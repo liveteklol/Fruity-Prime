@@ -161,6 +161,7 @@ namespace MphRead.Testing
             int audioFrameTotal = 0;
             var samples = new List<short>(); // todo: get rid of this once we're streaming/writing
             Span<short> sampleSpan = stackalloc short[256];
+            ReadOnlySpan<short> table206C268 = _dword206C268.AsSpan();
 
             for (int i = 0; i < frameCount; i++)
             {
@@ -263,72 +264,41 @@ namespace MphRead.Testing
                         decodeBuf[5] = _dword206BEBC[index5];
                     }
 
-                    static void Sub206BEFC(Span<short> sampleSpan, Span<int> decodeBuf, ReadOnlySpan<short> table, int clearCount)
+                    static void Sub206BEFC(Span<short> sampleSpan, Span<int> decodeSlice, ReadOnlySpan<short> table, int clearCount)
                     {
-                        // clearCount = count to clear at the start (0-3)
-                        // 3 - clearCount = count to clear at the end
-                        // total number cleared is always 3
-                        Debug.Assert(clearCount >= 0 && clearCount <= 3);
-                        sampleSpan.Slice(0, 64).Clear();
+                        sampleSpan.Clear();
                         for (int i = 0; i < 21; i++)
                         {
-                            sampleSpan[i * 3 + clearCount] = table[decodeBuf[i]];
+                            sampleSpan[i * 3 + clearCount] = table[decodeSlice[i]];
                         }
                     }
 
                     Sub206B9A0(audioFrameData, decodeBuf);
-                    Span<short> sampleSlice = sampleSpan;
-                    Span<int> decodeSlice = decodeBuf.Slice(16);
-                    ReadOnlySpan<short> tableStart = _dword206C268.AsSpan((decodeBuf[12] * 8)..^0);
-                    for (int k = 8; k < 8 + 4; k++)
+                    for (int k = 0; k < 4; k++)
                     {
-                        Sub206BEFC(sampleSlice, decodeSlice, tableStart, decodeBuf[k]);
-                        sampleSlice = sampleSlice.Slice(64);
-                        decodeSlice = decodeSlice.Slice(21);
-                        tableStart = _dword206C268.AsSpan((decodeBuf[k + 5] * 8)..^0);
+                        Span<short> sampleSlice = sampleSpan.Slice(64 * k, 64);
+                        Span<int> decodeSlice = decodeBuf.Slice(16 + 21 * k, 21);
+                        ReadOnlySpan<short> tableSlice = table206C268.Slice(decodeBuf[k + 12] * 8);
+                        Sub206BEFC(sampleSlice, decodeSlice, tableSlice, decodeBuf[k + 8]);
                     }
-                    int value109 = decodeBuf[109];
+                    int halfSample = decodeBuf[109];
                     for (int k = 0; k < 256; k++)
                     {
-                        int value0 = decodeBuf[0];
-                        int value100 = decodeBuf[100];
-                        int value7 = decodeBuf[7];
-                        int value107 = decodeBuf[107];
-                        int v11 = sampleSpan[k] - ((value7 * value107 + 0x4000) >> 15);
-                        decodeBuf[108] = value107 + ((value7 * v11 + 0x4000) >> 15);
-                        int value6 = decodeBuf[6];
-                        int value106 = decodeBuf[106];
-                        int v14 = v11 - ((value6 * value106 + 0x4000) >> 15);
-                        decodeBuf[107] = value106 + ((value6 * v14 + 0x4000) >> 15);
-                        int value5 = decodeBuf[5];
-                        int value105 = decodeBuf[105];
-                        int v17 = v14 - ((value5 * value105 + 0x4000) >> 15);
-                        decodeBuf[106] = value105 + ((value5 * v17 + 0x4000) >> 15);
-                        int value4 = decodeBuf[4];
-                        int value104 = decodeBuf[104];
-                        int v20 = v17 - ((value4 * value104 + 0x4000) >> 15);
-                        decodeBuf[105] = value104 + ((value4 * v20 + 0x4000) >> 15);
-                        int value3 = decodeBuf[3];
-                        int value103 = decodeBuf[103];
-                        int v23 = v20 - ((value3 * value103 + 0x4000) >> 15);
-                        decodeBuf[104] = value103 + ((value3 * v23 + 0x4000) >> 15);
-                        int value2 = decodeBuf[2];
-                        int value102 = decodeBuf[102];
-                        int v26 = v23 - ((value2 * value102 + 0x4000) >> 15);
-                        decodeBuf[103] = value102 + ((value2 * v26 + 0x4000) >> 15);
-                        int value1 = decodeBuf[1];
-                        int value101 = decodeBuf[101];
-                        int v29 = v26 - ((value1 * value101 + 0x4000) >> 15);
-                        decodeBuf[102] = value101 + ((value1 * v29 + 0x4000) >> 15);
-                        int v30 = v29 - ((value0 * value100 + 0x4000) >> 15);
-                        decodeBuf[101] = value100 + ((value0 * v30 + 0x4000) >> 15);
-                        decodeBuf[100] = v30;
-                        value109 = v30 + ((0x6E14 * value109 + 0x4000) >> 15);
-                        short sample = (short)Math.Clamp(value109 * 2, Int16.MinValue, Int16.MaxValue);
+                        int runningValue = sampleSpan[k];
+                        for (int l = 107; l >= 100; l--)
+                        {
+                            int currentValue = decodeBuf[l];
+                            int oppositeValue = decodeBuf[l - 100];
+                            runningValue = runningValue - ((oppositeValue * currentValue + 0x4000) >> 15);
+                            decodeBuf[l + 1] = currentValue + ((oppositeValue * runningValue + 0x4000) >> 15);
+                        }
+                        decodeBuf[100] = runningValue;
+                        halfSample = runningValue + ((0x6E14 * halfSample + 0x4000) >> 15);
+                        short sample = (short)Math.Clamp(halfSample * 2, Int16.MinValue, Int16.MaxValue);
                         sampleSpan[k] = sample;
                         samples.Add(sample);
                     }
-                    decodeBuf[109] = value109;
+                    decodeBuf[109] = halfSample;
                 }
                 Nop();
                 Nop();
