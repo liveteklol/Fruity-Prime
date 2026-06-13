@@ -149,12 +149,6 @@ namespace MphRead.Testing
             Debug.Assert(audioSampleRate == 32768);
             Debug.Assert(totalDataSize == fileBytes.Length - 36 - 16);
             Debug.Assert(field24 == 4608);
-            //Debug.WriteLine("--------------------------------------------------------");
-            //Debug.WriteLine("");
-            //Debug.WriteLine(Path.GetFileName(path));
-            //Debug.WriteLine($"field1C: {field1C}");
-            //Debug.WriteLine($"audioSizeMaybe: {audioSizeMaybe}");
-            //Debug.WriteLine($"field24: {field24}");
             var framePositions = new List<long>();
             var skipAheadPositions = new List<long>();
             var dataBuffer = new Span<byte>(new byte[maxDataSize - 8]);
@@ -207,12 +201,6 @@ namespace MphRead.Testing
                 // likewise, a buffer sized using maxDataSize holds 8 unnecessary bytes, due to the frame's video and audio size values being included
                 Debug.Assert(dataSize == videoSize + audioSize + 8);
                 Debug.Assert(audioSize == 320 || audioSize == 360);
-                //Debug.WriteLine("");
-                //Debug.WriteLine($"frame {i} data size: {dataSize}");
-                //Debug.WriteLine($"skipBackOffset: {skipBackOffset}");
-                //Debug.WriteLine($"skipAheadOffset: {skipAheadOffset}");
-                //Debug.WriteLine($"videoSize: {videoSize}");
-                //Debug.WriteLine($"audioSize: {audioSize}");
                 if (dataSize == maxDataSize)
                 {
                     foundMaxSize = true;
@@ -225,8 +213,6 @@ namespace MphRead.Testing
                 int audioFrameCount = audioSize / 40;
                 audioFrameTotal += audioFrameCount;
                 Span<uint> audioData = MemoryMarshal.Cast<byte, uint>(dataBuffer.Slice(videoSize, audioSize));
-                Debug.WriteLine($"frame {i}: {audioFrameCount} audio frames");
-
                 for (int j = 0; j < audioFrameCount; j++)
                 {
                     Span<uint> audioFrameData = audioData.Slice(j * 10, 10);
