@@ -122,8 +122,8 @@ namespace MphRead.Testing
         {
             if (path == null)
             {
-                ///path = @"C:\Users\auser\Home\MPH\_FS\amfe\data\movies\spawn_yellow-15fps-up-left.avi.fv";
-                path = @"C:\Users\auser\Home\MPH\_FS\amfe\data\movies\teaser-15fps-up-left.avi.fv";
+                path = @"C:\Users\auser\Home\MPH\_FS\amfe\data\movies\spawn_yellow-15fps-up-left.avi.fv";
+                //path = @"C:\Users\auser\Home\MPH\_FS\amfe\data\movies\teaser-15fps-up-left.avi.fv";
             }
             ReadOnlySpan<byte> fileBytes = File.ReadAllBytes(path);
             using FileStream fileStream = File.OpenRead(path);
@@ -156,7 +156,7 @@ namespace MphRead.Testing
             byte[] outputBuffer2 = new byte[2 * 256 * 192];
             bool foundMaxSize = false;
 
-            var decodeBuf = new Span<int>(new int[113]);
+            var decodeBuf = new Span<int>(new int[110]); // the game uses 113 in field48 for no clear reason
 
             int audioFrameTotal = 0;
             var samples = new List<short>(); // todo: get rid of this once we're streaming/writing
@@ -210,6 +210,7 @@ namespace MphRead.Testing
                 int read1 = BinaryPrimitives.ReadInt32LittleEndian(dataBuffer);
                 int read2 = BinaryPrimitives.ReadInt32LittleEndian(dataBuffer.Slice(4));
                 int offset = read1 + read2 + 8;
+                // skhere sktodo
                 // audio
                 int audioFrameCount = audioSize / 40;
                 audioFrameTotal += audioFrameCount;
