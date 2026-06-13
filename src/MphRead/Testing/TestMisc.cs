@@ -1,16 +1,562 @@
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.InteropServices;
 using MphRead.Entities;
 using MphRead.Formats;
 using MphRead.Formats.Collision;
+using MphRead.Formats.Sound;
 using MphRead.Utility;
 
 namespace MphRead.Testing
 {
     public static class TestMisc
     {
+        public static void TestAllFV()
+        {
+            foreach (string path in Directory.EnumerateFiles(@"C:\Users\auser\Home\MPH\_FS\amfe\data\movies"))
+            {
+                TestFV(path);
+            }
+            Nop();
+        }
+
+        private static readonly ImmutableArray<int> _dword206B720 =
+        [
+            -0x7F99, -0x7ECC, -0x7E00, -0x7D33, -0x7C66, -0x7B99, -0x7ACC, -0x7A00, -0x77FF, -0x74CD,
+            -0x7199, -0x6E65, -0x6B33, -0x67FF, -0x64CD, -0x6199, -0x5E65, -0x5B33, -0x57FF, -0x5334,
+            -0x4CCC, -0x4668, -0x4000, -0x3998, -0x3334, -0x2CCC, -0x2668, -0x2000, -0x1998, -0x1334,
+            -0xCCC, -0x668, 0, 0x668, 0xCCC, 0x1334, 0x1998, 0x2000, 0x2668, 0x2CCC, 0x3334, 0x3998,
+            0x4000, 0x4668, 0x4CCC, 0x5334, 0x57FF, 0x5B33, 0x5E67, 0x6199, 0x64CD, 0x67FF, 0x6B33,
+            0x6E65, 0x7199, 0x74CD, 0x77FF, 0x7A00, 0x7ACC, 0x7B99, 0x7C66, 0x7D33, 0x7E00, 0x7ECC
+        ];
+
+        private static readonly ImmutableArray<int> _dword206B820 =
+        [
+            -0x6B33, -0x67FF, -0x64CD, -0x6199, -0x5E65, -0x5B33, -0x57FF, -0x5334, -0x4CCC, -0x4668,
+            -0x4000, -0x3998, -0x3334, -0x2CCC, -0x2668, -0x2000, -0x1998, -0x1334, -0xCCC, -0x668,
+            0, 0x668, 0xCCC, 0x1334, 0x1998, 0x2000, 0x2668, 0x2CCC, 0x3334, 0x3998, 0x4000, 0x4668
+        ];
+
+        private static readonly ImmutableArray<int> _dword206B8A0 =
+        [
+            -0x4668, -0x4000, -0x3998, -0x3334, -0x2CCC, -0x2668, -0x2000, -0x1998, -0x1334, -0xCCC,
+            -0x668, 0, 0x668, 0xCCC, 0x1334, 0x1998, 0x2000, 0x2668, 0x2CCC, 0x3334, 0x3998, 0x4000,
+            0x4668, 0x4CCC, 0x5334, 0x57FF, 0x5B33, 0x5E67, 0x6199, 0x64CD, 0x67FF, 0x6B33
+        ];
+
+        private static readonly ImmutableArray<int> _dword206B920 =
+        [
+            -0x4CD0, -0x436C, -0x3A0C, -0x30A8, -0x2744, -0x1DE0, -0x1480, -0xB1C, -0x1B8, 0x7A8,
+            0x110C, 0x1A70, 0x23D4, 0x2D34, 0x3698, 0x3FFC
+        ];
+
+        private static readonly ImmutableArray<int> _dword206B960 =
+        [
+            -0x3334, -0x23D8, -0x147C, -0x520, 0xA3C, 0x1998, 0x28F4, 0x384C
+        ];
+
+        private static readonly ImmutableArray<int> _dword206B980 =
+        [
+            -0x199C, -0xB1C, 0x368, 0x11E8, 0x2068, 0x2EEC, 0x3D6C, 0x4BEC
+        ];
+
+        private static readonly ImmutableArray<int> _dword206BEBC =
+        [
+            -0x2668, -0x1DDC, -0x1554, -0xCCC, -0x444, 0x444, 0xCCC, 0x1554, 0x1DDC, 0x2668, 0x2EF0,
+            0x3778, 0x4000, 0x4888, 0x5110, 0x57FF
+        ];
+
+        private static readonly ImmutableArray<short> _dword206C268 =
+        [
+            -0x1C, -0x14, -0x0C, -0x04, 0x04, 0x0C, 0x14, 0x1C, -0x38, -0x28, -0x18,
+            -0x08, 0x08, 0x18, 0x28, 0x38, -0x54, -0x3C, -0x24, -0x0C, 0x0C, 0x24, 0x3C, 0x54, -0x70,
+            -0x50, -0x30, -0x10, 0x10, 0x30, 0x50, 0x70, -0x8C, -0x64, -0x3C, -0x14,
+            0x14, 0x3C, 0x64, 0x8C, -0xA8, -0x78, -0x48, -0x18, 0x18, 0x48, 0x78, 0xA8, -0xC4, -0x8C,
+            -0x54, -0x1C, 0x1C, 0x54, 0x8C, 0xC4, -0xE0, -0xA0, -0x60, -0x20, 0x20, 0x60, 0xA0,
+            0xE0, -0xFC, -0xB4, -0x6C, -0x24, 0x24, 0x6C, 0xB4, 0xFC, -0x118, -0xC8, -0x78,
+            -0x28, 0x28, 0x78, 0xC8, 0x118, -0x134, -0xDC, -0x84, -0x2C, 0x2C, 0x84, 0xDC, 0x134, -0x150,
+            -0xF0, -0x90, -0x30, 0x30, 0x90, 0xF0, 0x150, -0x16C, -0x104, -0x9C, -0x34,
+            0x34, 0x9C, 0x104, 0x16C, -0x188, -0x118, -0xA8, -0x38, 0x38, 0xA8, 0x118, 0x188, -0x1A4, -0x12C,
+            -0xB4, -0x3C, 0x3C, 0xB4, 0x12C, 0x1A4, -0x1C0, -0x140, -0xC0, -0x40, 0x40, 0xC0, 0x140,
+            0x1C0, -0x1F8, -0x168, -0xD8, -0x48, 0x48, 0xD8, 0x168, 0x1F8, -0x230, -0x190, -0xF0,
+            -0x50, 0x50, 0xF0, 0x190, 0x230, -0x268, -0x1B8, -0x108, -0x58, 0x58, 0x108, 0x1B8, 0x268,
+            -0x2A0, -0x1E0, -0x120, -0x60, 0x60, 0x120, 0x1E0, 0x2A0, -0x2D8, -0x208, -0x138,
+            -0x68, 0x68, 0x138, 0x208, 0x2D8, -0x310, -0x230, -0x150, -0x70, 0x70, 0x150, 0x230,
+            0x310, -0x348, -0x258, -0x168, -0x78, 0x78, 0x168, 0x258, 0x348, -0x380, -0x280,
+            -0x180, -0x80, 0x80, 0x180, 0x280, 0x380, -0x3F0, -0x2D0, -0x1B0, -0x90, 0x90,
+            0x1B0, 0x2D0, 0x3F0, -0x460, -0x320, -0x1E0, -0xA0, 0xA0, 0x1E0, 0x320, 0x460, -0x4D0,
+            -0x370, -0x210, -0xB0, 0xB0, 0x210, 0x370, 0x4D0, -0x540, -0x3C0, -0x240, -0xC0,
+            0xC0, 0x240, 0x3C0, 0x540, -0x5B0, -0x410, -0x270, -0xD0, 0xD0, 0x270, 0x410, 0x5B0,
+            -0x620, -0x460, -0x2A0, -0xE0, 0xE0, 0x2A0, 0x460, 0x620, -0x690, -0x4B0, -0x2D0,
+            -0xF0, 0xF0, 0x2D0, 0x4B0, 0x690, -0x700, -0x500, -0x300, -0x100, 0x100, 0x300, 0x500,
+            0x700, -0x7E0, -0x5A0, -0x360, -0x120, 0x120, 0x360, 0x5A0, 0x7E0, -0x8C0, -0x640,
+            -0x3C0, -0x140, 0x140, 0x3C0, 0x640, 0x8C0, -0x9A0, -0x6E0, -0x420, -0x160, 0x160,
+            0x420, 0x6E0, 0x9A0, -0xA80, -0x780, -0x480, -0x180, 0x180, 0x480, 0x780, 0xA80, -0xB60,
+            -0x820, -0x4E0, -0x1A0, 0x1A0, 0x4E0, 0x820, 0xB60, -0xC40, -0x8C0, -0x540, -0x1C0,
+            0x1C0, 0x540, 0x8C0, 0xC40, -0xD20, -0x960, -0x5A0, -0x1E0, 0x1E0, 0x5A0, 0x960, 0xD20,
+            -0xE00, -0xA00, -0x600, -0x200, 0x200, 0x600, 0xA00, 0xE00, -0xFC0, -0xB40, -0x6C0,
+            -0x240, 0x240, 0x6C0, 0xB40, 0xFC0, -0x1180, -0xC80, -0x780, -0x280, 0x280, 0x780, 0xC80,
+            0x1180, -0x1340, -0xDC0, -0x840, -0x2C0, 0x2C0, 0x840, 0xDC0, 0x1340, -0x1500, -0xF00,
+            -0x900, -0x300, 0x300, 0x900, 0xF00, 0x1500, -0x16C0, -0x1040, -0x9C0, -0x340, 0x340,
+            0x9C0, 0x1040, 0x16C0, -0x1880, -0x1180, -0xA80, -0x380, 0x380, 0xA80, 0x1180, 0x1880, -0x1A40,
+            -0x12C0, -0xB40, -0x3C0, 0x3C0, 0xB40, 0x12C0, 0x1A40, -0x1C00, -0x1400, -0xC00, -0x400,
+            0x400, 0xC00, 0x1400, 0x1C00, -0x1F7F, -0x167F, -0xD80, -0x480, 0x480, 0xD80, 0x1680, 0x1F80,
+            -0x22FF, -0x18FF, -0xF00, -0x500, 0x500, 0xF00, 0x1900, 0x2300, -0x267F, -0x1B7F, -0x1080,
+            -0x580, 0x580, 0x1080, 0x1B80, 0x2680, -0x29FF, -0x1DFF, -0x1200, -0x600, 0x600, 0x1200,
+            0x1E00, 0x2A00, -0x2D7F, -0x207F, -0x1380, -0x680, 0x680, 0x1380, 0x2080, 0x2D80, -0x30FF,
+            -0x22FF, -0x1500, -0x700, 0x700, 0x1500, 0x2300, 0x3100, -0x347F, -0x257F, -0x1680,
+            -0x780, 0x780, 0x1680, 0x2580, 0x3480, -0x37FF, -0x27FF, -0x1800, -0x800, 0x800, 0x1800,
+            0x2800, 0x3800, -0x3EFF, -0x2CFF, -0x1B00, -0x900, 0x900, 0x1B00, 0x2CFF, 0x3EFF, -0x45FF,
+            -0x31FF, -0x1E00, -0xA00, 0xA00, 0x1E00, 0x31FF, 0x45FF, -0x4CFF, -0x36FF, -0x2100,
+            -0xB00, 0xB00, 0x2100, 0x36FF, 0x4CFF, -0x53FF, -0x3BFF, -0x2400, -0xC00, 0xC00, 0x2400,
+            0x3BFF, 0x53FF, -0x5AFF, -0x40FF, -0x2700, -0xD00, 0xD00, 0x2700, 0x40FF, 0x5AFF, -0x61FF,
+            -0x45FF, -0x2A00, -0xE00, 0xE00, 0x2A00,0x45FF, 0x61FF, -0x68FF, -0x4AFF, -0x2D00,
+            -0xF00, 0xF00, 0x2D00, 0x4AFF, 0x68FF, -0x6FFF, -0x4FFF, -0x3000, -0x1000, 0x1000, 0x3000, 0x4FFF, 0x6FFF
+        ];
+
+        public static void TestFV(string? path = null)
+        {
+            if (path == null)
+            {
+                path = @"C:\Users\auser\Home\MPH\_FS\amfe\data\movies\spawn_yellow-15fps-up-left.avi.fv";
+            }
+            ReadOnlySpan<byte> fileBytes = File.ReadAllBytes(path);
+            using FileStream fileStream = File.OpenRead(path);
+            using var reader = new BinaryReader(fileStream);
+            char[] magic = new char[4];
+            magic[0] = reader.ReadChar(); // F (70)
+            magic[1] = reader.ReadChar(); // V (86)
+            magic[2] = reader.ReadChar(); // D (68)
+            magic[3] = reader.ReadChar(); // S (83)
+            int frameCount = reader.ReadInt32(); // 46
+            int frameWidth = reader.ReadInt32(); // 256
+            int frameHeight = reader.ReadInt32(); // 192
+            decimal frameRate = reader.ReadInt32() / 65536m; // 983035
+            int audioSampleRate = reader.ReadInt32(); // 32768
+            int totalDataSize = reader.ReadInt32(); // 157236
+            int maxDataSize = reader.ReadInt32(); // 7060
+            int field24 = reader.ReadInt32(); // 4608
+            Debug.Assert(magic[0] == 'F' && magic[1] == 'V' && magic[2] == 'D' && magic[3] == 'S');
+            Debug.Assert(frameCount > 0);
+            Debug.Assert(frameWidth == 256);
+            Debug.Assert(frameHeight == 192);
+            Debug.Assert(frameRate == 14.9999237060546875m);
+            Debug.Assert(audioSampleRate == 32768);
+            Debug.Assert(totalDataSize == fileBytes.Length - 36 - 16);
+            Debug.Assert(field24 == 4608);
+            //Debug.WriteLine("--------------------------------------------------------");
+            //Debug.WriteLine("");
+            //Debug.WriteLine(Path.GetFileName(path));
+            //Debug.WriteLine($"field1C: {field1C}");
+            //Debug.WriteLine($"audioSizeMaybe: {audioSizeMaybe}");
+            //Debug.WriteLine($"field24: {field24}");
+            var framePositions = new List<long>();
+            var skipAheadPositions = new List<long>();
+            var dataBuffer = new Span<byte>(new byte[maxDataSize - 8]);
+            byte[] outputBuffer1 = new byte[2 * 256 * 192];
+            byte[] outputBuffer2 = new byte[2 * 256 * 192];
+            bool foundMaxSize = false;
+
+            var allWordBufs = new Span<short>(new short[4096]);
+            int wordBufIndex = 0;
+            var decodeBuf = new Span<int>(new int[113]);
+
+            int audioFrameTotal = 0;
+            var samples = new List<short>(); // todo: get rid of this once we're streaming/writing
+
+            var outputStr = new List<string>();
+
+            for (int i = 0; i < frameCount; i++)
+            {
+                dataBuffer.Clear();
+                framePositions.Add(reader.BaseStream.Position);
+                skipAheadPositions.RemoveAll(r => r == reader.BaseStream.Position);
+                int dataSize = reader.ReadInt32();
+                int seekBackOffset = reader.ReadInt32();
+                int seekAheadOffset = reader.ReadInt32();
+                int frameIndex = reader.ReadInt32();
+                int videoSize = reader.ReadInt32();
+                fileStream.Read(dataBuffer.Slice(0, videoSize));
+                int audioSize = reader.ReadInt32();
+                fileStream.Read(dataBuffer.Slice(videoSize, audioSize));
+                Debug.Assert(frameIndex == i);
+                if (i == 0)
+                {
+                    Debug.Assert(seekBackOffset == 0);
+                }
+                if (i == frameCount - 1)
+                {
+                    // always 0 except at the end of opening-15fps-up-left.avi.fv
+                    // in that one, frame n-2 has 0, frame n-1 has -1256, and frame n has -2284
+                    // those are the only times skipAheadOffset is negative
+                    Debug.Assert(seekAheadOffset <= 0);
+                }
+                if (seekBackOffset < 0)
+                {
+                    Debug.Assert(framePositions.Contains(framePositions[^1] + seekBackOffset));
+                }
+                if (seekAheadOffset > 0)
+                {
+                    skipAheadPositions.Add(framePositions[^1] + seekAheadOffset);
+                }
+                Debug.Assert(seekBackOffset <= 0);
+                //Debug.Assert(skipAheadOffset >= 0);
+                // dataSize includes the two size values, does not include the header (4 ints)
+                // likewise, a buffer sized using maxDataSize holds 8 unnecessary bytes, due to the frame's video and audio size values being included
+                Debug.Assert(dataSize == videoSize + audioSize + 8);
+                Debug.Assert(audioSize == 320 || audioSize == 360);
+                //Debug.WriteLine("");
+                //Debug.WriteLine($"frame {i} data size: {dataSize}");
+                //Debug.WriteLine($"skipBackOffset: {skipBackOffset}");
+                //Debug.WriteLine($"skipAheadOffset: {skipAheadOffset}");
+                //Debug.WriteLine($"videoSize: {videoSize}");
+                //Debug.WriteLine($"audioSize: {audioSize}");
+                if (dataSize == maxDataSize)
+                {
+                    foundMaxSize = true;
+                }
+                // video
+                int read1 = BinaryPrimitives.ReadInt32LittleEndian(dataBuffer);
+                int read2 = BinaryPrimitives.ReadInt32LittleEndian(dataBuffer.Slice(4));
+                int offset = read1 + read2 + 8;
+                // audio
+                int audioFrameCount = audioSize / 40;
+                audioFrameTotal += audioFrameCount;
+                Span<uint> audioData = MemoryMarshal.Cast<byte, uint>(dataBuffer.Slice(videoSize, audioSize));
+                Debug.WriteLine($"frame {i}: {audioFrameCount} audio frames");
+
+                for (int j = 0; j < audioFrameCount; j++)
+                {
+                    Span<short> wordBuf = allWordBufs.Slice(wordBufIndex * 256, 256);
+                    Span<uint> audioFrameData = audioData.Slice(j * 10, 10);
+
+                    outputStr.Add($"video {i}, audio {j}");
+
+                    static void Sub206B9A0(Span<uint> audioFrameData, Span<int> decodeBuf)
+                    {
+                        // todo: roll up loop
+                        int index = 0;
+                        uint value = audioFrameData[index++];
+                        decodeBuf[0] = _dword206B720[(int)(value >> 26)];
+                        decodeBuf[1] = _dword206B720[(int)((value >> 20) & 0x3F)];
+                        decodeBuf[2] = _dword206B820[(int)((value >> 15) & 0x1F)];
+                        decodeBuf[3] = _dword206B8A0[(int)((value >> 10) & 0x1F)];
+                        decodeBuf[4] = _dword206B920[(int)((value >> 6) & 0xF)];
+                        // decodeBuf[5] is written at the end
+                        decodeBuf[6] = _dword206B960[(int)((value >> 3) & 7)];
+                        decodeBuf[7] = _dword206B980[(int)(value & 7)];
+                        value = audioFrameData[index++];
+                        decodeBuf[15] = (int)(value >> 26);
+                        decodeBuf[14] = (int)((value >> 20) & 0x3F);
+                        decodeBuf[13] = (int)((value >> 14) & 0x3F);
+                        decodeBuf[12] = (int)((value >> 8) & 0x3F);
+                        decodeBuf[11] = (byte)value >> 6;
+                        decodeBuf[10] = (int)((value >> 4) & 3);
+                        decodeBuf[9] = (int)((value >> 2) & 3);
+                        decodeBuf[8] = (int)(value & 3);
+                        value = audioFrameData[index++];
+                        uint value1 = value;
+                        decodeBuf[16] = (int)(value >> 29);
+                        decodeBuf[17] = (int)((value >> 26) & 7);
+                        decodeBuf[18] = (int)((value >> 23) & 7);
+                        decodeBuf[19] = (int)((value >> 20) & 7);
+                        decodeBuf[20] = (int)((value >> 17) & 7);
+                        decodeBuf[21] = (int)((value >> 14) & 7);
+                        decodeBuf[22] = (int)((value >> 11) & 7);
+                        decodeBuf[23] = (int)((value >> 8) & 7);
+                        decodeBuf[24] = (byte)value >> 5;
+                        decodeBuf[25] = (int)((value >> 2) & 7);
+                        value = audioFrameData[index++];
+                        uint value2 = value;
+                        decodeBuf[26] = (int)(value >> 29);
+                        decodeBuf[27] = (int)((value >> 26) & 7);
+                        decodeBuf[28] = (int)((value >> 23) & 7);
+                        decodeBuf[29] = (int)((value >> 20) & 7);
+                        decodeBuf[30] = (int)((value >> 17) & 7);
+                        decodeBuf[31] = (int)((value >> 14) & 7);
+                        decodeBuf[32] = (int)((value >> 11) & 7);
+                        decodeBuf[33] = (int)((value >> 8) & 7);
+                        decodeBuf[34] = (byte)value >> 5;
+                        decodeBuf[35] = (int)((value >> 2) & 7);
+                        decodeBuf[36] = ((value & 2) == 0 ? 0 : 1) | (2 * (int)(value1 & 3));
+                        value = audioFrameData[index++];
+                        uint value3 = value;
+                        decodeBuf[37] = (int)(value >> 29);
+                        decodeBuf[38] = (int)((value >> 26) & 7);
+                        decodeBuf[39] = (int)((value >> 23) & 7);
+                        decodeBuf[40] = (int)((value >> 20) & 7);
+                        decodeBuf[41] = (int)((value >> 17) & 7);
+                        decodeBuf[42] = (int)((value >> 14) & 7);
+                        decodeBuf[43] = (int)((value >> 11) & 7);
+                        decodeBuf[44] = (int)((value >> 8) & 7);
+                        decodeBuf[45] = (byte)value >> 5;
+                        decodeBuf[46] = (int)((value >> 2) & 7);
+                        value = audioFrameData[index++];
+                        uint value4 = value;
+                        decodeBuf[47] = (int)(value >> 29);
+                        decodeBuf[48] = (int)((value >> 26) & 7);
+                        decodeBuf[49] = (int)((value >> 23) & 7);
+                        decodeBuf[50] = (int)((value >> 20) & 7);
+                        decodeBuf[51] = (int)((value >> 17) & 7);
+                        decodeBuf[52] = (int)((value >> 14) & 7);
+                        decodeBuf[53] = (int)((value >> 11) & 7);
+                        decodeBuf[54] = (int)((value >> 8) & 7);
+                        decodeBuf[55] = (byte)value >> 5;
+                        decodeBuf[56] = (int)((value >> 2) & 7);
+                        decodeBuf[57] = ((value & 2) == 0 ? 0 : 1) | (2 * (int)(value3 & 3));
+                        value = audioFrameData[index++];
+                        uint value5 = value;
+                        decodeBuf[58] = (int)(value >> 29);
+                        decodeBuf[59] = (int)((value >> 26) & 7);
+                        decodeBuf[60] = (int)((value >> 23) & 7);
+                        decodeBuf[61] = (int)((value >> 20) & 7);
+                        decodeBuf[62] = (int)((value >> 17) & 7);
+                        decodeBuf[63] = (int)((value >> 14) & 7);
+                        decodeBuf[64] = (int)((value >> 11) & 7);
+                        decodeBuf[65] = (int)((value >> 8) & 7);
+                        decodeBuf[66] = (byte)value >> 5;
+                        decodeBuf[67] = (int)((value >> 2) & 7);
+                        value = audioFrameData[index++];
+                        uint value6 = value;
+                        decodeBuf[68] = (int)(value >> 29);
+                        decodeBuf[69] = (int)((value >> 26) & 7);
+                        decodeBuf[70] = (int)((value >> 23) & 7);
+                        decodeBuf[71] = (int)((value >> 20) & 7);
+                        decodeBuf[72] = (int)((value >> 17) & 7);
+                        decodeBuf[73] = (int)((value >> 14) & 7);
+                        decodeBuf[74] = (int)((value >> 11) & 7);
+                        decodeBuf[75] = (int)((value >> 8) & 7);
+                        decodeBuf[76] = (byte)value >> 5;
+                        decodeBuf[77] = (int)((value >> 2) & 7);
+                        decodeBuf[78] = ((value & 2) == 0 ? 0 : 1) | (2 * (int)(value5 & 3));
+                        value = audioFrameData[index++];
+                        uint value7 = value;
+                        decodeBuf[79] = (int)(value >> 29);
+                        decodeBuf[80] = (int)((value >> 26) & 7);
+                        decodeBuf[81] = (int)((value >> 23) & 7);
+                        decodeBuf[82] = (int)((value >> 20) & 7);
+                        decodeBuf[83] = (int)((value >> 17) & 7);
+                        decodeBuf[84] = (int)((value >> 14) & 7);
+                        decodeBuf[85] = (int)((value >> 11) & 7);
+                        decodeBuf[86] = (int)((value >> 8) & 7);
+                        decodeBuf[87] = (byte)value >> 5;
+                        decodeBuf[88] = (int)((value >> 2) & 7);
+                        value = audioFrameData[index++];
+                        decodeBuf[89] = (int)(value >> 29);
+                        decodeBuf[90] = (int)((value >> 26) & 7);
+                        decodeBuf[91] = (int)((value >> 23) & 7);
+                        decodeBuf[92] = (int)((value >> 20) & 7);
+                        decodeBuf[93] = (int)((value >> 17) & 7);
+                        decodeBuf[94] = (int)((value >> 14) & 7);
+                        decodeBuf[95] = (int)((value >> 11) & 7);
+                        decodeBuf[96] = (int)((value >> 8) & 7);
+                        decodeBuf[97] = (byte)value >> 5;
+                        decodeBuf[98] = (int)((value >> 2) & 7);
+                        decodeBuf[99] = ((value & 2) == 0 ? 0 : 1) | (2 * (int)(value7 & 3));
+                        decodeBuf[5] = _dword206BEBC[(int)(value & 1) | (2 * (int)(value6 & 1)) | (4 * (int)(value4 & 1)) | (8 * (int)(value2 & 1))];
+                    }
+
+                    static Span<int> Sub206BEFC(Span<short> wordBuf, Span<int> decodeBuf, ReadOnlySpan<short> table, int clearCount)
+                    {
+                        // skhere sktodo
+                        Debug.Assert(clearCount >= 0 && clearCount <= 3);
+                        int srcIndex = 0;
+                        int dstIndex = 0;
+                        // clearCount = count to clear at the start (0-3)
+                        // 3 - clearCount = count to clear at the end
+                        // total number cleared is always 3
+                        for (int i = 0; i < clearCount; i++)
+                        {
+                            wordBuf[dstIndex++] = 0;
+                        }
+                        // todo: roll up loop
+                        wordBuf[dstIndex++] = table[decodeBuf[srcIndex++]];
+                        wordBuf[dstIndex++] = 0;
+                        wordBuf[dstIndex++] = 0;
+                        wordBuf[dstIndex++] = table[decodeBuf[srcIndex++]];
+                        wordBuf[dstIndex++] = 0;
+                        wordBuf[dstIndex++] = 0;
+                        wordBuf[dstIndex++] = table[decodeBuf[srcIndex++]];
+                        wordBuf[dstIndex++] = 0;
+                        wordBuf[dstIndex++] = 0;
+                        wordBuf[dstIndex++] = table[decodeBuf[srcIndex++]];
+                        wordBuf[dstIndex++] = 0;
+                        wordBuf[dstIndex++] = 0;
+                        wordBuf[dstIndex++] = table[decodeBuf[srcIndex++]];
+                        wordBuf[dstIndex++] = 0;
+                        wordBuf[dstIndex++] = 0;
+                        wordBuf[dstIndex++] = table[decodeBuf[srcIndex++]];
+                        wordBuf[dstIndex++] = 0;
+                        wordBuf[dstIndex++] = 0;
+                        wordBuf[dstIndex++] = table[decodeBuf[srcIndex++]];
+                        wordBuf[dstIndex++] = 0;
+                        wordBuf[dstIndex++] = 0;
+                        wordBuf[dstIndex++] = table[decodeBuf[srcIndex++]];
+                        wordBuf[dstIndex++] = 0;
+                        wordBuf[dstIndex++] = 0;
+                        wordBuf[dstIndex++] = table[decodeBuf[srcIndex++]];
+                        wordBuf[dstIndex++] = 0;
+                        wordBuf[dstIndex++] = 0;
+                        wordBuf[dstIndex++] = table[decodeBuf[srcIndex++]];
+                        wordBuf[dstIndex++] = 0;
+                        wordBuf[dstIndex++] = 0;
+                        wordBuf[dstIndex++] = table[decodeBuf[srcIndex++]];
+                        wordBuf[dstIndex++] = 0;
+                        wordBuf[dstIndex++] = 0;
+                        wordBuf[dstIndex++] = table[decodeBuf[srcIndex++]];
+                        wordBuf[dstIndex++] = 0;
+                        wordBuf[dstIndex++] = 0;
+                        wordBuf[dstIndex++] = table[decodeBuf[srcIndex++]];
+                        wordBuf[dstIndex++] = 0;
+                        wordBuf[dstIndex++] = 0;
+                        wordBuf[dstIndex++] = table[decodeBuf[srcIndex++]];
+                        wordBuf[dstIndex++] = 0;
+                        wordBuf[dstIndex++] = 0;
+                        wordBuf[dstIndex++] = table[decodeBuf[srcIndex++]];
+                        wordBuf[dstIndex++] = 0;
+                        wordBuf[dstIndex++] = 0;
+                        wordBuf[dstIndex++] = table[decodeBuf[srcIndex++]];
+                        wordBuf[dstIndex++] = 0;
+                        wordBuf[dstIndex++] = 0;
+                        wordBuf[dstIndex++] = table[decodeBuf[srcIndex++]];
+                        wordBuf[dstIndex++] = 0;
+                        wordBuf[dstIndex++] = 0;
+                        wordBuf[dstIndex++] = table[decodeBuf[srcIndex++]];
+                        wordBuf[dstIndex++] = 0;
+                        wordBuf[dstIndex++] = 0;
+                        wordBuf[dstIndex++] = table[decodeBuf[srcIndex++]];
+                        wordBuf[dstIndex++] = 0;
+                        wordBuf[dstIndex++] = 0;
+                        wordBuf[dstIndex++] = table[decodeBuf[srcIndex++]];
+                        wordBuf[dstIndex++] = 0;
+                        wordBuf[dstIndex++] = 0;
+                        wordBuf[dstIndex++] = table[decodeBuf[srcIndex++]];
+                        for (int i = 3 - clearCount; i > 0; i--)
+                        {
+                            wordBuf[dstIndex++] = 0;
+                        }
+                        //return wordBuf.Slice(dstIndex);
+                        return decodeBuf.Slice(srcIndex);
+                    }
+
+                    Sub206B9A0(audioFrameData, decodeBuf);
+                    Span<int> decodeStart = decodeBuf.Slice(16);
+                    ReadOnlySpan<short> tableStart = _dword206C268.AsSpan((decodeBuf[12] * 8)..^0);
+
+                    //Span<short> wordBufStart = Sub206BEFC(wordBuf, decodeStart, tableStart, decodeBuf[8]);
+                    //tableStart = _dword206C268.AsSpan((decodeBuf[13] * 8)..^0);
+                    //wordBufStart = Sub206BEFC(wordBufStart, decodeStart, tableStart, decodeBuf[9]);
+                    //tableStart = _dword206C268.AsSpan((decodeBuf[14] * 8)..^0);
+                    //wordBufStart = Sub206BEFC(wordBufStart, decodeStart, tableStart, decodeBuf[10]);
+
+                    // fix: wordBuf and decodeStart BOTH advance. need to have R3 and R4 returned from that function.
+                    // (for our purposes, in both cases we already know how much they advance for every time, and can just repeat that with slices here)
+                    // current status: audio is outputting, but doesn't sound right (overlap/persistence issue)
+                    // (I tried a version of it where we skip half the samples like the game seesm to, but that plays too fast)
+                    decodeStart = Sub206BEFC(wordBuf, decodeStart, tableStart, decodeBuf[8]);
+                    Span<short> wordBufStart = wordBuf.Slice(64);
+                    tableStart = _dword206C268.AsSpan((decodeBuf[13] * 8)..^0);
+                    decodeStart = Sub206BEFC(wordBufStart, decodeStart, tableStart, decodeBuf[9]);
+                    wordBufStart = wordBufStart.Slice(64);
+                    tableStart = _dword206C268.AsSpan((decodeBuf[14] * 8)..^0);
+                    decodeStart = Sub206BEFC(wordBufStart, decodeStart, tableStart, decodeBuf[10]);
+                    wordBufStart = wordBufStart.Slice(64);
+
+                    tableStart = _dword206C268.AsSpan((decodeBuf[15] * 8)..^0);
+                    Sub206BEFC(wordBufStart, decodeStart, tableStart, decodeBuf[11]);
+
+                    string res = "";
+                    foreach (short value in wordBuf)
+                    {
+                        res += value.ToString() + " ";
+                    }
+                    outputStr.Add(res.Trim());
+
+                    int value109 = decodeBuf[109];
+                    for (int k = 0; k < 256; k++)
+                    {
+                        int value0 = decodeBuf[0];
+                        int value100 = decodeBuf[100];
+                        int value7 = decodeBuf[7];
+                        int value107 = decodeBuf[107];
+                        int v11 = wordBuf[k] - ((value7 * value107 + 0x4000) >> 15);
+                        decodeBuf[108] = value107 + ((value7 * v11 + 0x4000) >> 15);
+                        int value6 = decodeBuf[6];
+                        int value106 = decodeBuf[106];
+                        int v14 = v11 - ((value6 * value106 + 0x4000) >> 15);
+                        decodeBuf[107] = value106 + ((value6 * v14 + 0x4000) >> 15);
+                        int value5 = decodeBuf[5];
+                        int value105 = decodeBuf[105];
+                        int v17 = v14 - ((value5 * value105 + 0x4000) >> 15);
+                        decodeBuf[106] = value105 + ((value5 * v17 + 0x4000) >> 15);
+                        int value4 = decodeBuf[4];
+                        int value104 = decodeBuf[104];
+                        int v20 = v17 - ((value4 * value104 + 0x4000) >> 15);
+                        decodeBuf[105] = value104 + ((value4 * v20 + 0x4000) >> 15);
+                        int value3 = decodeBuf[3];
+                        int value103 = decodeBuf[103];
+                        int v23 = v20 - ((value3 * value103 + 0x4000) >> 15);
+                        decodeBuf[104] = value103 + ((value3 * v23 + 0x4000) >> 15);
+                        int value2 = decodeBuf[2];
+                        int value102 = decodeBuf[102];
+                        int v26 = v23 - ((value2 * value102 + 0x4000) >> 15);
+                        decodeBuf[103] = value102 + ((value2 * v26 + 0x4000) >> 15);
+                        int value1 = decodeBuf[1];
+                        int value101 = decodeBuf[101];
+                        int v29 = v26 - ((value1 * value101 + 0x4000) >> 15);
+                        decodeBuf[102] = value101 + ((value1 * v29 + 0x4000) >> 15);
+                        int v30 = v29 - ((value0 * value100 + 0x4000) >> 15);
+                        decodeBuf[101] = value100 + ((value0 * v30 + 0x4000) >> 15);
+                        decodeBuf[100] = v30;
+                        value109 = v30 + ((0x6E14 * value109 + 0x4000) >> 15);
+                        short sample = (short)Math.Clamp(value109 * 2, Int16.MinValue, Int16.MaxValue);
+                        wordBuf[k] = sample;
+                        samples.Add(sample);
+                    }
+                    decodeBuf[109] = value109;
+                    wordBufIndex++;
+                    wordBufIndex %= 16;
+                    outputStr.Add("final");
+                    res = "";
+                    foreach (short value in wordBuf)
+                    {
+                        res += value.ToString() + " ";
+                    }
+                    outputStr.Add(res.Trim());
+                }
+                Nop();
+                Nop();
+            }
+            File.WriteAllLines(@"C:\Users\auser\Temp\out.txt", outputStr);
+            Debug.Assert(foundMaxSize);
+            Debug.Assert(skipAheadPositions.Count == 0);
+            int lastFrameValue = reader.ReadInt32();
+            Debug.Assert(lastFrameValue == 0);
+            int lastFrameValue1 = reader.ReadInt32();
+            Debug.Assert(lastFrameValue1 == 0);
+            int lastFrameValue2 = reader.ReadInt32();
+            Debug.Assert(lastFrameValue2 == 0);
+            int lastFrameValue3 = reader.ReadInt32();
+            Debug.Assert(lastFrameValue3 == 0);
+            Debug.Assert(reader.BaseStream.Position == fileBytes.Length);
+            //using var output = File.OpenWrite(@"C:\Users\auser\Temp\out.wav");
+            using var output = File.OpenWrite($@"C:\Users\auser\Temp\out_{Path.GetFileNameWithoutExtension(path)}.wav");
+            using var writer = new BinaryWriter(output);
+            SoundRead.WriteWavHeader(writer, (uint)audioFrameTotal * 256, (ushort)audioSampleRate, WaveFormat.PCM16);
+            foreach (short sample in samples)
+            {
+                ushort data = (ushort)sample;
+                writer.Write((byte)(data & 0xFF));
+                writer.Write((byte)((data >> 8) & 0xFF));
+            }
+            Nop();
+            Nop();
+        }
+
         //public static int GetSfxIndex(string query)
         //{
         //    IReadOnlyList<SoundSample> samples = SoundRead.ReadSoundSamples();
