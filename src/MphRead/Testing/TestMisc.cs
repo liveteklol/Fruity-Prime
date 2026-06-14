@@ -265,12 +265,12 @@ namespace MphRead.Testing
                         decodeBuf[5] = _dword206BEBC[index5];
                     }
 
-                    static void Sub206BEFC(Span<short> sampleSpan, Span<int> decodeSlice, ReadOnlySpan<short> table, int clearCount)
+                    static void Sub206BEFC(Span<short> sampleSlice, Span<int> decodeSlice, ReadOnlySpan<short> tableSlice, int skipCount)
                     {
-                        sampleSpan.Clear();
+                        sampleSlice.Clear();
                         for (int i = 0; i < 21; i++)
                         {
-                            sampleSpan[i * 3 + clearCount] = table[decodeSlice[i]];
+                            sampleSlice[i * 3 + skipCount] = tableSlice[decodeSlice[i]];
                         }
                     }
 
