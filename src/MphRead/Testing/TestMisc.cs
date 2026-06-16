@@ -207,10 +207,8 @@ namespace MphRead.Testing
                     foundMaxSize = true;
                 }
                 // video
-                int read1 = BinaryPrimitives.ReadInt32LittleEndian(dataBuffer);
-                int read2 = BinaryPrimitives.ReadInt32LittleEndian(dataBuffer.Slice(4));
-                int offset = read1 + read2 + 8;
                 // skhere sktodo
+                TestVideo(dataBuffer.Slice(0, videoSize));
                 // audio
                 int audioFrameCount = audioSize / 40;
                 audioFrameTotal += audioFrameCount;
@@ -327,6 +325,191 @@ namespace MphRead.Testing
             }
             Nop();
             Nop();
+        }
+
+        private static int _readBit = 0;
+
+        private static readonly byte[] _outputBuf1 = new byte[192 * 512];
+        private static readonly byte[] _outputBuf2 = new byte[192 * 512];
+
+        private static void TestVideo(Span<byte> videoData)
+        {
+            Span<byte> outputSpan1 = new Span<byte>(_outputBuf1);
+            Span<byte> outputSpan2 = new Span<byte>(_outputBuf2);
+            int offset1 = BinaryPrimitives.ReadInt32LittleEndian(videoData) + 8;
+            Debug.Assert(offset1 == 8); // this seems to be the case initially, meaning the word and byte ptrs point to the same places
+            int offset2 = BinaryPrimitives.ReadInt32LittleEndian(videoData.Slice(4));
+            Span<uint> videoDataUint = MemoryMarshal.Cast<byte, uint>(videoData.Slice(offset1 + offset2));
+            Span<ushort> videoDataUshort = MemoryMarshal.Cast<byte, ushort>(videoData.Slice(offset1));
+            Span<byte> videoDataByte = videoData.Slice(8);
+            _readBit = 1;
+            uint value = NextValueCarry(ref videoDataUint);
+            uint r2 = 0;
+            // todo: frame height and width as variables
+            for (int y = 192 / 8; y > 0; y--)
+            {
+                for (int x = 256 / 8; x > 0; x--)
+                {
+                    Sub20679B0(ref r2, ref value, ref outputSpan1, ref outputSpan2, ref videoDataUint, ref videoDataUshort, ref videoDataByte);
+                    r2 += 16;
+                }
+                r2 += 4096 - 16 * (256 / 8);
+            }
+            _ = 5;
+            _ = 5;
+        }
+
+        // read 4 bytes
+        // left shift by 1, top bit goes into the carry flag
+        // add in the previous carry flag (initialized to 1)
+        //
+        // value is now the bottom 31 bits at the start of the stream plus 1
+        // so this is as if there was a previous bit in the stream before we started reading which was 1
+        //
+        // from now on the following pattern repeats:
+        // left shift the value by 1, top bit goes into the carry flag
+        // do NOT add in the previous carry flag
+        // if the result is 0, we need to read a new dword and start from the top
+        // once we have our value (the one already read, or a new one after seeing a 0), we can use the carry flag to make our first control flow decision
+
+        private static readonly ImmutableArray<int> _dword206B2A0 =
+        [
+            -0x1010, -0x100E, -0x100C, -0x100A, -0x1008, -0x1006, -0x1004, -0x1002, -0x1000,
+            -0xFFE, -0xFFC, -0xFFA, -0xFF8, -0xFF6, -0xFF4, -0xFF2, -0xE10, -0xE0E, -0xE0C,
+            -0xE0A, -0xE08, -0xE06, -0xE04, -0xE02, -0xE00, -0xDFE, -0xDFC, -0xDFA, -0xDF8,
+            -0xDF6, -0xDF4, -0xDF2, -0xC10, -0xC0E, -0xC0C, -0xC0A, -0xC08, -0xC06, -0xC04,
+            -0xC02, -0xC00, -0xBFE, -0xBFC, -0xBFA, -0xBF8, -0xBF6, -0xBF4, -0xBF2, -0xA10,
+            -0xA0E, -0xA0C, -0xA0A, -0xA08, -0xA06, -0xA04, -0xA02, -0xA00, -0x9FE, -0x9FC,
+            -0x9FA, -0x9F8, -0x9F6, -0x9F4, -0x9F2, -0x810, -0x80E, -0x80C, -0x80A, -0x808,
+            -0x806, -0x804, -0x802, -0x800, -0x7FE, -0x7FC, -0x7FA, -0x7F8, -0x7F6, -0x7F4,
+            -0x7F2, -0x610, -0x60E, -0x60C, -0x60A, -0x608, -0x606, -0x604, -0x602, -0x600,
+            -0x5FE, -0x5FC, -0x5FA, -0x5F8, -0x5F6, -0x5F4, -0x5F2, -0x410, -0x40E, -0x40C,
+            -0x40A, -0x408, -0x406, -0x404, -0x402, -0x400, -0x3FE, -0x3FC, -0x3FA, -0x3F8,
+            -0x3F6, -0x3F4, -0x3F2, -0x210, -0x20E, -0x20C, -0x20A, -0x208, -0x206, -0x204,
+            -0x202, -0x200, -0x1FE, -0x1FC, -0x1FA, -0x1F8, -0x1F6, -0x1F4, -0x1F2, -0x10,
+            -0x0E, -0x0C, -0x0A, -0x08, -0x06, -0x04, -0x02, 0, 2, 4, 6, 8, 0xA, 0xC, 0xE,
+            0x1F0, 0x1F2, 0x1F4, 0x1F6, 0x1F8, 0x1FA, 0x1FC, 0x1FE, 0x200, 0x202, 0x204,
+            0x206, 0x208, 0x20A, 0x20C, 0x20E, 0x3F0, 0x3F2, 0x3F4, 0x3F6, 0x3F8, 0x3FA,
+            0x3FC, 0x3FE, 0x400, 0x402, 0x404, 0x406, 0x408, 0x40A, 0x40C, 0x40E, 0x5F0,
+            0x5F2, 0x5F4, 0x5F6, 0x5F8, 0x5FA, 0x5FC, 0x5FE, 0x600, 0x602, 0x604, 0x606,
+            0x608, 0x60A, 0x60C, 0x60E, 0x7F0, 0x7F2, 0x7F4, 0x7F6, 0x7F8, 0x7FA, 0x7FC,
+            0x7FE, 0x800, 0x802, 0x804, 0x806, 0x808, 0x80A, 0x80C, 0x80E, 0x9F0, 0x9F2,
+            0x9F4, 0x9F6, 0x9F8, 0x9FA, 0x9FC, 0x9FE, 0xA00, 0xA02, 0xA04, 0xA06, 0xA08,
+            0xA0A, 0xA0C, 0xA0E, 0xBF0, 0xBF2, 0xBF4, 0xBF6, 0xBF8, 0xBFA, 0xBFC, 0xBFE,
+            0xC00, 0xC02, 0xC04, 0xC06, 0xC08, 0xC0A, 0xC0C, 0xC0E, 0xDF0, 0xDF2, 0xDF4,
+            0xDF6, 0xDF8, 0xDFA, 0xDFC, 0xDFE, 0xE00, 0xE02, 0xE04, 0xE06, 0xE08, 0xE0A,
+            0xE0C, 0xE0E
+        ];
+
+        private static void Sub20679B0(ref uint r2, ref uint value, ref Span<byte> outputSpan1, ref Span<byte> outputSpan2,
+            ref Span<uint> intBuf, ref Span<ushort> wordBuf, ref Span<byte> byteBuf)
+        {
+            ReadNextBit(ref value, ref intBuf);
+            if (_readBit != 0)
+            {
+                // 1
+                ReadNextBit(ref value, ref intBuf);
+                if (_readBit != 0)
+                {
+                    // 1 1
+                    ReadNextBit(ref value, ref intBuf);
+                    if (_readBit != 0)
+                    {
+                        // 1 1 1
+                        // todo: actual code
+                        byte v129 = byteBuf.Consume();
+                        int v130 = _dword206B2A0[v129];
+                        ushort v131 = wordBuf.Consume();
+                        int v132 = v131 | (v131 << 16);
+                        Span<byte> v133 = outputSpan1.Slice(v130 + r2);
+                        Span<byte> v134 = outputSpan2.Slice(r2);
+                    }
+                    else
+                    {
+                        // 1 1 0
+                        ReadNextBit(ref value, ref intBuf);
+                        if (_readBit != 0)
+                        {
+                            // 1 1 0 1
+                            ReadNextBit(ref value, ref intBuf);
+                            if (_readBit != 0)
+                            {
+                                // 1 1 0 1 1
+                                // todo: actual code
+                            }
+                            else
+                            {
+                                // 1 1 0 1 0
+                                // todo: actual code
+                            }
+                        }
+                        else
+                        {
+                            // 1 1 0 0
+                            // todo: actual code
+                        }
+                    }
+                }
+                else
+                {
+                    // 1 0
+                    ReadNextBit(ref value, ref intBuf);
+                    if (_readBit != 0)
+                    {
+                        // 1 0 1
+                        // todo: actual code
+                    }
+                    else
+                    {
+                        // 1 0 0
+                        // todo: actual code
+                    }
+                }
+            }
+            else
+            {
+                // 0
+                ReadNextBit(ref value, ref intBuf);
+                if (_readBit != 0)
+                {
+                    // 0 1
+                    // todo: actual code
+                }
+                else
+                {
+                    // 0 0
+                    // todo: actual code
+                }
+            }
+        }
+
+        private static void ReadNextBit(ref uint value, ref Span<uint> span)
+        {
+            value = NextBit(value);
+            if (value == 0)
+            {
+                value = NextValueCarry(ref span);
+            }
+        }
+
+        // updates the carry flag, but does not include it in this calculation
+        private static uint NextBit(uint value)
+        {
+            Debug.Assert(value != 0x80000000); // would not be distinguishable from 0 (except by the CF -- so this might be a thing, we'll see)
+            ulong ulongValue = (ulong)value;
+            ulongValue += ulongValue;
+            _readBit = ulongValue > UInt32.MaxValue ? 1 : 0;
+            return (uint)ulongValue;
+        }
+
+        private static uint NextValueCarry(ref Span<uint> span)
+        {
+            Debug.Assert(span[0] != 0x80000000); // would not be distinguishable from 0 (except by the CF -- so this might be a thing, we'll see)
+            ulong ulongValue = (ulong)span[0];
+            ulongValue += ulongValue + (ulong)_readBit;
+            _readBit = ulongValue > UInt32.MaxValue ? 1 : 0;
+            span = span.Slice(1);
+            return (uint)ulongValue;
         }
 
         //public static int GetSfxIndex(string query)

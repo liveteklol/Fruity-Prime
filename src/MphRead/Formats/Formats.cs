@@ -1634,6 +1634,25 @@ namespace MphRead
             return source.Slice((int)start, (int)length);
         }
 
+        public static Span<T> Slice<T>(this Span<T> source, long start)
+        {
+            return source.Slice((int)start);
+        }
+
+        public static T Consume<T>(this ref Span<T> span)
+        {
+            T value = span[0];
+            span = span.Slice(1);
+            return value;
+        }
+
+        public static T Consume<T>(this ref ReadOnlySpan<T> span)
+        {
+            T value = span[0];
+            span = span.Slice(1);
+            return value;
+        }
+
         public static int IndexOf<TSource>(this IEnumerable<TSource> source, Func<TSource, bool> predicate)
         {
             int index = 0;
