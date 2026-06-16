@@ -211,7 +211,7 @@ namespace MphRead.Formats.Sound
             string path = Paths.Combine(Paths.Export, "_SFX");
             Directory.CreateDirectory(path);
             path = Paths.Combine(path, $"{prefix + name}.wav");
-            using FileStream file = File.OpenWrite(path);
+            using FileStream file = File.Create(path);
             using var writer = new BinaryWriter(file);
             WriteWavHeader(writer, sampleCount, sampleRate, format);
             for (int i = 0; i < waveData.Length; i++)

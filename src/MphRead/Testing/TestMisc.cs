@@ -313,8 +313,8 @@ namespace MphRead.Testing
             int lastFrameValue3 = reader.ReadInt32();
             Debug.Assert(lastFrameValue3 == 0);
             Debug.Assert(reader.BaseStream.Position == fileBytes.Length);
-            //using var output = File.OpenWrite(@"C:\Users\auser\Temp\out.wav");
-            using var output = File.OpenWrite($@"C:\Users\auser\Temp\out_{Path.GetFileNameWithoutExtension(path)}.wav");
+            //using var output = File.Create(@"C:\Users\auser\Temp\out.wav");
+            using var output = File.Create($@"C:\Users\auser\Temp\out_{Path.GetFileNameWithoutExtension(path)}.wav");
             using var writer = new BinaryWriter(output);
             SoundRead.WriteWavHeader(writer, (uint)audioFrameTotal * 256, (ushort)audioSampleRate, WaveFormat.PCM16);
             foreach (short sample in samples)

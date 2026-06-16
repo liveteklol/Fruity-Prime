@@ -650,7 +650,7 @@ namespace MphRead.Formats
             Array.Clear(_influenceBuffer);
             AudioFrame? prevAudioFrame = null;
             _audioFrameTotal = 0;
-            using Stream file = writeFiles && AudioStreamCount >= 1 ? File.OpenWrite(Paths.Combine(folder, "audio.wav")) : Stream.Null;
+            using Stream file = writeFiles && AudioStreamCount >= 1 ? File.Create(Paths.Combine(folder, "audio.wav")) : Stream.Null;
             using BinaryWriter writer = new BinaryWriter(file);
             for (int i = 0; i < 11; i++)
             {
