@@ -1604,11 +1604,6 @@ namespace MphRead
 
     public static class CollectionExtensions
     {
-        public static ReadOnlySpan<T> Slice<T>(this ReadOnlySpan<T> source, uint start)
-        {
-            return source[(int)start..];
-        }
-
         public static ReadOnlySpan<T> Slice<T>(this ReadOnlySpan<T> source, uint start, uint length)
         {
             return source.Slice((int)start, (int)length);
