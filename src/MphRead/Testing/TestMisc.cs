@@ -173,9 +173,9 @@ namespace MphRead.Testing
                 int seekAheadOffset = reader.ReadInt32();
                 int frameIndex = reader.ReadInt32();
                 int videoSize = reader.ReadInt32();
-                fileStream.Read(dataBuffer.Slice(0, videoSize));
+                fileStream.ReadExactly(dataBuffer.Slice(0, videoSize));
                 int audioSize = reader.ReadInt32();
-                fileStream.Read(dataBuffer.Slice(videoSize, audioSize));
+                fileStream.ReadExactly(dataBuffer.Slice(videoSize, audioSize));
                 Debug.Assert(frameIndex == i);
                 if (i == 0)
                 {

@@ -3803,6 +3803,10 @@ namespace MphRead
             {
                 if (e.Control && e.Shift)
                 {
+                    if (_recording)
+                    {
+                        Images.StopRecording();
+                    }
                     _recording = !_recording;
                     _framesRecorded = 0;
                 }

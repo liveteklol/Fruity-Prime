@@ -8,66 +8,60 @@ using System.Linq;
 using System.Threading.Tasks;
 using MphRead.Hud;
 using OpenTK.Graphics.OpenGL;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.Formats.Png;
-using SixLabors.ImageSharp.PixelFormats;
-using SixLabors.ImageSharp.Processing;
+using ReFuel.Stb;
+using SoundFlow.Structs;
 
 namespace MphRead.Export
 {
     public static class Images
     {
         private static Task? _task = null;
-        private static readonly ConcurrentQueue<(Image, string)> _queue = new ConcurrentQueue<(Image, string)>();
-        private static readonly PngEncoder _encoderUncomp = new PngEncoder() { CompressionLevel = PngCompressionLevel.NoCompression };
-        private static readonly PngEncoder _encoderComp = new PngEncoder() { CompressionLevel = PngCompressionLevel.BestSpeed };
+        private static bool _recording = false;
+        private static readonly ConcurrentQueue<(byte[], string, int, int)> _queue = new ConcurrentQueue<(byte[], string, int, int)>();
 
         public static void Screenshot(int width, int height, string? name = null)
         {
-            byte[] buffer = new byte[width * height * 4];
-            GL.ReadPixels(0, 0, width, height, PixelFormat.Rgba, PixelType.UnsignedByte, buffer);
-            for (int i = 3; i < buffer.Length; i += 4)
-            {
-                buffer[i] = 255;
-            }
-            using var image = Image.LoadPixelData<Rgba32>(buffer, width, height);
-            image.Mutate(m => RotateFlipExtensions.RotateFlip(m, RotateMode.None, FlipMode.Vertical));
+            byte[] buffer = new byte[width * height * 3];
+            GL.ReadPixels(0, 0, width, height, PixelFormat.Rgb, PixelType.UnsignedByte, buffer);
             string path = Paths.Combine(Paths.Export, "_screenshots");
             Directory.CreateDirectory(path);
             name ??= DateTimeOffset.Now.ToUnixTimeMilliseconds().ToString();
-            image.SaveAsPng(Paths.Combine(path, $"{name}.png"), _encoderComp);
+            using FileStream fileStream = File.Create(Paths.Combine(path, $"{name}.png"));
+            StbImage.FlipVerticallyOnSave = true;
+            StbImage.WritePng<byte>(buffer, width, height, StbiImageFormat.Rgb, fileStream);
         }
 
         public static void Record(int width, int height, string name)
         {
+            _recording = true;
             if (_task == null)
             {
                 _task = Task.Run(async () => await ProcessQueue());
             }
-            byte[] buffer = ArrayPool<byte>.Shared.Rent(width * height * 4);
-            GL.ReadPixels(0, 0, width, height, PixelFormat.Rgba, PixelType.UnsignedByte, buffer);
-            for (int i = 3; i < width * height * 4; i += 4)
-            {
-                buffer[i] = 255;
-            }
-            var image = Image.LoadPixelData<Rgba32>(buffer, width, height);
-            ArrayPool<byte>.Shared.Return(buffer);
-            _queue.Enqueue((image, name));
+            byte[] buffer = ArrayPool<byte>.Shared.Rent(width * height * 3);
+            GL.ReadPixels(0, 0, width, height, PixelFormat.Rgb, PixelType.UnsignedByte, buffer);
+            _queue.Enqueue((buffer, name, width, height));
+        }
+
+        public static void StopRecording()
+        {
+            _recording = false;
         }
 
         private static async Task ProcessQueue()
         {
-            while (true)
+            while (_recording || _queue.Count > 0)
             {
-                while (_queue.TryDequeue(out (Image Image, string Name) result))
+                while (_queue.TryDequeue(out (byte[] Buffer, string Name, int Width, int Height) result))
                 {
-                    result.Image.Mutate(m => RotateFlipExtensions.RotateFlip(m, RotateMode.None, FlipMode.Vertical));
                     string path = Paths.Combine(Paths.Export, "_screenshots");
                     Directory.CreateDirectory(path);
-                    await result.Image.SaveAsPngAsync(Paths.Combine(path, $"{result.Name}.png"), _encoderUncomp);
-                    result.Image.Dispose();
+                    using FileStream fileStream = File.Create(Paths.Combine(path, $"{result.Name}.png"));
+                    StbImage.FlipVerticallyOnSave = true;
+                    StbImage.WritePng<byte>(result.Buffer, result.Width, result.Height, StbiImageFormat.Rgb, fileStream);
+                    ArrayPool<byte>.Shared.Return(result.Buffer);
                 }
-                await Task.Delay(15);
+                await Task.Delay(1);
             }
         }
 
@@ -169,13 +163,10 @@ namespace MphRead.Export
         public static void SaveTexture(string directory, string filename, ushort width, ushort height, IReadOnlyList<ColorRgba> pixels)
         {
             string imagePath = Paths.Combine(directory, $"{filename}.png");
-            using var image = new Image<Rgba32>(width, height);
-            for (int p = 0; p < pixels.Count; p++)
-            {
-                ColorRgba pixel = pixels[p];
-                image[p % width, p / width] = new Rgba32(pixel.Red, pixel.Green, pixel.Blue, pixel.Alpha);
-            }
-            image.SaveAsPng(imagePath);
+            Span<ColorRgba> pixelBuffer = pixels.ToArray();
+            using FileStream fileStream = File.Create(imagePath);
+            StbImage.FlipVerticallyOnSave = false;
+            StbImage.WritePng<ColorRgba>(pixelBuffer, width, height, StbiImageFormat.Rgba, fileStream);
         }
 
         public static void ExportHudLayers()
