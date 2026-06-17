@@ -1,6 +1,5 @@
 using System;
 using MphRead.Formats;
-using OpenTK.Mathematics;
 using OpenTK.Windowing.GraphicsLibraryFramework;
 
 namespace MphRead.Entities
@@ -318,7 +317,7 @@ namespace MphRead.Entities
             {
                 _aimY = Math.Clamp(_aimY, -85, 85);
             }
-            float diff = MathHelper.DegreesToRadians(_aimY - prevAim);
+            float diff = Single.DegreesToRadians(_aimY - prevAim);
             Matrix4 transform = GetTransformMatrix(_gunVec1, Vector3.UnitY);
             Vector3 vector;
             if (diff <= 0)
@@ -353,7 +352,7 @@ namespace MphRead.Entities
             // unimpl-controls: these calculations are different when exact aim is not set
             float sin;
             float cos;
-            float angle = MathHelper.DegreesToRadians(amount);
+            float angle = Single.DegreesToRadians(amount);
             if (amount <= 0)
             {
                 sin = MathF.Sin(angle);
@@ -833,9 +832,9 @@ namespace MphRead.Entities
                                     entity.GetPosition(out Vector3 position);
                                     Vector3 between = position - Position;
                                     float dot = Vector3.Dot(between, facing);
-                                    if (dot > 1 && dot / between.Length >= Fixed.ToFloat(4074))
+                                    if (dot > 1 && dot / between.Length() >= Fixed.ToFloat(4074))
                                     {
-                                        float angle = MathHelper.RadiansToDegrees(MathF.Atan2(3, dot));
+                                        float angle = Single.RadiansToDegrees(MathF.Atan2(3, dot));
                                         if (angle < zoomFov)
                                         {
                                             zoomFov = angle;
@@ -1741,7 +1740,7 @@ namespace MphRead.Entities
                 Speed += Acceleration / 2; // todo: FPS stuff
             }
             var hSpeed = new Vector3(Speed.X, 0, Speed.Z);
-            float hSpeedMag = hSpeed.Length;
+            float hSpeedMag = hSpeed.Length();
             if (hSpeedMag == 0)
             {
                 _hSpeedMag = 0;
@@ -1810,7 +1809,7 @@ namespace MphRead.Entities
             _aimPosition += CameraInfo.Position;
             // unimpl-controls: this calculation is different when exact aim is not set
             hMag = MathF.Sqrt(_gunVec1.X * _gunVec1.X + _gunVec1.Z * _gunVec1.Z);
-            _aimY = MathHelper.RadiansToDegrees(MathF.Atan2(_gunVec1.Y, hMag));
+            _aimY = Single.RadiansToDegrees(MathF.Atan2(_gunVec1.Y, hMag));
             if (_aimY > 75 || _aimY < -75)
             {
                 UpdateAimY(0);

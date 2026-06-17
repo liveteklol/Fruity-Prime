@@ -1,5 +1,3 @@
-using OpenTK.Mathematics;
-
 namespace MphRead.Entities
 {
     public class LightSourceEntity : EntityBase

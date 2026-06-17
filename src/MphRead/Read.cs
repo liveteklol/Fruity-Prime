@@ -8,7 +8,6 @@ using System.Text;
 using MphRead.Archive;
 using MphRead.Export;
 using MphRead.Utility;
-using OpenTK.Mathematics;
 
 namespace MphRead
 {
@@ -388,7 +387,7 @@ namespace MphRead
             if (name == "AlimbicCapsule")
             {
                 Debug.Assert(header.TextureMatrixCount == 1);
-                Matrix4 textureMatrix = Matrix4.Zero;
+                Matrix4 textureMatrix = default;
                 textureMatrix.M21 = Fixed.ToFloat(-2048);
                 textureMatrix.M31 = Fixed.ToFloat(410);
                 textureMatrix.M32 = Fixed.ToFloat(-3891);

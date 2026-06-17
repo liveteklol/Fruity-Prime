@@ -6,7 +6,6 @@ using MphRead.Formats;
 using MphRead.Formats.Culling;
 using MphRead.Hud;
 using MphRead.Text;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities
 {
@@ -1170,7 +1169,7 @@ namespace MphRead.Entities
             {
                 between = Volume.SpherePosition - bomb.Position;
             }
-            float distSqr = between.LengthSquared;
+            float distSqr = between.LengthSquared();
             float hitRadiusSqr = Fixed.ToFloat(Values.BombSelfRadiusSquared);
             if (bomb.Owner == this)
             {
@@ -2022,7 +2021,7 @@ namespace MphRead.Entities
                                 {
                                     continue;
                                 }
-                                float distance = (enemyHunter.Position - Position).LengthSquared;
+                                float distance = (enemyHunter.Position - Position).LengthSquared();
                                 if (_lostOctolithEnemyIndex == -1 || distance < minDistance)
                                 {
                                     _lostOctolithEnemyIndex = i;

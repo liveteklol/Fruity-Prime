@@ -1,7 +1,6 @@
 using System;
 using System.Runtime.InteropServices;
 using MphRead.Entities;
-using OpenTK.Mathematics;
 
 namespace MphRead
 {

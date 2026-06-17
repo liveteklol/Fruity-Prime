@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using MphRead.Formats;
 using MphRead.Formats.Culling;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities.Enemies
 {
@@ -47,7 +46,7 @@ namespace MphRead.Entities.Enemies
                 {
                     CollisionResult discard = default;
                     Vector3 travel = _prevPos - Position;
-                    if (travel.LengthSquared > 1 / 128f
+                    if (travel.LengthSquared() > 1 / 128f
                         && CollisionDetection.CheckBetweenPoints(_prevPos, Position, TestFlags.Beams, _scene, ref discard))
                     {
                         DieAndSpawnEffect(164); // goreaCrystalHit
@@ -60,7 +59,7 @@ namespace MphRead.Entities.Enemies
         {
             SpawnEffect(effectId, Position);
             Vector3 between = PlayerEntity.Main.Position - Position;
-            float distance = between.Length;
+            float distance = between.Length();
             if (distance < 2) // 8192
             {
                 CollisionResult discard = default;

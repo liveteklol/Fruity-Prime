@@ -2,11 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Numerics;
 using MphRead.Entities.Enemies;
 using MphRead.Formats;
 using MphRead.Hud;
 using MphRead.Text;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities
 {
@@ -1238,7 +1238,7 @@ namespace MphRead.Entities
                 }
                 proj.X /= _scene.Size.X;
                 proj.Y /= _scene.Size.Y;
-                float angle = MathHelper.RadiansToDegrees(MathF.Atan2(-y, x));
+                float angle = Single.RadiansToDegrees(MathF.Atan2(-y, x));
                 _scene.DrawIconModel(proj, angle, _arrowLocator, color, alpha);
             }
             else

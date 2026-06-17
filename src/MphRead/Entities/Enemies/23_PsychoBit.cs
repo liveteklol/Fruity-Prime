@@ -3,7 +3,6 @@ using System.Diagnostics;
 using MphRead.Effects;
 using MphRead.Formats;
 using MphRead.Formats.Culling;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities.Enemies
 {
@@ -212,11 +211,11 @@ namespace MphRead.Entities.Enemies
             _moveTarget = targetPoint;
             _moveStart = Position;
             _targetVec = _moveTarget - Position;
-            _moveDistSqr = _targetVec.LengthSquared;
+            _moveDistSqr = _targetVec.LengthSquared();
             _moveDistSqrHalf = _moveDistSqr / 2;
             _increaseSpeed = true;
             _targetVec = _targetVec.Normalized();
-            float angle = MathHelper.RadiansToDegrees(MathF.Acos(Vector3.Dot(facing, _targetVec)));
+            float angle = Single.RadiansToDegrees(MathF.Acos(Vector3.Dot(facing, _targetVec)));
             _aimSteps = (ushort)(_values.AimSteps * 2); // todo: FPS stuff
             _aimAngleStep = angle / _aimSteps;
             _crossVec = Vector3.Cross(facing, _targetVec).Normalized();
@@ -231,7 +230,7 @@ namespace MphRead.Entities.Enemies
                 var vec = new Vector3(dist, 0, 0);
                 _roamAngleSign *= -1;
                 float angle = Fixed.ToFloat(Rng.GetRandomInt2(0xB4000)) * _roamAngleSign; // [0-180)
-                var rotY = Matrix4.CreateRotationY(MathHelper.DegreesToRadians(angle));
+                var rotY = Matrix4.CreateRotationY(Single.DegreesToRadians(angle));
                 vec = Matrix.Vec3MultMtx3(vec, rotY);
                 vec.Y = Fixed.ToFloat(Rng.GetRandomInt2(Fixed.ToInt(_homeVolume.CylinderDot)));
                 moveTarget = _homeVolume.CylinderPosition + vec;
@@ -258,7 +257,7 @@ namespace MphRead.Entities.Enemies
             if (_increaseSpeed)
             {
                 Vector3 between = _moveTarget - Position;
-                if (between.LengthSquared < _moveDistSqrHalf)
+                if (between.LengthSquared() < _moveDistSqrHalf)
                 {
                     _increaseSpeed = false;
                 }
@@ -403,7 +402,7 @@ namespace MphRead.Entities.Enemies
         private void CheckReachedTarget()
         {
             Vector3 nextPos = Position + _speed;
-            if ((_moveStart - nextPos).LengthSquared > _moveDistSqr)
+            if ((_moveStart - nextPos).LengthSquared() > _moveDistSqr)
             {
                 _speed = nextPos - Position;
                 _reachedTarget = true;
@@ -489,7 +488,7 @@ namespace MphRead.Entities.Enemies
                 _reachTargetHackTimer = 1; // todo: FPS stuff
                 Vector3 facing = FacingVector;
                 _targetVec = (PlayerEntity.Main.Position - Position).Normalized();
-                float angle = MathHelper.RadiansToDegrees(MathF.Acos(Vector3.Dot(facing, _targetVec)));
+                float angle = Single.RadiansToDegrees(MathF.Acos(Vector3.Dot(facing, _targetVec)));
                 _aimSteps = (ushort)(_values.AimSteps * 2); // todo: FPS stuff
                 _aimAngleStep = angle / _aimSteps;
                 _crossVec = Vector3.Cross(facing, _targetVec).Normalized();

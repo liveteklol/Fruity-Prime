@@ -2,7 +2,6 @@ using System;
 using System.Diagnostics;
 using MphRead.Effects;
 using MphRead.Formats.Culling;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities.Enemies
 {
@@ -114,7 +113,7 @@ namespace MphRead.Entities.Enemies
             Vector3 target = -PlayerEntity.Main.FacingVector + PlayerEntity.Main.Position;
             target.Y = PlayerEntity.Main.Position.Y + 0.5f;
             _speed = target - Position;
-            float mag = _speed.Length;
+            float mag = _speed.Length();
             // _moveTimer is not used again after this
             _moveTimer = (int)(mag / 0.6f) + 1;
             _moveTimer *= 2; // todo: FPS stuff
@@ -149,7 +148,7 @@ namespace MphRead.Entities.Enemies
             _effect = _scene.SpawnEffectGetEntry(29, Vector3.UnitX, Vector3.UnitY, Position); // shriekBatTrail
             _effect?.SetElementExtension(true);
             _speed = _targetPos - Position;
-            float mag = _speed.Length;
+            float mag = _speed.Length();
             _moveTimer = (int)(mag / 0.3f) + 1;
             _moveTimer *= 2; // todo: FPS stuff
             _speed *= 0.3f / mag;

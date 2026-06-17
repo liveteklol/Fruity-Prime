@@ -1,7 +1,6 @@
 using System;
 using System.Diagnostics;
 using MphRead.Formats.Culling;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities.Enemies
 {
@@ -247,7 +246,7 @@ namespace MphRead.Entities.Enemies
         private bool Behavior03()
         {
             Vector3 between = Position - _moveStart;
-            if (between.LengthSquared <= _moveDistSqr && (!_airborne || _timeInAir <= 5 * 2)) // todo: FPS stuff
+            if (between.LengthSquared() <= _moveDistSqr && (!_airborne || _timeInAir <= 5 * 2)) // todo: FPS stuff
             {
                 return false;
             }
@@ -255,7 +254,7 @@ namespace MphRead.Entities.Enemies
             if (_state1 == 5)
             {
                 _targetVec = (PlayerEntity.Main.Position - Position).WithY(0).Normalized();
-                float angle = MathHelper.RadiansToDegrees(MathF.Acos(Vector3.Dot(FacingVector, _targetVec)));
+                float angle = Single.RadiansToDegrees(MathF.Acos(Vector3.Dot(FacingVector, _targetVec)));
                 _aimSteps = _aimStepCount;
                 _aimAngleStep = angle / _aimSteps;
             }
@@ -272,7 +271,7 @@ namespace MphRead.Entities.Enemies
                 return false;
             }
             Vector3 between = PlayerEntity.Main.Volume.SpherePosition - Position;
-            float mag = between.Length * 5;
+            float mag = between.Length() * 5;
             PlayerEntity.Main.Speed = new Vector3(
                 PlayerEntity.Main.Speed.X + between.X / mag,
                 PlayerEntity.Main.Speed.Y,
@@ -283,7 +282,7 @@ namespace MphRead.Entities.Enemies
             if (_state1 == 5)
             {
                 _targetVec = (PlayerEntity.Main.Position - Position).WithY(0).Normalized();
-                float angle = MathHelper.RadiansToDegrees(MathF.Acos(Vector3.Dot(FacingVector, _targetVec)));
+                float angle = Single.RadiansToDegrees(MathF.Acos(Vector3.Dot(FacingVector, _targetVec)));
                 _aimSteps = _aimStepCount;
                 _aimAngleStep = angle / _aimSteps;
             }

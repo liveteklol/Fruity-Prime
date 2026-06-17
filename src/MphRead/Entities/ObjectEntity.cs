@@ -4,7 +4,6 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using MphRead.Effects;
 using MphRead.Formats.Collision;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities
 {

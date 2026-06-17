@@ -3,8 +3,8 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Numerics;
 using System.Text;
-using OpenTK.Mathematics;
 
 namespace MphRead.Export
 {
@@ -240,7 +240,7 @@ namespace MphRead.Export
                         meshVerts[i + 2].Position - meshVerts[i].Position);
                     if (normal != Vector3.Zero)
                     {
-                        normal.Normalize();
+                        normal = normal.Normalized();
                     }
                     string vertNormal = $"{FloatFormat(normal.X)} {FloatFormat(normal.Y)} {FloatFormat(normal.Z)} ";
                     sb.Append(vertNormal);
@@ -336,11 +336,11 @@ namespace MphRead.Export
                             vert.Uv.Y * factorT * (1.0f / tex.Height));
                         if (material.XRepeat == RepeatMode.Clamp)
                         {
-                            newUv = new Vector2(MathHelper.Clamp(newUv.X, 0f, 1f), newUv.Y);
+                            newUv = new Vector2(Math.Clamp(newUv.X, 0f, 1f), newUv.Y);
                         }
                         if (material.YRepeat == RepeatMode.Clamp)
                         {
-                            newUv = new Vector2(newUv.X, MathHelper.Clamp(newUv.Y, 0f, 1f));
+                            newUv = new Vector2(newUv.X, Math.Clamp(newUv.Y, 0f, 1f));
                         }
                         var newVert = new Vertex(vert.Position, vert.Color, vert.Normal, newUv, vert.MatrixId);
                         string texCoord = $"{FloatFormat(newVert.Uv.X)} {FloatFormat(1 - newVert.Uv.Y)} ";
@@ -544,9 +544,9 @@ namespace MphRead.Export
                     if (transformRoom)
                     {
                         angle = new Vector3(
-                            MathHelper.RadiansToDegrees(node.Angle.X),
-                            MathHelper.RadiansToDegrees(node.Angle.Y),
-                            MathHelper.RadiansToDegrees(node.Angle.Z)
+                            Single.RadiansToDegrees(node.Angle.X),
+                            Single.RadiansToDegrees(node.Angle.Y),
+                            Single.RadiansToDegrees(node.Angle.Z)
                         );
                         scale = node.Scale;
                         position = node.Position;

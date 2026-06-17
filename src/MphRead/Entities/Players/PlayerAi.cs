@@ -3,8 +3,8 @@ using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Numerics;
 using MphRead.Formats;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities
 {
@@ -759,7 +759,7 @@ namespace MphRead.Entities
 
             private void UpdateAggro()
             {
-                float fov = MathHelper.DegreesToRadians(_player.CameraInfo.Fov > 0 ? _player.CameraInfo.Fov : 78);
+                float fov = Single.DegreesToRadians(_player.CameraInfo.Fov > 0 ? _player.CameraInfo.Fov : 78);
                 Matrix4 perspectiveMatrix = _scene.GetPerspectiveMatrix(fov);
                 foreach (PlayerEntity other in _scene.GetPlayerEntities())
                 {
@@ -788,7 +788,7 @@ namespace MphRead.Entities
                     {
                         Vector3 between = other.Position - _player.CameraInfo.Position;
                         between = between.AddY(other.IsAltForm ? Fixed.ToFloat(other.Values.AltColYPos) : 0.5f);
-                        int rand = (int)(between.LengthSquared * 4096);
+                        int rand = (int)(between.LengthSquared() * 4096);
                         int alpha = (int)(other.CurAlpha * 31);
                         if (alpha > 2)
                         {
@@ -813,7 +813,7 @@ namespace MphRead.Entities
                         alpha = alpha <= 2 ? 1 : (alpha - 2);
                         AggroFunc214864C(6, 1, 2, null, other, 0, alpha, 10, 3);
                     }
-                    float otherFov = MathHelper.DegreesToRadians(other.CameraInfo.Fov > 0 ? other.CameraInfo.Fov : 78);
+                    float otherFov = Single.DegreesToRadians(other.CameraInfo.Fov > 0 ? other.CameraInfo.Fov : 78);
                     Matrix4 otherPerspective = _scene.GetPerspectiveMatrix(otherFov);
                     w = Matrix.ProjectPosition(_player.Position, other.CameraInfo.ViewMatrix, otherPerspective, out proj);
                     if (w < 0)
@@ -3223,7 +3223,7 @@ namespace MphRead.Entities
                         {
                             Debug.Assert(_node40 != null);
                             Vector3 toNode = _node40.Position - _player.Position;
-                            if (toNode.LengthSquared > 3 * 3)
+                            if (toNode.LengthSquared() > 3 * 3)
                             {
                                 _buttons.L.IsDown = true;
                             }
@@ -3357,7 +3357,7 @@ namespace MphRead.Entities
                                     {
                                         toPos = toPos.AddY(-1.25f);
                                     }
-                                    if (toPos.Y > -0.5f && toPos.WithY(0).LengthSquared < 0.5f * 0.5f)
+                                    if (toPos.Y > -0.5f && toPos.WithY(0).LengthSquared() < 0.5f * 0.5f)
                                     {
                                         PressL();
                                     }
@@ -3507,7 +3507,7 @@ namespace MphRead.Entities
                     _buttons.Y.IsDown = true;
                 }
                 Vector3 vec = ExecuteVectorFunc(index: 0, clearY: true, normalize: false);
-                float lengthSqr = vec.LengthSquared;
+                float lengthSqr = vec.LengthSquared();
                 if (lengthSqr < 2 * 2)
                 {
                     _buttons.B.IsDown = true;
@@ -3522,7 +3522,7 @@ namespace MphRead.Entities
             private bool Func2142EB0(AiContext context)
             {
                 Vector3 toSelf = (_player.Position - context.Field34).WithY(0);
-                if (_player.IsMorphing || _player.IsUnmorphing || toSelf.LengthSquared >= 0.5f * 0.5f)
+                if (_player.IsMorphing || _player.IsUnmorphing || toSelf.LengthSquared() >= 0.5f * 0.5f)
                 {
                     context.Field40 = 0;
                     context.Field34 = _player.Position;
@@ -3638,8 +3638,8 @@ namespace MphRead.Entities
                         // this is similar to Func2_213DDCC above but with the added jank, and has 4/9 length checks like Func2142DCC
                         Debug.Assert(_targetPlayer != null);
                         Vector3 zero = Vector3.Zero;
-                        float targetLengthSqr = _targetPlayer.Position.WithY(0).LengthSquared;
-                        float selfLengthSqr = _player.Position.WithY(0).LengthSquared;
+                        float targetLengthSqr = _targetPlayer.Position.WithY(0).LengthSquared();
+                        float selfLengthSqr = _player.Position.WithY(0).LengthSquared();
                         bool spawnBomb = false;
                         if (_player.SyluxBombCount == 0)
                         {
@@ -3703,7 +3703,7 @@ namespace MphRead.Entities
                     _buttons.Y.IsDown = true;
                 }
                 Vector3 vec = ExecuteVectorFunc(index: 0, clearY: true, normalize: false);
-                float lengthSqr = vec.LengthSquared;
+                float lengthSqr = vec.LengthSquared();
                 if (lengthSqr < 2 * 2)
                 {
                     _buttons.B.IsDown = true;
@@ -3735,7 +3735,7 @@ namespace MphRead.Entities
                 {
                     Debug.Assert(_targetPlayer != null);
                     Vector3 toTarget = _targetPlayer.Position - _player.Position;
-                    float minLengthSqr = toTarget.LengthSquared;
+                    float minLengthSqr = toTarget.LengthSquared();
                     BeamProjectileEntity? closestBeam = null;
                     for (int i = 0; i < _targetPlayer.EquipInfo.Beams.Length; i++)
                     {
@@ -3743,7 +3743,7 @@ namespace MphRead.Entities
                         if (beam.Lifespan > 0)
                         {
                             Vector3 toBeam = beam.Position - _player.Position;
-                            float toBeamLenSq = toBeam.LengthSquared;
+                            float toBeamLenSq = toBeam.LengthSquared();
                             if (toBeamLenSq > 0)
                             {
                                 toBeam = toBeam.Normalized();
@@ -3934,7 +3934,7 @@ namespace MphRead.Entities
                     if (radius > 0.5f)
                     {
                         Vector3 toDefense = (_targetDefense.Position - _player.Position).WithY(0);
-                        if (radius * radius <= toDefense.LengthSquared)
+                        if (radius * radius <= toDefense.LengthSquared())
                         {
                             Field118 = 0;
                             context.Field40 = 0;
@@ -4032,7 +4032,7 @@ namespace MphRead.Entities
                     }
                 }
                 Vector3 vec = ExecuteVectorFunc(index: 0, clearY: true, normalize: false);
-                float lengthSqr = vec.LengthSquared;
+                float lengthSqr = vec.LengthSquared();
                 if (lengthSqr < 2 * 2)
                 {
                     _buttons.B.IsDown = true;
@@ -4401,7 +4401,7 @@ namespace MphRead.Entities
             private bool Func213995C(float angleCos, float maxDistSqr)
             {
                 Vector3 vec1 = ExecuteVectorFunc(index: 7, clearY: false, normalize: false);
-                float lengthSqr = vec1.LengthSquared;
+                float lengthSqr = vec1.LengthSquared();
                 if (maxDistSqr > 0 && lengthSqr >= maxDistSqr)
                 {
                     return false;
@@ -4766,7 +4766,7 @@ namespace MphRead.Entities
             private bool Func3_2139A1C(AiContext contex, Vector3 targetPos, float angleCos, float maxDistSqr)
             {
                 Vector3 toTarget = targetPos - _player.Position;
-                float distSqr = toTarget.LengthSquared;
+                float distSqr = toTarget.LengthSquared();
                 if (maxDistSqr > 0 && distSqr >= maxDistSqr)
                 {
                     return false;
@@ -5595,7 +5595,7 @@ namespace MphRead.Entities
                 Debug.Assert(_targetPlayer != null);
                 float dist = param.Param1 / 4096f;
                 // todo?: bug? checking distance to the origin instead of to this bot or another entity
-                return _targetPlayer.Position.LengthSquared < dist * dist ? 1 : 0;
+                return _targetPlayer.Position.LengthSquared() < dist * dist ? 1 : 0;
             }
 
             private int Func3_213AA20(AiContext context, AiPersonalityData5 param)
@@ -6497,7 +6497,7 @@ namespace MphRead.Entities
                 {
                     if (dot > _dotValues[_player.BotLevel])
                     {
-                        _buttonAimX = MathHelper.RadiansToDegrees(MathF.Acos(dot));
+                        _buttonAimX = Single.RadiansToDegrees(MathF.Acos(dot));
                     }
                     else
                     {
@@ -6521,7 +6521,7 @@ namespace MphRead.Entities
                 {
                     if (dot > _dotValues[_player.BotLevel])
                     {
-                        _buttonAimX = MathHelper.RadiansToDegrees(MathF.Acos(dot));
+                        _buttonAimX = Single.RadiansToDegrees(MathF.Acos(dot));
                     }
                     else
                     {
@@ -6532,8 +6532,8 @@ namespace MphRead.Entities
                         _buttonAimX *= -1;
                     }
                 }
-                float angle1 = 90 - MathHelper.RadiansToDegrees(MathF.Acos(_player.CameraInfo.Facing.Y));
-                float angle2 = 90 - MathHelper.RadiansToDegrees(MathF.Acos(_field1038.Y));
+                float angle1 = 90 - Single.RadiansToDegrees(MathF.Acos(_player.CameraInfo.Facing.Y));
+                float angle2 = 90 - Single.RadiansToDegrees(MathF.Acos(_field1038.Y));
                 float angleDiff = angle2 - angle1;
                 _buttonAimY = Math.Clamp(angleDiff, -value, value);
             }
@@ -6548,7 +6548,7 @@ namespace MphRead.Entities
                     Vector3 vec = ExecuteVectorFunc(index: 0, clearY: false, normalize: false);
                     if (Flags2.TestFlag(AiFlags2.Bit8)
                         && Func213842C() && (IsPlayerVisible(_player, _targetPlayer) || _weapon1 == 7)
-                        || vec.LengthSquared < 10)
+                        || vec.LengthSquared() < 10)
                     {
                         Func2143A40();
                     }
@@ -6573,7 +6573,7 @@ namespace MphRead.Entities
                 }
                 Debug.Assert(_targetPlayer != null);
                 Vector3 toTarget = _targetPlayer.Position - _player.Position;
-                float targetDist = toTarget.Length;
+                float targetDist = toTarget.Length();
                 // field1020 -- deviation
                 // if we haven't set the deviation yet, or we have but the bot is facing away by more than 90 degrees:
                 if (_field1020 == 0 || Vector3.Dot(toTarget, _player._facingVector) < 0)
@@ -6646,7 +6646,7 @@ namespace MphRead.Entities
                         else
                         {
                             Vector3 muzzleTarget = targetPos - _player._muzzlePos;
-                            float muzzleDist = muzzleTarget.Length;
+                            float muzzleDist = muzzleTarget.Length();
                             vec *= muzzleDist;
                             // the game checks the third speed decay value, but the result is the same as the second
                             ushort decay = weapon.SpeedDecayTimes[isCharged ? 1 : 0];
@@ -6774,7 +6774,7 @@ namespace MphRead.Entities
                 toTarget = toTarget.WithY(0);
                 toTarget = toTarget != Vector3.Zero ? toTarget.Normalized() : Vector3.UnitX;
                 Vector3 toPos = position - _player._muzzlePos;
-                float distToPosH = toPos.WithY(0).Length;
+                float distToPosH = toPos.WithY(0).Length();
                 float posY = toPos.Y;
                 toPos = toPos.Normalized();
                 float posYNrm = toPos.Y;
@@ -6787,7 +6787,7 @@ namespace MphRead.Entities
                     // sktodo-ai: add a common function for this
                     if (dot > _dotValues[_player.BotLevel])
                     {
-                        _buttonAimX = MathHelper.RadiansToDegrees(MathF.Acos(dot));
+                        _buttonAimX = Single.RadiansToDegrees(MathF.Acos(dot));
                     }
                     else
                     {
@@ -6835,13 +6835,13 @@ namespace MphRead.Entities
                     float sqrt = MathF.Sqrt(v28);
                     // note: the game chops the last bit off div, basically rounding it down to an even number of 1/4096ths
                     float div3 = (sqrt - distToPosH) / div;
-                    angle1 = MathHelper.RadiansToDegrees(MathF.Atan(div2));
-                    angle2 = MathHelper.RadiansToDegrees(MathF.Atan(div3));
+                    angle1 = Single.RadiansToDegrees(MathF.Atan(div2));
+                    angle2 = Single.RadiansToDegrees(MathF.Atan(div3));
                 }
                 else
                 {
-                    angle1 = 90 - MathHelper.RadiansToDegrees(MathF.Acos(toTargetYNrm));
-                    angle2 = 90 - MathHelper.RadiansToDegrees(MathF.Acos(posYNrm));
+                    angle1 = 90 - Single.RadiansToDegrees(MathF.Acos(toTargetYNrm));
+                    angle2 = 90 - Single.RadiansToDegrees(MathF.Acos(posYNrm));
                 }
                 float angleDiff = angle2 - angle1;
                 _buttonAimY = Math.Clamp(angleDiff, -value, value);
@@ -7018,7 +7018,7 @@ namespace MphRead.Entities
                             {
                                 Debug.Assert(_targetPlayer != null);
                                 Vector3 toTarget = _targetPlayer.Position - _player.Position;
-                                float distSqr = toTarget.LengthSquared;
+                                float distSqr = toTarget.LengthSquared();
                                 if (distSqr > 3 * 3 && _player.BotLevel == 0
                                     || distSqr > 11 && _player.BotLevel == 1
                                     || distSqr > 13)
@@ -7074,7 +7074,7 @@ namespace MphRead.Entities
                 {
                     Debug.Assert(_targetPlayer != null);
                     Vector3 toTarget = _targetPlayer.Position - _player.Position;
-                    float distSqr = toTarget.LengthSquared;
+                    float distSqr = toTarget.LengthSquared();
                     if (GameState.SinglePlayer || distSqr <= 15 * 15 || !_player.AvailableWeapons[BeamType.PowerBeam])
                     {
                         if (!_player.AvailableWeapons[beam])
@@ -7119,7 +7119,7 @@ namespace MphRead.Entities
                     {
                         Debug.Assert(_targetPlayer != null);
                         Vector3 toTarget = _targetPlayer.Position - _player.Position;
-                        if (toTarget.LengthSquared > 10 * 10)
+                        if (toTarget.LengthSquared() > 10 * 10)
                         {
                             _buttons.R.IsDown = true;
                         }
@@ -7224,7 +7224,7 @@ namespace MphRead.Entities
                     Debug.Assert(_targetHalfturret != null);
                     Func2144964();
                     Vector3 toHalfturret = _targetHalfturret.Position - _player.Position;
-                    if (Flags2.TestFlag(AiFlags2.Bit8) || toHalfturret.LengthSquared < 10)
+                    if (Flags2.TestFlag(AiFlags2.Bit8) || toHalfturret.LengthSquared() < 10)
                     {
                         Func2143A40();
                     }
@@ -7267,7 +7267,7 @@ namespace MphRead.Entities
                 float facingY = _player._facingVector.Y;
                 if (facingY != 0)
                 {
-                    float aimY = MathHelper.RadiansToDegrees(MathF.Acos(facingY)) - 90;
+                    float aimY = Single.RadiansToDegrees(MathF.Acos(facingY)) - 90;
                     float value = _aimValues[_player.BotLevel];
                     _buttonAimY = Math.Clamp(aimY, -value, value);
                 }
@@ -7369,7 +7369,7 @@ namespace MphRead.Entities
                     if (context.Field20 != 0)
                     {
                         if (Flags2.TestFlag(AiFlags2.Bit21) || _player.Flags1.TestFlag(PlayerFlags1.Grounded)
-                            || (_player.Position - _node40.Position).WithY(0).LengthSquared > _node40.MaxDistance * _node40.MaxDistance)
+                            || (_player.Position - _node40.Position).WithY(0).LengthSquared() > _node40.MaxDistance * _node40.MaxDistance)
                         {
                             if (context.Field30 && (context.Field2C == 0 || context.Field2C == 2 || context.Field20 == 2))
                             {
@@ -7489,7 +7489,7 @@ namespace MphRead.Entities
                         else if (_node44 == null || !IsNodeInRange(_node44))
                         {
                             Vector3 toNode = _node40.Position - _player.Position;
-                            if (toNode.LengthSquared < 0.5f * 0.5f
+                            if (toNode.LengthSquared() < 0.5f * 0.5f
                                 && _player.Flags1.TestFlag(PlayerFlags1.Grounded)
                                 && Field118 > 30 * 2) // todo: FPS stuff
                             {
@@ -7687,7 +7687,7 @@ namespace MphRead.Entities
                 {
                     if (dot > _dotValues[_player.BotLevel])
                     {
-                        _buttonAimX = MathHelper.RadiansToDegrees(MathF.Acos(dot));
+                        _buttonAimX = Single.RadiansToDegrees(MathF.Acos(dot));
                     }
                     else
                     {
@@ -9944,13 +9944,13 @@ namespace MphRead.Entities
                     return _node40;
                 }
                 NodeData3 result = nodeList[0];
-                float maxDist = (position - result.Position).LengthSquared
-                    - (_player.Position - result.Position).LengthSquared;
+                float maxDist = (position - result.Position).LengthSquared()
+                    - (_player.Position - result.Position).LengthSquared();
                 for (int i = 1; i < nodeCount; i++)
                 {
                     NodeData3 node = nodeList[i];
-                    float dist = (position - node.Position).LengthSquared
-                        - (_player.Position - node.Position).LengthSquared;
+                    float dist = (position - node.Position).LengthSquared()
+                        - (_player.Position - node.Position).LengthSquared();
                     if (dist > maxDist)
                     {
                         result = node;
@@ -10056,7 +10056,7 @@ namespace MphRead.Entities
                 between = between.AddY(_player.IsAltForm
                     ? Fixed.ToFloat(_player.Values.AltColRadius) - Fixed.ToFloat(_player.Values.AltColYPos)
                     : 0.5f);
-                return between.LengthSquared < node.MaxDistance * node.MaxDistance;
+                return between.LengthSquared() < node.MaxDistance * node.MaxDistance;
             }
 
             private bool IsJumpPadNode(NodeData3 node)

@@ -9,7 +9,6 @@ using System.Threading.Tasks;
 using MphRead.Formats;
 using MphRead.Formats.Collision;
 using MphRead.Formats.Culling;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities
 {
@@ -1265,7 +1264,7 @@ namespace MphRead.Entities
                     if (GameState.InRoomTransition || _partVisInfoHead == null || _scene.ShowAllNodes)
                     {
                         var transform = Matrix4.CreateScale(conInst.Model.Scale);
-                        transform.Row3.Xyz = _roomCollision[i + 1].Translation;
+                        transform.Row3_Xyz = _roomCollision[i + 1].Translation;
                         IReadOnlyList<Node> nodes = conInst.Model.Nodes;
                         for (int j = 0; j < nodes.Count; j++)
                         {
@@ -1412,7 +1411,7 @@ namespace MphRead.Entities
                     partInst = _connectorModels[modelIndex - 1];
                     offset = _roomCollision[modelIndex].Translation;
                     transform = Matrix4.CreateScale(partInst.Model.Scale);
-                    transform.Row3.Xyz = offset;
+                    transform.Row3_Xyz = offset;
                 }
                 if (!partInst.Active)
                 {
@@ -1565,7 +1564,7 @@ namespace MphRead.Entities
 
         private float GetPortalAlpha(Vector3 portalPosition, Vector3 cameraPosition)
         {
-            float between = (portalPosition - cameraPosition).Length;
+            float between = (portalPosition - cameraPosition).Length();
             between /= 8;
             if (between < 1 / 4096f)
             {

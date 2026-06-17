@@ -6,7 +6,6 @@ using System.Runtime.CompilerServices;
 using MphRead.Formats.Collision;
 using MphRead.Formats.Culling;
 using MphRead.Sound;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities.Enemies
 {
@@ -71,7 +70,7 @@ namespace MphRead.Entities.Enemies
                 facing = (PlayerEntity.Main.Position - position).WithY(0).Normalized();
             }
             Matrix4 transform = GetTransformMatrix(facing, Vector3.UnitY);
-            transform.Row3.Xyz = position;
+            transform.Row3_Xyz = position;
             Transform = transform;
             if (_data.Spawner is EnemySpawnEntity spawner && spawner.ParentEntCol != null)
             {
@@ -702,7 +701,7 @@ namespace MphRead.Entities.Enemies
             for (int i = 0; i < 3; i++)
             {
                 SegmentInfo segment = Segments[i];
-                float angle = MathHelper.DegreesToRadians(segment.Angle);
+                float angle = Single.DegreesToRadians(segment.Angle);
                 segment.JointNode.AfterTransform = Matrix4.CreateRotationX(angle);
             }
             _model.Model.AnimateNodes2(index: 0, false, Matrix4.Identity, Vector3.One, _model.AnimInfo);

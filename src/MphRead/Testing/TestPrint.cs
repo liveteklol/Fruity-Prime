@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using OpenTK.Mathematics;
 
 namespace MphRead.Testing
 {

@@ -1,7 +1,6 @@
 using System;
 using MphRead.Effects;
 using MphRead.Formats.Culling;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities.Enemies
 {
@@ -222,7 +221,7 @@ namespace MphRead.Entities.Enemies
                 Vector3 between = elbowPos - upperArmPos;
                 up = between;
                 facing = Vector3.UnitZ; // game uses a temp (zero?) here, should always get updated beloww
-                if (between.LengthSquared > 1 / 128f && upperArmFacing.LengthSquared > 1 / 128f)
+                if (between.LengthSquared() > 1 / 128f && upperArmFacing.LengthSquared() > 1 / 128f)
                 {
                     between = between.Normalized();
                     upperArmFacing = upperArmFacing.Normalized();
@@ -238,9 +237,9 @@ namespace MphRead.Entities.Enemies
             up = up.Normalized();
             facing = facing.Normalized();
             Matrix4 transform = GetTransformMatrix(facing, up, position);
-            transform.Row2.X *= factor;
-            transform.Row2.Y *= factor;
-            transform.Row2.Z *= factor;
+            transform.Row2_X *= factor;
+            transform.Row2_Y *= factor;
+            transform.Row2_Z *= factor;
             UpdateTransforms(regenModel, transform, recolor: 0);
             GetDrawItems(regenModel, 0);
         }

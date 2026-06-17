@@ -1,7 +1,6 @@
 using System;
 using System.Diagnostics;
 using MphRead.Formats.Culling;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities.Enemies
 {
@@ -100,7 +99,7 @@ namespace MphRead.Entities.Enemies
             {
                 _weaveAngle -= 360;
             }
-            float angle = MathHelper.DegreesToRadians(_weaveAngle);
+            float angle = Single.DegreesToRadians(_weaveAngle);
             float xzSin = MathF.Sin(angle);
             float xzCos = MathF.Cos(angle);
             if (_state1 != 0)
@@ -118,11 +117,11 @@ namespace MphRead.Entities.Enemies
             {
                 _bobAngle -= 360;
             }
-            float ySin = MathF.Sin(MathHelper.DegreesToRadians(_bobAngle));
+            float ySin = MathF.Sin(Single.DegreesToRadians(_bobAngle));
             _speed.Y = _initialPos.Y + ySin * _bobOffset - Position.Y;
             _speed /= 2; // todo: FPS stuff
             Vector3 between = PlayerEntity.Main.Position - Position;
-            if (between.LengthSquared >= 7 * 7)
+            if (between.LengthSquared() >= 7 * 7)
             {
                 _field194 = _field188.WithY(0).Normalized();
             }

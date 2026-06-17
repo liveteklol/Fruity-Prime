@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Numerics;
 using MphRead.Formats;
 using MphRead.Hud;
 using MphRead.Text;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities
 {

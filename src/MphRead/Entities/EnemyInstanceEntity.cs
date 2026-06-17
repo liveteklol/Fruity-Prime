@@ -4,7 +4,6 @@ using System.Diagnostics;
 using MphRead.Effects;
 using MphRead.Formats;
 using MphRead.Formats.Culling;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities
 {
@@ -175,7 +174,7 @@ namespace MphRead.Entities
                 bool CheckInRange(Vector3 pos)
                 {
                     Vector3 between = Position - pos;
-                    return between.LengthSquared < distSqr && between.Y > -15 && between.Y < 15;
+                    return between.LengthSquared() < distSqr && between.Y > -15 && between.Y < 15;
                 }
 
                 if (GameState.Multiplayer)
@@ -267,7 +266,7 @@ namespace MphRead.Entities
             if (knockback)
             {
                 Vector3 between = PlayerEntity.Main.Volume.SpherePosition - Position;
-                float factor = between.Length * 5;
+                float factor = between.Length() * 5;
                 PlayerEntity.Main.Speed = PlayerEntity.Main.Speed.AddX(between.X / factor).AddZ(between.Z / factor);
             }
             return true;
@@ -354,7 +353,7 @@ namespace MphRead.Entities
                 return false;
             }
             Vector3 between = Position - bomb.Position;
-            if (between.LengthSquared > bomb.Radius * bomb.Radius)
+            if (between.LengthSquared() > bomb.Radius * bomb.Radius)
             {
                 return false;
             }
@@ -423,7 +422,7 @@ namespace MphRead.Entities
                 if (effectiveness == Effectiveness.Zero && !_noIneffectiveEffect)
                 {
                     Matrix4 transform = GetTransformMatrix(Vector3.UnitX, Vector3.UnitY);
-                    transform.Row3.Xyz = _hurtVolume.GetCenter();
+                    transform.Row3_Xyz = _hurtVolume.GetCenter();
                     EffectEntry? effect = _scene.SpawnEffectGetEntry(115, transform); // ineffectivePsycho
                     if (effect != null)
                     {
@@ -489,7 +488,7 @@ namespace MphRead.Entities
                         _models[0].SetAnimation(0, AnimFlags.NoLoop);
                         // 3 - blastCapHit
                         Matrix4 transform = GetTransformMatrix(Vector3.UnitX, Vector3.UnitY);
-                        transform.Row3.Xyz = Position;
+                        transform.Row3_Xyz = Position;
                         _scene.SpawnEffect(3, transform);
                         break;
                     }
@@ -639,12 +638,12 @@ namespace MphRead.Entities
 
         public static Vector3 RotateVector(Vector3 vec, Vector3 axis, float angle)
         {
-            return vec * Matrix3.CreateFromAxisAngle(axis, MathHelper.DegreesToRadians(angle));
+            return vec * Matrix3.CreateFromAxisAngle(axis, Single.DegreesToRadians(angle));
         }
 
         public static bool SeekTargetVector(Vector3 target, ref Vector3 current, Vector3 axis, ref ushort steps, float angle)
         {
-            if (steps > 0 && Vector3.Dot(target, current) < MathF.Cos(MathHelper.DegreesToRadians(angle)))
+            if (steps > 0 && Vector3.Dot(target, current) < MathF.Cos(Single.DegreesToRadians(angle)))
             {
                 current = RotateVector(current, axis, angle).Normalized();
                 steps--;
@@ -659,7 +658,7 @@ namespace MphRead.Entities
         {
             bool result = false;
             Vector3 facing = FacingVector;
-            float radians = MathHelper.DegreesToRadians(angle);
+            float radians = Single.DegreesToRadians(angle);
             if (steps > 0 && Vector3.Dot(target, facing) < MathF.Cos(radians))
             {
                 var cross = Vector3.Cross(target, facing);

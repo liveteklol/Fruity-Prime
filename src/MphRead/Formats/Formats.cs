@@ -10,7 +10,6 @@ using MphRead.Effects;
 using MphRead.Entities;
 using MphRead.Formats.Culling;
 using MphRead.Text;
-using OpenTK.Mathematics;
 
 namespace MphRead
 {
@@ -948,7 +947,7 @@ namespace MphRead
                 {
                     if (Vector3.Dot(point - top, top - bottom) <= 0)
                     {
-                        return Vector3.Cross(point - bottom, top - bottom).Length / (top - bottom).Length <= CylinderRadius;
+                        return Vector3.Cross(point - bottom, top - bottom).Length() / (top - bottom).Length() <= CylinderRadius;
                     }
                 }
             }

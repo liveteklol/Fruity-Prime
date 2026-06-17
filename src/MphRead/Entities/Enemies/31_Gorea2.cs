@@ -4,7 +4,6 @@ using System.Diagnostics;
 using MphRead.Effects;
 using MphRead.Formats;
 using MphRead.Formats.Culling;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities.Enemies
 {
@@ -193,7 +192,7 @@ namespace MphRead.Entities.Enemies
         private void DrawLaser()
         {
             Vector3 laserVec = _laserTargetPos - _sealSphere.Position;
-            float length = laserVec.Length;
+            float length = laserVec.Length();
             if (length <= 1 / 128f)
             {
                 return;
@@ -208,8 +207,8 @@ namespace MphRead.Entities.Enemies
             var cross1 = Vector3.Cross(laserVec, unitVec);
             var cross2 = Vector3.Cross(cross1, laserVec);
             Matrix4 transform = GetTransformMatrix(laserVec, cross2);
-            transform.Row2.Xyz *= length;
-            transform.Row3.Xyz = _sealSphere.Position;
+            transform.Row2_Xyz *= length;
+            transform.Row3_Xyz = _sealSphere.Position;
             UpdateTransforms(_laserModel, transform, recolor: 0);
             GetDrawItems(_laserModel, 0);
         }
@@ -282,7 +281,7 @@ namespace MphRead.Entities.Enemies
             }
             UpdateAnimFrames(_laserModel);
             Vector3 posToPlayer = PlayerEntity.Main.Position - _laserTargetPos;
-            if (posToPlayer.Length <= 0.125f)
+            if (posToPlayer.Length() <= 0.125f)
             {
                 _laserTargetPos = PlayerEntity.Main.Position;
                 GoreaFlags |= Gorea2Flags.LaserOnTarget;
@@ -305,7 +304,7 @@ namespace MphRead.Entities.Enemies
             {
                 GoreaFlags &= ~Gorea2Flags.LaserBlocked;
                 Vector3 laserVec = _laserTargetPos - spherePos;
-                if (laserVec.LengthSquared > 0)
+                if (laserVec.LengthSquared() > 0)
                 {
                     laserVec = laserVec.Normalized();
                     _laserTargetPos += laserVec * (1 / (12 * 2f)); // todo: FPS stuff
@@ -325,7 +324,7 @@ namespace MphRead.Entities.Enemies
             if (!laserHit)
             {
                 CollisionResult discard = default;
-                if ((_laserTargetPos - spherePos).Length < 0.5f)
+                if ((_laserTargetPos - spherePos).Length() < 0.5f)
                 {
                     // bugfix?: doesn't this mean a hit would regitser if the laser were immediately blocked by a wall?
                     laserHit = true;
@@ -340,7 +339,7 @@ namespace MphRead.Entities.Enemies
             {
                 Vector3? direction = null;
                 Vector3 between = Func204D518(_laserTargetPos - spherePos, PlayerEntity.Main.UpVector);
-                if (between.LengthSquared > 1 / 128f)
+                if (between.LengthSquared() > 1 / 128f)
                 {
                     between = between.Normalized();
                     direction = between * (1 / 30f);
@@ -463,7 +462,7 @@ namespace MphRead.Entities.Enemies
                 _field22C = 15 * 2; // todo: FPS stuff
                 _field20C = _teleportDestination;
                 Vector3 facing = (PlayerEntity.Main.Position - _field20C).WithY(0);
-                if (facing.LengthSquared > 1 / 128f)
+                if (facing.LengthSquared() > 1 / 128f)
                 {
                     facing = facing.Normalized();
                 }
@@ -552,7 +551,7 @@ namespace MphRead.Entities.Enemies
                 _field23E -= 360;
                 GoreaFlags ^= Gorea2Flags.Bit7;
             }
-            float v5 = MathF.Sin(MathHelper.DegreesToRadians(_field23E)) * 1.5f;
+            float v5 = MathF.Sin(Single.DegreesToRadians(_field23E)) * 1.5f;
             float v6 = _field23E / 360 * 3;
             if (GoreaFlags.TestFlag(Gorea2Flags.Bit7))
             {
@@ -564,7 +563,7 @@ namespace MphRead.Entities.Enemies
                 _field240 -= 360;
             }
             float rand1 = ((int)Rng.GetRandomInt2(227) - 113) / 4096f;
-            var mtx = Matrix4.CreateFromAxisAngle(FacingVector, MathHelper.DegreesToRadians(_field240));
+            var mtx = Matrix4.CreateFromAxisAngle(FacingVector, Single.DegreesToRadians(_field240));
             Vector3 vec = Matrix.Vec3MultMtx3(Vector3.Cross(UpVector, FacingVector), mtx);
             Position = _field20C + vec * (v6 - 1.5f - rand1);
             float rand2 = ((int)Rng.GetRandomInt2(227) - 113) / 4096f;
@@ -687,16 +686,16 @@ namespace MphRead.Entities.Enemies
         public static Vector3 Func21418EC(Vector3 vec1, Vector3 vec2)
         {
             var cross = Vector3.Cross(vec1, vec2);
-            if (cross.LengthSquared <= 1 / 128f)
+            if (cross.LengthSquared() <= 1 / 128f)
             {
                 cross = Vector3.Cross(vec1, Vector3.UnitX);
-                if (cross.LengthSquared <= 1 / 128f)
+                if (cross.LengthSquared() <= 1 / 128f)
                 {
                     cross = Vector3.Cross(vec1, Vector3.UnitY);
-                    if (cross.LengthSquared <= 1 / 128f)
+                    if (cross.LengthSquared() <= 1 / 128f)
                     {
                         cross = Vector3.Cross(vec1, Vector3.UnitZ);
-                        if (cross.LengthSquared <= 1 / 128f)
+                        if (cross.LengthSquared() <= 1 / 128f)
                         {
                             // the game might return an uninitialized/previous value here
                             return Vector3.Zero;
@@ -815,7 +814,7 @@ namespace MphRead.Entities.Enemies
                 }
                 Vector3 triggerPos = trigger.Data.Header.Position.ToFloatVector();
                 Vector3 between = PlayerEntity.Main.Position - triggerPos;
-                float lengthSquared = between.LengthSquared;
+                float lengthSquared = between.LengthSquared();
                 bool randomChance = (Rng.GetRandomInt2(255) & 1) != 0;
                 if (value != 1 || triggerPos.Y >= _spawnerField38)
                 {
@@ -1004,7 +1003,7 @@ namespace MphRead.Entities.Enemies
         {
             Vector3 vec = Func21405FC();
             Vector3 between = _field20C - vec;
-            if (between.LengthSquared > 1 / (3 * 2f)) // todo: FPS stuff
+            if (between.LengthSquared() > 1 / (3 * 2f)) // todo: FPS stuff
             {
                 vec = Func213F9B8(vec).Normalized();
                 _field20C += vec * (1 / (3 * 2f)); // todo: FPS stuff
@@ -1016,7 +1015,7 @@ namespace MphRead.Entities.Enemies
             Vector3 toPos = (_field20C - _spawnerField28).Normalized();
             _field20C = _spawnerField28 + toPos * _spawnerField34; // sktodo: FPS stuff?
             Vector3 toPlayer = Position - PlayerEntity.Main.Position;
-            if (toPlayer.LengthSquared > 1 / 128f)
+            if (toPlayer.LengthSquared() > 1 / 128f)
             {
                 toPlayer = toPlayer.Normalized();
             }
@@ -1029,7 +1028,7 @@ namespace MphRead.Entities.Enemies
             Vector3 between1 = vec - _field20C;
             Vector3 between2 = _field20C - _spawnerField28;
             vec = Func204D518(between1, between2);
-            if (vec.LengthSquared >= 1 / 128f)
+            if (vec.LengthSquared() >= 1 / 128f)
             {
                 return vec;
             }
@@ -1059,7 +1058,7 @@ namespace MphRead.Entities.Enemies
             Vector3 between = _field20C - _spawnerField28;
             Vector3 unitVec = Vector3.UnitY;
             Vector3 vec = Func204D518(between, unitVec);
-            if (vec.LengthSquared < 1 / 128f)
+            if (vec.LengthSquared() < 1 / 128f)
             {
                 unitVec = Vector3.UnitX;
                 vec = Func204D518(between, unitVec);
@@ -1075,7 +1074,7 @@ namespace MphRead.Entities.Enemies
                 toPlayer = -toPlayer;
             }
             Vector3 vec = Func204D518(toPlayer, UpVector);
-            if (vec.LengthSquared > 0)
+            if (vec.LengthSquared() > 0)
             {
                 _field1E8 = vec.Normalized();
                 _field1E8 = SeekTargetSetAnim(_field1E8, _models[0].AnimInfo.Index[0]);
@@ -1086,7 +1085,7 @@ namespace MphRead.Entities.Enemies
         private Vector3 Func21405FC()
         {
             Vector3 toPos = PlayerEntity.Main.Position - _spawnerField28;
-            if (toPos.LengthSquared <= 1 / 128f)
+            if (toPos.LengthSquared() <= 1 / 128f)
             {
                 // the game might return an uninitialized/previous value here
                 return Vector3.Zero;
@@ -1098,7 +1097,7 @@ namespace MphRead.Entities.Enemies
         // todo: member name
         private Vector3 Func204E2A8(Vector3 vec1, Vector3 vec2, float a4)
         {
-            float dot1 = vec2.LengthSquared;
+            float dot1 = vec2.LengthSquared();
             float v10 = -(dot1 * -(a4 * a4) * 4);
             if (v10 < 0)
             {
@@ -1340,7 +1339,7 @@ namespace MphRead.Entities.Enemies
             }
             if (_field230 == 0)
             {
-                float dist = (PlayerEntity.Main.Position - Position).Length;
+                float dist = (PlayerEntity.Main.Position - Position).Length();
                 if (dist < (PlayerEntity.Main.Field6D0 ? 130 : 50))
                 {
                     return true;

@@ -7,7 +7,6 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using MphRead.Entities;
 using MphRead.Formats.Culling;
-using OpenTK.Mathematics;
 
 namespace MphRead.Formats.Collision
 {

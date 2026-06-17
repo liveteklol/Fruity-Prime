@@ -3,7 +3,6 @@ using System.Diagnostics;
 using MphRead.Entities.Enemies;
 using MphRead.Formats;
 using MphRead.Sound;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities
 {

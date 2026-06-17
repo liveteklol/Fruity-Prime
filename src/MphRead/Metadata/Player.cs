@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using MphRead.Entities;
-using OpenTK.Mathematics;
 
 namespace MphRead
 {

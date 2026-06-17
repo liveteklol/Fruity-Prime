@@ -1,7 +1,6 @@
 using System;
 using System.Diagnostics;
 using MphRead.Formats.Culling;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities.Enemies
 {
@@ -100,7 +99,7 @@ namespace MphRead.Entities.Enemies
         private void SetCameraShake(float shakeMax)
         {
             Vector3 between = PlayerEntity.Main.Position - Position;
-            float shake = Math.Min(1 / between.LengthSquared * 3, shakeMax);
+            float shake = Math.Min(1 / between.LengthSquared() * 3, shakeMax);
             PlayerEntity.Main.CameraInfo.SetShake(shake);
         }
 
@@ -237,7 +236,7 @@ namespace MphRead.Entities.Enemies
                 return false;
             }
             _targetVec = (PlayerEntity.Main.Position - Position).WithY(0).Normalized();
-            float angle = MathHelper.RadiansToDegrees(MathF.Acos(Vector3.Dot(FacingVector, _targetVec)));
+            float angle = Single.RadiansToDegrees(MathF.Acos(Vector3.Dot(FacingVector, _targetVec)));
             _aimSteps = 10 * 2; // todo: FPS stuff
             _aimAngleStep = angle / _aimSteps;
             _models[0].SetAnimation(7, AnimFlags.NoLoop);
@@ -386,7 +385,7 @@ namespace MphRead.Entities.Enemies
             }
             _speed = Vector3.Zero;
             _targetVec = (_initalPos - Position).WithY(0).Normalized();
-            float angle = MathHelper.RadiansToDegrees(MathF.Acos(Vector3.Dot(FacingVector, _targetVec)));
+            float angle = Single.RadiansToDegrees(MathF.Acos(Vector3.Dot(FacingVector, _targetVec)));
             _aimSteps = 10 * 2; // todo: FPS stuff
             _aimAngleStep = angle / _aimSteps;
             _models[0].SetAnimation(7, AnimFlags.NoLoop);
@@ -396,7 +395,7 @@ namespace MphRead.Entities.Enemies
         private bool Behavior15()
         {
             Vector3 between = Position - PlayerEntity.Main.Position;
-            if (between.LengthSquared >= 5 * 5)
+            if (between.LengthSquared() >= 5 * 5)
             {
                 return false;
             }
@@ -421,12 +420,12 @@ namespace MphRead.Entities.Enemies
         private bool Behavior17()
         {
             Vector3 between = Position - _initalPos;
-            if (between.LengthSquared >= 1)
+            if (between.LengthSquared() >= 1)
             {
                 return false;
             }
             _targetVec = _initalFacing;
-            float angle = MathHelper.RadiansToDegrees(MathF.Acos(Vector3.Dot(FacingVector, _targetVec)));
+            float angle = Single.RadiansToDegrees(MathF.Acos(Vector3.Dot(FacingVector, _targetVec)));
             _aimSteps = 10 * 2; // todo: FPS stuff
             _aimAngleStep = angle / _aimSteps;
             return true;
@@ -440,7 +439,7 @@ namespace MphRead.Entities.Enemies
                 return false;
             }
             _targetVec = (PlayerEntity.Main.Position - Position).WithY(0).Normalized();
-            float angle = MathHelper.RadiansToDegrees(MathF.Acos(Vector3.Dot(FacingVector, _targetVec)));
+            float angle = Single.RadiansToDegrees(MathF.Acos(Vector3.Dot(FacingVector, _targetVec)));
             _aimSteps = 10 * 2; // todo: FPS stuff
             _aimAngleStep = angle / _aimSteps;
             _models[0].SetAnimation(7, AnimFlags.NoLoop);

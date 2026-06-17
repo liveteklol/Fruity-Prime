@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using MphRead.Effects;
-using OpenTK.Mathematics;
 
 namespace MphRead.Testing
 {
@@ -47,8 +46,8 @@ namespace MphRead.Testing
             // note: in the original fixed math, neither angle will be >= 360 because of the way the division(?) works
             // -- but also, in this case, we don't need to worry about it since we're just doing trig
             float angle = _random.Next(0x168000) / 4096f;
-            float angle1 = MathHelper.DegreesToRadians(angle);
-            float angle2 = MathHelper.DegreesToRadians(angle + 90);
+            float angle1 = Single.DegreesToRadians(angle);
+            float angle2 = Single.DegreesToRadians(angle + 90);
             float cos1 = MathF.Cos(angle1);
             float sin1 = MathF.Sin(angle1);
             float cos2 = MathF.Cos(angle2);

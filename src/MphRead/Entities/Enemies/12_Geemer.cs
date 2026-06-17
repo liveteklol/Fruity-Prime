@@ -2,7 +2,6 @@ using System;
 using System.Diagnostics;
 using MphRead.Formats;
 using MphRead.Formats.Culling;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities.Enemies
 {
@@ -56,7 +55,7 @@ namespace MphRead.Entities.Enemies
             _angleInc = Fixed.ToFloat(Rng.GetRandomInt2(0x7000)) + 3;
             _angleInc /= 2; // todo: FPS stuff
             _maxAngle = Fixed.ToFloat(Rng.GetRandomInt2(0)) + 60;
-            _angleCos = MathF.Cos(MathHelper.DegreesToRadians(_angleInc));
+            _angleCos = MathF.Cos(Single.DegreesToRadians(_angleInc));
             _homeVolume = CollisionVolume.Move(SpawnFields.Volume1, _spawner.Data.Header.Position.ToFloatVector());
             _direction = Vector3.Cross(facing, up).Normalized();
         }
@@ -73,7 +72,7 @@ namespace MphRead.Entities.Enemies
             if (anim == GeemerAnim.WiggleRetracted)
             {
                 float radii = PlayerEntity.Main.Volume.SphereRadius + 1.5f;
-                if ((Position - PlayerEntity.Main.Volume.SpherePosition).LengthSquared < radii * radii)
+                if ((Position - PlayerEntity.Main.Volume.SpherePosition).LengthSquared() < radii * radii)
                 {
                     _soundSource.PlaySfx(SfxId.GEEMER_EXTEND);
                     SetAnimation(GeemerAnim.Extend, AnimFlags.NoLoop);
@@ -85,7 +84,7 @@ namespace MphRead.Entities.Enemies
             else if (anim == GeemerAnim.WiggleExtended)
             {
                 float radii = PlayerEntity.Main.Volume.SphereRadius + 1.5f;
-                if ((Position - PlayerEntity.Main.Volume.SpherePosition).LengthSquared >= radii * radii)
+                if ((Position - PlayerEntity.Main.Volume.SpherePosition).LengthSquared() >= radii * radii)
                 {
                     _soundSource.PlaySfx(SfxId.GEEMER_RETRACT);
                     _speed = Vector3.Zero;

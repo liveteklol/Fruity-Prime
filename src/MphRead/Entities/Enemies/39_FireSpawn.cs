@@ -2,7 +2,6 @@ using System;
 using System.Diagnostics;
 using MphRead.Effects;
 using MphRead.Formats.Culling;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities.Enemies
 {
@@ -56,7 +55,7 @@ namespace MphRead.Entities.Enemies
             Flags &= ~EnemyFlags.CollidePlayer;
             Vector3 position = _data.Spawner.Position;
             Matrix4 transform = GetTransformMatrix((PlayerEntity.Main.Position - position).Normalized(), Vector3.UnitY);
-            transform.Row3.Xyz = position;
+            transform.Row3_Xyz = position;
             Transform = transform;
             _boundingRadius = 1;
             _hurtVolumeInit = new CollisionVolume(new Vector3(0, Fixed.ToFloat(13516), Fixed.ToFloat(11059)), 0.5f);
@@ -144,7 +143,7 @@ namespace MphRead.Entities.Enemies
             // the Y component should really be set to zero before normalization -- this causes transform squashing
             Vector3 facing = (PlayerEntity.Main.Position - Position).Normalized().WithY(0);
             Matrix4 transform = GetTransformMatrix(facing, Vector3.UnitY);
-            transform.Row3.Xyz = Position;
+            transform.Row3_Xyz = Position;
             Transform = transform;
             CallSubroutine(Metadata.Enemy39Subroutines, this);
         }
@@ -237,7 +236,7 @@ namespace MphRead.Entities.Enemies
         private void CreateEffect()
         {
             Matrix4 transform = GetTransformMatrix(Vector3.UnitX, Vector3.UnitY);
-            transform.Row3.Xyz = _wristPos[_wristId];
+            transform.Row3_Xyz = _wristPos[_wristId];
             int effectId = _spawner.Data.Fields.S06.EnemySubtype == 1 ? 96 : 94; // iceDemonHurl, lavaDemonHurl
             _effectEntry = _scene.SpawnEffectGetEntry(effectId, transform);
             if (_effectEntry != null)
@@ -293,7 +292,7 @@ namespace MphRead.Entities.Enemies
             var vec = new Vector3(distance, 0, 0);
             _surfaceDirection *= -1;
             float angle = Rng.GetRandomInt2(0xB4000) / 4096f; // [0-180)
-            vec = Matrix.Vec3MultMtx3(vec, Matrix4.CreateRotationY(MathHelper.DegreesToRadians(angle * _surfaceDirection)));
+            vec = Matrix.Vec3MultMtx3(vec, Matrix4.CreateRotationY(Single.DegreesToRadians(angle * _surfaceDirection)));
             Vector3 position = Vector3.Zero;
             if (_locationVolume.Type == VolumeType.Cylinder)
             {
@@ -334,7 +333,7 @@ namespace MphRead.Entities.Enemies
                 return false;
             }
             Matrix4 transform = GetTransformMatrix(Vector3.UnitX, Vector3.UnitY);
-            transform.Row3.Xyz = Position;
+            transform.Row3_Xyz = Position;
             int effectId = _spawner.Data.Fields.S06.EnemySubtype == 1 ? 133 : 93; // iceDemonDive, lavaDemonDive
             _scene.SpawnEffect(effectId, transform);
             _models[0].SetAnimation(3, AnimFlags.Paused);
@@ -363,7 +362,7 @@ namespace MphRead.Entities.Enemies
                 return false;
             }
             Matrix4 transform = GetTransformMatrix(Vector3.UnitX, Vector3.UnitY);
-            transform.Row3.Xyz = Position;
+            transform.Row3_Xyz = Position;
             int effectId = _spawner.Data.Fields.S06.EnemySubtype == 1 ? 132 : 95; // iceDemonRise, lavaDemonRise
             _scene.SpawnEffect(effectId, transform);
             _models[0].SetAnimation(3, AnimFlags.NoLoop);

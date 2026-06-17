@@ -5,7 +5,6 @@ using MphRead.Entities;
 using MphRead.Formats;
 using MphRead.Formats.Collision;
 using MphRead.Text;
-using OpenTK.Mathematics;
 
 namespace MphRead
 {

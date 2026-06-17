@@ -1,6 +1,5 @@
 using System;
 using MphRead.Entities;
-using OpenTK.Mathematics;
 
 namespace MphRead.Memory
 {
@@ -198,10 +197,10 @@ namespace MphRead.Memory
         protected Matrix4x3 ReadMtx43(int offset)
         {
             return new Matrix4x3(
-                ReadVec3(offset),
-                ReadVec3(offset + 12),
-                ReadVec3(offset + 24),
-                ReadVec3(offset + 36)
+                (OpenTK.Mathematics.Vector3)ReadVec3(offset),
+                (OpenTK.Mathematics.Vector3)ReadVec3(offset + 12),
+                (OpenTK.Mathematics.Vector3)ReadVec3(offset + 24),
+                (OpenTK.Mathematics.Vector3)ReadVec3(offset + 36)
             );
         }
 

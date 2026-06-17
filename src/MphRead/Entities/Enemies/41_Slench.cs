@@ -6,7 +6,6 @@ using System.Runtime.CompilerServices;
 using MphRead.Effects;
 using MphRead.Formats;
 using MphRead.Formats.Culling;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities.Enemies
 {
@@ -107,7 +106,7 @@ namespace MphRead.Entities.Enemies
             Vector3 facing = _data.Spawner.FacingVector;
             Vector3 up = _data.Spawner.UpVector;
             Matrix4 transform = GetTransformMatrix(facing, up);
-            transform.Row3.Xyz = position;
+            transform.Row3_Xyz = position;
             Transform = transform;
             Enemy41Values values = GetValues();
             _health = _healthMax = (ushort)values.Health;
@@ -172,11 +171,11 @@ namespace MphRead.Entities.Enemies
         {
             var facing = new Vector3(_targetX, 0, _targetZ);
             var axis = new Vector3(_targetZ, 0, _targetX * -1);
-            var rotMtx = Matrix4.CreateFromAxisAngle(axis, MathHelper.DegreesToRadians(_targetAngle));
+            var rotMtx = Matrix4.CreateFromAxisAngle(axis, Single.DegreesToRadians(_targetAngle));
             facing = Matrix.Vec3MultMtx3(facing, rotMtx).Normalized();
             Vector3 up = Vector3.Cross(facing, axis).Normalized();
             Matrix4 transform = GetTransformMatrix(facing, up);
-            transform.Row3.Xyz = Position;
+            transform.Row3_Xyz = Position;
             Transform = transform;
         }
 
@@ -349,7 +348,7 @@ namespace MphRead.Entities.Enemies
                     _wobbleAngle -= 360;
                 }
                 Vector3 axis = facing;
-                var rotMtx = Matrix4.CreateFromAxisAngle(axis, MathHelper.DegreesToRadians(_wobbleAngle));
+                var rotMtx = Matrix4.CreateFromAxisAngle(axis, Single.DegreesToRadians(_wobbleAngle));
                 playerTarget += Matrix.Vec3MultMtx3(up, rotMtx).Normalized() * 2;
             }
             if (SlenchFlags.TestFlag(SlenchFlags.TargetingPlayer))
@@ -382,7 +381,7 @@ namespace MphRead.Entities.Enemies
                 {
                     // cosine result in 0, 0.4, 0, -0.4, 0 over a period of 16f at 30 fps (0.5333 seconds)
                     // angle is between 0 and 360 over that time, which is 675 degrees per second
-                    float increment = MathF.Cos(MathHelper.DegreesToRadians(_scene.GlobalElapsedTime / 675f)) * 0.4f;
+                    float increment = MathF.Cos(Single.DegreesToRadians(_scene.GlobalElapsedTime / 675f)) * 0.4f;
                     float y = _detachedPosition.Y + increment;
                     Vector3 position = Position.WithY(y);
                     Vector3 target = Position.WithY(y + _shieldOffset * (increment >= 0 ? 1 : -1));
@@ -439,7 +438,7 @@ namespace MphRead.Entities.Enemies
             }
             if (State == SlenchState.Initial)
             {
-                if ((playerTarget - Position).LengthSquared <= 16 * 16)
+                if ((playerTarget - Position).LengthSquared() <= 16 * 16)
                 {
                     ChangeState(SlenchState.Intro);
                 }
@@ -497,7 +496,7 @@ namespace MphRead.Entities.Enemies
                             // angle being 1 fx32 less (1/4096f). we don't do any of that, but we will still call RNG twice.
                             Rng.GetRandomInt2(360);
                             float angle = Rng.GetRandomInt2(360);
-                            var rotMtx = Matrix4.CreateFromAxisAngle(facing, MathHelper.DegreesToRadians(angle));
+                            var rotMtx = Matrix4.CreateFromAxisAngle(facing, Single.DegreesToRadians(angle));
                             Vector3 vecA = Matrix.Vec3MultMtx3(up, rotMtx);
                             Vector3 vecB = facing * 4 + Position;
                             float randf = Rng.GetRandomInt2(0x2000) / 4096f + 2; // [2.0, 4.0)
@@ -654,7 +653,7 @@ namespace MphRead.Entities.Enemies
                                         }
                                         float factor = Fixed.ToFloat(phaseValues.RollingSpeed);
                                         Vector3 vecB = vecA * factor + _detachedPosition;
-                                        (float sin, float cos) = MathF.SinCos(MathHelper.DegreesToRadians(angle));
+                                        (float sin, float cos) = MathF.SinCos(Single.DegreesToRadians(angle));
                                         var mtx = new Matrix3(
                                             cos, 0, -sin,
                                             0, 1, 0,
@@ -720,7 +719,7 @@ namespace MphRead.Entities.Enemies
                                     );
                                 }
                                 Vector3 vecB = Vector3.Cross(_targetHorizontal, Vector3.UnitY).Normalized();
-                                var rotMtx = Matrix4.CreateFromAxisAngle(vecB, MathHelper.DegreesToRadians(angle));
+                                var rotMtx = Matrix4.CreateFromAxisAngle(vecB, Single.DegreesToRadians(angle));
                                 Position = Matrix.Vec3MultMtx3(_targetHorizontal, rotMtx) * factor + vecA;
                                 if (RotateToTarget(playerTarget, Fixed.ToFloat(phaseValues.AngleIncrement4) / 2)) // todo: FPS stuff
                                 {
@@ -754,7 +753,7 @@ namespace MphRead.Entities.Enemies
                             }
                             vecA *= Fixed.ToFloat(phaseValues.FloatingSpeed);
                             Vector3 vecB = vecA + _detachedPosition;
-                            var rotMtx = Matrix4.CreateFromAxisAngle(_targetHorizontal, MathHelper.DegreesToRadians(angle));
+                            var rotMtx = Matrix4.CreateFromAxisAngle(_targetHorizontal, Single.DegreesToRadians(angle));
                             vecA = Matrix.Vec3MultMtx3(vecA, rotMtx);
                             Position = vecA + vecB;
                             if (_subtype != 0)
@@ -838,7 +837,7 @@ namespace MphRead.Entities.Enemies
                     {
                         factor = 0.01f;
                     }
-                    var rotMtx = Matrix4.CreateFromAxisAngle(facing, MathHelper.DegreesToRadians(_wobbleAngle));
+                    var rotMtx = Matrix4.CreateFromAxisAngle(facing, Single.DegreesToRadians(_wobbleAngle));
                     Position = Matrix.Vec3MultMtx3(up, rotMtx) * factor + _destVec2;
                 }
             }
@@ -921,7 +920,7 @@ namespace MphRead.Entities.Enemies
                         continue;
                     }
                     Vector3 doorFacing = door.FacingVector;
-                    var plane = new Vector4(doorFacing);
+                    var plane = new Vector4(doorFacing, 0);
                     Vector3 between = position - door.LockPosition;
                     if (Vector3.Dot(between, doorFacing) < 0)
                     {
@@ -935,7 +934,7 @@ namespace MphRead.Entities.Enemies
                     if (CollisionDetection.CheckCylinderIntersectPlane(position, cylTop, plane, ref res) && res.Distance < 2)
                     {
                         between = res.Position - door.LockPosition;
-                        if (between.LengthSquared < door.RadiusSquared)
+                        if (between.LengthSquared() < door.RadiusSquared)
                         {
                             return true;
                         }
@@ -1030,11 +1029,11 @@ namespace MphRead.Entities.Enemies
             else
             {
                 Vector3 between = target - Position;
-                if (between.Length <= Fixed.ToFloat(phaseValues.SlamRange))
+                if (between.Length() <= Fixed.ToFloat(phaseValues.SlamRange))
                 {
                     float radius = _shieldOffset * 0.75f; // 3072
                     target -= Position;
-                    float length = target.Length;
+                    float length = target.Length();
                     if (length > radius)
                     {
                         _destVec2 = Position;
@@ -1057,7 +1056,7 @@ namespace MphRead.Entities.Enemies
         private bool MoveToPosition(Vector3 position, float increment)
         {
             Vector3 between = position - Position;
-            if (between.LengthSquared > increment * increment)
+            if (between.LengthSquared() > increment * increment)
             {
                 between = between.Normalized();
                 Position += between * increment;
@@ -1079,7 +1078,7 @@ namespace MphRead.Entities.Enemies
                 float z = target.Z - Position.Z;
                 float sqrt = MathF.Sqrt(x * x + z * z);
                 float y = Position.Y - target.Y;
-                float atan = MathHelper.RadiansToDegrees(MathF.Atan2(y, sqrt));
+                float atan = Single.RadiansToDegrees(MathF.Atan2(y, sqrt));
                 angle = atan + (atan < 0 ? 360 : 0);
             }
             float targetAngle = _targetAngle;
@@ -1147,7 +1146,7 @@ namespace MphRead.Entities.Enemies
             between = between.WithY(0).Normalized();
             Vector3 fields = new Vector3(_targetX, 0, _targetZ).Normalized();
             Vector3 between2 = fields - between;
-            (float sin, float cos) = MathF.SinCos(MathHelper.DegreesToRadians(increment));
+            (float sin, float cos) = MathF.SinCos(Single.DegreesToRadians(increment));
             if (between2.X * between2.X + between2.Z * between2.Z <= (1 - cos) * (1 - cos) + sin * sin)
             {
                 _targetX = between.X;

@@ -1,6 +1,5 @@
 using System;
 using System.Linq;
-using OpenTK.Mathematics;
 
 namespace MphRead.Testing
 {
@@ -17,12 +16,10 @@ namespace MphRead.Testing
             field64 = new Vector3(0, 1, 0);
             field70 = new Vector3(0, 0, 1);
             Matrix3 mat2 = TestVectors(field58, field64, field70);
-            Quaternion quat1 = new Matrix4(mat1).ExtractRotation();
-            Vector3 rot1 = quat1.ToEulerAngles();
-            rot1 = new Vector3(MathHelper.RadiansToDegrees(rot1.X), MathHelper.RadiansToDegrees(rot1.Y), MathHelper.RadiansToDegrees(rot1.Z));
-            Quaternion quat2 = new Matrix4(mat2).ExtractRotation();
-            Vector3 rot2 = quat2.ToEulerAngles();
-            rot2 = new Vector3(MathHelper.RadiansToDegrees(rot2.X), MathHelper.RadiansToDegrees(rot2.Y), MathHelper.RadiansToDegrees(rot2.Z));
+            Vector3 rot1 = Matrix4.Create(mat1).ToEulerAngles();
+            rot1 = new Vector3(Single.RadiansToDegrees(rot1.X), Single.RadiansToDegrees(rot1.Y), Single.RadiansToDegrees(rot1.Z));
+            Vector3 rot2 = Matrix4.Create(mat2).ToEulerAngles();
+            rot2 = new Vector3(Single.RadiansToDegrees(rot2.X), Single.RadiansToDegrees(rot2.Y), Single.RadiansToDegrees(rot2.Z));
             Nop();
         }
 
@@ -37,18 +34,18 @@ namespace MphRead.Testing
             Matrix4x3 currentTextureMatrix = ParseMatrix48("FF EF FF FF 00 00 00 00 FE FF FF FF 00 00 00 00 86 0F 00 00 DF 03 00 00 01 00 00 00 DF 03 00 00 7A F0 FF FF 00 00 00 00 7F F4 FF FF CA D2 FF FF");
             Matrix4x3 mult = Matrix.Concat43(mtx1, mtx2);
 
-            var trans = new Matrix4(
-                new Vector4(mtx1.Row0, 0.0f),
-                new Vector4(mtx1.Row1, 0.0f),
-                new Vector4(mtx1.Row2, 0.0f),
-                new Vector4(mtx1.Row3, 1.0f)
+            var trans = Matrix4.Create(
+                new Vector4((Vector3)mtx1.Row0, 0.0f),
+                new Vector4((Vector3)mtx1.Row1, 0.0f),
+                new Vector4((Vector3)mtx1.Row2, 0.0f),
+                new Vector4((Vector3)mtx1.Row3, 1.0f)
             );
             Vector3 pos = trans.ExtractTranslation();
-            Vector3 rot = trans.ExtractRotation().ToEulerAngles();
+            Vector3 rot = trans.ToEulerAngles();
             rot = new Vector3(
-                MathHelper.RadiansToDegrees(rot.X),
-                MathHelper.RadiansToDegrees(rot.Y),
-                MathHelper.RadiansToDegrees(rot.Z)
+                Single.RadiansToDegrees(rot.X),
+                Single.RadiansToDegrees(rot.Y),
+                Single.RadiansToDegrees(rot.Z)
             );
             Vector3 scale = trans.ExtractScale();
         }

@@ -1,7 +1,6 @@
 using System;
 using System.Diagnostics;
 using MphRead.Formats.Culling;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities.Enemies
 {
@@ -106,7 +105,7 @@ namespace MphRead.Entities.Enemies
             if (_target != null && HitPlayers[_target.SlotIndex])
             {
                 Vector3 between = _target.Volume.SpherePosition - Position;
-                float mag = between.Length * 5;
+                float mag = between.Length() * 5;
                 _target.Speed = _target.Speed.AddX(between.X / mag).AddZ(between.Z / mag);
                 _target.TakeDamage(_values.ContactDamage, DamageFlags.None, null, this);
             }
@@ -203,7 +202,7 @@ namespace MphRead.Entities.Enemies
                     _target = player;
                     _targetVec = (player.Position - Position).Normalized();
                     _aimSteps = 20 * 2; // todo: FPS stuff
-                    float angle = MathHelper.RadiansToDegrees(MathF.Acos(Vector3.Dot(_aimVec, _targetVec)));
+                    float angle = Single.RadiansToDegrees(MathF.Acos(Vector3.Dot(_aimVec, _targetVec)));
                     _aimAngleStep = angle / _aimSteps;
                     _crossVec = Vector3.Cross(_aimVec, _targetVec).Normalized();
                     _soundSource.PlaySfx(SfxId.TURRET_LOCK_ON);
@@ -248,7 +247,7 @@ namespace MphRead.Entities.Enemies
             _targetVec = _initialFacing;
             _aimSteps = 20 * 2; // todo: FPS stuff
             _shotCount = (ushort)(_values.MinShots + Rng.GetRandomInt2(_values.MaxShots + 1 - _values.MinShots));
-            float angle = MathHelper.RadiansToDegrees(MathF.Acos(Vector3.Dot(_aimVec, _targetVec)));
+            float angle = Single.RadiansToDegrees(MathF.Acos(Vector3.Dot(_aimVec, _targetVec)));
             _aimAngleStep = angle / _aimSteps;
             _crossVec = Vector3.Cross(_aimVec, _targetVec).Normalized();
             _target = null;
@@ -296,8 +295,8 @@ namespace MphRead.Entities.Enemies
             if (_state1 == 0)
             {
                 // patrol aiming
-                var rotX = Matrix4.CreateRotationX(MathHelper.DegreesToRadians(_angleX));
-                var rotY = Matrix4.CreateRotationY(MathHelper.DegreesToRadians(_angleY));
+                var rotX = Matrix4.CreateRotationX(Single.DegreesToRadians(_angleX));
+                var rotY = Matrix4.CreateRotationY(Single.DegreesToRadians(_angleY));
                 aimTransform = rotX * rotY;
                 _aimVec = Matrix.Vec3MultMtx4(_initialFacing, aimTransform);
                 var transpose = Matrix4.Transpose(Transform.ClearTranslation());
@@ -309,7 +308,7 @@ namespace MphRead.Entities.Enemies
                 aimTransform = GetTransformMatrix(_aimVec, upVector);
                 var transpose = Matrix4.Transpose(Transform.ClearTranslation());
                 aimTransform *= transpose;
-                aimTransform.Row3.Xyz = Vector3.Zero;
+                aimTransform.Row3_Xyz = Vector3.Zero;
             }
             _rotNode.AfterTransform = aimTransform;
             model.AnimateNodes2(index: 0, false, Matrix4.Identity, Vector3.One, animInfo);

@@ -5,7 +5,6 @@ using System.Linq;
 using MphRead.Formats.Collision;
 using MphRead.Formats.Culling;
 using MphRead.Sound;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities
 {
@@ -50,7 +49,7 @@ namespace MphRead.Entities
                 if (_transform != value)
                 {
                     _scale = value.ExtractScale();
-                    value.ExtractRotation().ToEulerAngles(out _rotation);
+                    value.ToEulerAngles(out _rotation);
                     _position = value.Row3.Xyz;
                     _transform = value;
                     _drawColUpdated = false;
@@ -70,7 +69,7 @@ namespace MphRead.Entities
                 {
                     _transform = Matrix4.CreateScale(value) * Matrix4.CreateRotationZ(Rotation.Z)
                         * Matrix4.CreateRotationY(Rotation.Y) * Matrix4.CreateRotationX(Rotation.X);
-                    _transform.Row3.Xyz = Position;
+                    _transform.Row3_Xyz = Position;
                     _scale = value;
                     _drawColUpdated = false;
                 }
@@ -89,7 +88,7 @@ namespace MphRead.Entities
                 {
                     _transform = Matrix4.CreateScale(Scale) * Matrix4.CreateRotationZ(value.Z)
                         * Matrix4.CreateRotationY(value.Y) * Matrix4.CreateRotationX(value.X);
-                    _transform.Row3.Xyz = Position;
+                    _transform.Row3_Xyz = Position;
                     _rotation = value;
                     _drawColUpdated = false;
                 }
@@ -106,7 +105,7 @@ namespace MphRead.Entities
             {
                 if (_position != value)
                 {
-                    _transform.Row3.Xyz = value;
+                    _transform.Row3_Xyz = value;
                     _position = value;
                     _drawColUpdated = false;
                 }
@@ -549,7 +548,7 @@ namespace MphRead.Entities
                     product *= materialMatrix;
                     product *= texcoordMatrix;
                     product *= 1.0f / (texture.Width / 2);
-                    texcoordMatrix = new Matrix4(
+                    texcoordMatrix = Matrix4.Create(
                         product.Row0 * 16.0f,
                         product.Row1 * 16.0f,
                         product.Row2 * 16.0f,
@@ -572,7 +571,7 @@ namespace MphRead.Entities
             //Rotation = rotation;
             //Position = position;
             transform = Matrix4.CreateScale(_scale) * transform;
-            transform.Row3.Xyz = position;
+            transform.Row3_Xyz = position;
             Transform = transform;
         }
 
@@ -727,7 +726,7 @@ namespace MphRead.Entities
             }
             else
             {
-                volume = new CollisionVolume(vector.Normalized(), point, 0.05f, vector.Length);
+                volume = new CollisionVolume(vector.Normalized(), point, 0.05f, vector.Length());
             }
             AddVolumeItem(volume, color);
         }

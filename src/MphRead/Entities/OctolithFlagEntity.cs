@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using MphRead.Formats;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities
 {
@@ -349,7 +348,7 @@ namespace MphRead.Entities
             Matrix4 transform = base.GetModelTransform(inst, index);
             if (index == 1)
             {
-                transform.Row3.Xyz = _basePosition;
+                transform.Row3_Xyz = _basePosition;
             }
             return transform;
         }

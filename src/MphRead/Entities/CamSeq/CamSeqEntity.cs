@@ -2,7 +2,6 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using MphRead.Formats;
 using MphRead.Sound;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities
 {

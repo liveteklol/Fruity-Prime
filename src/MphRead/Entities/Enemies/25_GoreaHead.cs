@@ -1,6 +1,5 @@
 using MphRead.Effects;
 using MphRead.Formats.Culling;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities.Enemies
 {

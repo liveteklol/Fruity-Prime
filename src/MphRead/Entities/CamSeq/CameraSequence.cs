@@ -7,7 +7,6 @@ using System.IO;
 using System.Linq;
 using MphRead.Entities;
 using MphRead.Formats.Culling;
-using OpenTK.Mathematics;
 
 namespace MphRead.Formats
 {
@@ -386,16 +385,16 @@ namespace MphRead.Formats
                     }
                     Vector4 dotVec = GetVec4(factorDot);
                     var posMtx = new Matrix4x3(
-                        curPos,
-                        prevPos,
-                        afterPos,
-                        nextPos
+                        (OpenTK.Mathematics.Vector3)curPos,
+                        (OpenTK.Mathematics.Vector3)prevPos,
+                        (OpenTK.Mathematics.Vector3)afterPos,
+                        (OpenTK.Mathematics.Vector3)nextPos
                     );
                     var targetMtx = new Matrix4x3(
-                        curTarget,
-                        prevTarget,
-                        afterTarget,
-                        nextTarget
+                        (OpenTK.Mathematics.Vector3)curTarget,
+                        (OpenTK.Mathematics.Vector3)prevTarget,
+                        (OpenTK.Mathematics.Vector3)afterTarget,
+                        (OpenTK.Mathematics.Vector3)nextTarget
                     );
                     finalPosition = Matrix.Vec4MultMtx4x3(dotVec, posMtx);
                     finalToTarget = Matrix.Vec4MultMtx4x3(dotVec, targetMtx);
@@ -454,7 +453,7 @@ namespace MphRead.Formats
             Vector3 upVector = Vector3.UnitY;
             if (MathF.Abs(finalRoll) >= 1 / 4096f)
             {
-                finalRoll = MathHelper.DegreesToRadians(finalRoll + 90);
+                finalRoll = Single.DegreesToRadians(finalRoll + 90);
                 CamInfoRef.Facing = CamInfoRef.Target - CamInfoRef.Position;
                 Vector3 cross = Vector3.Cross(upVector, CamInfoRef.Facing).Normalized();
                 upVector = Vector3.Cross(CamInfoRef.Facing, cross).Normalized();

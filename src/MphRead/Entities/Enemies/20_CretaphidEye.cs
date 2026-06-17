@@ -1,7 +1,7 @@
+using System;
 using System.Diagnostics;
 using MphRead.Formats;
 using MphRead.Formats.Culling;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities.Enemies
 {
@@ -60,7 +60,7 @@ namespace MphRead.Entities.Enemies
             Flags |= EnemyFlags.Invincible;
             Flags |= EnemyFlags.NoMaxDistance;
             Matrix4 transform = GetTransformMatrix(attachNode.Transform.Row2.Xyz, attachNode.Transform.Row1.Xyz);
-            transform.Row3.Xyz = attachNode.Transform.Row3.Xyz + position;
+            transform.Row3_Xyz = attachNode.Transform.Row3.Xyz + position;
             Transform = transform;
             _hurtVolumeInit = new CollisionVolume(Vector3.Zero, 0.5f);
             _boundingRadius = radius;
@@ -405,10 +405,10 @@ namespace MphRead.Entities.Enemies
             }
             _cretaphid.UpdateTransforms(rootPosition: false);
             var transform = Matrix4.CreateScale(1, 1, 20);
-            float angle = MathHelper.DegreesToRadians(_cretaphid.Segments[SegmentIndex].BeamAngle);
+            float angle = Single.DegreesToRadians(_cretaphid.Segments[SegmentIndex].BeamAngle);
             transform *= Matrix4.CreateRotationX(angle);
             transform *= _attachNode.Animation;
-            transform.Row3.Xyz += _cretaphid.Position;
+            transform.Row3_Xyz += _cretaphid.Position;
             Position = transform.Row3.Xyz;
             Vector3 pointTwo = Position + transform.Row2.Xyz;
             CollisionResult result = default;

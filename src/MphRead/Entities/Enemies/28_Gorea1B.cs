@@ -4,7 +4,6 @@ using System.Diagnostics;
 using MphRead.Effects;
 using MphRead.Formats;
 using MphRead.Formats.Culling;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities.Enemies
 {
@@ -196,7 +195,7 @@ namespace MphRead.Entities.Enemies
         private void State01()
         {
             Vector3 toCenter = (_volume.SpherePosition - Position).WithY(0);
-            if (toCenter.LengthSquared > 1 / 128f)
+            if (toCenter.LengthSquared() > 1 / 128f)
             {
                 _speed = toCenter.Normalized() * Fixed.ToFloat(109) / 2; // todo: FPS stuff
             }
@@ -212,7 +211,7 @@ namespace MphRead.Entities.Enemies
             if (!_goreaFlags.TestFlag(Gorea1BFlags.Bit2))
             {
                 _targetFacing = (PlayerEntity.Main.Position - Position).WithY(0);
-                if (_targetFacing.LengthSquared > 1 / 128f)
+                if (_targetFacing.LengthSquared() > 1 / 128f)
                 {
                     _goreaFlags |= Gorea1BFlags.Bit2;
                     _targetFacing = _targetFacing.Normalized();
@@ -248,7 +247,7 @@ namespace MphRead.Entities.Enemies
         private void Func2139F54()
         {
             _targetFacing = (PlayerEntity.Main.Position - Position).WithY(0);
-            if (_targetFacing.LengthSquared > 1 / 128f)
+            if (_targetFacing.LengthSquared() > 1 / 128f)
             {
                 _targetFacing = _targetFacing.Normalized();
                 Func2139FE8();
@@ -261,7 +260,7 @@ namespace MphRead.Entities.Enemies
             Vector3 facing = FacingVector;
             if (Vector3.Dot(_targetFacing, facing) < Fixed.ToFloat(4090))
             {
-                float angle = MathHelper.DegreesToRadians(3);
+                float angle = Single.DegreesToRadians(3);
                 var cross = Vector3.Cross(_targetFacing, facing);
                 var rotY = Matrix4.CreateRotationY(angle * (cross.Y > 0 ? -1 : 1));
                 facing = Matrix.Vec3MultMtx4(facing, rotY).Normalized();
@@ -349,7 +348,7 @@ namespace MphRead.Entities.Enemies
         {
             // todo: implement "count_1" to support multiple grapple beams?
             Vector3 between = _grappleVecs[^1] - _grappleVecs[0];
-            if (between.LengthSquared > 1 / 128f)
+            if (between.LengthSquared() > 1 / 128f)
             {
                 between = between.Normalized();
                 _field21C += 1.5f / 2; // todo: FPS stuff // sktodo: confirm
@@ -357,7 +356,7 @@ namespace MphRead.Entities.Enemies
                 {
                     _field21C -= 360;
                 }
-                _grappleMtx = Matrix4.CreateFromAxisAngle(between, MathHelper.DegreesToRadians(_field21C));
+                _grappleMtx = Matrix4.CreateFromAxisAngle(between, Single.DegreesToRadians(_field21C));
             }
             else
             {
@@ -384,7 +383,7 @@ namespace MphRead.Entities.Enemies
         {
             Vector3 pos = Func213BF7C(); // sktodo: variable name
             Vector3 between = PlayerEntity.Main.Position.AddY(0.05f) - pos;
-            if (between.LengthSquared >= 0.25f * 0.25f)
+            if (between.LengthSquared() >= 0.25f * 0.25f)
             {
                 between = between.Normalized();
                 _grappleVecs[^1] += between * 0.3f / 2; // 1228 // todo: FPS stuff // sktodo: confirm
@@ -392,7 +391,7 @@ namespace MphRead.Entities.Enemies
                 if (CollisionDetection.CheckBetweenPoints(_grappleVecs[0], _grappleVecs[^1], TestFlags.None, _scene, ref result))
                 {
                     Vector3 toCollision = result.Position - _grappleVecs[0];
-                    if (toCollision.Length > 20) // 81920
+                    if (toCollision.Length() > 20) // 81920
                     {
                         toCollision = toCollision.Normalized() * 20;
                     }
@@ -528,7 +527,7 @@ namespace MphRead.Entities.Enemies
             for (int i = 1; i < _grappleVecs.Length; i++)
             {
                 Vector3 between = _grappleVecs[i] - _grappleVecs[i - 1];
-                if (between.LengthSquared > 1 / 128f)
+                if (between.LengthSquared() > 1 / 128f)
                 {
                     Vector3 scaled = between.Normalized() * factor;
                     Vector3 remaining = scaled - between;
@@ -548,7 +547,7 @@ namespace MphRead.Entities.Enemies
             Func213C624(dist);
             Vector3 playerPos = _grappleVecs[^1].AddY(-0.05f); // 204
             Vector3 between = _grappleVecs[^1] - _grappleVecs[^2];
-            if (between.LengthSquared > 1 / 128f)
+            if (between.LengthSquared() > 1 / 128f)
             {
                 between = between.Normalized();
                 playerPos += between * -0.5f;
@@ -568,7 +567,7 @@ namespace MphRead.Entities.Enemies
                 for (int i = 2; i < _grappleVecs.Length; i++)
                 {
                     Vector3 between = _grappleVecs[i] - _grappleVecs[i - 1];
-                    if (between.LengthSquared > 1 / 128f)
+                    if (between.LengthSquared() > 1 / 128f)
                     {
                         Vector3 result = Func204D57C(between, start);
                         Vector3 update = _grappleVecs[i];
@@ -620,7 +619,7 @@ namespace MphRead.Entities.Enemies
                 between = _grappleVecs[1] - _grappleVecs[0];
             }
             between = between.WithY(0).WithZ(-between.Z);
-            if (between.LengthSquared > 1 / 128f)
+            if (between.LengthSquared() > 1 / 128f)
             {
                 _field10 = between.Normalized();
             }
@@ -673,7 +672,7 @@ namespace MphRead.Entities.Enemies
             if (Vector3.Dot(between, _field10.Normalized()) < Fixed.ToFloat(-3956))
             {
                 Vector3 vec = (_volume.SpherePosition - Position).WithY(0);
-                if (vec.LengthSquared >= 1 / 128f)
+                if (vec.LengthSquared() >= 1 / 128f)
                 {
                     vec = vec.Normalized();
                 }
@@ -719,7 +718,7 @@ namespace MphRead.Entities.Enemies
                         if (i % 2 == 1)
                         {
                             Vector3 between = prev - cur;
-                            if (between.LengthSquared > 1 / 128f)
+                            if (between.LengthSquared() > 1 / 128f)
                             {
                                 between = between.Normalized();
                                 Vector3 unitVec = Vector3.UnitY;
@@ -820,7 +819,7 @@ namespace MphRead.Entities.Enemies
                         if (entity.Type == EntityType.EnemyInstance && entity is Enemy30Entity enemy && enemy.State == 0)
                         {
                             Vector3 between = enemy.Position - Position;
-                            if (between.LengthSquared > 1 / 128f && Vector3.Dot(between.Normalized(), FacingVector) < 0)
+                            if (between.LengthSquared() > 1 / 128f && Vector3.Dot(between.Normalized(), FacingVector) < 0)
                             {
                                 _trocra[firstDeadIndex] = enemy;
                                 break;
@@ -866,7 +865,7 @@ namespace MphRead.Entities.Enemies
                         if (trocra.Field184 == 0)
                         {
                             Vector3 speed = PlayerEntity.Main.Position - trocra.Position;
-                            if (speed.LengthSquared >= 1 / 128f)
+                            if (speed.LengthSquared() >= 1 / 128f)
                             {
                                 speed = speed.Normalized() * 0.7f; // 2867
                             }
@@ -884,11 +883,11 @@ namespace MphRead.Entities.Enemies
         private bool Func213B188(Enemy30Entity trocra)
         {
             Vector3 between = (trocra.Position - Position).WithY(0);
-            if (between.LengthSquared > 1 / 128f)
+            if (between.LengthSquared() > 1 / 128f)
             {
                 Vector3 position = (_volume.SpherePosition + between.Normalized() * 5).AddY(10);
                 Vector3 direction = position - trocra.Position;
-                if (direction.LengthSquared > 1 / 128f)
+                if (direction.LengthSquared() > 1 / 128f)
                 {
                     direction = direction.Normalized();
                     trocra.Position += (direction * (1 / 7f)) / 2; // todo: FPS stuff
@@ -1152,7 +1151,7 @@ namespace MphRead.Entities.Enemies
             _holdTimer = 30 * 2; // sktodo: FPS stuff
             _goreaFlags ^= Gorea1BFlags.Bit3;
             Vector3 toCenter = (PlayerEntity.Main.Position - _volume.SpherePosition).WithY(0);
-            if (toCenter.LengthSquared > 1 / 128f)
+            if (toCenter.LengthSquared() > 1 / 128f)
             {
                 _speed = toCenter.Normalized() * Fixed.ToFloat(68) / 2; // sktodo: FPS stuff
                 if (CheckMovementOutsideVolume())
@@ -1372,7 +1371,7 @@ namespace MphRead.Entities.Enemies
                 if (trocra != null)
                 {
                     Vector3 between = trocra.Position - _sealSphere.Position;
-                    float distance = between.Length;
+                    float distance = between.Length();
                     if (distance > 1 / 128f)
                     {
                         between = between.Normalized();
@@ -1383,9 +1382,9 @@ namespace MphRead.Entities.Enemies
                             unitVec = Vector3.UnitZ;
                         }
                         Matrix4 transform = GetTransformMatrix(between, unitVec, _sealSphere.Position);
-                        transform.Row2.X *= distance;
-                        transform.Row2.Y *= distance;
-                        transform.Row2.Z *= distance;
+                        transform.Row2_X *= distance;
+                        transform.Row2_Y *= distance;
+                        transform.Row2_Z *= distance;
                         UpdateTransforms(_trickModel, transform, recolor: 0);
                         GetDrawItems(_trickModel, 0);
                     }
@@ -1397,10 +1396,10 @@ namespace MphRead.Entities.Enemies
         {
             Vector3 vec = Func213BF7C();
             Vector3 between = vec - _grappleVecs[0];
-            if (between.LengthSquared > 1 / 128f)
+            if (between.LengthSquared() > 1 / 128f)
             {
                 var cross1 = Vector3.Cross(Vector3.UnitY, between);
-                if (cross1.LengthSquared > 1 / 128f)
+                if (cross1.LengthSquared() > 1 / 128f)
                 {
                     cross1 = cross1.Normalized();
                     var cross2 = Vector3.Cross(between, cross1);
@@ -1425,13 +1424,13 @@ namespace MphRead.Entities.Enemies
             Vector3 first = _grappleVecs[0];
             Vector3 last = _grappleVecs[^1];
             var axis = new Vector3(first.Z - last.Z, 0, last.X - first.X);
-            if (axis.LengthSquared <= 1 / 128f)
+            if (axis.LengthSquared() <= 1 / 128f)
             {
                 return;
             }
             axis = axis.Normalized();
             float angle = (index + _grappleInt) * (65535 / 24f) / 16 * (360 / 4096f);
-            float factor = MathF.Sin(MathHelper.DegreesToRadians(angle)) * _field24;
+            float factor = MathF.Sin(Single.DegreesToRadians(angle)) * _field24;
             axis *= factor;
             axis = Matrix.Vec3MultMtx4(axis, _grappleMtx);
             Vector3 vec = Func213C458(index);
@@ -1443,7 +1442,7 @@ namespace MphRead.Entities.Enemies
         {
             Vector3 vec = default;
             Func213C238(index, ref vec);
-            var transform = new Matrix4(
+            var transform = Matrix4.Create(
                 new Vector4(a6, 0),
                 new Vector4(a5, 0),
                 new Vector4(vec - pos, 0),

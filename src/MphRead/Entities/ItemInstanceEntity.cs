@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using MphRead.Effects;
 using MphRead.Formats;
 using MphRead.Formats.Culling;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities
 {
@@ -144,7 +143,7 @@ namespace MphRead.Entities
                 {
                     // todo: visualize
                     Vector3 between = PlayerEntity.Main.Position - Position;
-                    float distSqr = between.LengthSquared;
+                    float distSqr = between.LengthSquared();
                     if (distSqr > 0 && distSqr < 20 * 20)
                     {
                         // hyperbolic function -- (20 - x) / (80 * x)
@@ -274,9 +273,9 @@ namespace MphRead.Entities
             if (index == _spinModelIndex)
             {
                 transform *= Matrix.GetTransformSRT(Vector3.One, new Vector3(
-                    MathHelper.DegreesToRadians(_spinAxis.X * _spin),
-                    MathHelper.DegreesToRadians(_spinAxis.Y * _spin),
-                    MathHelper.DegreesToRadians(_spinAxis.Z * _spin)),
+                    Single.DegreesToRadians(_spinAxis.X * _spin),
+                    Single.DegreesToRadians(_spinAxis.Y * _spin),
+                    Single.DegreesToRadians(_spinAxis.Z * _spin)),
                     Vector3.Zero);
             }
             transform *= _transform;

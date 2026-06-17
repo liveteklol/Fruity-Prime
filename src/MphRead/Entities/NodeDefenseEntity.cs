@@ -1,9 +1,9 @@
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using MphRead.Formats;
 using MphRead.Hud;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities
 {
@@ -416,9 +416,9 @@ namespace MphRead.Entities
             Matrix4 transform = base.GetModelTransform(inst, index);
             if (index == 1)
             {
-                var rotY = Matrix4.CreateRotationY(MathHelper.DegreesToRadians(_curRotation));
+                var rotY = Matrix4.CreateRotationY(Single.DegreesToRadians(_curRotation));
                 transform = _circleScale * rotY * transform;
-                transform.Row3.Xyz = Position.AddY(0.7f);
+                transform.Row3_Xyz = Position.AddY(0.7f);
             }
             return transform;
         }

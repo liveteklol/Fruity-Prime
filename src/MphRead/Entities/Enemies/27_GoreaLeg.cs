@@ -1,5 +1,4 @@
 using MphRead.Formats.Culling;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities.Enemies
 {
@@ -74,7 +73,7 @@ namespace MphRead.Entities.Enemies
                 return;
             }
             Vector3 between = (PlayerEntity.Main.Position - Position).WithY(0);
-            between = between.LengthSquared > 1 / 128f
+            between = between.LengthSquared() > 1 / 128f
                 ? between.Normalized()
                 : FacingVector;
             PlayerEntity.Main.Speed += between * factor;

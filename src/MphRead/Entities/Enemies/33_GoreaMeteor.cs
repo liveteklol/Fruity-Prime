@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using MphRead.Effects;
 using MphRead.Formats;
 using MphRead.Formats.Culling;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities.Enemies
 {
@@ -117,7 +116,7 @@ namespace MphRead.Entities.Enemies
                 _field1BE -= 360;
             }
             var axis = Vector3.Cross(_effectUp, _effectFacing);
-            var mtx = Matrix4.CreateFromAxisAngle(axis, MathHelper.DegreesToRadians(_field1BE));
+            var mtx = Matrix4.CreateFromAxisAngle(axis, Single.DegreesToRadians(_field1BE));
             Vector3 up = Matrix.Vec3MultMtx3(_effectUp, mtx);
             Vector3 facing = Matrix.Vec3MultMtx3(_effectFacing, mtx);
             SetTransform(facing, up, Position);
@@ -130,7 +129,7 @@ namespace MphRead.Entities.Enemies
                 return;
             }
             Vector3 speed = _target.Position - Position;
-            if (speed.LengthSquared > 1 / 128f)
+            if (speed.LengthSquared() > 1 / 128f)
             {
                 speed = speed.Normalized();
                 _effectFacing = speed;
@@ -148,7 +147,7 @@ namespace MphRead.Entities.Enemies
             }
             Vector3 travel = _prevPos - Position;
             CollisionResult discard = default;
-            if (travel.LengthSquared > 1 / 128f
+            if (travel.LengthSquared() > 1 / 128f
                 && CollisionDetection.CheckBetweenPoints(_prevPos, Position, TestFlags.Beams, _scene, ref discard))
             {
                 CheckExplosionDamage();
@@ -263,7 +262,7 @@ namespace MphRead.Entities.Enemies
                 return;
             }
             Vector3 toTarget = _target.Position - Position;
-            float distance = toTarget.Length;
+            float distance = toTarget.Length();
             if (distance >= _field1A0)
             {
                 return;

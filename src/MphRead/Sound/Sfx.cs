@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 using MphRead.Entities;
 using MphRead.Formats.Sound;
 using OpenTK.Audio.OpenAL;
-using OpenTK.Mathematics;
+using OpenTK.Audio.OpenAL.ALC;
 
 namespace MphRead.Sound
 {
@@ -187,11 +187,12 @@ namespace MphRead.Sound
             bool loopPointsSupported = false;
             try
             {
-                ALDevice device = ALC.OpenDevice(null);
-                ALContext context = ALC.CreateContext(device, new ALContextAttributes());
+                ALCDevice device = ALC.OpenDevice(null!);
+                ALCContext context = ALC.CreateContext(device, new ALCContextAttributes());
                 ALC.MakeContextCurrent(context);
-                loopPointsSupported = AL.LoopPoints.IsExtensionPresent();
-                ALC.MakeContextCurrent(ALContext.Null);
+                //loopPointsSupported = AL.LoopPoints.IsExtensionPresent();
+                loopPointsSupported = false; // todo-otk5
+                ALC.MakeContextCurrent(ALCContext.Null);
                 ALC.DestroyContext(context);
                 ALC.CloseDevice(device);
             }
@@ -305,7 +306,7 @@ namespace MphRead.Sound
             {
                 int channelId = Channels[index].Id;
                 SoundSample sample = Samples[index];
-                AL.Source(channelId, ALSourceb.Looping, sample.BufferCount == 1 && Loop[index]);
+                AL.Sourcei(channelId, SourcePNameI.Looping, sample.BufferCount == 1 && Loop[index] ? 1 : 0);
                 AL.SourcePlay(channelId);
             }
 
@@ -334,10 +335,10 @@ namespace MphRead.Sound
                             continue;
                         }
                         int channelId = channel.Id;
-                        AL.Source(channelId, ALSource3f.Position, ref sourcePos);
-                        AL.Source(channelId, ALSourcef.ReferenceDistance, Single.MaxValue);
-                        AL.Source(channelId, ALSourcef.MaxDistance, Single.MaxValue);
-                        AL.Source(channelId, ALSourcef.RolloffFactor, 1);
+                        AL.Source3f(channelId, SourcePName3F.Position, sourcePos.X, sourcePos.Y, sourcePos.Z);
+                        AL.Sourcef(channelId, SourcePNameF.ReferenceDistance, Single.MaxValue);
+                        AL.Sourcef(channelId, SourcePNameF.MaxDistance, Single.MaxValue);
+                        AL.Sourcef(channelId, SourcePNameF.RolloffFactor, 1);
                     }
                 }
                 else if (!NoUpdate)
@@ -351,10 +352,10 @@ namespace MphRead.Sound
                             continue;
                         }
                         int channelId = channel.Id;
-                        AL.Source(channelId, ALSource3f.Position, ref sourcePos);
-                        AL.Source(channelId, ALSourcef.ReferenceDistance, Source.ReferenceDistance);
-                        AL.Source(channelId, ALSourcef.MaxDistance, Source.MaxDistance);
-                        AL.Source(channelId, ALSourcef.RolloffFactor, Source.RolloffFactor);
+                        AL.Source3f(channelId, SourcePName3F.Position, sourcePos.X, sourcePos.Y, sourcePos.Z);
+                        AL.Sourcef(channelId, SourcePNameF.ReferenceDistance, Source.ReferenceDistance);
+                        AL.Sourcef(channelId, SourcePNameF.MaxDistance, Source.MaxDistance);
+                        AL.Sourcef(channelId, SourcePNameF.RolloffFactor, Source.RolloffFactor);
                     }
                 }
             }
@@ -371,10 +372,10 @@ namespace MphRead.Sound
                     int channelId = channel.Id;
                     float mute = Sfx.SfxMute && Source != null ? 0 : 1;
                     float sourceMute = Source?.Volume ?? 1;
-                    AL.Source(channelId, ALSourcef.Gain, Sfx.Volume * Volume[i] * Samples[i].Volume * mute * sourceMute);
-                    AL.Source(channelId, ALSourcef.Pitch, Pitch[i]);
-                    AL.Source(channelId, ALSourceb.SourceRelative, false);
-                    AL.Source(channelId, ALSourcef.RolloffFactor, 1);
+                    AL.Sourcef(channelId, SourcePNameF.Gain, Sfx.Volume * Volume[i] * Samples[i].Volume * mute * sourceMute);
+                    AL.Sourcef(channelId, SourcePNameF.Pitch, Pitch[i]);
+                    AL.Sourcei(channelId, (SourcePNameI)SourcePNameB.SourceRelative, 0); // todo-otk5
+                    AL.Sourcef(channelId, SourcePNameF.RolloffFactor, 1);
                 }
             }
 
@@ -427,7 +428,7 @@ namespace MphRead.Sound
             {
                 AL.SourceStop(Id);
                 // buffer must be disassociated from sources in order to buffer new data
-                AL.Source(Id, ALSourcei.Buffer, 0);
+                AL.Sourcei(Id, SourcePNameI.Buffer, 0);
                 InUse = false;
                 BufferId = 0;
             }
@@ -444,8 +445,8 @@ namespace MphRead.Sound
             }
         }
 
-        private ALDevice _device = ALDevice.Null;
-        private ALContext _context = ALContext.Null;
+        private ALCDevice _device = ALCDevice.Null;
+        private ALCContext _context = ALCContext.Null;
         private bool _loopPointSupport = false;
         private readonly SoundBuffer[] _buffers = new SoundBuffer[64];
         private readonly SoundChannel[] _channels = new SoundChannel[128];
@@ -649,7 +650,7 @@ namespace MphRead.Sound
             if (channel.BufferId != sample.BufferId)
             {
                 int bufferId = sample.BufferId;
-                AL.Source(channel.Id, ALSourcei.Buffer, bufferId);
+                AL.Sourcei(channel.Id, SourcePNameI.Buffer, bufferId);
                 channel.BufferId = sample.BufferId;
             }
             return true;
@@ -952,11 +953,11 @@ namespace MphRead.Sound
                     dest.Sample.BufferId = 0;
                 }
                 dest.Sample = sample;
-                ALFormat format = sample.Format == WaveFormat.ADPCM ? ALFormat.Mono16 : ALFormat.Mono8;
-                AL.BufferData(dest.Id, format, sample.WaveData.Value, sample.SampleRate);
+                Format format = sample.Format == WaveFormat.ADPCM ? Format.Mono16 : Format.Mono8;
+                AL.BufferData(dest.Id, format, sample.WaveData.Value, sample.WaveData.Value.Length, sample.SampleRate);
                 if (_loopPointSupport)
                 {
-                    AL.LoopPoints.Buffer(dest.Id, BufferLoopPoint.LoopPointsSOFT, sample.LoopStart, sample.LoopStart + sample.LoopLength);
+                    //AL.LoopPoints.Buffer(dest.Id, BufferLoopPoint.LoopPointsSOFT, sample.LoopStart, sample.LoopStart + sample.LoopLength); // todo-otk5
                 }
                 sample.BufferCount = sample.MaxBuffers = 1;
                 sample.BufferId = dest.Id;
@@ -1033,9 +1034,9 @@ namespace MphRead.Sound
                 SoundChannel? channel = inst.Channels[i];
                 if (channel != null)
                 {
-                    AL.GetSource(channel.Id, ALGetSourcei.SourceState, out int value);
-                    var state = (ALSourceState)value;
-                    if (state == ALSourceState.Playing)
+                    AL.GetSourcei(channel.Id, SourceGetPNameI.SourceState, out int value);
+                    var state = (SourceState)value;
+                    if (state == SourceState.Playing)
                     {
                         playingCount++;
                     }
@@ -1107,14 +1108,14 @@ namespace MphRead.Sound
                 if (entry.Pan > -1)
                 {
                     int channelId = inst.Channels[index].Id;
-                    AL.Source(channelId, ALSourceb.SourceRelative, true);
-                    AL.Source(channelId, ALSourcef.RolloffFactor, 0);
+                    AL.Sourcei(channelId, (SourcePNameI)SourcePNameB.SourceRelative, 1);
+                    AL.Sourcef(channelId, SourcePNameF.RolloffFactor, 0);
                     Vector3 position = Vector3.Zero;
                     if (MathF.Abs(entry.Pan) > 1 / 128f)
                     {
                         position = new Vector3(entry.Pan, 0, -MathF.Sqrt(1 - entry.Pan * entry.Pan));
                     }
-                    AL.Source(channelId, ALSource3f.Position, ref position);
+                    AL.Source3f(channelId, SourcePName3F.Position, position.X, position.Y, position.Z);
                 }
                 inst.Loop[index] = (entry.SfxData & 0x4000) != 0;
                 inst.PlayChannel(index);
@@ -1126,14 +1127,19 @@ namespace MphRead.Sound
             Vector3 listenerPos = GetListenerPosition();
             Vector3 listenerUp = GetListenerUp();
             Vector3 listenerFacing = GetListenerFacing();
-            AL.Listener(ALListener3f.Position, ref listenerPos);
-            AL.Listener(ALListenerfv.Orientation, ref listenerFacing, ref listenerUp);
+            AL.Listener3f(ListenerPName3F.Position, listenerPos.X, listenerPos.Y, listenerPos.Z);
+            Span<float> orientation = stackalloc float[6]
+            {
+                listenerFacing.X, listenerFacing.Y, listenerFacing.Z,
+                listenerUp.X, listenerUp.Y, listenerUp.Z
+            };
+            AL.Listenerfv(ListenerPNameFV.Orientation, orientation);
             Debug.Assert(_streamInstance != -1);
             Debug.Assert(_streamBuffer != -1);
-            AL.Source(_streamInstance, ALSource3f.Position, ref listenerPos);
-            AL.Source(_streamInstance, ALSourcef.ReferenceDistance, Single.MaxValue);
-            AL.Source(_streamInstance, ALSourcef.MaxDistance, Single.MaxValue);
-            AL.Source(_streamInstance, ALSourcef.RolloffFactor, 1);
+            AL.Source3f(_streamInstance, SourcePName3F.Position, listenerPos.X, listenerPos.Y, listenerPos.Z);
+            AL.Sourcef(_streamInstance, SourcePNameF.ReferenceDistance, Single.MaxValue);
+            AL.Sourcef(_streamInstance, SourcePNameF.MaxDistance, Single.MaxValue);
+            AL.Sourcei(_streamInstance, SourcePNameI.RolloffFactor, 1);
             for (int i = 0; i < _instances.Length; i++)
             {
                 SoundInstance inst = _instances[i];
@@ -1151,9 +1157,9 @@ namespace MphRead.Sound
                     for (int j = 0; j < inst.Count; j++)
                     {
                         int channelId = inst.Channels[j].Id;
-                        AL.GetSource(channelId, ALGetSourcei.SourceState, out int value);
-                        var state = (ALSourceState)value;
-                        if (state == ALSourceState.Playing)
+                        AL.GetSourcei(channelId, SourceGetPNameI.SourceState, out int value);
+                        var state = (SourceState)value;
+                        if (state == SourceState.Playing)
                         {
                             if (inst.Volume[j] == 0)
                             {
@@ -1365,12 +1371,12 @@ namespace MphRead.Sound
                 Debug.Assert(item.Stream != null);
                 if (index == 0 && item.Playing)
                 {
-                    AL.GetSource(_streamInstance, ALGetSourcei.SourceState, out int value);
-                    var state = (ALSourceState)value;
-                    if (state != ALSourceState.Initial && state != ALSourceState.Playing)
+                    AL.GetSourcei(_streamInstance, SourceGetPNameI.SourceState, out int value);
+                    var state = (SourceState)value;
+                    if (state != SourceState.Initial && state != SourceState.Playing)
                     {
                         AL.SourceStop(_streamInstance);
-                        AL.Source(_streamInstance, ALSourcei.Buffer, 0);
+                        AL.Sourcei(_streamInstance, SourcePNameI.Buffer, 0);
                         item.Stream = null;
                         _activeQueue.Remove(node);
                         _inactiveQueue.Enqueue(node.Value);
@@ -1389,21 +1395,21 @@ namespace MphRead.Sound
                 }
                 if (item.DelayTimer == 0 && !item.Playing && index == 0)
                 {
-                    ALFormat format;
+                    Format format;
                     if (item.Stream.Format == WaveFormat.ADPCM)
                     {
-                        format = item.Stream.Channels.Count == 2 ? ALFormat.Stereo16 : ALFormat.Mono16;
+                        format = item.Stream.Channels.Count == 2 ? Format.Stereo16 : Format.Mono16;
                     }
                     else // if (item.Stream.Format == WaveFormat.PCM8)
                     {
-                        format = item.Stream.Channels.Count == 2 ? ALFormat.Stereo8 : ALFormat.Mono8;
+                        format = item.Stream.Channels.Count == 2 ? Format.Stereo8 : Format.Mono8;
                     }
                     AL.SourceStop(_streamInstance);
-                    AL.Source(_streamInstance, ALSourcei.Buffer, 0);
-                    AL.BufferData(_streamBuffer, format, item.Stream.BufferData.Value, item.Stream.SampleRate);
-                    AL.Source(_streamInstance, ALSourcei.Buffer, _streamBuffer);
-                    AL.Source(_streamInstance, ALSourceb.Looping, item.Stream.Loop);
-                    AL.Source(_streamInstance, ALSourcef.Gain, Sfx.Volume * item.Stream.Volume);
+                    AL.Sourcei(_streamInstance, SourcePNameI.Buffer, 0);
+                    AL.BufferData(_streamBuffer, format, item.Stream.BufferData.Value, item.Stream.BufferData.Value.Length, item.Stream.SampleRate);
+                    AL.Sourcei(_streamInstance, SourcePNameI.Buffer, _streamBuffer);
+                    AL.Sourcei(_streamInstance, SourcePNameI.Looping, item.Stream.Loop ? 1 : 0);
+                    AL.Sourcef(_streamInstance, SourcePNameF.Gain, Sfx.Volume * item.Stream.Volume);
                     AL.SourcePlay(_streamInstance);
                     item.Playing = true;
                     node = next;
@@ -1451,18 +1457,19 @@ namespace MphRead.Sound
             {
                 _inactiveQueue.Enqueue(new QueueItem());
             }
-            _device = ALC.OpenDevice(null);
-            _context = ALC.CreateContext(_device, new ALContextAttributes());
+            _device = ALC.OpenDevice(null!);
+            _context = ALC.CreateContext(_device, new ALCContextAttributes());
             ALC.MakeContextCurrent(_context);
-            _loopPointSupport = AL.LoopPoints.IsExtensionPresent();
+            //_loopPointSupport = AL.LoopPoints.IsExtensionPresent();
+            _loopPointSupport = false; // todo-otk5
             int[] bufferIds = new int[_buffers.Length * 2];
-            AL.GenBuffers(bufferIds);
+            AL.GenBuffers(bufferIds.Length, bufferIds);
             for (int i = 0; i < _buffers.Length; i++)
             {
                 _buffers[i] = new SoundBuffer(bufferIds[i * 2]);
             }
             int[] channelIds = new int[_channels.Length];
-            AL.GenSources(channelIds);
+            AL.GenSources(channelIds.Length, channelIds);
             for (int i = 0; i < _channels.Length; i++)
             {
                 _channels[i] = new SoundChannel(channelIds[i]);
@@ -1475,7 +1482,7 @@ namespace MphRead.Sound
             _streamInstance = AL.GenSource();
             if (!Features.LogSpatialAudio)
             {
-                AL.DistanceModel(ALDistanceModel.LinearDistanceClamped);
+                AL.DistanceModel(DistanceModel.LinearDistanceClamped);
             }
         }
 
@@ -1492,9 +1499,9 @@ namespace MphRead.Sound
                     {
                         continue;
                     }
-                    AL.GetSource(channel.Id, ALGetSourcei.SourceState, out int value);
-                    var state = (ALSourceState)value;
-                    if (state == ALSourceState.Playing)
+                    AL.GetSourcei(channel.Id, SourceGetPNameI.SourceState, out int value);
+                    var state = (SourceState)value;
+                    if (state == SourceState.Playing)
                     {
                         inst.Stop();
                         break;
@@ -1506,13 +1513,13 @@ namespace MphRead.Sound
                 _environmentItems[i].Reset();
             }
             AL.SourceStop(_streamInstance);
-            ALC.MakeContextCurrent(ALContext.Null);
+            ALC.MakeContextCurrent(ALCContext.Null);
             Task.Run(() =>
             {
                 ALC.DestroyContext(_context);
                 ALC.CloseDevice(_device);
-                _context = ALContext.Null;
-                _device = ALDevice.Null;
+                _context = ALCContext.Null;
+                _device = ALCDevice.Null;
             });
             _scene = null;
         }

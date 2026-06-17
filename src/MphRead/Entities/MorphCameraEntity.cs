@@ -1,5 +1,4 @@
 using MphRead.Formats;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities
 {

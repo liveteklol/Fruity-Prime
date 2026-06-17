@@ -1,7 +1,6 @@
 using System;
 using System.Diagnostics;
 using MphRead.Formats.Culling;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities.Enemies
 {
@@ -62,7 +61,7 @@ namespace MphRead.Entities.Enemies
                 if (!_initialCloudHit)
                 {
                     float radii = PlayerEntity.Main.Volume.SphereRadius + _cloudRadius;
-                    if ((Position - PlayerEntity.Main.Volume.SpherePosition).LengthSquared < radii * radii)
+                    if ((Position - PlayerEntity.Main.Volume.SpherePosition).LengthSquared() < radii * radii)
                     {
                         _initialCloudHit = true;
                         PlayerEntity.Main.TakeDamage(2, DamageFlags.NoDmgInvuln, null, this);
@@ -100,7 +99,7 @@ namespace MphRead.Entities.Enemies
                 return false;
             }
             float radii = PlayerEntity.Main.Volume.SphereRadius + _cloudRadius;
-            if ((Position - PlayerEntity.Main.Volume.SpherePosition).LengthSquared < radii * radii)
+            if ((Position - PlayerEntity.Main.Volume.SpherePosition).LengthSquared() < radii * radii)
             {
                 _initialCloudHit = true;
                 PlayerEntity.Main.TakeDamage(2, DamageFlags.None, null, this);
@@ -125,7 +124,7 @@ namespace MphRead.Entities.Enemies
         private bool Behavior02()
         {
             float radii = PlayerEntity.Main.Volume.SphereRadius + _nearRadius;
-            if ((Position - PlayerEntity.Main.Volume.SpherePosition).LengthSquared < radii * radii)
+            if ((Position - PlayerEntity.Main.Volume.SpherePosition).LengthSquared() < radii * radii)
             {
                 return false;
             }
@@ -158,7 +157,7 @@ namespace MphRead.Entities.Enemies
         private bool Behavior05()
         {
             float radii = PlayerEntity.Main.Volume.SphereRadius + _nearRadius;
-            if ((Position - PlayerEntity.Main.Volume.SpherePosition).LengthSquared < radii * radii)
+            if ((Position - PlayerEntity.Main.Volume.SpherePosition).LengthSquared() < radii * radii)
             {
                 _models[0].SetAnimation(1);
                 return true;

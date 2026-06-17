@@ -2,7 +2,6 @@ using System;
 using System.Diagnostics;
 using MphRead.Formats;
 using MphRead.Formats.Culling;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities.Enemies
 {
@@ -222,7 +221,7 @@ namespace MphRead.Entities.Enemies
             var vec = new Vector3(dist, 0, 0);
             _roamAngleSign *= -1;
             float angle = Fixed.ToFloat(Rng.GetRandomInt2(0xB4000)) * _roamAngleSign; // [0-180)
-            var rotY = Matrix4.CreateRotationY(MathHelper.DegreesToRadians(angle));
+            var rotY = Matrix4.CreateRotationY(Single.DegreesToRadians(angle));
             vec = Matrix.Vec3MultMtx3(vec, rotY);
             var moveTarget = new Vector3(_homeVolume.CylinderPosition.X + vec.X, Position.Y, _homeVolume.CylinderPosition.Z + vec.Z);
             UpdateMoveTarget(moveTarget);
@@ -234,11 +233,11 @@ namespace MphRead.Entities.Enemies
             _moveTarget = targetPoint;
             _moveStart = Position;
             _targetVec = _moveTarget - Position;
-            _moveDistSqr = _targetVec.LengthSquared;
+            _moveDistSqr = _targetVec.LengthSquared();
             _moveDistSqrHalf = _moveDistSqr / 2;
             _increaseSpeed = true;
             _targetVec = _targetVec.Normalized();
-            float angle = MathHelper.RadiansToDegrees(MathF.Acos(Vector3.Dot(FacingVector, _targetVec)));
+            float angle = Single.RadiansToDegrees(MathF.Acos(Vector3.Dot(FacingVector, _targetVec)));
             _aimSteps = _aimStepCount;
             _aimAngleStep = angle / _aimSteps;
         }
@@ -249,7 +248,7 @@ namespace MphRead.Entities.Enemies
             if (_increaseSpeed)
             {
                 Vector3 between = _moveTarget - Position;
-                if (between.LengthSquared < _moveDistSqrHalf)
+                if (between.LengthSquared() < _moveDistSqrHalf)
                 {
                     _increaseSpeed = false;
                 }
@@ -363,7 +362,7 @@ namespace MphRead.Entities.Enemies
         private bool Behavior02()
         {
             Vector3 between = Position - _moveStart;
-            if (between.LengthSquared <= _moveDistSqr && (!_airborne || _timeInAir <= 5 * 2)) // todo: FPS stuff
+            if (between.LengthSquared() <= _moveDistSqr && (!_airborne || _timeInAir <= 5 * 2)) // todo: FPS stuff
             {
                 return false;
             }
@@ -389,7 +388,7 @@ namespace MphRead.Entities.Enemies
             _airborne = false;
             _moveTarget = PlayerEntity.Main.Position.WithY(Position.Y);
             _targetVec = _moveTarget - Position;
-            _moveDistSqr = _targetVec.LengthSquared;
+            _moveDistSqr = _targetVec.LengthSquared();
             _moveDistSqrHalf = _moveDistSqr / 2;
             _speedInc = 0.005f / 2; // todo: FPS stuff
             _speedFactor = 0.6f / 2; // todo: FPS stuff

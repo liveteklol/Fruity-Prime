@@ -1,5 +1,4 @@
 using MphRead.Formats;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities
 {
@@ -32,7 +31,7 @@ namespace MphRead.Entities
             ModelInstance beamInst = SetUpModel("JumpPad_Beam");
             Vector3 beamVector = data.BeamVector.ToFloatVector().Normalized();
             _beamTransform = GetTransformMatrix(beamVector, beamVector.X != 0 || beamVector.Z != 0 ? Vector3.UnitY : Vector3.UnitX);
-            _beamTransform.Row3.Y = 0.25f;
+            _beamTransform.Row3_Y = 0.25f;
             _beamVector = Matrix.Vec3MultMtx3(beamVector, Transform) * _data.Speed.FloatValue;
             if (GameState.Mode == GameMode.SinglePlayer)
             {
@@ -209,7 +208,7 @@ namespace MphRead.Entities
                 // FH beam vectors are absolute, so don't include the parent rotation
                 // todo: it would be nicer to just compute beamTransform as relative on creation
                 Matrix4 transform = Matrix4.CreateScale(inst.Model.Scale) * _beamTransform;
-                transform.Row3.Xyz = Position.AddY(0.25f);
+                transform.Row3_Xyz = Position.AddY(0.25f);
                 return transform;
             }
             return base.GetModelTransform(inst, index);

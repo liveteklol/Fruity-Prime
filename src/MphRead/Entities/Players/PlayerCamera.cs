@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using MphRead.Formats;
 using MphRead.Formats.Culling;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities
 {
@@ -90,11 +89,11 @@ namespace MphRead.Entities
             Vector3 position = Position;
             if (!_field6D0)
             {
-                position.Y += Fixed.ToFloat(Values.AimYOffset) + MathF.Cos(MathHelper.DegreesToRadians(_gunViewBob)) * _walkViewBob;
+                position.Y += Fixed.ToFloat(Values.AimYOffset) + MathF.Cos(Single.DegreesToRadians(_gunViewBob)) * _walkViewBob;
             }
             if (_timeStanding < 9 * 2) // todo: FPS stuff
             {
-                float angle = MathHelper.DegreesToRadians(360 * _timeStanding / (9 * 2)); // todo: FPS stuff
+                float angle = Single.DegreesToRadians(360 * _timeStanding / (9 * 2)); // todo: FPS stuff
                 position.Y += MathF.Cos(angle) * _field44C - _field44C;
             }
             float switchTime = Values.CamSwitchTime * 2; // todo: FPS stuff
@@ -110,12 +109,12 @@ namespace MphRead.Entities
                 CameraInfo.Position = position;
                 CameraInfo.Target = CameraInfo.Position + _facingVector;
             }
-            CameraInfo.Target.Y += Fixed.ToFloat(Values.Field118) * MathF.Sin(MathHelper.DegreesToRadians(_field688));
+            CameraInfo.Target.Y += Fixed.ToFloat(Values.Field118) * MathF.Sin(Single.DegreesToRadians(_field688));
             if (MathF.Abs(_field684) >= 1 / 4096f)
             {
                 Vector3 toTarget = CameraInfo.Target - CameraInfo.Position;
                 Vector3 upVec = new Vector3(-toTarget.Z, 0, toTarget.X).Normalized();
-                float factor = Fixed.ToFloat(Values.Field118) * MathF.Sin(MathHelper.DegreesToRadians(_field684));
+                float factor = Fixed.ToFloat(Values.Field118) * MathF.Sin(Single.DegreesToRadians(_field684));
                 CameraInfo.UpVector = new Vector3(upVec.X * factor, 1, upVec.Z * factor);
             }
             else
@@ -124,7 +123,7 @@ namespace MphRead.Entities
             }
             if (EquipInfo.Zoomed && Flags1.TestFlag(PlayerFlags1.Walking))
             {
-                CameraInfo.Target.Y += MathF.Cos(MathHelper.DegreesToRadians(_gunViewBob)) * 0.025f;
+                CameraInfo.Target.Y += MathF.Cos(Single.DegreesToRadians(_gunViewBob)) * 0.025f;
             }
         }
 
@@ -209,13 +208,13 @@ namespace MphRead.Entities
             {
                 _field553--;
             }
-            if ((CameraInfo.Position - Volume.SpherePosition).LengthSquared >= 6 * 6)
+            if ((CameraInfo.Position - Volume.SpherePosition).LengthSquared() >= 6 * 6)
             {
                 _field551 = 255;
             }
             else
             {
-                float speedMagSqr = (Speed / 2).LengthSquared; // sktodo: FPS stuff?
+                float speedMagSqr = (Speed / 2).LengthSquared(); // sktodo: FPS stuff?
                 if (speedMagSqr > Fixed.ToFloat(36) && _field551 != 255)
                 {
                     _field551++;
@@ -280,7 +279,7 @@ namespace MphRead.Entities
                         {
                             _field558 = -Fixed.ToFloat(Values.Field8C);
                         }
-                        float angle = MathHelper.DegreesToRadians(_field558 * 22.5f); // 360 / 16 = 22.5
+                        float angle = Single.DegreesToRadians(_field558 * 22.5f); // 360 / 16 = 22.5
                         float cos;
                         float sin;
                         if (angle <= 0)
@@ -313,7 +312,7 @@ namespace MphRead.Entities
                     {
                         _field558 = Fixed.ToFloat(Values.Field8C);
                     }
-                    float angle = MathHelper.DegreesToRadians(_field558 * 22.5f); // 360 / 16 = 22.5
+                    float angle = Single.DegreesToRadians(_field558 * 22.5f); // 360 / 16 = 22.5
                     float cos;
                     float sin;
                     if (angle <= 0)
@@ -350,7 +349,7 @@ namespace MphRead.Entities
                         {
                             _field554 = -Fixed.ToFloat(Values.Field8C);
                         }
-                        float angle = MathHelper.DegreesToRadians(_field554);
+                        float angle = Single.DegreesToRadians(_field554);
                         float cos;
                         float sin;
                         if (angle <= 0)
@@ -385,7 +384,7 @@ namespace MphRead.Entities
                     {
                         _field554 = Fixed.ToFloat(Values.Field8C);
                     }
-                    float angle = MathHelper.DegreesToRadians(_field554);
+                    float angle = Single.DegreesToRadians(_field554);
                     float cos;
                     float sin;
                     if (angle <= 0)
@@ -456,18 +455,18 @@ namespace MphRead.Entities
                     Vector4 doorPlane;
                     if (Vector3.Dot(toLock, doorFacing) >= 0)
                     {
-                        doorPlane = new Vector4(doorFacing);
+                        doorPlane = new Vector4(doorFacing, 0);
                     }
                     else
                     {
-                        doorPlane = new Vector4(-doorFacing);
+                        doorPlane = new Vector4(-doorFacing, 0);
                     }
                     Vector3 wvec = doorPlane.Xyz * (door.LockPosition + 0.4f * doorPlane.Xyz);
                     doorPlane.W = wvec.X + wvec.Y + wvec.Z;
                     CollisionResult planeRes = default;
                     if (CollisionDetection.CheckCylinderIntersectPlane(Position, CameraInfo.Position, doorPlane, ref planeRes))
                     {
-                        if ((planeRes.Position - door.LockPosition).LengthSquared < door.RadiusSquared + 1)
+                        if ((planeRes.Position - door.LockPosition).LengthSquared() < door.RadiusSquared + 1)
                         {
                             float dot = Vector3.Dot(CameraInfo.Position, doorPlane.Xyz) - doorPlane.W;
                             if (dot <= 0)
@@ -703,8 +702,8 @@ namespace MphRead.Entities
                     // button aim causes constant acceleration/decay of the rate of change of the pitch/yaw of the facing vector.
                     // to make that easy to implement independent of the frame rate, we convert the vector to angles and back.
                     // there may be a better way to do this by operating on the vector itself.
-                    float pitch = MathHelper.RadiansToDegrees(MathF.Asin(CameraInfo.Facing.Y));
-                    float yaw = MathHelper.RadiansToDegrees(MathF.Atan2(CameraInfo.Facing.X, CameraInfo.Facing.Z));
+                    float pitch = Single.RadiansToDegrees(MathF.Asin(CameraInfo.Facing.Y));
+                    float yaw = Single.RadiansToDegrees(MathF.Atan2(CameraInfo.Facing.X, CameraInfo.Facing.Z));
                     if (updateY)
                     {
                         pitch = (pitch + aimY) % 360;
@@ -713,8 +712,8 @@ namespace MphRead.Entities
                     {
                         yaw = (yaw + aimX) % 360;
                     }
-                    pitch = MathHelper.DegreesToRadians(pitch);
-                    yaw = MathHelper.DegreesToRadians(yaw);
+                    pitch = Single.DegreesToRadians(pitch);
+                    yaw = Single.DegreesToRadians(yaw);
                     float cos = MathF.Cos(pitch);
                     CameraInfo.Facing = new Vector3(MathF.Sin(yaw) * cos, MathF.Sin(pitch), MathF.Cos(yaw) * cos);
                 }
@@ -905,7 +904,7 @@ namespace MphRead.Entities
             Field4C = facingZ / hMag;
             Field50 = Field4C;
             Field54 = -Field48;
-            ViewMatrix = Matrix4.LookAt(Position, Target, camUp);
+            ViewMatrix = Matrix4.CreateLookAt(Position, Target, camUp);
             TrueUp = camUp;
             // todo?: set transposes and stuff
         }

@@ -2,7 +2,6 @@ using System;
 using System.Buffers;
 using System.Diagnostics;
 using MphRead.Formats;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities
 {
@@ -26,7 +25,7 @@ namespace MphRead.Entities
             int lod = 0;
             Flags2 &= ~PlayerFlags2.Lod1;
             if (!IsMainPlayer && !Features.MaxPlayerDetail
-                && (Position - Main.CameraInfo.Position).LengthSquared >= 3 * 3)
+                && (Position - Main.CameraInfo.Position).LengthSquared() >= 3 * 3)
             {
                 lod = 1;
                 Flags2 |= PlayerFlags2.Lod1;
@@ -45,7 +44,7 @@ namespace MphRead.Entities
                     || _camSwitchTimer < Values.CamSwitchTime * 2; // todo: FPS stuff
                 if (IsAltForm)
                 {
-                    _modelTransform.Row3.Xyz = Position;
+                    _modelTransform.Row3_Xyz = Position;
                     if (_timeSinceDamage < Values.DamageFlashTime * 2) // todo: FPS stuff
                     {
                         PaletteOverride = Metadata.RedPalette;
@@ -68,7 +67,7 @@ namespace MphRead.Entities
                     {
                         float radius = _volume.SphereRadius + 0.2f;
                         Matrix4 transform = Matrix4.CreateScale(radius) * _modelTransform;
-                        transform.Row3.Y += Fixed.ToFloat(Values.AltColYPos);
+                        transform.Row3_Y += Fixed.ToFloat(Values.AltColYPos);
                         UpdateTransforms(_altIceModel, transform, recolor: 0);
                         GetDrawItems(_altIceModel, _altIceModel.Model.Nodes[0], alpha: 1, recolor: 0);
                     }
@@ -76,7 +75,7 @@ namespace MphRead.Entities
                     {
                         DrawMorphBallTrail();
                     }
-                    _modelTransform.Row3.Xyz = Vector3.Zero;
+                    _modelTransform.Row3_Xyz = Vector3.Zero;
                     Flags2 |= PlayerFlags2.DrawnThirdPerson;
                 }
                 else if (drawBiped)
@@ -105,14 +104,14 @@ namespace MphRead.Entities
                     float bottom = Fixed.ToFloat(Values.MinPickupHeight);
                     var lateral = new Vector3(_field70, 0, _field74);
                     Matrix4 transform = Matrix4.Identity;
-                    transform.Row0.Xyz = -_gunVec2;
-                    transform.Row1.Xyz = Vector3.Cross(lateral, _gunVec2);
-                    transform.Row2.Xyz = -lateral;
-                    transform.Row3.Xyz = Position;
-                    transform.Row3.Y += bottom + bottom * (1 - scale);
-                    transform.Row0.Xyz *= scale;
-                    transform.Row1.Xyz *= scale;
-                    transform.Row2.Xyz *= scale;
+                    transform.Row0_Xyz = -_gunVec2;
+                    transform.Row1_Xyz = Vector3.Cross(lateral, _gunVec2);
+                    transform.Row2_Xyz = -lateral;
+                    transform.Row3_Xyz = Position;
+                    transform.Row3_Y += bottom + bottom * (1 - scale);
+                    transform.Row0_Xyz *= scale;
+                    transform.Row1_Xyz *= scale;
+                    transform.Row2_Xyz *= scale;
                     for (int i = 0; i < model.Nodes.Count; i++)
                     {
                         Node node = model.Nodes[i];
@@ -179,7 +178,7 @@ namespace MphRead.Entities
                         // todo?: the game uses an alternate projection matrix to draw this
                         var drawPos = new Vector3(0, 0, Fixed.ToFloat(Values.MuzzleOffset));
                         drawPos = Matrix.Vec3MultMtx4(drawPos, transform);
-                        transform.Row3.Xyz = drawPos;
+                        transform.Row3_Xyz = drawPos;
                         UpdateTransforms(_gunSmokeModel, transform, recolor: 0);
                         GetDrawItems(_gunSmokeModel, _gunSmokeModel.Model.Nodes[0], _smokeAlpha, recolor: 0);
                     }
@@ -200,7 +199,7 @@ namespace MphRead.Entities
                 && System.Numerics.BitOperations.PopCount(GameState.StorySave.CurrentOctoliths) > 0)
             {
                 Matrix4 transform = Matrix4.Identity;
-                transform.Row3.Xyz = _lostOctolithDrawPos;
+                transform.Row3_Xyz = _lostOctolithDrawPos;
                 UpdateTransforms(_octolithSimpleModel, transform, recolor: 0);
                 GetDrawItems(_octolithSimpleModel, _octolithSimpleModel.Model.Nodes[0], alpha: 1, recolor: 0);
             }
@@ -233,7 +232,7 @@ namespace MphRead.Entities
             {
                 Node node = _altModel.Model.Nodes[i];
                 Matrix4 animation = node.Animation;
-                animation.Row3.Xyz += _modelTransform.Row3.Xyz;
+                animation.Row3_Xyz += _modelTransform.Row3.Xyz;
                 node.Animation = animation;
             }
             _altModel.Model.UpdateMatrixStack();
@@ -338,11 +337,11 @@ namespace MphRead.Entities
                 ulong frame = _scene.LiveFrames / 2;
                 float rotZ = ((int)(16 * ((781874935307L * (53248 * frame) >> 32) + 2048)) >> 20) * (360 / 4096f);
                 float rotY = ((int)(16 * ((781874935307L * (26624 * frame) + 0x80000000000) >> 32)) >> 20) * (360 / 4096f);
-                var rot = Matrix4.CreateRotationZ(MathHelper.DegreesToRadians(rotZ));
-                rot *= Matrix4.CreateRotationY(MathHelper.DegreesToRadians(rotY));
+                var rot = Matrix4.CreateRotationZ(Single.DegreesToRadians(rotZ));
+                rot *= Matrix4.CreateRotationY(Single.DegreesToRadians(rotY));
                 product = rot * product;
                 product *= 1.0f / (texture.Width / 2);
-                product = new Matrix4(
+                product = Matrix4.Create(
                     product.Row0 * 16.0f,
                     product.Row1 * 16.0f,
                     product.Row2 * 16.0f,
@@ -486,19 +485,19 @@ namespace MphRead.Entities
             }
             float scale = timePct / 2 + 0.1f;
             // todo: the angle stuff could be removed
-            float angle = MathF.Sin(MathHelper.DegreesToRadians(270 - 90 * timePct));
-            float sin270 = MathF.Sin(MathHelper.DegreesToRadians(270));
-            float sin180 = MathF.Sin(MathHelper.DegreesToRadians(180));
+            float angle = MathF.Sin(Single.DegreesToRadians(270 - 90 * timePct));
+            float sin270 = MathF.Sin(Single.DegreesToRadians(270));
+            float sin180 = MathF.Sin(Single.DegreesToRadians(180));
             float offset = (angle - sin270) / (sin180 - sin270);
             for (int i = 1; i < _bipedModel1.Model.Nodes.Count; i++)
             {
                 Node node = _bipedModel1.Model.Nodes[i];
-                var nodePos = new Vector3(node.Animation.Row3);
+                var nodePos = node.Animation.Row3.Xyz;
                 nodePos.Y += offset;
                 if (node.ChildIndex != -1)
                 {
                     Debug.Assert(node.ChildIndex > 0);
-                    var childPos = new Vector3(_bipedModel1.Model.Nodes[node.ChildIndex].Animation.Row3);
+                    var childPos = _bipedModel1.Model.Nodes[node.ChildIndex].Animation.Row3.Xyz;
                     childPos.Y += offset;
                     for (int j = 1; j < 5; j++)
                     {
@@ -514,7 +513,7 @@ namespace MphRead.Entities
                 if (node.NextIndex != -1)
                 {
                     Debug.Assert(node.NextIndex > 0);
-                    var nextPos = new Vector3(_bipedModel1.Model.Nodes[node.NextIndex].Animation.Row3);
+                    var nextPos = _bipedModel1.Model.Nodes[node.NextIndex].Animation.Row3.Xyz;
                     nextPos.Y += offset;
                     for (int j = 1; j < 5; j++)
                     {

@@ -2,7 +2,6 @@ using System;
 using System.Diagnostics;
 using MphRead.Formats;
 using MphRead.Formats.Culling;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities.Enemies
 {
@@ -105,7 +104,7 @@ namespace MphRead.Entities.Enemies
                 _targetY = Position.Y;
                 _bobAngle -= 360;
             }
-            float ySin = MathF.Sin(MathHelper.DegreesToRadians(_bobAngle));
+            float ySin = MathF.Sin(Single.DegreesToRadians(_bobAngle));
             float ySpeedInc = _targetY + ySin * _bobOffset - Position.Y;
             if (_field1A0 > 0)
             {
@@ -168,7 +167,7 @@ namespace MphRead.Entities.Enemies
                 _field184 = _field184.Normalized();
             }
             Vector3 between = PlayerEntity.Main.Position - Position;
-            if (between.LengthSquared >= 2 * 2)
+            if (between.LengthSquared() >= 2 * 2)
             {
                 _field190 = _field184.WithY(0).Normalized();
             }

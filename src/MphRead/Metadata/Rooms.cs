@@ -1,6 +1,6 @@
 using System.Collections.Frozen;
 using System.Collections.Generic;
-using OpenTK.Mathematics;
+using System.Numerics;
 
 namespace MphRead
 {

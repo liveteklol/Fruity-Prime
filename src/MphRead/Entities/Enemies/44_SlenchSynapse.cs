@@ -2,7 +2,6 @@ using System;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using MphRead.Formats.Culling;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities.Enemies
 {
@@ -73,7 +72,7 @@ namespace MphRead.Entities.Enemies
             }
             Vector3 facing = _slench.FacingVector;
             Vector3 up = _slench.UpVector;
-            var rotMtx = Matrix4.CreateFromAxisAngle(facing, MathHelper.DegreesToRadians(angle));
+            var rotMtx = Matrix4.CreateFromAxisAngle(facing, Single.DegreesToRadians(angle));
             up = Matrix.Vec3MultMtx3(up, rotMtx).Normalized();
             SetTransform(facing, up, _slench.Position);
             _health = _healthMax = values.Health;

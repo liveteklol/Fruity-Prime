@@ -6,7 +6,6 @@ using MphRead.Formats;
 using MphRead.Formats.Culling;
 using MphRead.Sound;
 using MphRead.Text;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities
 {
@@ -276,7 +275,7 @@ namespace MphRead.Entities
                     {
                         int revealTime = (PlayerCount > 2 ? 600 : 300) * 2; // todo: FPS stuff
                         Vector3 moved = Position - IdlePosition;
-                        if (moved.LengthSquared >= 25)
+                        if (moved.LengthSquared() >= 25)
                         {
                             // todo: FPS stuff
                             _hidingTimer = (ushort)(_hidingTimer > 35 * 2 ? _hidingTimer - 35 * 2 : 0);
@@ -827,7 +826,7 @@ namespace MphRead.Entities
                         _field41C += _gunVec2 * factor1 + _upVector * factor2;
                     }
                     float angle = 180 * _field40C + 180;
-                    float factor = (MathF.Cos(MathHelper.DegreesToRadians(angle)) + 1) / 2;
+                    float factor = (MathF.Cos(Single.DegreesToRadians(angle)) + 1) / 2;
                     _facingVector = _field410 + (_field41C - _field410) * factor;
                     _facingVector = _facingVector.Normalized();
                 }
@@ -1549,7 +1548,7 @@ namespace MphRead.Entities
                 + CameraInfo.Position
                 + Fixed.ToFloat(Values.FieldB0) * _gunVec2
                 + Fixed.ToFloat(Values.FieldB4) * up;
-            float cos = MathF.Cos(MathHelper.DegreesToRadians(_gunViewBob));
+            float cos = MathF.Cos(Single.DegreesToRadians(_gunViewBob));
             _gunDrawPos.Y += Fixed.ToFloat(20) * cos;
             _aimVec = _aimPosition - _gunDrawPos;
             float dot = Vector3.Dot(_aimVec, facing);
@@ -1562,20 +1561,20 @@ namespace MphRead.Entities
         {
             _field4E8 = _gunVec2;
             Vector3 up = _upVector;
-            _modelTransform.Row0.X = _gunVec2.X; // right?
-            _modelTransform.Row0.Y = 0;
-            _modelTransform.Row0.Z = _gunVec2.Z;
-            _modelTransform.Row1.X = up.X;
-            _modelTransform.Row1.Y = up.Y;
-            _modelTransform.Row1.Z = up.Z;
-            _modelTransform.Row2.X = _field70; // facing?
-            _modelTransform.Row2.Y = 0;
-            _modelTransform.Row2.Z = _field74;
-            _modelTransform.Row2.Xyz = Vector3.Cross(_modelTransform.Row0.Xyz, _modelTransform.Row1.Xyz);
-            _modelTransform.Row1.Xyz = Vector3.Cross(_modelTransform.Row2.Xyz, _modelTransform.Row0.Xyz);
-            _modelTransform.Row0.Xyz = Vector3.Normalize(_modelTransform.Row0.Xyz);
-            _modelTransform.Row1.Xyz = Vector3.Normalize(_modelTransform.Row1.Xyz);
-            _modelTransform.Row2.Xyz = Vector3.Normalize(_modelTransform.Row2.Xyz);
+            _modelTransform.Row0_X = _gunVec2.X; // right?
+            _modelTransform.Row0_Y = 0;
+            _modelTransform.Row0_Z = _gunVec2.Z;
+            _modelTransform.Row1_X = up.X;
+            _modelTransform.Row1_Y = up.Y;
+            _modelTransform.Row1_Z = up.Z;
+            _modelTransform.Row2_X = _field70; // facing?
+            _modelTransform.Row2_Y = 0;
+            _modelTransform.Row2_Z = _field74;
+            _modelTransform.Row2_Xyz = Vector3.Cross(_modelTransform.Row0.Xyz, _modelTransform.Row1.Xyz);
+            _modelTransform.Row1_Xyz = Vector3.Cross(_modelTransform.Row2.Xyz, _modelTransform.Row0.Xyz);
+            _modelTransform.Row0_Xyz = Vector3.Normalize(_modelTransform.Row0.Xyz);
+            _modelTransform.Row1_Xyz = Vector3.Normalize(_modelTransform.Row1.Xyz);
+            _modelTransform.Row2_Xyz = Vector3.Normalize(_modelTransform.Row2.Xyz);
         }
 
         private void UpdateAltTransform()
@@ -1599,8 +1598,8 @@ namespace MphRead.Entities
                 {
                     _altSpinRot -= 360;
                 }
-                var rotX = Matrix4.CreateRotationX(MathHelper.DegreesToRadians(_altWobble));
-                var rotY = Matrix4.CreateRotationY(MathHelper.DegreesToRadians(_altSpinRot));
+                var rotX = Matrix4.CreateRotationX(Single.DegreesToRadians(_altWobble));
+                var rotY = Matrix4.CreateRotationY(Single.DegreesToRadians(_altSpinRot));
                 Matrix4 transform = rotX * rotY;
                 float mag = MathF.Sqrt(_altTiltX * _altTiltX + _altTiltZ * _altTiltZ);
                 if (mag != 0)
@@ -1608,7 +1607,7 @@ namespace MphRead.Entities
                     var axis = new Vector3(_altTiltZ / mag, 0, -_altTiltX / mag);
                     float angle = mag * Fixed.ToFloat(Values.AltTiltAngleMax);
                     angle = MathF.Min(angle, Fixed.ToFloat(Values.AltTiltAngleCap));
-                    var rotAxis = Matrix4.CreateFromAxisAngle(axis, MathHelper.DegreesToRadians(angle));
+                    var rotAxis = Matrix4.CreateFromAxisAngle(axis, Single.DegreesToRadians(angle));
                     transform *= rotAxis;
                 }
                 _modelTransform = transform;
@@ -1632,7 +1631,7 @@ namespace MphRead.Entities
                     axis.X = altRadius * (Position.Z - PrevPosition.Z);
                     axis.Z = -altRadius * (Position.X - PrevPosition.X);
                 }
-                float mag = axis.Length;
+                float mag = axis.Length();
                 if (mag > 0)
                 {
                     axis /= mag;
@@ -1646,7 +1645,7 @@ namespace MphRead.Entities
                             axis *= -1;
                         }
                         axis = Vector3.Cross(transform.Row0.Xyz, axis);
-                        float mbAngle = axis.Length;
+                        float mbAngle = axis.Length();
                         if (mbAngle > 0)
                         {
                             if (mbAngle > 0.125f)
@@ -1658,11 +1657,11 @@ namespace MphRead.Entities
                             transform *= rotMtx;
                         }
                     }
-                    transform.Row2.Xyz = Vector3.Cross(transform.Row0.Xyz, transform.Row1.Xyz);
-                    transform.Row1.Xyz = Vector3.Cross(transform.Row2.Xyz, transform.Row0.Xyz);
-                    transform.Row0.Xyz = transform.Row0.Xyz.Normalized();
-                    transform.Row1.Xyz = transform.Row1.Xyz.Normalized();
-                    transform.Row2.Xyz = transform.Row2.Xyz.Normalized();
+                    transform.Row2_Xyz = Vector3.Cross(transform.Row0.Xyz, transform.Row1.Xyz);
+                    transform.Row1_Xyz = Vector3.Cross(transform.Row2.Xyz, transform.Row0.Xyz);
+                    transform.Row0_Xyz = transform.Row0.Xyz.Normalized();
+                    transform.Row1_Xyz = transform.Row1.Xyz.Normalized();
+                    transform.Row2_Xyz = transform.Row2.Xyz.Normalized();
                     if (Hunter == Hunter.Spire)
                     {
                         for (int i = 0; i < _spireAltVecs.Length; i++)
@@ -1683,10 +1682,10 @@ namespace MphRead.Entities
         {
             const int cycle = 13 * 2; // todo: FPS stuff
             float angle = 359f * (_scene.FrameCount % cycle) / (cycle - 1);
-            float factor = 0.3f * MathF.Sin(MathHelper.DegreesToRadians(angle)) * _hSpeedMag;
+            float factor = 0.3f * MathF.Sin(Single.DegreesToRadians(angle)) * _hSpeedMag;
             _kandenSegPos[0] = Position.AddX(_field78 * factor).AddZ(_field7C * factor);
             Vector3 dir;
-            if (Speed.LengthSquared > 0.02f)
+            if (Speed.LengthSquared() > 0.02f)
             {
                 dir = new Vector3(Speed.X + _field80 / 4, Speed.Y, Speed.Z + _field84 / 4);
             }
@@ -1711,7 +1710,7 @@ namespace MphRead.Entities
                 var up = new Vector3(dir.X, dir.Y, 0);
                 _kandenSegMtx[0] = GetTransformMatrix(facing, up);
             }
-            _kandenSegMtx[0].Row3.Xyz = _kandenSegPos[0];
+            _kandenSegMtx[0].Row3_Xyz = _kandenSegPos[0];
             Debug.Assert(_kandenSegPos.Length == _kandenSegMtx.Length);
             for (int i = 1; i < _kandenSegPos.Length; i++)
             {
@@ -1720,7 +1719,7 @@ namespace MphRead.Entities
                 {
                     angle -= 360;
                 }
-                factor = 0.12f * MathF.Sin(MathHelper.DegreesToRadians(angle)) * _hSpeedMag;
+                factor = 0.12f * MathF.Sin(Single.DegreesToRadians(angle)) * _hSpeedMag;
                 Vector3 segPos = _kandenSegPos[i];
                 segPos = segPos.AddX(_field78 * factor).AddZ(_field7C * factor);
                 _kandenSegPos[i] = segPos;
@@ -1730,10 +1729,10 @@ namespace MphRead.Entities
                 if (dot < Fixed.ToFloat(2896))
                 {
                     var axis = Vector3.Cross(dir, prevMtx.Row2.Xyz);
-                    float mag = axis.Length;
+                    float mag = axis.Length();
                     axis /= mag;
                     float atan = MathF.Atan2(mag, dot);
-                    atan -= MathHelper.DegreesToRadians(45);
+                    atan -= Single.DegreesToRadians(45);
                     var rotMtx = Matrix4.CreateFromAxisAngle(axis, atan);
                     dir = Matrix.Vec3MultMtx3(dir, rotMtx);
                 }
@@ -1741,7 +1740,7 @@ namespace MphRead.Entities
                 float dist = KandenAltNodeDistances[i - 1];
                 dir *= dist;
                 _kandenSegPos[i] = _kandenSegPos[i - 1] - dir;
-                _kandenSegMtx[i].Row3.Xyz = _kandenSegPos[i];
+                _kandenSegMtx[i].Row3_Xyz = _kandenSegPos[i];
             }
         }
 
@@ -1755,7 +1754,7 @@ namespace MphRead.Entities
             var camFacing = new Vector3(_field70, 0, _field74);
             SwitchCamera(Values.AltFormStrafe != 0 ? CameraType.Third2 : CameraType.Third1, camFacing);
             InitAltTransform();
-            _modelTransform.Row3.Xyz = Vector3.Zero;
+            _modelTransform.Row3_Xyz = Vector3.Zero;
             if (Hunter == Hunter.Spire)
             {
                 for (int i = 0; i < _spireAltVecs.Length; i++)
@@ -1869,7 +1868,7 @@ namespace MphRead.Entities
                         float dist = -KandenAltNodeDistances[i - 1];
                         _kandenSegPos[i] = _kandenSegPos[i - 1] + facing * dist;
                         Matrix4 matrix = _kandenSegMtx[0];
-                        matrix.Row3.Xyz = _kandenSegPos[i];
+                        matrix.Row3_Xyz = _kandenSegPos[i];
                         _kandenSegMtx[i] = matrix;
                     }
                 }

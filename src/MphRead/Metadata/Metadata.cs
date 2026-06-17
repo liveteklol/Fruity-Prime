@@ -2,7 +2,6 @@ using System;
 using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Linq;
-using OpenTK.Mathematics;
 
 namespace MphRead
 {
@@ -534,8 +533,8 @@ namespace MphRead
             new ColorRgb(0, 31, 0)   // green
         };
 
-        public static readonly Vector3 OctolithLight1Vector = new Vector3(0, 0.3005371f, -0.5f);
-        public static readonly Vector3 OctolithLight2Vector = new Vector3(0, 0, -0.5f);
+        public static readonly Vector4 OctolithLight1Vector = new Vector4(0, 0.3005371f, -0.5f, 1);
+        public static readonly Vector4 OctolithLight2Vector = new Vector4(0, 0, -0.5f, 1);
         public static readonly Vector3 OctolithLightColor = new Vector3(1, 1, 1);
 
         // this is only set/used by Octolith

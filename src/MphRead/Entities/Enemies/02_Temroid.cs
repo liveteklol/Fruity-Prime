@@ -2,7 +2,6 @@ using System;
 using System.Diagnostics;
 using MphRead.Formats;
 using MphRead.Formats.Culling;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities.Enemies
 {
@@ -234,7 +233,7 @@ namespace MphRead.Entities.Enemies
                 {
                     Vector3 doorFacing = door.FacingVector;
                     Vector3 between = Position - door.LockPosition;
-                    float magSqr = between.LengthSquared;
+                    float magSqr = between.LengthSquared();
                     if (magSqr < door.RadiusSquared + _boundingRadius)
                     {
                         float dist = door.RadiusSquared + _boundingRadius - magSqr;
@@ -300,7 +299,7 @@ namespace MphRead.Entities.Enemies
                 return false;
             }
             Vector3 between = Position - bomb.Position;
-            if (between.LengthSquared > bomb.Radius * bomb.Radius)
+            if (between.LengthSquared() > bomb.Radius * bomb.Radius)
             {
                 return false;
             }
@@ -311,7 +310,7 @@ namespace MphRead.Entities.Enemies
         private void State00()
         {
             Vector3 between = _idlePoints[_field1A4] - Position;
-            if (between.LengthSquared < 1 && ++_field1A4 >= 4)
+            if (between.LengthSquared() < 1 && ++_field1A4 >= 4)
             {
                 _field1A4 = 0;
             }
@@ -519,13 +518,13 @@ namespace MphRead.Entities.Enemies
                 return false;
             }
             Vector3 between = PlayerEntity.Main.Position - Position;
-            return between.LengthSquared < 6.5f * 6.5f;
+            return between.LengthSquared() < 6.5f * 6.5f;
         }
 
         private bool Behavior06()
         {
             Vector3 between = _idlePoints[0] - Position;
-            return between.LengthSquared < 1;
+            return between.LengthSquared() < 1;
         }
 
         private bool Behavior07()
@@ -552,7 +551,7 @@ namespace MphRead.Entities.Enemies
         private bool Behavior10()
         {
             Vector3 between = PlayerEntity.Main.Position - Position;
-            return between.LengthSquared < 100;
+            return between.LengthSquared() < 100;
         }
 
         private bool Behavior11()
@@ -563,7 +562,7 @@ namespace MphRead.Entities.Enemies
         private bool Behavior12()
         {
             Vector3 between = PlayerEntity.Main.Position - Position;
-            return between.LengthSquared < 25;
+            return between.LengthSquared() < 25;
         }
 
         #region Boilerplate

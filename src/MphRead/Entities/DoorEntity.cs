@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using MphRead.Formats.Collision;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities
 {
@@ -410,7 +409,7 @@ namespace MphRead.Entities
             }
             foreach (PlayerEntity player in _scene.GetPlayerEntities())
             {
-                if (player.Health > 0 && !player.IsBot && (Position - player.Position).LengthSquared < 16)
+                if (player.Health > 0 && !player.IsBot && (Position - player.Position).LengthSquared() < 16)
                 {
                     return true;
                 }

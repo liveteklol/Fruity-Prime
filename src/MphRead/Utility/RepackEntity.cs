@@ -7,7 +7,6 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using MphRead.Editor;
 using MphRead.Entities;
-using OpenTK.Mathematics;
 
 namespace MphRead.Utility
 {

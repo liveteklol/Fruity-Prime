@@ -3,7 +3,6 @@ using System.Diagnostics;
 using MphRead.Entities.Enemies;
 using MphRead.Formats.Collision;
 using MphRead.Formats.Culling;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities
 {

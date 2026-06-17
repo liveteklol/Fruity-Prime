@@ -4,7 +4,6 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using MphRead.Formats.Collision;
-using OpenTK.Mathematics;
 
 namespace MphRead.Utility
 {
@@ -534,7 +533,7 @@ namespace MphRead.Utility
                 Vector3 v1 = face[i + 1];
                 Vector3 v2 = face[i + 2];
                 bool intersect = TestIntersection(point1, point2, v0, v1, v2, out float t);
-                if (intersect && t <= between.Length)
+                if (intersect && t <= between.Length())
                 {
                     return true;
                 }

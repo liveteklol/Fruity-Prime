@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using MphRead.Entities;
 using MphRead.Formats.Collision;
-using OpenTK.Mathematics;
 
 namespace MphRead.Formats
 {
@@ -561,7 +560,7 @@ namespace MphRead.Formats
             float cylHeight, float radii, ref CollisionResult result)
         {
             Vector3 travel = point2 - point1;
-            float length = travel.Length;
+            float length = travel.Length();
             travel /= length;
             Vector3 vec1 = cylPos - point1;
             float dot = Vector3.Dot(travel, vec1);
@@ -701,7 +700,7 @@ namespace MphRead.Formats
                                 if (div < 0 || div >= 1)
                                 {
                                     Vector3 vec1 = transPoint - point1;
-                                    float mag1 = vec1.Length;
+                                    float mag1 = vec1.Length();
                                     if (mag1 > radius)
                                     {
                                         continue;
@@ -720,7 +719,7 @@ namespace MphRead.Formats
                                     break;
                                 }
                                 Vector3 vec2 = transPoint - (point1 + edge * div);
-                                float mag2 = vec2.Length;
+                                float mag2 = vec2.Length();
                                 if (mag2 <= radius)
                                 {
                                     foundBlocker = true;
@@ -1248,7 +1247,7 @@ namespace MphRead.Formats
                 {
                     between -= other.CylinderVector * dot;
                     float radii = radius + other.CylinderRadius;
-                    if (between.LengthSquared <= radii * radii)
+                    if (between.LengthSquared() <= radii * radii)
                     {
                         result.Field0 = 2;
                         result.EntityCollision = null;
@@ -1260,7 +1259,7 @@ namespace MphRead.Formats
                         }
                         else if (dot <= other.CylinderDot)
                         {
-                            float mag = between.Length;
+                            float mag = between.Length();
                             result.Plane = new Vector4(-between / mag, 0);
                             result.Field14 = mag - radius;
                         }
@@ -1277,12 +1276,12 @@ namespace MphRead.Formats
             {
                 Vector3 between = other.SpherePosition - pos;
                 float radii = other.SphereRadius + radius;
-                if (between.LengthSquared <= radii * radii)
+                if (between.LengthSquared() <= radii * radii)
                 {
                     result.Field0 = 2;
                     result.EntityCollision = null;
                     result.Flags = CollisionFlags.None;
-                    float mag = between.Length;
+                    float mag = between.Length();
                     result.Plane = new Vector4(between / mag, 0);
                     result.Field14 = mag - radius;
                     return true;
@@ -1477,7 +1476,7 @@ namespace MphRead.Formats
                         }
                         else if (dot1 <= dot)
                         {
-                            float mag = between.Length;
+                            float mag = between.Length();
                             result.Plane = new Vector4(between / mag, 0);
                             result.Field14 = mag - radius;
                         }
@@ -1536,11 +1535,11 @@ namespace MphRead.Formats
             float radii, ref CollisionResult result)
         {
             Vector3 a = cylTop - cylBot;
-            float v7 = a.Length;
+            float v7 = a.Length();
             Vector3 b = spherePos - cylBot;
             if (v7 <= 0)
             {
-                if (b.LengthSquared <= radii * radii)
+                if (b.LengthSquared() <= radii * radii)
                 {
                     result.Field0 = 0;
                     result.EntityCollision = null;
@@ -1560,7 +1559,7 @@ namespace MphRead.Formats
                 if (v12 >= -radii && v12 <= v7 + radii)
                 {
                     Vector3 c = b - (a * v12);
-                    if (c.LengthSquared <= radii * radii)
+                    if (c.LengthSquared() <= radii * radii)
                     {
                         result.Field0 = 0;
                         result.EntityCollision = null;

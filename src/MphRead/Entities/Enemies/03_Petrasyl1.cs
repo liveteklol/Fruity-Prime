@@ -1,7 +1,6 @@
 using System;
 using System.Diagnostics;
 using MphRead.Formats.Culling;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities.Enemies
 {
@@ -132,7 +131,7 @@ namespace MphRead.Entities.Enemies
             {
                 _bobAngle -= 360;
             }
-            float sin = MathF.Sin(MathHelper.DegreesToRadians(_bobAngle));
+            float sin = MathF.Sin(Single.DegreesToRadians(_bobAngle));
             _speed.Y = _initialPos.Y + sin * _bobOffset - Position.Y;
             _speed.Y /= 2; // todo: FPS stuff
             if (HitPlayers[PlayerEntity.Main.SlotIndex])
@@ -140,7 +139,7 @@ namespace MphRead.Entities.Enemies
                 PlayerEntity.Main.TakeDamage(12, DamageFlags.None, FacingVector, this);
             }
             Vector3 between = PlayerEntity.Main.Position - Position;
-            if (between.LengthSquared >= 7 * 7)
+            if (between.LengthSquared() >= 7 * 7)
             {
                 _field1A0 = _field194.WithY(0).Normalized();
             }

@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using MphRead.Formats;
 using MphRead.Formats.Collision;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities
 {
@@ -31,7 +30,7 @@ namespace MphRead.Entities
                 {
                     Vector3 toTurret = other.Volume.SpherePosition - _halfturret.Position;
                     float radius = other.Volume.SphereRadius + 0.45f + 0.1f;
-                    if (toTurret.LengthSquared <= radius * radius)
+                    if (toTurret.LengthSquared() <= radius * radius)
                     {
                         CollisionResult turretRes = default;
                         if (toTurret.Y < 0)
@@ -41,7 +40,7 @@ namespace MphRead.Entities
                         Debug.Assert(toTurret != Vector3.Zero);
                         toTurret = toTurret.Normalized();
                         turretRes.Field0 = 0;
-                        turretRes.Plane = new Vector4(toTurret);
+                        turretRes.Plane = new Vector4(toTurret, 0);
                         toTurret *= 0.45f;
                         toTurret += _halfturret.Position;
                         turretRes.Plane.W = Vector3.Dot(toTurret, turretRes.Plane.Xyz);
@@ -67,7 +66,7 @@ namespace MphRead.Entities
                     continue;
                 }
                 Vector3 between = _volume.SpherePosition - other.Volume.SpherePosition;
-                float distSqr = between.LengthFast;
+                float distSqr = between.LengthSquared();
                 if (distSqr == 0)
                 {
                     between = Vector3.UnitX;
@@ -339,7 +338,7 @@ namespace MphRead.Entities
             if ((Hunter == Hunter.Trace || Hunter == Hunter.Weavel) && Flags2.TestFlag(PlayerFlags2.AltAttack))
             {
                 Vector3 between = _volume.SpherePosition - target.HurtVolume.SpherePosition;
-                float distSqr = between.LengthFast;
+                float distSqr = between.LengthSquared();
                 if (distSqr == 0)
                 {
                     between = Vector3.UnitX;
@@ -474,10 +473,10 @@ namespace MphRead.Entities
                                 Debug.Assert(edge != Vector3.Zero);
                                 Vector3 between = point2 - result.EdgePoint1;
                                 float dot = Vector3.Dot(between, edge);
-                                float div = Math.Clamp(dot / edge.LengthSquared, 0, 1);
+                                float div = Math.Clamp(dot / edge.LengthSquared(), 0, 1);
                                 between = result.EdgePoint1 + edge * div;
                                 between = point2 - between;
-                                float magSqr = between.LengthSquared;
+                                float magSqr = between.LengthSquared();
                                 if (magSqr > 0 && magSqr < altRadius * altRadius)
                                 {
                                     float mag = MathF.Sqrt(magSqr);
@@ -523,11 +522,11 @@ namespace MphRead.Entities
                 if (dot <= 1.25f && dot >= -1.25f)
                 {
                     between -= doorFacing * dot;
-                    if (between.LengthSquared < door.RadiusSquared)
+                    if (between.LengthSquared() < door.RadiusSquared)
                     {
                         CollisionResult doorResult = default;
                         doorResult.Field0 = 0;
-                        doorResult.Plane = new Vector4(doorFacing);
+                        doorResult.Plane = new Vector4(doorFacing, 0);
                         doorResult.EntityCollision = null;
                         doorResult.Flags = CollisionFlags.None;
                         if (Vector3.Dot(PrevPosition - lockPos, doorFacing) < 0)
@@ -626,9 +625,9 @@ namespace MphRead.Entities
                     Debug.Assert(edge != Vector3.Zero);
                     Vector3 between = altPos - result.EdgePoint1;
                     float dot = Vector3.Dot(between, edge);
-                    float div = Math.Clamp(dot / edge.LengthSquared, 0, 1);
+                    float div = Math.Clamp(dot / edge.LengthSquared(), 0, 1);
                     between = altPos - (result.EdgePoint1 + edge * div);
-                    float magSqr = between.LengthSquared;
+                    float magSqr = between.LengthSquared();
                     if (magSqr >= altRad * altRad || magSqr <= 0)
                     {
                         return;
@@ -702,7 +701,7 @@ namespace MphRead.Entities
                         yBotAdd - result.EdgePoint1.Y,
                         Position.Z - result.EdgePoint1.Z + edge.Z * div
                     );
-                    float magSqr = between.LengthSquared;
+                    float magSqr = between.LengthSquared();
                     if (magSqr >= 0.25f)
                     {
                         return;
@@ -760,7 +759,7 @@ namespace MphRead.Entities
                             yBotAdd - betweenY,
                             Position.Z - (result.EdgePoint1.Z + edge.Z * v11)
                         );
-                        float magSqr = between.LengthSquared;
+                        float magSqr = between.LengthSquared();
                         if (magSqr >= 0.25f)
                         {
                             return;
@@ -854,7 +853,7 @@ namespace MphRead.Entities
                             _altTiltZ += result.Plane.Z * tilt;
                             _altWobble += Fixed.ToFloat(Values.AltBounceWobble) * -magSqr;
                             _altSpinSpeed -= Fixed.ToFloat(Values.AltBounceSpin) * -magSqr;
-                            var rotMtx = Matrix4.CreateRotationY(MathHelper.DegreesToRadians(40));
+                            var rotMtx = Matrix4.CreateRotationY(Single.DegreesToRadians(40));
                             Vector3 axis = Matrix.Vec3MultMtx3(result.Plane.Xyz, rotMtx);
                             Speed = Speed.AddX(axis.X * (-magSqr / 2)).AddZ(axis.Z * (-magSqr / 2));
                         }

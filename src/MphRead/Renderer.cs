@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Linq;
+using System.Numerics;
 using System.Runtime;
 using System.Text;
 using System.Threading;
@@ -17,10 +18,11 @@ using MphRead.Formats.Collision;
 using MphRead.Formats.Culling;
 using MphRead.Hud;
 using OpenTK.Graphics.OpenGL;
-using OpenTK.Mathematics;
 using OpenTK.Windowing.Common;
 using OpenTK.Windowing.Desktop;
 using OpenTK.Windowing.GraphicsLibraryFramework;
+using C = OpenTK.Graphics.OpenGL.Compatibility;
+using GLC = OpenTK.Graphics.OpenGL.Compatibility.GL;
 
 namespace MphRead
 {
@@ -100,12 +102,12 @@ namespace MphRead
         private Vector3 _cameraFacing = -Vector3.UnitZ;
         private Vector3 _cameraUp = Vector3.UnitY;
         private Vector3 _cameraRight = Vector3.UnitX;
-        private float _cameraFov = MathHelper.DegreesToRadians(78);
+        private float _cameraFov = Single.DegreesToRadians(78);
         private bool _leftMouse = false;
         private int _activeCutscene = -1;
         private Vector3 _priorCameraPos = Vector3.Zero;
         private Vector3 _priorCameraFacing = -Vector3.UnitZ;
-        private float _priorCameraFov = MathHelper.DegreesToRadians(78);
+        private float _priorCameraFov = Single.DegreesToRadians(78);
         public FrustumInfo FrustumInfo { get; } = new FrustumInfo();
 
         private bool _showTextures = true;
@@ -360,9 +362,9 @@ namespace MphRead
         {
             float fogMin = _fogOffset / (float)0x7FFF;
             float fogMax = (_fogOffset + 32 * (0x400 >> _fogSlope)) / (float)0x7FFF;
-            GL.Uniform4(_shaderLocations.FogColor, _fogColor);
-            GL.Uniform1(_shaderLocations.FogMinDistance, fogMin);
-            GL.Uniform1(_shaderLocations.FogMaxDistance, fogMax);
+            GL.Uniform4f(_shaderLocations.FogColor, 1, in _fogColor);
+            GL.Uniform1f(_shaderLocations.FogMinDistance, fogMin);
+            GL.Uniform1f(_shaderLocations.FogMaxDistance, fogMax);
         }
 
         // called before load
@@ -477,12 +479,13 @@ namespace MphRead
             if (_screenTexture != 0)
             {
                 GL.BindTexture(TextureTarget.Texture2D, _screenTexture);
-                GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgb, Size.X, Size.Y, 0,
+
+                GL.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.Rgb, Size.X, Size.Y, 0,
                     PixelFormat.Rgb, PixelType.UnsignedByte, IntPtr.Zero);
                 GL.BindTexture(TextureTarget.Texture2D, 0);
                 Debug.Assert(_renderBuffer != 0);
                 GL.BindRenderbuffer(RenderbufferTarget.Renderbuffer, _renderBuffer);
-                GL.RenderbufferStorage(RenderbufferTarget.Renderbuffer, RenderbufferStorage.Depth24Stencil8, Size.X, Size.Y);
+                GL.RenderbufferStorage(RenderbufferTarget.Renderbuffer, InternalFormat.Depth24Stencil8, Size.X, Size.Y);
                 GL.BindRenderbuffer(RenderbufferTarget.Renderbuffer, 0);
             }
         }
@@ -497,8 +500,8 @@ namespace MphRead
             int fragmentShader = GL.CreateShader(ShaderType.FragmentShader);
             GL.ShaderSource(fragmentShader, Shaders.FragmentShader);
             GL.CompileShader(fragmentShader);
-            GL.GetShader(vertexShader, ShaderParameter.CompileStatus, out int vertexStatus);
-            GL.GetShader(fragmentShader, ShaderParameter.CompileStatus, out int fragmentStatus);
+            GL.GetShaderi(vertexShader, ShaderParameterName.CompileStatus, out int vertexStatus);
+            GL.GetShaderi(fragmentShader, ShaderParameterName.CompileStatus, out int fragmentStatus);
             if (Debugger.IsAttached)
             {
                 vertexLog = GL.GetShaderInfoLog(vertexShader);
@@ -528,8 +531,8 @@ namespace MphRead
             fragmentShader = GL.CreateShader(ShaderType.FragmentShader);
             GL.ShaderSource(fragmentShader, Shaders.RttFragmentShader);
             GL.CompileShader(fragmentShader);
-            GL.GetShader(vertexShader, ShaderParameter.CompileStatus, out vertexStatus);
-            GL.GetShader(fragmentShader, ShaderParameter.CompileStatus, out fragmentStatus);
+            GL.GetShaderi(vertexShader, ShaderParameterName.CompileStatus, out vertexStatus);
+            GL.GetShaderi(fragmentShader, ShaderParameterName.CompileStatus, out fragmentStatus);
             if (Debugger.IsAttached)
             {
                 vertexLog = GL.GetShaderInfoLog(vertexShader);
@@ -555,7 +558,7 @@ namespace MphRead
             fragmentShader = GL.CreateShader(ShaderType.FragmentShader);
             GL.ShaderSource(fragmentShader, Shaders.ShiftFragmentShader);
             GL.CompileShader(fragmentShader);
-            GL.GetShader(fragmentShader, ShaderParameter.CompileStatus, out fragmentStatus);
+            GL.GetShaderi(fragmentShader, ShaderParameterName.CompileStatus, out fragmentStatus);
             if (Debugger.IsAttached)
             {
                 fragmentLog = GL.GetShaderInfoLog(fragmentShader);
@@ -582,25 +585,25 @@ namespace MphRead
             _screenTexture = GL.GenTexture();
             _textureCount++;
             GL.BindTexture(TextureTarget.Texture2D, _screenTexture);
-            GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgb, Size.X, Size.Y, 0,
+            GL.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.Rgb, Size.X, Size.Y, 0,
                 PixelFormat.Rgb, PixelType.UnsignedByte, IntPtr.Zero);
             int minParameter = (int)TextureMinFilter.Nearest;
             int magParameter = (int)TextureMagFilter.Nearest;
-            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, minParameter);
-            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, magParameter);
+            GL.TexParameteri(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, minParameter);
+            GL.TexParameteri(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, magParameter);
             GL.BindTexture(TextureTarget.Texture2D, 0);
             GL.FramebufferTexture2D(FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment0,
                 TextureTarget.Texture2D, _screenTexture, 0);
 
             _renderBuffer = GL.GenRenderbuffer();
             GL.BindRenderbuffer(RenderbufferTarget.Renderbuffer, _renderBuffer);
-            GL.RenderbufferStorage(RenderbufferTarget.Renderbuffer, RenderbufferStorage.Depth24Stencil8, Size.X, Size.Y);
+            GL.RenderbufferStorage(RenderbufferTarget.Renderbuffer, InternalFormat.Depth24Stencil8, Size.X, Size.Y);
             GL.BindRenderbuffer(RenderbufferTarget.Renderbuffer, 0);
             GL.FramebufferRenderbuffer(FramebufferTarget.Framebuffer, FramebufferAttachment.DepthStencilAttachment,
                 RenderbufferTarget.Renderbuffer, _renderBuffer);
 
-            FramebufferErrorCode status = GL.CheckFramebufferStatus(FramebufferTarget.Framebuffer);
-            if (status != FramebufferErrorCode.FramebufferComplete)
+            FramebufferStatus status = GL.CheckFramebufferStatus(FramebufferTarget.Framebuffer);
+            if (status != FramebufferStatus.FramebufferComplete)
             {
                 Debugger.Break();
             }
@@ -644,8 +647,8 @@ namespace MphRead
             int texLocation = GL.GetUniformLocation(_rttShaderProgramId, "tex");
             int maskLocation = GL.GetUniformLocation(_rttShaderProgramId, "mask");
             GL.UseProgram(_rttShaderProgramId);
-            GL.Uniform1(texLocation, 0);
-            GL.Uniform1(maskLocation, 1);
+            GL.Uniform1i(texLocation, 0);
+            GL.Uniform1i(maskLocation, 1);
 
             _shaderLocations.ShiftTable = GL.GetUniformLocation(_shiftShaderProgramId, "shift_table");
             _shaderLocations.ShiftIndex = GL.GetUniformLocation(_shiftShaderProgramId, "shift_idx");
@@ -670,7 +673,7 @@ namespace MphRead
                 }
                 shifts[i] = -((val - 16) << 12) / 4096f / 256f;
             }
-            GL.Uniform1(_shaderLocations.ShiftTable, 64, shifts);
+            GL.Uniform1f(_shaderLocations.ShiftTable, 64, shifts);
 
             GL.UseProgram(_shaderProgramId);
 
@@ -681,7 +684,7 @@ namespace MphRead
                 floats.Add(vector.Y);
                 floats.Add(vector.Z);
             }
-            GL.Uniform3(_shaderLocations.ToonTable, Metadata.ToonTable.Count, floats.ToArray());
+            GL.Uniform1f(_shaderLocations.ToonTable, floats.Count, floats.ToArray());
             SetShaderFog();
         }
 
@@ -714,11 +717,11 @@ namespace MphRead
                         textureWidth = texture.Width;
                         textureHeight = texture.Height;
                     }
-                    listId = GL.GenLists(1);
-                    GL.NewList(listId, ListMode.Compile);
+                    listId = GLC.GenLists(1);
+                    GLC.NewList(listId, C.ListMode.Compile);
                     bool texgen = material.TexgenMode == TexgenMode.Normal;
                     DoDlist(model, mesh, textureWidth, textureHeight, texgen, isRoom);
-                    GL.EndList();
+                    GLC.EndList();
                 }
                 mesh.ListId = listId;
             }
@@ -733,7 +736,7 @@ namespace MphRead
             float texX = texgen ? 0.5f : 0f;
             float texY = texgen ? 0.5f : 0f;
             uint matrixId = 0;
-            GL.TexCoord3(texX, texY, 0f);
+            GLC.TexCoord3f(texX, texY, 0f);
             for (int i = 0; i < list.Count; i++)
             {
                 RenderInstruction instruction = list[i];
@@ -742,19 +745,19 @@ namespace MphRead
                 case InstructionCode.BEGIN_VTXS:
                     if (instruction.Arguments[0] == 0)
                     {
-                        GL.Begin(PrimitiveType.Triangles);
+                        GLC.Begin(C.PrimitiveType.Triangles);
                     }
                     else if (instruction.Arguments[0] == 1)
                     {
-                        GL.Begin(PrimitiveType.Quads);
+                        GLC.Begin(C.PrimitiveType.Quads);
                     }
                     else if (instruction.Arguments[0] == 2)
                     {
-                        GL.Begin(PrimitiveType.TriangleStrip);
+                        GLC.Begin(C.PrimitiveType.TriangleStrip);
                     }
                     else if (instruction.Arguments[0] == 3)
                     {
-                        GL.Begin(PrimitiveType.QuadStrip);
+                        GLC.Begin(C.PrimitiveType.QuadStrip);
                     }
                     else
                     {
@@ -767,7 +770,7 @@ namespace MphRead
                         uint r = (rgb >> 0) & 0x1F;
                         uint g = (rgb >> 5) & 0x1F;
                         uint b = (rgb >> 10) & 0x1F;
-                        GL.Color3(r / 31.0f, g / 31.0f, b / 31.0f);
+                        GLC.Color3f(r / 31.0f, g / 31.0f, b / 31.0f);
                     }
                     break;
                 case InstructionCode.DIF_AMB:
@@ -786,12 +789,12 @@ namespace MphRead
                         // MPH only calls this with zero ambient, and we need to rely on that in order to
                         // use GL.Color to smuggle in the diffuse, since setting uniforms here doesn't work
                         Debug.Assert(ambient.X == 0 && ambient.Y == 0 && ambient.Z == 0);
-                        GL.Color4(diffuse.X, diffuse.Y, diffuse.Z, 0.0f);
+                        GLC.Color4f(diffuse.X, diffuse.Y, diffuse.Z, 0.0f);
                         if (set != 0) // shader - && _showColors
                         {
                             // MPH never does this in a dlist
                             Debug.Assert(false);
-                            GL.Color3(dr / 31.0f, dg / 31.0f, db / 31.0f);
+                            GLC.Color3f(dr / 31.0f, dg / 31.0f, db / 31.0f);
                         }
                     }
                     break;
@@ -813,7 +816,7 @@ namespace MphRead
                         {
                             z = (int)(z | 0xFFFFFC00);
                         }
-                        GL.Normal3(x / 512.0f, y / 512.0f, z / 512.0f);
+                        GLC.Normal3f(x / 512.0f, y / 512.0f, z / 512.0f);
                     }
                     break;
                 case InstructionCode.TEXCOORD:
@@ -832,7 +835,7 @@ namespace MphRead
                         }
                         texX = s / 16.0f / textureWidth;
                         texY = t / 16.0f / textureHeight;
-                        GL.TexCoord3(texX, texY, matrixId);
+                        GLC.TexCoord3f(texX, texY, matrixId);
                     }
                     break;
                 case InstructionCode.VTX_16:
@@ -856,7 +859,7 @@ namespace MphRead
                         vtxX = Fixed.ToFloat(x);
                         vtxY = Fixed.ToFloat(y);
                         vtxZ = Fixed.ToFloat(z);
-                        GL.Vertex3(vtxX, vtxY, vtxZ);
+                        GLC.Vertex3f(vtxX, vtxY, vtxZ);
                     }
                     break;
                 case InstructionCode.VTX_10:
@@ -880,7 +883,7 @@ namespace MphRead
                         vtxX = x / 64.0f;
                         vtxY = y / 64.0f;
                         vtxZ = z / 64.0f;
-                        GL.Vertex3(vtxX, vtxY, vtxZ);
+                        GLC.Vertex3f(vtxX, vtxY, vtxZ);
                     }
                     break;
                 case InstructionCode.VTX_XY:
@@ -898,7 +901,7 @@ namespace MphRead
                         }
                         vtxX = Fixed.ToFloat(x);
                         vtxY = Fixed.ToFloat(y);
-                        GL.Vertex3(vtxX, vtxY, vtxZ);
+                        GLC.Vertex3f(vtxX, vtxY, vtxZ);
                     }
                     break;
                 case InstructionCode.VTX_XZ:
@@ -916,7 +919,7 @@ namespace MphRead
                         }
                         vtxX = Fixed.ToFloat(x);
                         vtxZ = Fixed.ToFloat(z);
-                        GL.Vertex3(vtxX, vtxY, vtxZ);
+                        GLC.Vertex3f(vtxX, vtxY, vtxZ);
                     }
                     break;
                 case InstructionCode.VTX_YZ:
@@ -934,7 +937,7 @@ namespace MphRead
                         }
                         vtxY = Fixed.ToFloat(y);
                         vtxZ = Fixed.ToFloat(z);
-                        GL.Vertex3(vtxX, vtxY, vtxZ);
+                        GLC.Vertex3f(vtxX, vtxY, vtxZ);
                     }
                     break;
                 case InstructionCode.VTX_DIFF:
@@ -958,11 +961,11 @@ namespace MphRead
                         vtxX += Fixed.ToFloat(x);
                         vtxY += Fixed.ToFloat(y);
                         vtxZ += Fixed.ToFloat(z);
-                        GL.Vertex3(vtxX, vtxY, vtxZ);
+                        GLC.Vertex3f(vtxX, vtxY, vtxZ);
                     }
                     break;
                 case InstructionCode.END_VTXS:
-                    GL.End();
+                    GLC.End();
                     break;
                 case InstructionCode.MTX_RESTORE:
                     // in order to allow toggling room node transforms, keep the matrix ID at 0
@@ -970,7 +973,7 @@ namespace MphRead
                     {
                         matrixId = instruction.Arguments[0];
                     }
-                    GL.TexCoord3(texX, texY, matrixId);
+                    GLC.TexCoord3f(texX, texY, matrixId);
                     break;
                 case InstructionCode.NOP:
                     break;
@@ -979,7 +982,7 @@ namespace MphRead
                 }
             }
             // leave the ID at 0 in case the next thing we draw doesn't use the stack
-            GL.TexCoord3(0f, 0f, 0f);
+            GLC.TexCoord3f(0f, 0f, 0f);
         }
 
         public void LoadModel(string name, bool firstHunt = false)
@@ -1067,7 +1070,7 @@ namespace MphRead
             }
             Texture texture = model.Recolors[recolorId].Textures[textureId];
             GL.BindTexture(TextureTarget.Texture2D, _textureCount);
-            GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba, texture.Width, texture.Height, 0,
+            GL.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.Rgba, texture.Width, texture.Height, 0,
                 PixelFormat.Rgba, PixelType.UnsignedByte, pixels.ToArray());
             GL.BindTexture(TextureTarget.Texture2D, 0);
             return onlyOpaque;
@@ -1077,7 +1080,7 @@ namespace MphRead
         {
             _textureCount++;
             GL.BindTexture(TextureTarget.Texture2D, _textureCount);
-            GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba, width, height, 0,
+            GL.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.Rgba, width, height, 0,
                 PixelFormat.Rgba, PixelType.UnsignedByte, data.ToArray());
             GL.BindTexture(TextureTarget.Texture2D, 0);
             return _textureCount;
@@ -1086,7 +1089,7 @@ namespace MphRead
         public void BindTexture(IReadOnlyList<ColorRgba> data, int width, int height, int bindingId)
         {
             GL.BindTexture(TextureTarget.Texture2D, bindingId);
-            GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba, width, height, 0,
+            GL.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.Rgba, width, height, 0,
                 PixelFormat.Rgba, PixelType.UnsignedByte, data.ToArray());
             GL.BindTexture(TextureTarget.Texture2D, 0);
         }
@@ -1220,7 +1223,7 @@ namespace MphRead
         {
             // todo: update this only when the viewport or camera values change
             _perspectiveMatrix = GetPerspectiveMatrix(_cameraFov);
-            GL.UniformMatrix4(_shaderLocations.ProjectionMatrix, transpose: false, ref _perspectiveMatrix);
+            GL.UniformMatrix4f(_shaderLocations.ProjectionMatrix, 1, transpose: false, in _perspectiveMatrix);
             // update frustum info
             Vector3 camPos = PlayerEntity.Main.CameraInfo.Position;
             var camRight = new Vector3(_viewMatrix.Row0.X, _viewMatrix.Row0.Y, -_viewMatrix.Row0.Z);
@@ -1318,8 +1321,8 @@ namespace MphRead
             }
             // pass 1: opaque
             GL.ColorMask(true, true, true, true);
-            GL.Enable(EnableCap.AlphaTest);
-            GL.AlphaFunc(AlphaFunction.Equal, 1.0f);
+            GLC.Enable(C.EnableCap.AlphaTest);
+            GLC.AlphaFunc(C.AlphaFunction.Equal, 1.0f);
             GL.DepthFunc(DepthFunction.Less);
             GL.DepthMask(true);
             GL.Enable(EnableCap.StencilTest);
@@ -1331,7 +1334,7 @@ namespace MphRead
                 RenderItem item = _nonDecalItems[i];
                 RenderItem(item);
             }
-            GL.Disable(EnableCap.AlphaTest);
+            GLC.Disable(C.EnableCap.AlphaTest);
             // pass 2: decal
             GL.Enable(EnableCap.PolygonOffsetFill);
             GL.PolygonOffset(-1, -1);
@@ -1348,8 +1351,8 @@ namespace MphRead
             GL.PolygonOffset(0, 0);
             GL.Disable(EnableCap.PolygonOffsetFill);
             // pass 3: mark transparent faces in stencil
-            GL.Enable(EnableCap.AlphaTest);
-            GL.AlphaFunc(AlphaFunction.Less, 1.0f);
+            GLC.Enable(C.EnableCap.AlphaTest);
+            GLC.AlphaFunc(C.AlphaFunction.Less, 1.0f);
             GL.ColorMask(false, false, false, false);
             GL.StencilOp(StencilOp.Keep, StencilOp.Keep, StencilOp.Replace);
             for (int i = 0; i < _translucentItems.Count; i++)
@@ -1362,14 +1365,14 @@ namespace MphRead
             GL.Clear(ClearBufferMask.DepthBufferBit);
             GL.StencilOp(StencilOp.Keep, StencilOp.Keep, StencilOp.Keep);
             GL.StencilFunc(StencilFunction.Always, 0, 0xFF);
-            GL.AlphaFunc(AlphaFunction.Equal, 1.0f);
+            GLC.AlphaFunc(C.AlphaFunction.Equal, 1.0f);
             for (int i = 0; i < _nonDecalItems.Count; i++)
             {
                 RenderItem item = _nonDecalItems[i];
                 RenderItem(item);
             }
             // pass 5: translucent (behind)
-            GL.AlphaFunc(AlphaFunction.Less, 1.0f);
+            GLC.AlphaFunc(C.AlphaFunction.Less, 1.0f);
             GL.ColorMask(true, true, true, true);
             GL.DepthMask(false);
             GL.DepthFunc(DepthFunction.Lequal);
@@ -1389,7 +1392,7 @@ namespace MphRead
                 RenderItem(item);
             }
             GL.DepthMask(true);
-            GL.Disable(EnableCap.AlphaTest);
+            GLC.Disable(C.EnableCap.AlphaTest);
             GL.Disable(EnableCap.StencilTest);
             GL.PolygonMode(TriangleFace.FrontAndBack, OpenTK.Graphics.OpenGL.PolygonMode.Fill);
 
@@ -1401,8 +1404,8 @@ namespace MphRead
             }
 
             GL.UseProgram(_rttShaderProgramId);
-            GL.Uniform1(_shaderLocations.LayerAlpha, 1f);
-            GL.Uniform4(_shaderLocations.FadeColor, Vector4.Zero);
+            GL.Uniform1f(_shaderLocations.LayerAlpha, 1f);
+            GL.Uniform4f(_shaderLocations.FadeColor, 0, 0, 0, 0);
 
             if (PlayerEntity.Main.HudDisruptedState != 0 || PlayerEntity.Main.HudWhiteoutState != -1)
             {
@@ -1410,13 +1413,13 @@ namespace MphRead
                 int index = (int)div;
                 float factor = div % 1;
                 GL.UseProgram(_shiftShaderProgramId);
-                GL.Uniform1(_shaderLocations.ShiftFactor, PlayerEntity.Main.HudDisruptionFactor);
-                GL.Uniform1(_shaderLocations.ShiftIndex, index);
-                GL.Uniform1(_shaderLocations.LerpFactor, factor);
-                GL.Uniform1(_shaderLocations.WhiteoutFactor, PlayerEntity.Main.HudWhiteoutFactor);
+                GL.Uniform1f(_shaderLocations.ShiftFactor, PlayerEntity.Main.HudDisruptionFactor);
+                GL.Uniform1i(_shaderLocations.ShiftIndex, index);
+                GL.Uniform1f(_shaderLocations.LerpFactor, factor);
+                GL.Uniform1f(_shaderLocations.WhiteoutFactor, PlayerEntity.Main.HudWhiteoutFactor);
                 if (PlayerEntity.Main.HudWhiteoutFactor != 0)
                 {
-                    GL.Uniform1(_shaderLocations.WhiteoutTable, 192, PlayerEntity.HudWhiteoutTable);
+                    GL.Uniform1f(_shaderLocations.WhiteoutTable, 192, PlayerEntity.HudWhiteoutTable);
                 }
             }
 
@@ -1426,20 +1429,20 @@ namespace MphRead
             GL.Enable(EnableCap.Blend);
             GL.BindTexture(TextureTarget.Texture2D, _screenTexture);
 
-            GL.Begin(PrimitiveType.TriangleStrip);
+            GLC.Begin(C.PrimitiveType.TriangleStrip);
             // top right
-            GL.TexCoord3(1f, 1f, 0f);
-            GL.Vertex3(1f, 1f, 0f);
+            GLC.TexCoord3f(1f, 1f, 0f);
+            GLC.Vertex3f(1f, 1f, 0f);
             // top left
-            GL.TexCoord3(0f, 1f, 0f);
-            GL.Vertex3(-1f, 1f, 0f);
+            GLC.TexCoord3f(0f, 1f, 0f);
+            GLC.Vertex3f(-1f, 1f, 0f);
             // bottom right
-            GL.TexCoord3(1f, 0f, 0f);
-            GL.Vertex3(1f, -1f, 0f);
+            GLC.TexCoord3f(1f, 0f, 0f);
+            GLC.Vertex3f(1f, -1f, 0f);
             // bottom left
-            GL.TexCoord3(0f, 0f, 0f);
-            GL.Vertex3(-1f, -1f, 0f);
-            GL.End();
+            GLC.TexCoord3f(0f, 0f, 0f);
+            GLC.Vertex3f(-1f, -1f, 0f);
+            GLC.End();
 
             GL.BindTexture(TextureTarget.Texture2D, 0);
 
@@ -1448,7 +1451,7 @@ namespace MphRead
                 GL.UseProgram(_rttShaderProgramId);
             }
             GL.Disable(EnableCap.CullFace);
-            GL.Uniform4(_shaderLocations.FadeColor, _fadeColor, _fadeColor, _fadeColor, 0);
+            GL.Uniform4f(_shaderLocations.FadeColor, _fadeColor, _fadeColor, _fadeColor, 0);
             if (PlayerEntity.Main.LoadFlags.TestFlag(LoadFlags.Active) && CameraMode == CameraMode.Player)
             {
                 DrawHudLayer(Layer4Info); // ice layer
@@ -1461,11 +1464,11 @@ namespace MphRead
                     GL.ActiveTexture(TextureUnit.Texture1);
                     GL.BindTexture(TextureTarget.Texture2D, Layer1Info.MaskId);
                     GL.ActiveTexture(TextureUnit.Texture0);
-                    GL.Uniform1(_shaderLocations.ViewWidth, (float)Size.X);
-                    GL.Uniform1(_shaderLocations.ViewHeight, (float)Size.Y);
+                    GL.Uniform1f(_shaderLocations.ViewWidth, (float)Size.X);
+                    GL.Uniform1f(_shaderLocations.ViewHeight, (float)Size.Y);
                 }
                 PlayerEntity.Main.DrawHudObjects();
-                GL.Uniform1(_shaderLocations.UseMask, 0);
+                GL.Uniform1f(_shaderLocations.UseMask, 0);
                 if (Layer1Info.MaskId != -1)
                 {
                     GL.ActiveTexture(TextureUnit.Texture1);
@@ -1486,21 +1489,21 @@ namespace MphRead
                 }
                 if (percent > 0)
                 {
-                    GL.Uniform4(_shaderLocations.FadeColor, _fadeColor, _fadeColor, _fadeColor, percent);
-                    GL.Begin(PrimitiveType.TriangleStrip);
+                    GL.Uniform4f(_shaderLocations.FadeColor, _fadeColor, _fadeColor, _fadeColor, percent);
+                    GLC.Begin(C.PrimitiveType.TriangleStrip);
                     // top right
-                    GL.TexCoord3(1f, 1f, 0f);
-                    GL.Vertex3(1f, 1f, 0f);
+                    GLC.TexCoord3f(1f, 1f, 0f);
+                    GLC.Vertex3f(1f, 1f, 0f);
                     // top left
-                    GL.TexCoord3(0f, 1f, 0f);
-                    GL.Vertex3(-1f, 1f, 0f);
+                    GLC.TexCoord3f(0f, 1f, 0f);
+                    GLC.Vertex3f(-1f, 1f, 0f);
                     // bottom right
-                    GL.TexCoord3(1f, 0f, 0f);
-                    GL.Vertex3(1f, -1f, 0f);
+                    GLC.TexCoord3f(1f, 0f, 0f);
+                    GLC.Vertex3f(1f, -1f, 0f);
                     // bottom left
-                    GL.TexCoord3(0f, 0f, 0f);
-                    GL.Vertex3(-1f, -1f, 0f);
-                    GL.End();
+                    GLC.TexCoord3f(0f, 0f, 0f);
+                    GLC.Vertex3f(-1f, -1f, 0f);
+                    GLC.End();
                 }
             }
             GL.Enable(EnableCap.DepthTest);
@@ -1572,7 +1575,7 @@ namespace MphRead
             }
             foreach (Mesh mesh in model.Meshes)
             {
-                GL.DeleteLists(mesh.ListId, 1);
+                GLC.DeleteLists(mesh.ListId, 1);
             }
             Read.RemoveModel(model.Name, model.FirstHunt);
         }
@@ -1585,11 +1588,11 @@ namespace MphRead
             _viewInvRotYMatrix = Matrix4.Identity;
             if (_cameraMode == CameraMode.Pivot)
             {
-                _viewMatrix.Row3.Xyz = new Vector3(0, 0, _pivotDistance * -1);
-                _viewMatrix = Matrix4.CreateRotationX(MathHelper.DegreesToRadians(_pivotAngleX)) * _viewMatrix;
-                _viewMatrix = Matrix4.CreateRotationY(MathHelper.DegreesToRadians(_pivotAngleY)) * _viewMatrix;
-                _viewInvRotMatrix = _viewInvRotYMatrix = Matrix4.CreateRotationY(MathHelper.DegreesToRadians(-1 * _pivotAngleY));
-                _viewInvRotMatrix = Matrix4.CreateRotationX(MathHelper.DegreesToRadians(-1 * _pivotAngleX)) * _viewInvRotMatrix;
+                _viewMatrix.Row3_Xyz = new Vector3(0, 0, _pivotDistance * -1);
+                _viewMatrix = Matrix4.CreateRotationX(Single.DegreesToRadians(_pivotAngleX)) * _viewMatrix;
+                _viewMatrix = Matrix4.CreateRotationY(Single.DegreesToRadians(_pivotAngleY)) * _viewMatrix;
+                _viewInvRotMatrix = _viewInvRotYMatrix = Matrix4.CreateRotationY(Single.DegreesToRadians(-1 * _pivotAngleY));
+                _viewInvRotMatrix = Matrix4.CreateRotationX(Single.DegreesToRadians(-1 * _pivotAngleX)) * _viewInvRotMatrix;
             }
             else if (_cameraMode == CameraMode.Roam || _cameraMode == CameraMode.Player)
             {
@@ -1597,20 +1600,20 @@ namespace MphRead
                 {
                     _viewMatrix = PlayerEntity.Main.CameraInfo.ViewMatrix;
                     float fov = PlayerEntity.Main.CameraInfo.Fov > 0 ? PlayerEntity.Main.CameraInfo.Fov : 78;
-                    _cameraFov = MathHelper.DegreesToRadians(fov);
+                    _cameraFov = Single.DegreesToRadians(fov);
                 }
                 else
                 {
-                    _viewMatrix = Matrix4.LookAt(_cameraPosition, _cameraPosition + _cameraFacing, _cameraUp);
+                    _viewMatrix = Matrix4.CreateLookAt(_cameraPosition, _cameraPosition + _cameraFacing, _cameraUp);
                 }
                 _viewInvRotMatrix = Matrix4.Transpose(_viewMatrix.ClearTranslation());
                 if (_viewInvRotMatrix.Row0.X != 0 || _viewInvRotMatrix.Row0.Z != 0)
                 {
-                    _viewInvRotYMatrix.Row0.Xyz = new Vector3(_viewInvRotMatrix.Row0.X, 0, _viewInvRotMatrix.Row0.Z).Normalized();
-                    _viewInvRotYMatrix.Row2.Xyz = new Vector3(_viewInvRotMatrix.Row2.X, 0, _viewInvRotMatrix.Row2.Z).Normalized();
+                    _viewInvRotYMatrix.Row0_Xyz = new Vector3(_viewInvRotMatrix.Row0.X, 0, _viewInvRotMatrix.Row0.Z).Normalized();
+                    _viewInvRotYMatrix.Row2_Xyz = new Vector3(_viewInvRotMatrix.Row2.X, 0, _viewInvRotMatrix.Row2.Z).Normalized();
                 }
             }
-            GL.UniformMatrix4(_shaderLocations.ViewMatrix, transpose: false, ref _viewMatrix);
+            GL.UniformMatrix4f(_shaderLocations.ViewMatrix, 1, transpose: false, in _viewMatrix);
         }
 
         private void UpdateCameraPosition()
@@ -1627,8 +1630,8 @@ namespace MphRead
                 {
                     angleX -= 360;
                 }
-                float theta = MathHelper.DegreesToRadians(angleY);
-                float phi = MathHelper.DegreesToRadians(angleX);
+                float theta = Single.DegreesToRadians(angleY);
+                float phi = Single.DegreesToRadians(angleX);
                 float x = MathF.Round(_pivotDistance * MathF.Cos(theta), 4);
                 float y = MathF.Round(_pivotDistance * MathF.Sin(theta) * MathF.Cos(phi), 4) * -1;
                 float z = MathF.Round(_pivotDistance * MathF.Sin(theta) * MathF.Sin(phi), 4);
@@ -2425,15 +2428,15 @@ namespace MphRead
             Matrix4 transform, int listId, int matrixStackCount, IReadOnlyList<float> matrixStack, Vector4? overrideColor, Vector4? paletteOverride,
             SelectionType selectionType, BillboardMode billboardMode, float scaleFactor = 1, int? bindingOverride = null)
         {
-            transform.Row0.X *= scaleFactor;
-            transform.Row0.Y *= scaleFactor;
-            transform.Row0.Z *= scaleFactor;
-            transform.Row1.X *= scaleFactor;
-            transform.Row1.Y *= scaleFactor;
-            transform.Row1.Z *= scaleFactor;
-            transform.Row2.X *= scaleFactor;
-            transform.Row2.Y *= scaleFactor;
-            transform.Row2.Z *= scaleFactor;
+            transform.Row0_X *= scaleFactor;
+            transform.Row0_Y *= scaleFactor;
+            transform.Row0_Z *= scaleFactor;
+            transform.Row1_X *= scaleFactor;
+            transform.Row1_Y *= scaleFactor;
+            transform.Row1_Z *= scaleFactor;
+            transform.Row2_X *= scaleFactor;
+            transform.Row2_Y *= scaleFactor;
+            transform.Row2_Z *= scaleFactor;
             _scaleFactors[0] = scaleFactor;
             _scaleFactors[1] = scaleFactor;
             _scaleFactors[2] = scaleFactor;
@@ -2803,8 +2806,8 @@ namespace MphRead
         private void UpdateUniforms()
         {
             UseRoomLights();
-            GL.Uniform1(_shaderLocations.UseFog, _hasFog && _showFog ? 1 : 0);
-            GL.Uniform1(_shaderLocations.ShowColors, _showColors ? 1 : 0);
+            GL.Uniform1i(_shaderLocations.UseFog, _hasFog && _showFog ? 1 : 0);
+            GL.Uniform1i(_shaderLocations.ShowColors, _showColors ? 1 : 0);
             if (ProcessFrame)
             {
                 UpdateFade();
@@ -2813,22 +2816,22 @@ namespace MphRead
 
         private void UseRoomLights()
         {
-            GL.Uniform3(_shaderLocations.Light1Vector, _light1Vector);
-            GL.Uniform3(_shaderLocations.Light1Color, _light1Color);
-            GL.Uniform3(_shaderLocations.Light2Vector, _light2Vector);
-            GL.Uniform3(_shaderLocations.Light2Color, _light2Color);
+            GL.Uniform3f(_shaderLocations.Light1Vector, 1, in _light1Vector);
+            GL.Uniform3f(_shaderLocations.Light1Color, 1, in _light1Color);
+            GL.Uniform3f(_shaderLocations.Light2Vector, 1, in _light2Vector);
+            GL.Uniform3f(_shaderLocations.Light2Color, 1, in _light2Color);
         }
 
         private void UseLight1(Vector3 vector, Vector3 color)
         {
-            GL.Uniform3(_shaderLocations.Light1Vector, vector);
-            GL.Uniform3(_shaderLocations.Light1Color, color);
+            GL.Uniform3f(_shaderLocations.Light1Vector, 1, in vector);
+            GL.Uniform3f(_shaderLocations.Light1Color, 1, in color);
         }
 
         private void UseLight2(Vector3 vector, Vector3 color)
         {
-            GL.Uniform3(_shaderLocations.Light2Vector, vector);
-            GL.Uniform3(_shaderLocations.Light2Color, color);
+            GL.Uniform3f(_shaderLocations.Light2Vector, 1, in vector);
+            GL.Uniform3f(_shaderLocations.Light2Color, 1, in color);
         }
 
         private class MovieFadeSettings
@@ -3017,12 +3020,12 @@ namespace MphRead
 
             if (item.MatrixStackCount > 0)
             {
-                GL.UniformMatrix4(_shaderLocations.MatrixStack, item.MatrixStackCount, transpose: false, item.MatrixStack);
+                GL.Uniform1f(_shaderLocations.MatrixStack, item.MatrixStackCount * 16, item.MatrixStack);
             }
             else
             {
                 Matrix4 transform = item.Transform;
-                GL.UniformMatrix4(_shaderLocations.MatrixStack, transpose: false, ref transform);
+                GL.UniformMatrix4f(_shaderLocations.MatrixStack, 1, transpose: false, ref transform);
             }
             Matrix4 viewInv = Matrix4.Identity;
             if (item.BillboardMode == BillboardMode.Sphere)
@@ -3033,7 +3036,7 @@ namespace MphRead
             {
                 viewInv = _viewInvRotYMatrix;
             }
-            GL.UniformMatrix4(_shaderLocations.ViewInvMatrix, transpose: false, ref viewInv);
+            GL.UniformMatrix4f(_shaderLocations.ViewInvMatrix, 1, transpose: false, ref viewInv);
 
             DoMaterial(item);
             // texgen actually uses the transform from the current node, not the matrix stack
@@ -3060,7 +3063,7 @@ namespace MphRead
                 : OpenTK.Graphics.OpenGL.PolygonMode.Fill);
             if (item.Type == RenderItemType.Mesh)
             {
-                GL.CallList(item.ListId);
+                GLC.CallList(item.ListId);
             }
             else if (item.Type == RenderItemType.Box)
             {
@@ -3111,122 +3114,122 @@ namespace MphRead
         private void RenderBox(Vector3[] verts)
         {
             // sides
-            GL.Begin(PrimitiveType.TriangleStrip);
-            GL.Vertex3(verts[2]);
-            GL.Vertex3(verts[6]);
-            GL.Vertex3(verts[0]);
-            GL.Vertex3(verts[4]);
-            GL.Vertex3(verts[1]);
-            GL.Vertex3(verts[5]);
-            GL.Vertex3(verts[3]);
-            GL.Vertex3(verts[7]);
-            GL.Vertex3(verts[2]);
-            GL.Vertex3(verts[6]);
-            GL.End();
+            GLC.Begin(C.PrimitiveType.TriangleStrip);
+            GLC.Vertex3f(in verts[2]);
+            GLC.Vertex3f(in verts[6]);
+            GLC.Vertex3f(in verts[0]);
+            GLC.Vertex3f(in verts[4]);
+            GLC.Vertex3f(in verts[1]);
+            GLC.Vertex3f(in verts[5]);
+            GLC.Vertex3f(in verts[3]);
+            GLC.Vertex3f(in verts[7]);
+            GLC.Vertex3f(in verts[2]);
+            GLC.Vertex3f(in verts[6]);
+            GLC.End();
             // top
-            GL.Begin(PrimitiveType.TriangleStrip);
-            GL.Vertex3(verts[5]);
-            GL.Vertex3(verts[4]);
-            GL.Vertex3(verts[7]);
-            GL.Vertex3(verts[6]);
-            GL.End();
+            GLC.Begin(C.PrimitiveType.TriangleStrip);
+            GLC.Vertex3f(in verts[5]);
+            GLC.Vertex3f(in verts[4]);
+            GLC.Vertex3f(in verts[7]);
+            GLC.Vertex3f(in verts[6]);
+            GLC.End();
             // bottom
-            GL.Begin(PrimitiveType.TriangleStrip);
-            GL.Vertex3(verts[3]);
-            GL.Vertex3(verts[2]);
-            GL.Vertex3(verts[1]);
-            GL.Vertex3(verts[0]);
-            GL.End();
+            GLC.Begin(C.PrimitiveType.TriangleStrip);
+            GLC.Vertex3f(in verts[3]);
+            GLC.Vertex3f(in verts[2]);
+            GLC.Vertex3f(in verts[1]);
+            GLC.Vertex3f(in verts[0]);
+            GLC.End();
         }
 
         private void RenderCylinder(Vector3[] verts)
         {
             // bottom
-            GL.Begin(PrimitiveType.TriangleFan);
-            GL.Vertex3(verts[32]);
-            GL.Vertex3(verts[0]);
-            GL.Vertex3(verts[1]);
-            GL.Vertex3(verts[2]);
-            GL.Vertex3(verts[3]);
-            GL.Vertex3(verts[4]);
-            GL.Vertex3(verts[5]);
-            GL.Vertex3(verts[6]);
-            GL.Vertex3(verts[7]);
-            GL.Vertex3(verts[8]);
-            GL.Vertex3(verts[9]);
-            GL.Vertex3(verts[10]);
-            GL.Vertex3(verts[11]);
-            GL.Vertex3(verts[12]);
-            GL.Vertex3(verts[13]);
-            GL.Vertex3(verts[14]);
-            GL.Vertex3(verts[15]);
-            GL.Vertex3(verts[0]);
-            GL.End();
+            GLC.Begin(C.PrimitiveType.TriangleFan);
+            GLC.Vertex3f(in verts[32]);
+            GLC.Vertex3f(in verts[0]);
+            GLC.Vertex3f(in verts[1]);
+            GLC.Vertex3f(in verts[2]);
+            GLC.Vertex3f(in verts[3]);
+            GLC.Vertex3f(in verts[4]);
+            GLC.Vertex3f(in verts[5]);
+            GLC.Vertex3f(in verts[6]);
+            GLC.Vertex3f(in verts[7]);
+            GLC.Vertex3f(in verts[8]);
+            GLC.Vertex3f(in verts[9]);
+            GLC.Vertex3f(in verts[10]);
+            GLC.Vertex3f(in verts[11]);
+            GLC.Vertex3f(in verts[12]);
+            GLC.Vertex3f(in verts[13]);
+            GLC.Vertex3f(in verts[14]);
+            GLC.Vertex3f(in verts[15]);
+            GLC.Vertex3f(in verts[0]);
+            GLC.End();
             // top
-            GL.Begin(PrimitiveType.TriangleFan);
-            GL.Vertex3(verts[33]);
-            GL.Vertex3(verts[31]);
-            GL.Vertex3(verts[30]);
-            GL.Vertex3(verts[29]);
-            GL.Vertex3(verts[28]);
-            GL.Vertex3(verts[27]);
-            GL.Vertex3(verts[26]);
-            GL.Vertex3(verts[25]);
-            GL.Vertex3(verts[24]);
-            GL.Vertex3(verts[23]);
-            GL.Vertex3(verts[22]);
-            GL.Vertex3(verts[21]);
-            GL.Vertex3(verts[20]);
-            GL.Vertex3(verts[19]);
-            GL.Vertex3(verts[18]);
-            GL.Vertex3(verts[17]);
-            GL.Vertex3(verts[16]);
-            GL.Vertex3(verts[31]);
-            GL.End();
+            GLC.Begin(C.PrimitiveType.TriangleFan);
+            GLC.Vertex3f(in verts[33]);
+            GLC.Vertex3f(in verts[31]);
+            GLC.Vertex3f(in verts[30]);
+            GLC.Vertex3f(in verts[29]);
+            GLC.Vertex3f(in verts[28]);
+            GLC.Vertex3f(in verts[27]);
+            GLC.Vertex3f(in verts[26]);
+            GLC.Vertex3f(in verts[25]);
+            GLC.Vertex3f(in verts[24]);
+            GLC.Vertex3f(in verts[23]);
+            GLC.Vertex3f(in verts[22]);
+            GLC.Vertex3f(in verts[21]);
+            GLC.Vertex3f(in verts[20]);
+            GLC.Vertex3f(in verts[19]);
+            GLC.Vertex3f(in verts[18]);
+            GLC.Vertex3f(in verts[17]);
+            GLC.Vertex3f(in verts[16]);
+            GLC.Vertex3f(in verts[31]);
+            GLC.End();
             // sides
-            GL.Begin(PrimitiveType.TriangleStrip);
-            GL.Vertex3(verts[0]);
-            GL.Vertex3(verts[16]);
-            GL.Vertex3(verts[1]);
-            GL.Vertex3(verts[17]);
-            GL.Vertex3(verts[2]);
-            GL.Vertex3(verts[18]);
-            GL.Vertex3(verts[3]);
-            GL.Vertex3(verts[19]);
-            GL.Vertex3(verts[4]);
-            GL.Vertex3(verts[20]);
-            GL.Vertex3(verts[5]);
-            GL.Vertex3(verts[21]);
-            GL.Vertex3(verts[6]);
-            GL.Vertex3(verts[22]);
-            GL.Vertex3(verts[7]);
-            GL.Vertex3(verts[23]);
-            GL.Vertex3(verts[8]);
-            GL.Vertex3(verts[24]);
-            GL.Vertex3(verts[9]);
-            GL.Vertex3(verts[25]);
-            GL.Vertex3(verts[10]);
-            GL.Vertex3(verts[26]);
-            GL.Vertex3(verts[11]);
-            GL.Vertex3(verts[27]);
-            GL.Vertex3(verts[12]);
-            GL.Vertex3(verts[28]);
-            GL.Vertex3(verts[13]);
-            GL.Vertex3(verts[29]);
-            GL.Vertex3(verts[14]);
-            GL.Vertex3(verts[30]);
-            GL.Vertex3(verts[15]);
-            GL.Vertex3(verts[31]);
-            GL.Vertex3(verts[0]);
-            GL.Vertex3(verts[16]);
-            GL.End();
+            GLC.Begin(C.PrimitiveType.TriangleStrip);
+            GLC.Vertex3f(in verts[0]);
+            GLC.Vertex3f(in verts[16]);
+            GLC.Vertex3f(in verts[1]);
+            GLC.Vertex3f(in verts[17]);
+            GLC.Vertex3f(in verts[2]);
+            GLC.Vertex3f(in verts[18]);
+            GLC.Vertex3f(in verts[3]);
+            GLC.Vertex3f(in verts[19]);
+            GLC.Vertex3f(in verts[4]);
+            GLC.Vertex3f(in verts[20]);
+            GLC.Vertex3f(in verts[5]);
+            GLC.Vertex3f(in verts[21]);
+            GLC.Vertex3f(in verts[6]);
+            GLC.Vertex3f(in verts[22]);
+            GLC.Vertex3f(in verts[7]);
+            GLC.Vertex3f(in verts[23]);
+            GLC.Vertex3f(in verts[8]);
+            GLC.Vertex3f(in verts[24]);
+            GLC.Vertex3f(in verts[9]);
+            GLC.Vertex3f(in verts[25]);
+            GLC.Vertex3f(in verts[10]);
+            GLC.Vertex3f(in verts[26]);
+            GLC.Vertex3f(in verts[11]);
+            GLC.Vertex3f(in verts[27]);
+            GLC.Vertex3f(in verts[12]);
+            GLC.Vertex3f(in verts[28]);
+            GLC.Vertex3f(in verts[13]);
+            GLC.Vertex3f(in verts[29]);
+            GLC.Vertex3f(in verts[14]);
+            GLC.Vertex3f(in verts[30]);
+            GLC.Vertex3f(in verts[15]);
+            GLC.Vertex3f(in verts[31]);
+            GLC.Vertex3f(in verts[0]);
+            GLC.Vertex3f(in verts[16]);
+            GLC.End();
         }
 
         private void RenderSphere(Vector3[] verts)
         {
             int stackCount = DisplaySphereStacks;
             int sectorCount = DisplaySphereSectors;
-            GL.Begin(PrimitiveType.Triangles);
+            GLC.Begin(C.PrimitiveType.Triangles);
             int k1, k2;
             for (int i = 0; i < stackCount; i++)
             {
@@ -3236,39 +3239,39 @@ namespace MphRead
                 {
                     if (i != 0)
                     {
-                        GL.Vertex3(verts[k1 + 1]);
-                        GL.Vertex3(verts[k2]);
-                        GL.Vertex3(verts[k1]);
+                        GLC.Vertex3f(in verts[k1 + 1]);
+                        GLC.Vertex3f(in verts[k2]);
+                        GLC.Vertex3f(in verts[k1]);
                     }
                     if (i != (stackCount - 1))
                     {
-                        GL.Vertex3(verts[k2 + 1]);
-                        GL.Vertex3(verts[k2]);
-                        GL.Vertex3(verts[k1 + 1]);
+                        GLC.Vertex3f(in verts[k2 + 1]);
+                        GLC.Vertex3f(in verts[k2]);
+                        GLC.Vertex3f(in verts[k1 + 1]);
                     }
                 }
             }
-            GL.End();
+            GLC.End();
         }
 
         private void RenderQuad(Vector3[] verts)
         {
-            GL.Begin(PrimitiveType.TriangleStrip);
-            GL.Vertex3(verts[0]);
-            GL.Vertex3(verts[3]);
-            GL.Vertex3(verts[1]);
-            GL.Vertex3(verts[2]);
-            GL.End();
+            GLC.Begin(C.PrimitiveType.TriangleStrip);
+            GLC.Vertex3f(in verts[0]);
+            GLC.Vertex3f(in verts[3]);
+            GLC.Vertex3f(in verts[1]);
+            GLC.Vertex3f(in verts[2]);
+            GLC.End();
         }
 
         private void RenderNgon(Vector3[] verts, int count)
         {
-            GL.Begin(PrimitiveType.TriangleFan);
+            GLC.Begin(C.PrimitiveType.TriangleFan);
             for (int i = 0; i < count; i++)
             {
-                GL.Vertex3(verts[i]);
+                GLC.Vertex3f(in verts[i]);
             }
-            GL.End();
+            GLC.End();
         }
 
         private void RenderNgonLines(Vector3[] verts, int count)
@@ -3276,13 +3279,13 @@ namespace MphRead
             Vector4 color = _showCollision && ColDisplayColor == CollisionColor.None && ColDisplayAlpha == 1
                 ? new Vector4(0f, 0f, 1f, 1f)
                 : new Vector4(1f, 0f, 0f, 1f);
-            GL.Uniform4(_shaderLocations.OverrideColor, color);
-            GL.Begin(PrimitiveType.LineLoop);
+            GL.Uniform4f(_shaderLocations.OverrideColor, 1, in color);
+            GLC.Begin(C.PrimitiveType.LineLoop);
             for (int i = 0; i < count; i++)
             {
-                GL.Vertex3(verts[i]);
+                GLC.Vertex3f(in verts[i]);
             }
-            GL.End();
+            GLC.End();
         }
 
         private void RenderParticle(RenderItem item)
@@ -3295,16 +3298,16 @@ namespace MphRead
             Vector3 vertex2 = item.Points[5];
             Vector3 texcoord3 = item.Points[6];
             Vector3 vertex3 = item.Points[7];
-            GL.Begin(PrimitiveType.Quads);
-            GL.TexCoord3(texcoord0.X * item.ScaleS, texcoord0.Y * item.ScaleT, 0f);
-            GL.Vertex3(vertex0);
-            GL.TexCoord3(texcoord1.X * item.ScaleS, texcoord1.Y * item.ScaleT, 0f);
-            GL.Vertex3(vertex1);
-            GL.TexCoord3(texcoord2.X * item.ScaleS, texcoord2.Y * item.ScaleT, 0f);
-            GL.Vertex3(vertex2);
-            GL.TexCoord3(texcoord3.X * item.ScaleS, texcoord3.Y * item.ScaleT, 0f);
-            GL.Vertex3(vertex3);
-            GL.End();
+            GLC.Begin(C.PrimitiveType.Quads);
+            GLC.TexCoord3f(texcoord0.X * item.ScaleS, texcoord0.Y * item.ScaleT, 0f);
+            GLC.Vertex3f(in vertex0);
+            GLC.TexCoord3f(texcoord1.X * item.ScaleS, texcoord1.Y * item.ScaleT, 0f);
+            GLC.Vertex3f(in vertex1);
+            GLC.TexCoord3f(texcoord2.X * item.ScaleS, texcoord2.Y * item.ScaleT, 0f);
+            GLC.Vertex3f(in vertex2);
+            GLC.TexCoord3f(texcoord3.X * item.ScaleS, texcoord3.Y * item.ScaleT, 0f);
+            GLC.Vertex3f(in vertex3);
+            GLC.End();
         }
 
         private void RenderTrailSingle(RenderItem item)
@@ -3317,30 +3320,30 @@ namespace MphRead
             Vector3 vertex2 = item.Points[5];
             Vector3 texcoord3 = item.Points[6];
             Vector3 vertex3 = item.Points[7];
-            GL.Begin(PrimitiveType.QuadStrip);
-            GL.TexCoord3(texcoord0);
-            GL.Vertex3(vertex0);
-            GL.TexCoord3(texcoord1);
-            GL.Vertex3(vertex1);
-            GL.TexCoord3(texcoord2);
-            GL.Vertex3(vertex2);
-            GL.TexCoord3(texcoord3);
-            GL.Vertex3(vertex3);
-            GL.End();
+            GLC.Begin(C.PrimitiveType.QuadStrip);
+            GLC.TexCoord3f(in texcoord0);
+            GLC.Vertex3f(in vertex0);
+            GLC.TexCoord3f(in texcoord1);
+            GLC.Vertex3f(in vertex1);
+            GLC.TexCoord3f(in texcoord2);
+            GLC.Vertex3f(in vertex2);
+            GLC.TexCoord3f(in texcoord3);
+            GLC.Vertex3f(in vertex3);
+            GLC.End();
         }
 
         private void RenderTrailMulti(RenderItem item)
         {
             Debug.Assert(item.ItemCount >= 4 && item.ItemCount % 2 == 0);
-            GL.Begin(PrimitiveType.QuadStrip);
+            GLC.Begin(C.PrimitiveType.QuadStrip);
             for (int i = 0; i < item.ItemCount; i += 2)
             {
                 Vector3 texcoord = item.Points[i];
                 Vector3 vertex = item.Points[i + 1];
-                GL.TexCoord3(texcoord);
-                GL.Vertex3(vertex);
+                GLC.TexCoord3f(in texcoord);
+                GLC.Vertex3f(in vertex);
             }
-            GL.End();
+            GLC.End();
         }
 
         private void RenderTrailStack(RenderItem item)
@@ -3355,16 +3358,16 @@ namespace MphRead
                 Vector3 vertex2 = item.Points[i * 8 + 5];
                 Vector3 texcoord3 = item.Points[i * 8 + 6];
                 Vector3 vertex3 = item.Points[i * 8 + 7];
-                GL.Begin(PrimitiveType.Quads);
-                GL.TexCoord3(texcoord0);
-                GL.Vertex3(vertex0);
-                GL.TexCoord3(texcoord1);
-                GL.Vertex3(vertex1);
-                GL.TexCoord3(texcoord2);
-                GL.Vertex3(vertex2);
-                GL.TexCoord3(texcoord3);
-                GL.Vertex3(vertex3);
-                GL.End();
+                GLC.Begin(C.PrimitiveType.Quads);
+                GLC.TexCoord3f(in texcoord0);
+                GLC.Vertex3f(in vertex0);
+                GLC.TexCoord3f(in texcoord1);
+                GLC.Vertex3f(in vertex1);
+                GLC.TexCoord3f(in texcoord2);
+                GLC.Vertex3f(in vertex2);
+                GLC.TexCoord3f(in texcoord3);
+                GLC.Vertex3f(in vertex3);
+                GLC.End();
             }
         }
 
@@ -3379,37 +3382,37 @@ namespace MphRead
             GL.Disable(EnableCap.DepthTest);
             GL.Enable(EnableCap.Blend);
             Matrix4 identity = Matrix4.Identity;
-            GL.UniformMatrix4(_shaderLocations.MatrixStack, transpose: false, ref identity);
-            GL.UniformMatrix4(_shaderLocations.ViewInvMatrix, transpose: false, ref identity);
-            GL.Uniform1(_shaderLocations.UseLight, 0);
-            GL.Color3(Vector3.One);
-            GL.Uniform3(_shaderLocations.Diffuse, Vector3.One);
-            GL.Uniform3(_shaderLocations.Ambient, Vector3.One);
-            GL.Uniform3(_shaderLocations.Specular, Vector3.One);
-            GL.Uniform3(_shaderLocations.Emission, Vector3.One);
-            GL.Uniform1(_shaderLocations.MaterialMode, (int)PolygonMode.Modulate);
-            GL.Uniform1(_shaderLocations.TexgenMode, (int)TexgenMode.None);
-            GL.UniformMatrix4(_shaderLocations.TextureMatrix, transpose: false, ref identity);
-            GL.Uniform1(_shaderLocations.UseTexture, 1);
-            GL.Uniform1(_shaderLocations.UseOverride, 0);
-            GL.Uniform1(_shaderLocations.UsePaletteOverride, 0);
-            GL.Uniform1(_shaderLocations.UseFog, 0);
+            GL.UniformMatrix4f(_shaderLocations.MatrixStack, 1, transpose: false, ref identity);
+            GL.UniformMatrix4f(_shaderLocations.ViewInvMatrix, 1, transpose: false, ref identity);
+            GL.Uniform1i(_shaderLocations.UseLight, 0);
+            GLC.Color3f(1, 1, 1);
+            GL.Uniform3f(_shaderLocations.Diffuse, 1, 1, 1);
+            GL.Uniform3f(_shaderLocations.Ambient, 1, 1, 1);
+            GL.Uniform3f(_shaderLocations.Specular, 1, 1, 1);
+            GL.Uniform3f(_shaderLocations.Emission, 1, 1, 1);
+            GL.Uniform1i(_shaderLocations.MaterialMode, (int)PolygonMode.Modulate);
+            GL.Uniform1i(_shaderLocations.TexgenMode, (int)TexgenMode.None);
+            GL.UniformMatrix4f(_shaderLocations.TextureMatrix, 1, transpose: false, ref identity);
+            GL.Uniform1i(_shaderLocations.UseTexture, 1);
+            GL.Uniform1i(_shaderLocations.UseOverride, 0);
+            GL.Uniform1i(_shaderLocations.UsePaletteOverride, 0);
+            GL.Uniform1i(_shaderLocations.UseFog, 0);
             if (_faceCulling)
             {
                 GL.Enable(EnableCap.CullFace);
                 GL.CullFace(TriangleFace.Back);
             }
-            GL.UniformMatrix4(_shaderLocations.ViewMatrix, transpose: false, ref identity);
+            GL.UniformMatrix4f(_shaderLocations.ViewMatrix, 1, transpose: false, ref identity);
             var orthoMatrix = Matrix4.CreateOrthographic(Size.X, Size.Y, 0.5f, 1.5f);
-            GL.UniformMatrix4(_shaderLocations.ProjectionMatrix, transpose: false, ref orthoMatrix);
+            GL.UniformMatrix4f(_shaderLocations.ProjectionMatrix, 1, transpose: false, ref orthoMatrix);
         }
 
         private void UnsetHudLayerUniforms()
         {
             GL.Disable(EnableCap.Blend);
             GL.Enable(EnableCap.DepthTest);
-            GL.UniformMatrix4(_shaderLocations.ViewMatrix, transpose: false, ref _viewMatrix);
-            GL.UniformMatrix4(_shaderLocations.ProjectionMatrix, transpose: false, ref _perspectiveMatrix);
+            GL.UniformMatrix4f(_shaderLocations.ViewMatrix, 1, transpose: false, ref _viewMatrix);
+            GL.UniformMatrix4f(_shaderLocations.ProjectionMatrix, 1, transpose: false, ref _perspectiveMatrix);
         }
 
         private void DrawHudLayer(LayerInfo info)
@@ -3418,15 +3421,15 @@ namespace MphRead
             {
                 return;
             }
-            GL.Uniform1(_shaderLocations.LayerAlpha, info.Alpha);
+            GL.Uniform1f(_shaderLocations.LayerAlpha, info.Alpha);
             GL.BindTexture(TextureTarget.Texture2D, info.BindingId);
             int minParameter = (int)TextureMinFilter.Nearest;
             int magParameter = (int)TextureMagFilter.Nearest;
-            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, minParameter);
-            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, magParameter);
-            GL.TexParameter(TextureTarget.Texture2D,
+            GL.TexParameteri(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, minParameter);
+            GL.TexParameteri(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, magParameter);
+            GL.TexParameteri(TextureTarget.Texture2D,
                 TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
-            GL.TexParameter(TextureTarget.Texture2D,
+            GL.TexParameteri(TextureTarget.Texture2D,
                 TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
             float viewWidth = Size.X;
             float viewHeight = Size.Y;
@@ -3443,20 +3446,20 @@ namespace MphRead
                 width = viewWidth * info.ScaleX / 2 / (viewWidth / 2);
                 height = viewHeight * info.ScaleY / 2 / (viewHeight / 2);
             }
-            GL.Begin(PrimitiveType.TriangleStrip);
+            GLC.Begin(C.PrimitiveType.TriangleStrip);
             // top right
-            GL.TexCoord3(1f, 0f, 0f);
-            GL.Vertex3(width + info.ShiftX, height + info.ShiftY, 0f);
+            GLC.TexCoord3f(1f, 0f, 0f);
+            GLC.Vertex3f(width + info.ShiftX, height + info.ShiftY, 0f);
             // top left
-            GL.TexCoord3(0f, 0f, 0f);
-            GL.Vertex3(-width + info.ShiftX, height + info.ShiftY, 0f);
+            GLC.TexCoord3f(0f, 0f, 0f);
+            GLC.Vertex3f(-width + info.ShiftX, height + info.ShiftY, 0f);
             // bottom right
-            GL.TexCoord3(1f, 1f, 0f);
-            GL.Vertex3(width + info.ShiftX, -height + info.ShiftY, 0f);
+            GLC.TexCoord3f(1f, 1f, 0f);
+            GLC.Vertex3f(width + info.ShiftX, -height + info.ShiftY, 0f);
             // bottom left
-            GL.TexCoord3(0f, 1f, 0f);
-            GL.Vertex3(-width + info.ShiftX, -height + info.ShiftY, 0f);
-            GL.End();
+            GLC.TexCoord3f(0f, 1f, 0f);
+            GLC.Vertex3f(-width + info.ShiftX, -height + info.ShiftY, 0f);
+            GLC.End();
             GL.BindTexture(TextureTarget.Texture2D, 0);
         }
 
@@ -3471,16 +3474,16 @@ namespace MphRead
             float width = inst.Width;
             float height = inst.Height;
             bool center = inst.Center;
-            GL.Uniform1(_shaderLocations.LayerAlpha, inst.Alpha);
-            GL.Uniform1(_shaderLocations.UseMask, inst.UseMask ? 1 : 0);
+            GL.Uniform1f(_shaderLocations.LayerAlpha, inst.Alpha);
+            GL.Uniform1i(_shaderLocations.UseMask, inst.UseMask ? 1 : 0);
             GL.BindTexture(TextureTarget.Texture2D, inst.BindingId);
             int minParameter = (int)TextureMinFilter.Nearest;
             int magParameter = (int)TextureMagFilter.Nearest;
-            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, minParameter);
-            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, magParameter);
-            GL.TexParameter(TextureTarget.Texture2D,
+            GL.TexParameteri(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, minParameter);
+            GL.TexParameteri(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, magParameter);
+            GL.TexParameteri(TextureTarget.Texture2D,
                 TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
-            GL.TexParameter(TextureTarget.Texture2D,
+            GL.TexParameteri(TextureTarget.Texture2D,
                 TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
             float viewWidth = Size.X;
             float viewHeight = Size.Y;
@@ -3519,20 +3522,20 @@ namespace MphRead
             {
                 (bottomPos, topPos) = (topPos, bottomPos);
             }
-            GL.Begin(PrimitiveType.TriangleStrip);
+            GLC.Begin(C.PrimitiveType.TriangleStrip);
             // top right
-            GL.TexCoord3(1f, 0f, 0f);
-            GL.Vertex3(rightPos, topPos, 0f);
+            GLC.TexCoord3f(1f, 0f, 0f);
+            GLC.Vertex3f(rightPos, topPos, 0f);
             // top left
-            GL.TexCoord3(0f, 0f, 0f);
-            GL.Vertex3(leftPos, topPos, 0f);
+            GLC.TexCoord3f(0f, 0f, 0f);
+            GLC.Vertex3f(leftPos, topPos, 0f);
             // bottom right
-            GL.TexCoord3(1f, 1f, 0f);
-            GL.Vertex3(rightPos, bottomPos, 0f);
+            GLC.TexCoord3f(1f, 1f, 0f);
+            GLC.Vertex3f(rightPos, bottomPos, 0f);
             // bottom left
-            GL.TexCoord3(0f, 1f, 0f);
-            GL.Vertex3(leftPos, bottomPos, 0f);
-            GL.End();
+            GLC.TexCoord3f(0f, 1f, 0f);
+            GLC.Vertex3f(leftPos, bottomPos, 0f);
+            GLC.End();
             GL.BindTexture(TextureTarget.Texture2D, 0);
         }
 
@@ -3540,26 +3543,26 @@ namespace MphRead
         {
             float scale = Size.Y / 192f;
             var position3d = new Vector3(position.X * Size.X - Size.X / 2, (1 - position.Y) * Size.Y - (Size.Y / 2), -1f);
-            Matrix4 transform = Matrix4.CreateRotationZ(MathHelper.DegreesToRadians(angle))
+            Matrix4 transform = Matrix4.CreateRotationZ(Single.DegreesToRadians(angle))
                 * Matrix4.CreateScale(scale, scale, 1) * Matrix4.CreateTranslation(position3d);
-            GL.UniformMatrix4(_shaderLocations.MatrixStack, transpose: false, ref transform);
+            GL.UniformMatrix4f(_shaderLocations.MatrixStack, 1, transpose: false, ref transform);
             Model model = inst.Model;
             UpdateMaterials(model, 0);
-            GL.Uniform1(_shaderLocations.MaterialAlpha, alpha);
+            GL.Uniform1f(_shaderLocations.MaterialAlpha, alpha);
             GL.BindTexture(TextureTarget.Texture2D, model.Materials[0].TextureBindingId);
             int minParameter = (int)TextureMinFilter.Nearest;
             int magParameter = (int)TextureMagFilter.Nearest;
-            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, minParameter);
-            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, magParameter);
-            GL.TexParameter(TextureTarget.Texture2D,
+            GL.TexParameteri(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, minParameter);
+            GL.TexParameteri(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, magParameter);
+            GL.TexParameteri(TextureTarget.Texture2D,
                 TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
-            GL.TexParameter(TextureTarget.Texture2D,
+            GL.TexParameteri(TextureTarget.Texture2D,
                 TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
-            GL.Color3(new Vector3(color.Red / 31f, color.Green / 31f, color.Blue / 31f));
-            GL.CallList(model.Meshes[0].ListId);
+            GLC.Color3f(color.Red / 31f, color.Green / 31f, color.Blue / 31f);
+            GLC.CallList(model.Meshes[0].ListId);
             GL.BindTexture(TextureTarget.Texture2D, 0);
             Matrix4 identity = Matrix4.Identity;
-            GL.UniformMatrix4(_shaderLocations.MatrixStack, transpose: false, ref identity);
+            GL.UniformMatrix4f(_shaderLocations.MatrixStack, 1, transpose: false, ref identity);
         }
 
         public void DrawHudFilterModel(ModelInstance inst, float alpha = 1)
@@ -3567,32 +3570,32 @@ namespace MphRead
             Model model = inst.Model;
             UpdateMaterials(model, 0);
             Material material = model.Materials[0];
-            GL.Uniform1(_shaderLocations.MaterialAlpha, material.Alpha / 31f * alpha);
+            GL.Uniform1f(_shaderLocations.MaterialAlpha, material.Alpha / 31f * alpha);
             GL.BindTexture(TextureTarget.Texture2D, material.TextureBindingId);
             int minParameter = (int)TextureMinFilter.Nearest;
             int magParameter = (int)TextureMagFilter.Nearest;
-            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, minParameter);
-            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, magParameter);
-            GL.TexParameter(TextureTarget.Texture2D,
+            GL.TexParameteri(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, minParameter);
+            GL.TexParameteri(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, magParameter);
+            GL.TexParameteri(TextureTarget.Texture2D,
                 TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
-            GL.TexParameter(TextureTarget.Texture2D,
+            GL.TexParameteri(TextureTarget.Texture2D,
                 TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
             float viewWidth = Size.X;
             float viewHeight = Size.Y;
-            GL.Begin(PrimitiveType.TriangleStrip);
+            GLC.Begin(C.PrimitiveType.TriangleStrip);
             // top right
-            GL.TexCoord3(1f, 0f, 0f);
-            GL.Vertex3(viewWidth, viewHeight, -1f);
+            GLC.TexCoord3f(1f, 0f, 0f);
+            GLC.Vertex3f(viewWidth, viewHeight, -1f);
             // top left
-            GL.TexCoord3(0f, 0f, 0f);
-            GL.Vertex3(-viewWidth, viewHeight, -1f);
+            GLC.TexCoord3f(0f, 0f, 0f);
+            GLC.Vertex3f(-viewWidth, viewHeight, -1f);
             // bottom right
-            GL.TexCoord3(1f, 1f, 0f);
-            GL.Vertex3(viewWidth, -viewHeight, -1f);
+            GLC.TexCoord3f(1f, 1f, 0f);
+            GLC.Vertex3f(viewWidth, -viewHeight, -1f);
             // bottom left
-            GL.TexCoord3(0f, 1f, 0f);
-            GL.Vertex3(-viewWidth, -viewHeight, -1f);
-            GL.End();
+            GLC.TexCoord3f(0f, 1f, 0f);
+            GLC.Vertex3f(-viewWidth, -viewHeight, -1f);
+            GLC.End();
             GL.BindTexture(TextureTarget.Texture2D, 0);
         }
 
@@ -3602,15 +3605,15 @@ namespace MphRead
         {
             Model model = inst.Model;
             UpdateMaterials(model, 0);
-            GL.Uniform1(_shaderLocations.MaterialAlpha, 1f);
+            GL.Uniform1f(_shaderLocations.MaterialAlpha, 1f);
             GL.BindTexture(TextureTarget.Texture2D, model.Materials[0].TextureBindingId);
             int minParameter = (int)TextureMinFilter.Nearest;
             int magParameter = (int)TextureMagFilter.Nearest;
-            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, minParameter);
-            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, magParameter);
-            GL.TexParameter(TextureTarget.Texture2D,
+            GL.TexParameteri(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, minParameter);
+            GL.TexParameteri(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, magParameter);
+            GL.TexParameteri(TextureTarget.Texture2D,
                 TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
-            GL.TexParameter(TextureTarget.Texture2D,
+            GL.TexParameteri(TextureTarget.Texture2D,
                 TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
             float viewWidth = Size.X;
             float viewHeight = Size.Y;
@@ -3629,41 +3632,41 @@ namespace MphRead
                     newWidth *= model.Scale.X;
                     newHeight *= model.Scale.Y;
                     var transform = Matrix4.CreateScale(newWidth / width, newHeight / height, 1);
-                    transform.Row3.Xyz = new Vector3(xOffset, yOffset, -1);
+                    transform.Row3_Xyz = new Vector3(xOffset, yOffset, -1);
                     node.Animation = transform;
                 }
             }
             model.UpdateMatrixStack();
             Array.Copy(model.MatrixStackValues.ToArray(), _hudMatrixStack, model.MatrixStackValues.Count);
-            GL.UniformMatrix4(_shaderLocations.MatrixStack, model.NodeMatrixIds.Count, transpose: false, _hudMatrixStack);
+            GL.Uniform1f(_shaderLocations.MatrixStack, model.NodeMatrixIds.Count * 16, _hudMatrixStack);
             for (int i = 1; i < 9; i++)
             {
                 Node node = inst.Model.Nodes[i];
                 if (node.Enabled)
                 {
                     Mesh mesh = model.Meshes[node.MeshId / 2];
-                    GL.CallList(mesh.ListId);
+                    GLC.CallList(mesh.ListId);
                 }
             }
             GL.BindTexture(TextureTarget.Texture2D, 0);
             Matrix4 identity = Matrix4.Identity;
-            GL.UniformMatrix4(_shaderLocations.MatrixStack, transpose: false, ref identity);
+            GL.UniformMatrix4f(_shaderLocations.MatrixStack, 1, transpose: false, ref identity);
         }
 
         private void DoMaterial(RenderItem item)
         {
-            GL.Uniform1(_shaderLocations.UseLight, _lighting && item.Lighting ? 1 : 0);
+            GL.Uniform1i(_shaderLocations.UseLight, _lighting && item.Lighting ? 1 : 0);
             // MPH applies the material colors initially by calling DIF_AMB with bit 15 set,
             // so the diffuse color is always set as the vertex color to start
             // (the emission color is set to white if lighting is disabled or black if lighting is enabled; we can just ignore that)
             // --> ...except for hunter models with teams enabled or with double damage
-            GL.Color3(item.Diffuse);
-            GL.Uniform3(_shaderLocations.Diffuse, item.Diffuse);
-            GL.Uniform3(_shaderLocations.Ambient, item.Ambient);
-            GL.Uniform3(_shaderLocations.Specular, item.Specular);
-            GL.Uniform3(_shaderLocations.Emission, item.Emission);
-            GL.Uniform1(_shaderLocations.MaterialAlpha, item.Alpha);
-            GL.Uniform1(_shaderLocations.MaterialMode, (int)item.PolygonMode);
+            GLC.Color3f(item.Diffuse.X, item.Diffuse.Y, item.Diffuse.Z);
+            GL.Uniform3f(_shaderLocations.Diffuse, item.Diffuse.X, item.Diffuse.Y, item.Diffuse.Z);
+            GL.Uniform3f(_shaderLocations.Ambient, item.Ambient.X, item.Ambient.Y, item.Ambient.Z);
+            GL.Uniform3f(_shaderLocations.Specular, item.Specular.X, item.Specular.Y, item.Specular.Z);
+            GL.Uniform3f(_shaderLocations.Emission, item.Emission.X, item.Emission.Y, item.Emission.Z);
+            GL.Uniform1f(_shaderLocations.MaterialAlpha, item.Alpha);
+            GL.Uniform1i(_shaderLocations.MaterialMode, (int)item.PolygonMode);
         }
 
         private void DoTexture(RenderItem item)
@@ -3673,63 +3676,63 @@ namespace MphRead
                 GL.BindTexture(TextureTarget.Texture2D, item.TextureBindingId);
                 int minParameter = _textureFiltering ? (int)TextureMinFilter.Linear : (int)TextureMinFilter.Nearest;
                 int magParameter = _textureFiltering ? (int)TextureMagFilter.Linear : (int)TextureMagFilter.Nearest;
-                GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, minParameter);
-                GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, magParameter);
+                GL.TexParameteri(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, minParameter);
+                GL.TexParameteri(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, magParameter);
                 switch (item.XRepeat)
                 {
                 case RepeatMode.Clamp:
-                    GL.TexParameter(TextureTarget.Texture2D,
+                    GL.TexParameteri(TextureTarget.Texture2D,
                         TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
                     break;
                 case RepeatMode.Repeat:
-                    GL.TexParameter(TextureTarget.Texture2D,
+                    GL.TexParameteri(TextureTarget.Texture2D,
                         TextureParameterName.TextureWrapS, (int)TextureWrapMode.Repeat);
                     break;
                 case RepeatMode.Mirror:
-                    GL.TexParameter(TextureTarget.Texture2D,
+                    GL.TexParameteri(TextureTarget.Texture2D,
                         TextureParameterName.TextureWrapS, (int)TextureWrapMode.MirroredRepeat);
                     break;
                 }
                 switch (item.YRepeat)
                 {
                 case RepeatMode.Clamp:
-                    GL.TexParameter(TextureTarget.Texture2D,
+                    GL.TexParameteri(TextureTarget.Texture2D,
                         TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
                     break;
                 case RepeatMode.Repeat:
-                    GL.TexParameter(TextureTarget.Texture2D,
+                    GL.TexParameteri(TextureTarget.Texture2D,
                         TextureParameterName.TextureWrapT, (int)TextureWrapMode.Repeat);
                     break;
                 case RepeatMode.Mirror:
-                    GL.TexParameter(TextureTarget.Texture2D,
+                    GL.TexParameteri(TextureTarget.Texture2D,
                         TextureParameterName.TextureWrapT, (int)TextureWrapMode.MirroredRepeat);
                     break;
                 }
                 Matrix4 texcoordMatrix = item.TexcoordMatrix;
-                GL.Uniform1(_shaderLocations.TexgenMode, (int)item.TexgenMode);
-                GL.UniformMatrix4(_shaderLocations.TextureMatrix, transpose: false, ref texcoordMatrix);
+                GL.Uniform1i(_shaderLocations.TexgenMode, (int)item.TexgenMode);
+                GL.UniformMatrix4f(_shaderLocations.TextureMatrix, 1, transpose: false, ref texcoordMatrix);
             }
-            GL.Uniform1(_shaderLocations.UseTexture, item.HasTexture && _showTextures ? 1 : 0);
+            GL.Uniform1i(_shaderLocations.UseTexture, item.HasTexture && _showTextures ? 1 : 0);
             Vector4? overrideColor = item.OverrideColor;
             if (overrideColor != null)
             {
                 Vector4 overrideColorValue = overrideColor.Value;
-                GL.Uniform1(_shaderLocations.UseOverride, 1);
-                GL.Uniform4(_shaderLocations.OverrideColor, ref overrideColorValue);
+                GL.Uniform1i(_shaderLocations.UseOverride, 1);
+                GL.Uniform4f(_shaderLocations.OverrideColor, 1, ref overrideColorValue);
             }
             else
             {
-                GL.Uniform1(_shaderLocations.UseOverride, 0);
+                GL.Uniform1i(_shaderLocations.UseOverride, 0);
             }
             if (item.PaletteOverride != null)
             {
                 Vector4 overrideColorValue = item.PaletteOverride.Value;
-                GL.Uniform1(_shaderLocations.UsePaletteOverride, 1);
-                GL.Uniform4(_shaderLocations.PaletteOverrideColor, ref overrideColorValue);
+                GL.Uniform1i(_shaderLocations.UsePaletteOverride, 1);
+                GL.Uniform4f(_shaderLocations.PaletteOverrideColor, 1, ref overrideColorValue);
             }
             else
             {
-                GL.Uniform1(_shaderLocations.UsePaletteOverride, 0);
+                GL.Uniform1i(_shaderLocations.UsePaletteOverride, 0);
             }
         }
 
@@ -3764,7 +3767,7 @@ namespace MphRead
                 }
                 else if (_cameraMode == CameraMode.Roam)
                 {
-                    UpdateCameraRotation(MathHelper.DegreesToRadians(deltaX / 1.5f), MathHelper.DegreesToRadians(-deltaY / 1.5f));
+                    UpdateCameraRotation(Single.DegreesToRadians(deltaX / 1.5f), Single.DegreesToRadians(-deltaY / 1.5f));
                 }
             }
         }
@@ -4260,7 +4263,7 @@ namespace MphRead
             {
                 float moveStep = _keyboardState.IsKeyDown(Keys.LeftShift) || _keyboardState.IsKeyDown(Keys.RightShift) ? 0.5f : 0.1f;
                 float rotStepDeg = _keyboardState.IsKeyDown(Keys.LeftShift) || _keyboardState.IsKeyDown(Keys.RightShift) ? 3 : 1.5f;
-                float rotStep = MathHelper.DegreesToRadians(rotStepDeg);
+                float rotStep = Single.DegreesToRadians(rotStepDeg);
                 if (_keyboardState.IsKeyDown(Keys.W)) // move forward
                 {
                     _cameraPosition += _cameraFacing * moveStep;
@@ -4877,7 +4880,7 @@ namespace MphRead
 
         private static readonly NativeWindowSettings _nativeWindowSettings = new NativeWindowSettings()
         {
-            ClientSize = new Vector2i(1024, 768),
+            ClientSize = new OpenTK.Mathematics.Vector2i(1024, 768),
             Title = "MphRead",
             Profile = ContextProfile.Compatability,
             Flags = ContextFlags.Default,

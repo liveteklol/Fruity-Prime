@@ -4,9 +4,9 @@ using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Numerics;
 using MphRead.Entities;
 using MphRead.Formats.Collision;
-using OpenTK.Mathematics;
 
 namespace MphRead.Effects
 {
@@ -69,13 +69,13 @@ namespace MphRead.Effects
         public void AddRenderItem(Scene scene)
         {
             Vector3[] uvsAndVerts = ArrayPool<Vector3>.Shared.Rent(8);
-            uvsAndVerts[0] = new Vector3(Texcoord0);
+            uvsAndVerts[0] = new Vector3(Texcoord0.X, Texcoord0.Y, 0);
             uvsAndVerts[1] = Vertex0;
-            uvsAndVerts[2] = new Vector3(Texcoord1);
+            uvsAndVerts[2] = new Vector3(Texcoord1.X, Texcoord1.Y, 0);
             uvsAndVerts[3] = Vertex1;
-            uvsAndVerts[4] = new Vector3(Texcoord2);
+            uvsAndVerts[4] = new Vector3(Texcoord2.X, Texcoord2.Y, 0);
             uvsAndVerts[5] = Vertex2;
-            uvsAndVerts[6] = new Vector3(Texcoord3);
+            uvsAndVerts[6] = new Vector3(Texcoord3.X, Texcoord3.Y, 0);
             uvsAndVerts[7] = Vertex3;
             Material material = ParticleDefinition.Model.Materials[ParticleDefinition.MaterialId];
             // should already be bound
@@ -174,7 +174,7 @@ namespace MphRead.Effects
             {
                 percent *= -1;
             }
-            float angle = MathHelper.DegreesToRadians(360 * percent);
+            float angle = Single.DegreesToRadians(360 * percent);
             vec.X = MathF.Sin(angle);
             vec.Y = 0;
             vec.Z = MathF.Cos(angle);
@@ -199,7 +199,7 @@ namespace MphRead.Effects
         {
             float value1 = InvokeFloatFunc(Funcs[(uint)param[0]], times);
             float value2 = InvokeFloatFunc(Funcs[(uint)param[1]], times);
-            float angle = MathHelper.DegreesToRadians((Rng.GetRandomInt1(0xFFFF) >> 4) * (360 / 4096f));
+            float angle = Single.DegreesToRadians((Rng.GetRandomInt1(0xFFFF) >> 4) * (360 / 4096f));
             vec.X = MathF.Sin(angle) * value1;
             vec.Y = value2;
             vec.Z = MathF.Cos(angle) * value1;
@@ -608,7 +608,7 @@ namespace MphRead.Effects
 
         public void Transform(Vector3 position, Matrix4 transform)
         {
-            transform.Row3.Xyz = position;
+            transform.Row3_Xyz = position;
             for (int i = 0; i < Elements.Count; i++)
             {
                 EffectElementEntry element = Elements[i];
@@ -955,7 +955,7 @@ namespace MphRead.Effects
 
         protected override void FxFunc11(IReadOnlyList<int> param, TimeValues times, ref Vector3 vec)
         {
-            float angle = MathHelper.DegreesToRadians(360 * PortionTotal);
+            float angle = Single.DegreesToRadians(360 * PortionTotal);
             vec.X = MathF.Sin(angle);
             vec.Y = 0;
             vec.Z = MathF.Cos(angle);
@@ -1083,7 +1083,7 @@ namespace MphRead.Effects
             var vec1 = Vector3.Normalize(Speed);
             var vec2 = new Vector3(viewMatrix.M13, viewMatrix.M23, viewMatrix.M33);
             var vec3 = Vector3.Cross(vec2, vec1);
-            if (vec3.LengthSquared < Fixed.ToFloat(64))
+            if (vec3.LengthSquared() < Fixed.ToFloat(64))
             {
                 vec2 = new Vector3(viewMatrix.M11, viewMatrix.M21, viewMatrix.M31);
                 vec3 = Vector3.Cross(vec2, vec1);
@@ -1180,7 +1180,7 @@ namespace MphRead.Effects
 
         private void DrawC4(float scaleFactor)
         {
-            if (Speed.LengthSquared > Fixed.ToFloat(128))
+            if (Speed.LengthSquared() > Fixed.ToFloat(128))
             {
                 EffectVec1 = Vector3.Normalize(Speed);
                 DrawShared(scaleFactor, skipIfZeroSpeed: true);
@@ -1193,8 +1193,8 @@ namespace MphRead.Effects
             {
                 ShouldDraw = true;
                 Color = new Vector3(Red, Green, Blue);
-                float angle1 = MathHelper.DegreesToRadians(Rotation);
-                float angle2 = MathHelper.DegreesToRadians(Rotation + 90);
+                float angle1 = Single.DegreesToRadians(Rotation);
+                float angle2 = Single.DegreesToRadians(Rotation + 90);
                 float sin1 = MathF.Sin(angle1);
                 float cos1 = MathF.Cos(angle1);
                 float sin2 = MathF.Sin(angle2);
@@ -1278,22 +1278,22 @@ namespace MphRead.Effects
                 }
                 if (BillboardMode == BillboardMode.Sphere)
                 {
-                    NodeTransform = Matrix4.CreateScale(Scale) * Matrix4.CreateTranslation(new Vector3(ev4));
+                    NodeTransform = Matrix4.CreateScale(Scale) * Matrix4.CreateTranslation(ev4.Xyz);
                 }
                 else
                 {
                     Debug.Assert(false, "DrawDC was called with non-billboard");
-                    var ev1 = new Vector4(EffectVec1 * Scale);
-                    var ev2 = new Vector4(EffectVec2 * Scale);
-                    var ev3 = new Vector4(EffectVec3 * Scale);
-                    NodeTransform = new Matrix4(ev1, ev2, ev3, ev4);
+                    var ev1 = new Vector4(EffectVec1 * Scale, 0);
+                    var ev2 = new Vector4(EffectVec2 * Scale, 0);
+                    var ev3 = new Vector4(EffectVec3 * Scale, 0);
+                    NodeTransform = Matrix4.Create(ev1, ev2, ev3, ev4);
                 }
             }
         }
 
         private void DrawShared(float scaleFactor, bool skipIfZeroSpeed)
         {
-            if (Alpha > 0 && (!skipIfZeroSpeed || Speed.LengthSquared > 0))
+            if (Alpha > 0 && (!skipIfZeroSpeed || Speed.LengthSquared() > 0))
             {
                 ShouldDraw = true;
                 Color = new Vector3(Red, Green, Blue);
@@ -1408,13 +1408,13 @@ namespace MphRead.Effects
                     return;
                 }
                 Vector3[] uvsAndVerts = ArrayPool<Vector3>.Shared.Rent(8);
-                uvsAndVerts[0] = new Vector3(Texcoord0);
+                uvsAndVerts[0] = new Vector3(Texcoord0.X, Texcoord0.Y, 0);
                 uvsAndVerts[1] = Vertex0;
-                uvsAndVerts[2] = new Vector3(Texcoord1);
+                uvsAndVerts[2] = new Vector3(Texcoord1.X, Texcoord1.Y, 0);
                 uvsAndVerts[3] = Vertex1;
-                uvsAndVerts[4] = new Vector3(Texcoord2);
+                uvsAndVerts[4] = new Vector3(Texcoord2.X, Texcoord2.Y, 0);
                 uvsAndVerts[5] = Vertex2;
-                uvsAndVerts[6] = new Vector3(Texcoord3);
+                uvsAndVerts[6] = new Vector3(Texcoord3.X, Texcoord3.Y, 0);
                 uvsAndVerts[7] = Vertex3;
                 Material material = Owner.Model.Materials[MaterialId];
                 int bindingId = Owner.TextureBindingIds[ParticleId];

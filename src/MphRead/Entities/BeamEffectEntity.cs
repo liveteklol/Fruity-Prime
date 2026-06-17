@@ -1,5 +1,4 @@
 using MphRead.Formats.Collision;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities
 {

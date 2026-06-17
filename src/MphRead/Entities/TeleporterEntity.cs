@@ -2,7 +2,6 @@ using System;
 using System.Diagnostics;
 using MphRead.Formats;
 using MphRead.Formats.Culling;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities
 {
@@ -90,14 +89,14 @@ namespace MphRead.Entities
                 inst.SetAnimation(-1);
                 inst = SetUpModel(name);
                 inst.SetAnimation(-1);
-                float angleY = MathHelper.DegreesToRadians(337 * (360 / 4096f));
-                float angleZ = MathHelper.DegreesToRadians(360 * (360 / 4096f));
+                float angleY = Single.DegreesToRadians(337 * (360 / 4096f));
+                float angleZ = Single.DegreesToRadians(360 * (360 / 4096f));
                 Matrix4 transform = Matrix4.CreateRotationY(angleY) * Matrix4.CreateRotationZ(angleZ);
-                transform.Row3.Xyz = new Vector3(Fixed.ToFloat(7208), Fixed.ToFloat(2375), 0);
+                transform.Row3_Xyz = new Vector3(Fixed.ToFloat(7208), Fixed.ToFloat(2375), 0);
                 _artifact1Transform = transform;
-                angleY = MathHelper.DegreesToRadians(1365 * (360 / 4096f));
+                angleY = Single.DegreesToRadians(1365 * (360 / 4096f));
                 _artifact2Transform = _artifact1Transform * Matrix4.CreateRotationY(angleY);
-                angleY = MathHelper.DegreesToRadians(2730 * (360 / 4096f));
+                angleY = Single.DegreesToRadians(2730 * (360 / 4096f));
                 _artifact3Transform = _artifact1Transform * Matrix4.CreateRotationY(angleY);
             }
             if (multiplayer)
@@ -350,7 +349,7 @@ namespace MphRead.Entities
             Matrix4 transform = base.GetModelTransform(inst, index);
             if (index != 0 && inst.IsPlaceholder)
             {
-                transform.Row3.Xyz = _targetPos;
+                transform.Row3_Xyz = _targetPos;
             }
             else if (index == 1)
             {

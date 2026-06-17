@@ -3,7 +3,6 @@ using System.Diagnostics;
 using MphRead.Effects;
 using MphRead.Formats;
 using MphRead.Formats.Culling;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities
 {
@@ -187,7 +186,7 @@ namespace MphRead.Entities
                             continue;
                         }
                         Vector3 between = player.Position - Position;
-                        float distSqr = between.LengthSquared;
+                        float distSqr = between.LengthSquared();
                         if (distSqr < minDistSqr)
                         {
                             minDistSqr = distSqr;
@@ -410,7 +409,7 @@ namespace MphRead.Entities
                 _useRoomLights = true;
                 float radius = 0.65f;
                 var transform = Matrix4.CreateScale(radius);
-                transform.Row3.Xyz = Position;
+                transform.Row3_Xyz = Position;
                 UpdateTransforms(_altIceModel, transform, recolor: 0);
                 GetDrawItems(_altIceModel, 1);
                 _useRoomLights = false;
@@ -465,11 +464,11 @@ namespace MphRead.Entities
                 ulong frame = _scene.LiveFrames / 2;
                 float rotZ = ((int)(16 * ((781874935307L * (53248 * frame) >> 32) + 2048)) >> 20) * (360 / 4096f);
                 float rotY = ((int)(16 * ((781874935307L * (26624 * frame) + 0x80000000000) >> 32)) >> 20) * (360 / 4096f);
-                var rot = Matrix4.CreateRotationZ(MathHelper.DegreesToRadians(rotZ));
-                rot *= Matrix4.CreateRotationY(MathHelper.DegreesToRadians(rotY));
+                var rot = Matrix4.CreateRotationZ(Single.DegreesToRadians(rotZ));
+                rot *= Matrix4.CreateRotationY(Single.DegreesToRadians(rotY));
                 product = rot * product;
                 product *= 1.0f / (texture.Width / 2);
-                product = new Matrix4(
+                product = Matrix4.Create(
                     product.Row0 * 16.0f,
                     product.Row1 * 16.0f,
                     product.Row2 * 16.0f,

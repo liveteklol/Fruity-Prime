@@ -5,7 +5,6 @@ using MphRead.Effects;
 using MphRead.Formats;
 using MphRead.Formats.Collision;
 using MphRead.Formats.Culling;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities
 {
@@ -847,7 +846,7 @@ namespace MphRead.Entities
                         transform.M32 * 1.5f + transform.M42,
                         transform.M33 * 1.5f + transform.M43
                     );
-                    transform = Matrix.GetTransform4(new Vector3(transform.Row1), new Vector3(transform.Row2), position);
+                    transform = Matrix.GetTransform4(transform.Row1.Xyz, transform.Row2.Xyz, position);
                     effect.Transform(position, transform);
                     _effects[i] = effect;
                 }
@@ -942,7 +941,7 @@ namespace MphRead.Entities
             }
             else
             {
-                float distance = velocity.Length;
+                float distance = velocity.Length();
                 if (distance == 0)
                 {
                     factor = 0; // skdebug
@@ -1246,13 +1245,13 @@ namespace MphRead.Entities
                 transform = GetTransformMatrix();
                 if (_posOffset != Vector3.Zero)
                 {
-                    transform.Row3.Xyz += Matrix.Vec3MultMtx3(_posOffset, transform);
+                    transform.Row3_Xyz += Matrix.Vec3MultMtx3(_posOffset, transform);
                 }
                 if (_parentEntCol != null)
                 {
                     if (Flags.TestFlag(PlatformFlags.SyluxShip))
                     {
-                        transform.Row3.Xyz = Matrix.Vec3MultMtx4(transform.Row3.Xyz, _parentEntCol.Transform);
+                        transform.Row3_Xyz = Matrix.Vec3MultMtx4(transform.Row3.Xyz, _parentEntCol.Transform);
                     }
                     else
                     {
@@ -1705,7 +1704,7 @@ namespace MphRead.Entities
         private void UpdateMovement()
         {
             Vector3 velocity = _posList[_toIndex] - _posList[_fromIndex];
-            float distance = velocity.Length;
+            float distance = velocity.Length();
             _moveTimer = (int)(distance / _speed);
             float factor = _speed / distance;
             _velocity = velocity * factor;

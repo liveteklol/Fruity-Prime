@@ -2,7 +2,6 @@ using System;
 using System.Diagnostics;
 using MphRead.Formats;
 using MphRead.Formats.Culling;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities.Enemies
 {
@@ -112,7 +111,7 @@ namespace MphRead.Entities.Enemies
         {
             if (_state1 == 9)
             {
-                if (_speed.LengthSquared <= Fixed.ToFloat(50) / 2) // todo: FPS stuff
+                if (_speed.LengthSquared() <= Fixed.ToFloat(50) / 2) // todo: FPS stuff
                 {
                     _speed = Vector3.Zero;
                 }
@@ -168,7 +167,7 @@ namespace MphRead.Entities.Enemies
                 var vec = new Vector3(dist, 0, 0);
                 _dropAngleSign *= -1;
                 float randAngle = Fixed.ToFloat(Rng.GetRandomInt2(0xB4000)) * _dropAngleSign; // [0-180)
-                var rotY = Matrix4.CreateRotationY(MathHelper.DegreesToRadians(randAngle));
+                var rotY = Matrix4.CreateRotationY(Single.DegreesToRadians(randAngle));
                 vec = Matrix.Vec3MultMtx3(vec, rotY);
                 moveTarget = new Vector3(
                     pos.X + vec.X,
@@ -190,7 +189,7 @@ namespace MphRead.Entities.Enemies
             CollisionResult result = default;
             CollisionDetection.CheckBetweenPoints(Position, moveTarget, TestFlags.None, _scene, ref result);
             _moveTarget = moveTarget.WithY(result.Position.Y);
-            _moveDistSqr = (_moveTarget - Position).WithY(0).LengthSquared;
+            _moveDistSqr = (_moveTarget - Position).WithY(0).LengthSquared();
         }
 
         private bool HandleCollision(Vector3 testPos)
@@ -391,7 +390,7 @@ namespace MphRead.Entities.Enemies
             SetNodeAnim(16);
             PickMoveTarget(_homeVolume);
             _targetVec = (_moveTarget - Position).WithY(0).Normalized();
-            float angle = MathHelper.RadiansToDegrees(MathF.Acos(Vector3.Dot(FacingVector, _targetVec)));
+            float angle = Single.RadiansToDegrees(MathF.Acos(Vector3.Dot(FacingVector, _targetVec)));
             _stepCount = 10 * 2; // todo: FPS stuff
             _aimAngleStep = angle / _stepCount;
             return true;
@@ -496,7 +495,7 @@ namespace MphRead.Entities.Enemies
             }
             SetNodeAnim(16);
             _targetVec = (PlayerEntity.Main.Position - Position).WithY(0).Normalized();
-            float angle = MathHelper.RadiansToDegrees(MathF.Acos(Vector3.Dot(FacingVector, _targetVec)));
+            float angle = Single.RadiansToDegrees(MathF.Acos(Vector3.Dot(FacingVector, _targetVec)));
             _stepCount = 10 * 2; // todo: FPS stuff
             _aimAngleStep = angle / _stepCount;
             return true;
@@ -593,7 +592,7 @@ namespace MphRead.Entities.Enemies
             }
             SetNodeAnim(16);
             _targetVec = (playerPos - Position).WithY(0).Normalized();
-            float angle = MathHelper.RadiansToDegrees(MathF.Acos(Vector3.Dot(FacingVector, _targetVec)));
+            float angle = Single.RadiansToDegrees(MathF.Acos(Vector3.Dot(FacingVector, _targetVec)));
             _stepCount = 10 * 2; // todo: FPS stuff
             _aimAngleStep = angle / _stepCount;
             _speed = Vector3.Zero;
@@ -619,7 +618,7 @@ namespace MphRead.Entities.Enemies
             }
             PickMoveTarget(_homeVolume);
             Vector3 travel = _moveTarget - Position;
-            float distance = travel.Length;
+            float distance = travel.Length();
             _stepCount = (ushort)((distance / _stepDistance) + 1);
             _speed = travel * (_stepDistance / distance);
             SetNodeAnim(12, AnimFlags.NoLoop);
@@ -634,7 +633,7 @@ namespace MphRead.Entities.Enemies
             var vec = new Vector3(-facing.X * factor, 0, -facing.Z * factor);
             _recoilAngleSign *= -1;
             float randAngle = (Fixed.ToFloat(Rng.GetRandomInt2(0x1E000)) + 30) * _recoilAngleSign; // [30-60)
-            var rotY = Matrix4.CreateRotationY(MathHelper.DegreesToRadians(randAngle));
+            var rotY = Matrix4.CreateRotationY(Single.DegreesToRadians(randAngle));
             vec = Matrix.Vec3MultMtx3(vec, rotY);
             _speed = new Vector3(vec.X, Fixed.ToFloat(1000), vec.Z);
             _speed /= 2; // todo: FPS stuff
@@ -642,7 +641,7 @@ namespace MphRead.Entities.Enemies
 
         protected bool Behavior16()
         {
-            if ((Position - PlayerEntity.Main.Position).LengthSquared >= 1.5f * 1.5f)
+            if ((Position - PlayerEntity.Main.Position).LengthSquared() >= 1.5f * 1.5f)
             {
                 return false;
             }
@@ -677,7 +676,7 @@ namespace MphRead.Entities.Enemies
         protected bool Behavior18()
         {
             Vector3 between = Position - PlayerEntity.Main.Position;
-            float distSqr = between.LengthSquared;
+            float distSqr = between.LengthSquared();
             if (distSqr <= 1.5f * 1.5f || distSqr >= 2 * 2)
             {
                 return false;
@@ -698,7 +697,7 @@ namespace MphRead.Entities.Enemies
                 _soundSource.StopSfx(SfxId.HANGING_TERROR_WALK);
                 _speed = Vector3.Zero;
                 _targetVec = (_moveTarget - Position).WithY(0).Normalized();
-                float angle = MathHelper.RadiansToDegrees(MathF.Acos(Vector3.Dot(FacingVector, _targetVec)));
+                float angle = Single.RadiansToDegrees(MathF.Acos(Vector3.Dot(FacingVector, _targetVec)));
                 _stepCount = 10 * 2; // todo: FPS stuff
                 _aimAngleStep = angle / _stepCount;
                 _reachingTarget = false;
@@ -706,7 +705,7 @@ namespace MphRead.Entities.Enemies
             }
             Vector3 nextPos = Position + _speed;
             Vector3 travel = _moveStart - nextPos;
-            if (travel.LengthSquared > _moveDistSqr)
+            if (travel.LengthSquared() > _moveDistSqr)
             {
                 _speed = nextPos - Position;
                 _reachingTarget = true;
@@ -725,7 +724,7 @@ namespace MphRead.Entities.Enemies
             _soundSource.StopSfx(SfxId.HANGING_TERROR_WALK);
             _speed = Vector3.Zero;
             _targetVec = (PlayerEntity.Main.Position - Position).WithY(0).Normalized();
-            float angle = MathHelper.RadiansToDegrees(MathF.Acos(Vector3.Dot(FacingVector, _targetVec)));
+            float angle = Single.RadiansToDegrees(MathF.Acos(Vector3.Dot(FacingVector, _targetVec)));
             _stepCount = 10 * 2; // todo: FPS stuff
             _aimAngleStep = angle / _stepCount;
             _moveTimer = 600 * 2; // todo: FPS stuff
@@ -734,7 +733,7 @@ namespace MphRead.Entities.Enemies
 
         protected bool Behavior21()
         {
-            if (_delayTimer > 0 || (Position - PlayerEntity.Main.Position).LengthSquared <= 2 * 2)
+            if (_delayTimer > 0 || (Position - PlayerEntity.Main.Position).LengthSquared() <= 2 * 2)
             {
                 return false;
             }
@@ -775,7 +774,7 @@ namespace MphRead.Entities.Enemies
         protected bool Behavior24()
         {
             Vector3 between = Position - PlayerEntity.Main.Position;
-            float distSqr = between.LengthSquared;
+            float distSqr = between.LengthSquared();
             if (distSqr <= 3.5f * 3.5f || distSqr >= 5 * 5)
             {
                 return false;

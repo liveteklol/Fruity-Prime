@@ -5,7 +5,6 @@ using MphRead.Effects;
 using MphRead.Entities.Enemies;
 using MphRead.Formats;
 using MphRead.Formats.Culling;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities
 {
@@ -61,7 +60,7 @@ namespace MphRead.Entities
                     CollisionResult colRes = default;
                     BombEntity firstBomb = Owner.SyluxBombs[0]!;
                     Vector3 between = firstBomb.Position - Position;
-                    if (between.LengthSquared >= 100 || CollisionDetection.CheckBetweenPoints(firstBomb.Position, Position,
+                    if (between.LengthSquared() >= 100 || CollisionDetection.CheckBetweenPoints(firstBomb.Position, Position,
                         TestFlags.Players, _scene, ref colRes))
                     {
                         Countdown = 1;
@@ -139,7 +138,7 @@ namespace MphRead.Entities
                     else if (BombType == BombType.Stinglarva)
                     {
                         Vector3 between = player.Position - Position;
-                        if (between.LengthSquared < 5 * 5)
+                        if (between.LengthSquared() < 5 * 5)
                         {
                             _target = player;
                             _speed = FacingVector * 0.3f;
@@ -151,7 +150,7 @@ namespace MphRead.Entities
                     foreach (HalfturretEntity halfturret in _scene.GetHalfturretEntities())
                     {
                         Vector3 between = halfturret.Position - Position;
-                        if (between.LengthSquared < 5 * 5)
+                        if (between.LengthSquared() < 5 * 5)
                         {
                             _target = halfturret;
                             _speed = FacingVector * 0.3f;
@@ -190,7 +189,7 @@ namespace MphRead.Entities
                         if (dot < radius && dot > -radius)
                         {
                             between -= doorFacing * dot;
-                            if (between.LengthSquared <= door.RadiusSquared)
+                            if (between.LengthSquared() <= door.RadiusSquared)
                             {
                                 if (door.Flags.TestFlag(DoorFlags.Locked) && door.Data.PaletteId == 8)
                                 {
@@ -492,7 +491,7 @@ namespace MphRead.Entities
             if (BombType == BombType.Lockjaw)
             {
                 Vector3 between = targetPos - Position;
-                float magSqr = between.LengthSquared;
+                float magSqr = between.LengthSquared();
                 if (magSqr > 0)
                 {
                     between /= MathF.Sqrt(magSqr);

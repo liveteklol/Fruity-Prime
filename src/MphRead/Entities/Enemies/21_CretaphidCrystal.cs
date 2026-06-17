@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using MphRead.Formats.Culling;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities.Enemies
 {
@@ -29,7 +28,7 @@ namespace MphRead.Entities.Enemies
             Flags |= EnemyFlags.Invincible;
             Flags |= EnemyFlags.NoMaxDistance;
             Matrix4 transform = GetTransformMatrix(attachNode.Transform.Row2.Xyz, attachNode.Transform.Row1.Xyz);
-            transform.Row3.Xyz = attachNode.Transform.Row3.Xyz + position;
+            transform.Row3_Xyz = attachNode.Transform.Row3.Xyz + position;
             Transform = transform;
             _hurtVolumeInit = new CollisionVolume(Vector3.Zero, 1);
             _boundingRadius = 1;

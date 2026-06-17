@@ -1,7 +1,6 @@
 using System.Collections.Generic;
 using System.Diagnostics;
 using MphRead.Formats;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities
 {
@@ -295,11 +294,11 @@ namespace MphRead.Entities
                     : _scene.CameraPosition; // skdebug
                 var vector1 = new Vector3(0, 1, 0);
                 Vector3 vector2 = new Vector3(player.X - Position.X, 0, player.Z - Position.Z).Normalized();
-                Matrix3 lightTransform = Matrix.GetTransform3(vector2, vector1);
+                Matrix4 lightTransform = Matrix.GetTransform3(vector2, vector1);
                 return new LightInfo(
-                    (Metadata.OctolithLight1Vector * lightTransform).Normalized(),
+                    Vector4.Transform(Metadata.OctolithLight1Vector, lightTransform).Xyz.Normalized(),
                     Metadata.OctolithLightColor,
-                    (Metadata.OctolithLight2Vector * lightTransform).Normalized(),
+                    Vector4.Transform(Metadata.OctolithLight2Vector, lightTransform).Xyz.Normalized(),
                     Metadata.OctolithLightColor
                 );
             }
@@ -311,11 +310,11 @@ namespace MphRead.Entities
             Matrix4 transform = base.GetModelTransform(inst, index);
             if (index == 0)
             {
-                transform.Row3.Y += _heightOffset;
+                transform.Row3_Y += _heightOffset;
             }
             else if (index == 1)
             {
-                transform.Row3.Y -= 0.2f;
+                transform.Row3_Y -= 0.2f;
             }
             return transform;
         }

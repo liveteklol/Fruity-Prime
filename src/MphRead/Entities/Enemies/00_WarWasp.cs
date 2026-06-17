@@ -2,7 +2,6 @@ using System;
 using System.Diagnostics;
 using MphRead.Formats;
 using MphRead.Formats.Culling;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities.Enemies
 {
@@ -88,7 +87,7 @@ namespace MphRead.Entities.Enemies
         {
             Vector3 travel = target - Position;
             _stepDistance = step;
-            float distance = travel.Length;
+            float distance = travel.Length();
             _stepCount = (int)(distance / _stepDistance) + 1;
             if (distance == 0)
             {
@@ -120,7 +119,7 @@ namespace MphRead.Entities.Enemies
                 {
                     _circleAngle -= 360;
                 }
-                float angle = MathHelper.DegreesToRadians(_circleAngle);
+                float angle = Single.DegreesToRadians(_circleAngle);
                 _speed.X = _initialPos.X + MathF.Sin(angle) * _movementVolume.CylinderRadius;
                 _speed.Z = _initialPos.Z + MathF.Cos(angle) * _movementVolume.CylinderRadius;
                 SetTransform(_speed.Normalized(), Vector3.UnitY, Position);
@@ -337,7 +336,7 @@ namespace MphRead.Entities.Enemies
         private void ReachTargetOrReversePattern()
         {
             _speed = _moveTarget - Position;
-            if (_speed.Length == 0)
+            if (_speed.Length() == 0)
             {
                 _stepCount = 0;
             }

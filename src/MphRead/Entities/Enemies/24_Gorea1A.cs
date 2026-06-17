@@ -5,7 +5,6 @@ using System.Diagnostics;
 using System.Linq;
 using MphRead.Effects;
 using MphRead.Formats.Culling;
-using OpenTK.Mathematics;
 
 namespace MphRead.Entities.Enemies
 {
@@ -99,7 +98,7 @@ namespace MphRead.Entities.Enemies
 
         protected bool SeekTargetFacing(Vector3 target, float angle)
         {
-            angle = MathHelper.DegreesToRadians(angle / 2f); // todo: FPS stuff
+            angle = Single.DegreesToRadians(angle / 2f); // todo: FPS stuff
             (float sin, float cos) = MathF.SinCos(angle);
             Vector3 facing = FacingVector;
             float dot = Vector3.Dot(target, facing);
@@ -142,7 +141,7 @@ namespace MphRead.Entities.Enemies
             if (target == Vector3.Zero)
             {
                 Vector3 between = (PlayerEntity.Main.Position - Position).WithY(0);
-                if (between.LengthSquared > 1 / 128f)
+                if (between.LengthSquared() > 1 / 128f)
                 {
                     between = between.Normalized();
                     if (Vector3.Dot(between, FacingVector) < Fixed.ToFloat(3547))
@@ -165,11 +164,11 @@ namespace MphRead.Entities.Enemies
         protected bool CheckFacingAngle(float minCos, Vector3 position)
         {
             Vector3 facing = FacingVector.WithY(0);
-            if (facing.LengthSquared > 1 / 128f)
+            if (facing.LengthSquared() > 1 / 128f)
             {
                 facing = facing.Normalized();
                 Vector3 between = (position - Position).WithY(0);
-                if (between.LengthSquared > 1 / 128f)
+                if (between.LengthSquared() > 1 / 128f)
                 {
                     between = between.Normalized();
                     if (Vector3.Dot(between, facing) > minCos)
@@ -515,7 +514,7 @@ namespace MphRead.Entities.Enemies
                 return;
             }
             Vector3 between = (PlayerEntity.Main.Position - Position).WithY(0);
-            between = between.LengthSquared > 1 / 128f
+            between = between.LengthSquared() > 1 / 128f
                 ? between.Normalized()
                 : FacingVector;
             PlayerEntity.Main.Speed += between / 4;
@@ -608,7 +607,7 @@ namespace MphRead.Entities.Enemies
         private bool UpdateTargetFacing()
         {
             Vector3 between = (PlayerEntity.Main.Position - Position).WithY(0);
-            if (between.LengthSquared > 1 / 128f)
+            if (between.LengthSquared() > 1 / 128f)
             {
                 _targetFacing = between.Normalized();
                 return true;
@@ -860,7 +859,7 @@ namespace MphRead.Entities.Enemies
             if (PlayerEntity.Main.Health > 0)
             {
                 between = PlayerEntity.Main.Position - Position;
-                distance = between.WithY(0).LengthSquared;
+                distance = between.WithY(0).LengthSquared();
                 if (distance < maxDistance)
                 {
                     return true;
@@ -1277,7 +1276,7 @@ namespace MphRead.Entities.Enemies
                 between = between.WithY(0).Normalized();
                 Vector3 facing = FacingVector;
                 facing = new Vector3(facing.Z, 0, -facing.X);
-                if (facing.LengthSquared > 1 / 128f)
+                if (facing.LengthSquared() > 1 / 128f)
                 {
                     facing = facing.Normalized();
                     float dot = Vector3.Dot(facing, between);
@@ -1294,7 +1293,7 @@ namespace MphRead.Entities.Enemies
         private bool Behavior11()
         {
             Vector3 between = PlayerEntity.Main.Position - Position;
-            if (between.LengthSquared > 19 * 19) // 1478656
+            if (between.LengthSquared() > 19 * 19) // 1478656
             {
                 if (_field244 > 0)
                 {

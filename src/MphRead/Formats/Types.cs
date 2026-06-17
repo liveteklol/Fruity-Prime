@@ -1,8 +1,8 @@
 using System;
 using System.Diagnostics;
 using System.Linq;
+using System.Numerics;
 using System.Runtime.CompilerServices;
-using OpenTK.Mathematics;
 
 namespace MphRead
 {
@@ -194,32 +194,15 @@ namespace MphRead
 
         public Matrix4 ToFloatMatrix()
         {
-            return new Matrix4(One.ToFloatVector(), Two.ToFloatVector(), Three.ToFloatVector(), Four.ToFloatVector());
+            return Matrix4.Create(One.ToFloatVector(), Two.ToFloatVector(), Three.ToFloatVector(), Four.ToFloatVector());
         }
     }
 
     public static class Matrix
     {
-        public static Matrix3 GetTransform3(Vector3 vector1, Vector3 vector2)
+        public static Matrix4 GetTransform3(Vector3 vector1, Vector3 vector2)
         {
-            Vector3 up = Vector3.Cross(vector2, vector1).Normalized();
-            var direction = Vector3.Cross(vector1, up);
-
-            Matrix3 transform = default;
-
-            transform.M11 = up.X;
-            transform.M12 = up.Y;
-            transform.M13 = up.Z;
-
-            transform.M21 = direction.X;
-            transform.M22 = direction.Y;
-            transform.M23 = direction.Z;
-
-            transform.M31 = vector1.X;
-            transform.M32 = vector1.Y;
-            transform.M33 = vector1.Z;
-
-            return transform;
+            return GetTransform4(vector1, vector2, Vector3.Zero);
         }
 
         public static Matrix4 GetTransform4(Vector3 vector1, Vector3 vector2, Vector3 position)
@@ -340,7 +323,7 @@ namespace MphRead
         // todo: could replace this with "keep 3x2"
         public static Matrix4 Multiply44(Matrix4 first, Matrix4 second)
         {
-            Matrix4 output = Matrix4.Zero;
+            Matrix4 output = default;
             output.M11 = first.M13 * second.M31 + first.M11 * second.M11 + first.M12 * second.M21;
             output.M12 = first.M13 * second.M32 + first.M11 * second.M12 + first.M12 * second.M22;
             output.M21 = first.M23 * second.M31 + first.M21 * second.M11 + first.M22 * second.M21;
@@ -650,27 +633,27 @@ namespace MphRead
 
         public static Matrix4 AsMatrix4(this Matrix4x3 matrix)
         {
-            return new Matrix4(
-                new Vector4(matrix.Row0),
-                new Vector4(matrix.Row1),
-                new Vector4(matrix.Row2),
-                new Vector4(matrix.Row3)
+            return Matrix4.Create(
+                new Vector4((Vector3)matrix.Row0, 0.0f),
+                new Vector4((Vector3)matrix.Row1, 0.0f),
+                new Vector4((Vector3)matrix.Row2, 0.0f),
+                new Vector4((Vector3)matrix.Row3, 0.0f)
             );
         }
 
         public static Matrix4 Keep3x3(this Matrix4x3 matrix)
         {
-            return new Matrix4(
-                new Vector4(matrix.Row0, 0.0f),
-                new Vector4(matrix.Row1, 0.0f),
-                new Vector4(matrix.Row2, 0.0f),
+            return Matrix4.Create(
+                new Vector4((Vector3)matrix.Row0, 0.0f),
+                new Vector4((Vector3)matrix.Row1, 0.0f),
+                new Vector4((Vector3)matrix.Row2, 0.0f),
                 Vector4.Zero
             );
         }
 
         public static Matrix4 Keep3x3(this Matrix4 matrix)
         {
-            return new Matrix4(
+            return Matrix4.Create(
                 new Vector4(matrix.Row0.Xyz, 0.0f),
                 new Vector4(matrix.Row1.Xyz, 0.0f),
                 new Vector4(matrix.Row2.Xyz, 0.0f),

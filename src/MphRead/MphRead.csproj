@@ -17,7 +17,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="OpenTK" Version="4.9.4" />
+    <PackageReference Include="OpenTK" Version="5.0.0-pre.16" />
     <PackageReference Include="ReFuel.StbImage" Version="2.1.1" />
   </ItemGroup>
 

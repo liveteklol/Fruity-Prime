@@ -14,8 +14,10 @@ using MphRead.Formats.Sound;
 using MphRead.Sound;
 using OpenTK.Audio.OpenAL;
 using OpenTK.Graphics.OpenGL;
-using OpenTK.Mathematics;
 using ReFuel.Stb;
+using InternalFormat = OpenTK.Graphics.OpenGL.InternalFormat;
+using C = OpenTK.Graphics.OpenGL.Compatibility;
+using GLC = OpenTK.Graphics.OpenGL.Compatibility.GL;
 
 namespace MphRead
 {
@@ -96,11 +98,11 @@ namespace MphRead
             {
                 AL.SourceStop(_audioHandle);
                 AL.DeleteSource(_audioHandle);
-                AL.DeleteBuffers(_audioBufferIds);
+                AL.DeleteBuffers(_audioBufferIds.Length, _audioBufferIds);
             }
             _audioHandle = AL.GenSource();
-            AL.GenBuffers(_audioBufferIds);
-            AL.Source(_audioHandle, ALSourcef.Gain, Music.UserVolume * 0.5f);
+            AL.GenBuffers(_audioBufferIds.Length, _audioBufferIds);
+            AL.Sourcef(_audioHandle, SourcePNameF.Gain, Music.UserVolume * 0.5f);
             Array.Fill(_audioBuffersAvailable, true);
             _audioBufferIndex = 0;
             Metadata.MovieInfo info = Metadata.MovieFiles[(int)movieId];
@@ -137,10 +139,10 @@ namespace MphRead
                 _botMovieBinding = ++_textureCount;
             }
             GL.BindTexture(TextureTarget.Texture2D, _topMovieBinding);
-            GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgb, _frameWidth, _frameHeight, 0,
+            GL.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.Rgb, _frameWidth, _frameHeight, 0,
                 PixelFormat.Rgb, PixelType.UnsignedByte, _topImageBuffer);
             GL.BindTexture(TextureTarget.Texture2D, _botMovieBinding);
-            GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgb, _frameWidth, _frameHeight, 0,
+            GL.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.Rgb, _frameWidth, _frameHeight, 0,
                 PixelFormat.Rgb, PixelType.UnsignedByte, _botImageBuffer);
             GL.BindTexture(TextureTarget.Texture2D, 0);
             Debug.Assert(!_dualScreenMovie || VxDecoder.Instance1.FrameCount == VxDecoder.Instance2.FrameCount);
@@ -181,11 +183,11 @@ namespace MphRead
                 }
                 else
                 {
-                    int buffersProcessed = AL.GetSource(_audioHandle, ALGetSourcei.BuffersProcessed);
+                    int buffersProcessed = AL.GetSourcei(_audioHandle, SourceGetPNameI.BuffersProcessed);
                     if (buffersProcessed > 0)
                     {
                         Span<int> processedIds = stackalloc int[Math.Min(framesAvailable, buffersProcessed)];
-                        AL.SourceUnqueueBuffers(_audioHandle, processedIds);
+                        AL.SourceUnqueueBuffers(_audioHandle, processedIds.Length, processedIds);
                         for (int i = 0; i < _audioBufferCount; i++)
                         {
                             _audioBuffersAvailable[i] = processedIds.Contains(_audioBufferIds[i]);
@@ -224,17 +226,17 @@ namespace MphRead
                                 stereoBuffer[j * 2] = buffer1[j];
                                 stereoBuffer[j * 2 + 1] = buffer2[j];
                             }
-                            AL.BufferData<short>(queueBuffers[i], ALFormat.Stereo16, stereoBuffer, VxDecoder.Instance1.AudioSampleRate);
+                            AL.BufferData<short>(queueBuffers[i], Format.Stereo16, stereoBuffer, stereoBuffer.Length, VxDecoder.Instance1.AudioSampleRate);
                         }
                         else
                         {
                             ReadOnlySpan<short> buffer = VxDecoder.Instance1.GetAudioBuffer(_audioBufferIndex++);
-                            AL.BufferData<short>(queueBuffers[i], ALFormat.Mono16, buffer, VxDecoder.Instance1.AudioSampleRate);
+                            AL.BufferData<short>(queueBuffers[i], Format.Mono16, buffer, buffer.Length, VxDecoder.Instance1.AudioSampleRate);
                         }
                     }
-                    AL.SourceQueueBuffers(_audioHandle, queueBuffers);
-                    var state = (ALSourceState)AL.GetSource(_audioHandle, ALGetSourcei.SourceState);
-                    if (state != ALSourceState.Playing)
+                    AL.SourceQueueBuffers(_audioHandle, queueBuffers.Length, queueBuffers);
+                    var state = (SourceState)AL.GetSourcei(_audioHandle, SourceGetPNameI.SourceState);
+                    if (state != SourceState.Playing)
                     {
                         // this should only occur once unless things are lagging behind
                         AL.SourcePlay(_audioHandle);
@@ -254,7 +256,7 @@ namespace MphRead
             {
                 AL.SourceStop(_audioHandle);
                 AL.DeleteSource(_audioHandle);
-                AL.DeleteBuffers(_audioBufferIds);
+                AL.DeleteBuffers(_audioBufferIds.Length, _audioBufferIds);
                 _audioHandle = -1;
             }
             if (_movieSettings.AfterMovieId.HasValue)
@@ -363,7 +365,7 @@ namespace MphRead
 
         private void DrawMovieFrame()
         {
-            GL.Uniform1(_shaderLocations.LayerAlpha, 1);
+            GL.Uniform1i(_shaderLocations.LayerAlpha, 1);
             bool newFrame = false;
 
             void DrawScreen(int movieBinding, byte[] imageBuffer, float y)
@@ -371,11 +373,11 @@ namespace MphRead
                 GL.BindTexture(TextureTarget.Texture2D, movieBinding);
                 int minParameter = (int)TextureMinFilter.Nearest;
                 int magParameter = (int)TextureMagFilter.Nearest;
-                GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, minParameter);
-                GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, magParameter);
-                GL.TexParameter(TextureTarget.Texture2D,
+                GL.TexParameteri(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, minParameter);
+                GL.TexParameteri(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, magParameter);
+                GL.TexParameteri(TextureTarget.Texture2D,
                     TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
-                GL.TexParameter(TextureTarget.Texture2D,
+                GL.TexParameteri(TextureTarget.Texture2D,
                     TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
                 if (_movieFrameIndex != _lastRenderedMovieFrameIndex || newFrame && _dualScreenMovie)
                 {
@@ -383,38 +385,38 @@ namespace MphRead
                     _lastRenderedMovieFrameIndex = _movieFrameIndex;
                     GL.TexSubImage2D(TextureTarget.Texture2D, 0, 0, 0, _frameWidth, _frameHeight, PixelFormat.Rgb, PixelType.UnsignedByte, imageBuffer);
                 }
-                GL.Begin(PrimitiveType.TriangleStrip);
+                GLC.Begin(C.PrimitiveType.TriangleStrip);
                 // top right
-                GL.TexCoord3(1f, 0f, 0f);
-                GL.Vertex3(0.5f, y, 0f);
+                GLC.TexCoord3f(1f, 0f, 0f);
+                GLC.Vertex3f(0.5f, y, 0f);
                 // top left
-                GL.TexCoord3(0f, 0f, 0f);
-                GL.Vertex3(-0.5f, y, 0f);
+                GLC.TexCoord3f(0f, 0f, 0f);
+                GLC.Vertex3f(-0.5f, y, 0f);
                 // bottom right
-                GL.TexCoord3(1f, 1f, 0f);
-                GL.Vertex3(0.5f, y - 1, 0f);
+                GLC.TexCoord3f(1f, 1f, 0f);
+                GLC.Vertex3f(0.5f, y - 1, 0f);
                 // bottom left
-                GL.TexCoord3(0f, 1f, 0f);
-                GL.Vertex3(-0.5f, y - 1, 0f);
-                GL.End();
+                GLC.TexCoord3f(0f, 1f, 0f);
+                GLC.Vertex3f(-0.5f, y - 1, 0f);
+                GLC.End();
                 GL.BindTexture(TextureTarget.Texture2D, 0);
             }
 
-            GL.Uniform4(_shaderLocations.FadeColor, 0, 0, 0, 1);
-            GL.Begin(PrimitiveType.TriangleStrip);
+            GL.Uniform4f(_shaderLocations.FadeColor, 0, 0, 0, 1);
+            GLC.Begin(C.PrimitiveType.TriangleStrip);
             // top right
-            GL.TexCoord3(1f, 1f, 0f);
-            GL.Vertex3(1f, 1f, 0f);
+            GLC.TexCoord3f(1f, 1f, 0f);
+            GLC.Vertex3f(1f, 1f, 0f);
             // top left
-            GL.TexCoord3(0f, 1f, 0f);
-            GL.Vertex3(-1f, 1f, 0f);
+            GLC.TexCoord3f(0f, 1f, 0f);
+            GLC.Vertex3f(-1f, 1f, 0f);
             // bottom right
-            GL.TexCoord3(1f, 0f, 0f);
-            GL.Vertex3(1f, -1f, 0f);
+            GLC.TexCoord3f(1f, 0f, 0f);
+            GLC.Vertex3f(1f, -1f, 0f);
             // bottom left
-            GL.TexCoord3(0f, 0f, 0f);
-            GL.Vertex3(-1f, -1f, 0f);
-            GL.End();
+            GLC.TexCoord3f(0f, 0f, 0f);
+            GLC.Vertex3f(-1f, -1f, 0f);
+            GLC.End();
             DrawScreen(_topMovieBinding, _topImageBuffer, y: 1);
             DrawScreen(_botMovieBinding, _botImageBuffer, y: 0);
         }

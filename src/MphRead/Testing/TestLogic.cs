@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using MphRead.Memory;
-using OpenTK.Mathematics;
 
 namespace MphRead.Testing
 {
@@ -455,7 +454,7 @@ namespace MphRead.Testing
                             {
                                 CModelInitializeAnimationData(player.Model);
                                 CNodeAnimationSetData(player.Model.Model, UIntPtr.Zero);
-                                var matrix = Matrix4x3.CreateTranslation(player.Position);
+                                var matrix = Matrix4x3.CreateTranslation((OpenTK.Mathematics.Vector3)player.Position);
                                 DrawAnimatedModel(_mdl200D960, matrix, (byte)player.Model.SomeFlag);
                             }
                             else
@@ -499,8 +498,12 @@ namespace MphRead.Testing
                         }
                         else
                         {
-                            Matrix3 transform = Matrix.GetTransform3(player.Field64, player.FieldB4);
-                            var matrix = new Matrix4x3(transform.Row0, transform.Row1, transform.Row2, new Vector3());
+                            Matrix4 transform = Matrix.GetTransform3(player.Field64, player.FieldB4);
+                            var matrix = new Matrix4x3(
+                                (OpenTK.Mathematics.Vector3)transform.Row0.Xyz,
+                                (OpenTK.Mathematics.Vector3)transform.Row1.Xyz,
+                                (OpenTK.Mathematics.Vector3)transform.Row2.Xyz,
+                                new OpenTK.Mathematics.Vector3());
                             CModelDraw(player.Gun, matrix);
                             if (player.SomeFlags.TestFlag(SomeFlags.DrawGunSmoke))
                             {
