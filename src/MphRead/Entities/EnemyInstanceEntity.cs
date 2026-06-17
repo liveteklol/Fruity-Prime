@@ -217,7 +217,7 @@ namespace MphRead.Entities
                         CollisionResult hitRes = default;
                         if (player.Health > 0)
                         {
-                            // the game does not check fot alt attacks hitting enemies
+                            // the game does not check for alt attacks hitting enemies
                             bool hit = player.CheckAltAttackHitEnemy1(this);
                             if (!hit)
                             {

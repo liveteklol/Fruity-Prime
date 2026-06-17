@@ -67,7 +67,7 @@ namespace MphRead.Entities
                     continue;
                 }
                 Vector3 between = _volume.SpherePosition - other.Volume.SpherePosition;
-                float distSqr = between.LengthFast;
+                float distSqr = between.LengthSquared;
                 if (distSqr == 0)
                 {
                     between = Vector3.UnitX;
@@ -339,7 +339,7 @@ namespace MphRead.Entities
             if ((Hunter == Hunter.Trace || Hunter == Hunter.Weavel) && Flags2.TestFlag(PlayerFlags2.AltAttack))
             {
                 Vector3 between = _volume.SpherePosition - target.HurtVolume.SpherePosition;
-                float distSqr = between.LengthFast;
+                float distSqr = between.LengthSquared;
                 if (distSqr == 0)
                 {
                     between = Vector3.UnitX;
