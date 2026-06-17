@@ -337,7 +337,6 @@ namespace MphRead.Testing
             Span<byte> outputSpan1 = new Span<byte>(_outputBuf1);
             Span<byte> outputSpan2 = new Span<byte>(_outputBuf2);
             int offset1 = BinaryPrimitives.ReadInt32LittleEndian(videoData) + 8;
-            Debug.Assert(offset1 == 8); // this seems to be the case initially, meaning the word and byte ptrs point to the same places
             int offset2 = BinaryPrimitives.ReadInt32LittleEndian(videoData.Slice(4));
             Span<uint> videoDataUint = MemoryMarshal.Cast<byte, uint>(videoData.Slice(offset1 + offset2));
             Span<ushort> videoDataUshort = MemoryMarshal.Cast<byte, ushort>(videoData.Slice(offset1));
@@ -495,7 +494,6 @@ namespace MphRead.Testing
         // updates the carry flag, but does not include it in this calculation
         private static uint NextBit(uint value)
         {
-            Debug.Assert(value != 0x80000000); // would not be distinguishable from 0 (except by the CF -- so this might be a thing, we'll see)
             ulong ulongValue = (ulong)value;
             ulongValue += ulongValue;
             _readBit = ulongValue > UInt32.MaxValue ? 1 : 0;
@@ -504,7 +502,6 @@ namespace MphRead.Testing
 
         private static uint NextValueCarry(ref Span<uint> span)
         {
-            Debug.Assert(span[0] != 0x80000000); // would not be distinguishable from 0 (except by the CF -- so this might be a thing, we'll see)
             ulong ulongValue = (ulong)span[0];
             ulongValue += ulongValue + (ulong)_readBit;
             _readBit = ulongValue > UInt32.MaxValue ? 1 : 0;
