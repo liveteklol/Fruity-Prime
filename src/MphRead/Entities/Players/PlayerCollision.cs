@@ -361,7 +361,8 @@ namespace MphRead.Entities
         private void AltAttackHitDoor(DoorEntity door)
         {
             if ((Hunter == Hunter.Spire || Hunter == Hunter.Trace || Hunter == Hunter.Weavel) && Flags2.TestFlag(PlayerFlags2.AltAttack)
-                || Hunter == Hunter.Noxus && _altAttackTime >= Values.AltAttackStartup * 2) // todo: FPS stuff
+                || Hunter == Hunter.Noxus && _altAttackTime >= Values.AltAttackStartup * 2 // todo: FPS stuff
+                || Features.BoostOpensDoors && Hunter == Hunter.Samus && Flags1.TestFlag(PlayerFlags1.Boosting))
             {
                 if (door.Flags.TestFlag(DoorFlags.Locked) && door.Data.PaletteId == 8)
                 {

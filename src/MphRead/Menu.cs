@@ -1800,6 +1800,7 @@ namespace MphRead
                     Console.WriteLine($"{X(s++)} (L) Logarithmic Spatial Audio: {OnOff(Features.LogSpatialAudio)}");
                     Console.WriteLine($"{X(s++)} (A) Consistent Alarm Interval: {OnOff(Features.HalfSecondAlarm)}");
                     Console.WriteLine($"{X(s++)} (G) Full Boost Charge: {OnOff(Features.FullBoostCharge)}");
+                    Console.WriteLine($"{X(s++)} (B) Boost Opens Doors: {OnOff(Features.BoostOpensDoors)}");
                     Console.WriteLine($"{X(s++)} (1) Update Adventure Mode For Other Hunters: {OnOff(Features.AlternateHunters1P)}");
                 }
                 else if (screen == 2)
@@ -2030,6 +2031,10 @@ namespace MphRead
                         }
                         else if (selection == 16)
                         {
+                            Features.BoostOpensDoors = false;
+                        }
+                        else if (selection == 17)
+                        {
                             Features.AlternateHunters1P = true;
                         }
                     }
@@ -2140,6 +2145,10 @@ namespace MphRead
                             Features.FullBoostCharge = !Features.FullBoostCharge;
                         }
                         else if (selection == 16)
+                        {
+                            Features.BoostOpensDoors = !Features.BoostOpensDoors;
+                        }
+                        else if (selection == 17)
                         {
                             Features.AlternateHunters1P = !Features.AlternateHunters1P;
                         }
@@ -2985,6 +2994,7 @@ namespace MphRead
             Features.LogSpatialAudio = false;
             Features.HalfSecondAlarm = false;
             Features.FullBoostCharge = false;
+            Features.BoostOpensDoors = false;
             Features.AlternateHunters1P = true;
             Cheats.FreeWeaponSelect = false;
             Cheats.UnlimitedJumps = false;

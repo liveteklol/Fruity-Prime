@@ -74,6 +74,7 @@ namespace MphRead
         public static bool LogSpatialAudio { get; set; } = false; // false
         public static bool HalfSecondAlarm { get; set; } = false; // false
         public static bool FullBoostCharge { get; set; } = false; // false
+        public static bool BoostOpensDoors { get; set; } = false; // false
         public static bool AlternateHunters1P { get; set; } = true; // false
 
         public static void Load(IReadOnlyDictionary<string, string> values)
@@ -142,6 +143,10 @@ namespace MphRead
             {
                 FullBoostCharge = boolean;
             }
+            if (values.TryGetValue(nameof(BoostOpensDoors), out value) && Boolean.TryParse(value, out boolean))
+            {
+                BoostOpensDoors = boolean;
+            }
             if (values.TryGetValue(nameof(AlternateHunters1P), out value) && Boolean.TryParse(value, out boolean))
             {
                 AlternateHunters1P = boolean;
@@ -168,6 +173,7 @@ namespace MphRead
                 new(nameof(LogSpatialAudio), LogSpatialAudio.ToString().ToLower()),
                 new(nameof(HalfSecondAlarm), HalfSecondAlarm.ToString().ToLower()),
                 new(nameof(FullBoostCharge), FullBoostCharge.ToString().ToLower()),
+                new(nameof(BoostOpensDoors), BoostOpensDoors.ToString().ToLower()),
                 new(nameof(AlternateHunters1P), AlternateHunters1P.ToString().ToLower())
             ]);
         }
