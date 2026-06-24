@@ -10,6 +10,7 @@ using MphRead.Formats;
 using MphRead.Formats.Collision;
 using MphRead.Formats.Sound;
 using MphRead.Utility;
+using ReFuel.Stb;
 
 namespace MphRead.Testing
 {
@@ -122,8 +123,20 @@ namespace MphRead.Testing
         {
             if (path == null)
             {
-                path = @"C:\Users\auser\Home\MPH\_FS\amfe\data\movies\spawn_yellow-15fps-up-left.avi.fv";
+                //path = @"C:\Users\auser\Home\MPH\_FS\amfe\data\movies\spawn_blue-15fps-up-left.avi.fv";
+                //path = @"C:\Users\auser\Home\MPH\_FS\amfe\data\movies\spawn_green-15fps-down-right.avi.fv";
+                //path = @"C:\Users\auser\Home\MPH\_FS\amfe\data\movies\spawn_green-15fps-up-left.avi.fv";
+                //path = @"C:\Users\auser\Home\MPH\_FS\amfe\data\movies\spawn_white-15fps-down-right.avi.fv";
+                //path = @"C:\Users\auser\Home\MPH\_FS\amfe\data\movies\spawn_white-15fps-up-left.avi.fv";
+                path = @"C:\Users\auser\Home\MPH\_FS\amfe\data\movies\spawn_yellow-15fps-down-right.avi.fv";
+                //path = @"C:\Users\auser\Home\MPH\_FS\amfe\data\movies\spawn_yellow-15fps-up-left.avi.fv";
+                //path = @"C:\Users\auser\Home\MPH\_FS\amfe\data\movies\teaser-15fps-down-right.avi.fv";
                 //path = @"C:\Users\auser\Home\MPH\_FS\amfe\data\movies\teaser-15fps-up-left.avi.fv";
+                //path = @"C:\Users\auser\Home\MPH\_FS\amfe\data\movies\death-15fps-down-right.avi.fv";
+                //path = @"C:\Users\auser\Home\MPH\_FS\amfe\data\movies\death-15fps-up-left.avi.fv";
+                //path = @"C:\Users\auser\Home\MPH\_FS\amfe\data\movies\opening-15fps-down-right.avi.fv";
+                //path = @"C:\Users\auser\Home\MPH\_FS\amfe\data\movies\opening-15fps-up-left.avi.fv";
+                //path = @"C:\Users\auser\Home\MPH\_FS\amfe\data\movies\spawn_blue-15fps-down-right.avi.fv";
             }
             ReadOnlySpan<byte> fileBytes = File.ReadAllBytes(path);
             using FileStream fileStream = File.OpenRead(path);
@@ -152,8 +165,9 @@ namespace MphRead.Testing
             var framePositions = new List<long>();
             var skipAheadPositions = new List<long>();
             var dataBuffer = new Span<byte>(new byte[maxDataSize - 8]);
-            byte[] outputBuffer1 = new byte[2 * 256 * 192];
-            byte[] outputBuffer2 = new byte[2 * 256 * 192];
+            Array.Clear(_outputBuf1);
+            Array.Clear(_outputBuf2);
+            _outputBufferSwap = false;
             bool foundMaxSize = false;
 
             var decodeBuf = new Span<int>(new int[110]); // the game uses 113 in field48 for no clear reason
@@ -162,6 +176,8 @@ namespace MphRead.Testing
             var samples = new List<short>(); // todo: get rid of this once we're streaming/writing
             Span<short> sampleSpan = stackalloc short[256];
             ReadOnlySpan<short> table206C268 = _dword206C268.AsSpan();
+
+            byte[] imageOutput = new byte[256 * 192 * 3];
 
             for (int i = 0; i < frameCount; i++)
             {
@@ -207,8 +223,34 @@ namespace MphRead.Testing
                     foundMaxSize = true;
                 }
                 // video
-                // skhere sktodo
-                TestVideo(dataBuffer.Slice(0, videoSize));
+                TestVideo(frameWidth, frameHeight, dataBuffer.Slice(0, videoSize), frameIndex);
+                if (frameIndex > 0)
+                {
+                    byte[] outputBuf = _outputBufferSwap ? _outputBuf1 : _outputBuf2;
+                    int p = 0;
+                    for (int j = 0; j < outputBuf.Length; j += 2)
+                    {
+                        int color = outputBuf[j] + (outputBuf[j + 1] << 8);
+                        int r = color & 0x1F;
+                        int g = (color >> 5) & 0x1F;
+                        int b = (color >> 10) & 0x1F;
+                        imageOutput[p] = (byte)(r * 8);
+                        imageOutput[p + 1] = (byte)(g * 8);
+                        imageOutput[p + 2] = (byte)(b * 8);
+                        // sktodo: support both output approaches
+                        //imageOutput[p] = (byte)MathF.Round(r / 31f * 255);
+                        //imageOutput[p + 1] = (byte)MathF.Round(g / 31f * 255);
+                        //imageOutput[p + 2] = (byte)MathF.Round(b / 31f * 255);
+                        // sktodo: for understanding/documenting the format, it would be cool to instrument the code with
+                        // intermediate image outputs + images that show pixels as changed vs. unchanged at each step
+                        p += 3;
+                    }
+                    string outputPath = $@"C:\Users\auser\Home\MPH\Data\_Export\FV\{Path.GetFileNameWithoutExtension(path)}\"
+                        + $@"{frameIndex.ToString().PadLeft(3, '0')}.png";
+                    Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
+                    using FileStream fs = File.Create(outputPath);
+                    StbImage.WritePng<byte>(imageOutput, 256, 192, StbiImageFormat.Rgb, fs);
+                }
                 // audio
                 int audioFrameCount = audioSize / 40;
                 audioFrameTotal += audioFrameCount;
@@ -313,8 +355,9 @@ namespace MphRead.Testing
             int lastFrameValue3 = reader.ReadInt32();
             Debug.Assert(lastFrameValue3 == 0);
             Debug.Assert(reader.BaseStream.Position == fileBytes.Length);
-            //using var output = File.Create(@"C:\Users\auser\Temp\out.wav");
-            using var output = File.Create($@"C:\Users\auser\Temp\out_{Path.GetFileNameWithoutExtension(path)}.wav");
+            string audioOutput = $@"C:\Users\auser\Home\MPH\Data\_Export\FV\{Path.GetFileNameWithoutExtension(path)}\audio.wav";
+            Directory.CreateDirectory(Path.GetDirectoryName(audioOutput)!);
+            using var output = File.Create(audioOutput);
             using var writer = new BinaryWriter(output);
             SoundRead.WriteWavHeader(writer, (uint)audioFrameTotal * 256, (ushort)audioSampleRate, WaveFormat.PCM16);
             foreach (short sample in samples)
@@ -329,30 +372,115 @@ namespace MphRead.Testing
 
         private static int _readBit = 0;
 
-        private static readonly byte[] _outputBuf1 = new byte[192 * 512];
-        private static readonly byte[] _outputBuf2 = new byte[192 * 512];
+        // 15-bit output colors
+        private static readonly byte[] _outputBuf1 = new byte[256 * 192 * 2];
+        private static readonly byte[] _outputBuf2 = new byte[256 * 192 * 2];
+        private static bool _outputBufferSwap = true; // swapped to false when decoding the first frame
 
-        private static void TestVideo(Span<byte> videoData)
+        private static bool _log = false;
+
+        private static void Log(string message)
         {
-            Span<byte> outputSpan1 = new Span<byte>(_outputBuf1);
-            Span<byte> outputSpan2 = new Span<byte>(_outputBuf2);
+            if (_log)
+            {
+                Debug.Write(message);
+            }
+        }
+
+        private static void LogLine(string message)
+        {
+            if (_log)
+            {
+                Debug.WriteLine(message);
+            }
+        }
+
+        private static void LogBlock(int block, bool current = true)
+        {
+            byte[] buffer = _outputBufferSwap || !current ? _outputBuf1 : _outputBuf2;
+            for (int h = 0; h < 8; h++)
+            {
+                for (int w = 0; w < 8; w++)
+                {
+                    //int p = (y * 512 * 8) + h * 512 + w * 2 + (x * 16);
+                    int p = (block / 32 * 512 * 8) + h * 512 + w * 2 + (block % 32) * 16;
+                    ushort color = (ushort)(buffer[p] | (buffer[p + 1] << 8));
+                    int r = color & 0x1F;
+                    int g = (color >> 5) & 0x1F;
+                    int b = (color >> 10) & 0x1F;
+                    Log($"{r * 8,3},{g * 8,3},{b * 8,3}");
+                    if (w < 7)
+                    {
+                        Log("  ");
+                    }
+                }
+                LogLine("");
+            }
+            LogLine("");
+        }
+
+        private static void TestVideo(int width, int height, Span<byte> videoData, int frameIndex)
+        {
+            _outputBufferSwap = !_outputBufferSwap;
+            Span<byte> outputSpan1; // previous frame (being drawn)
+            Span<byte> outputSpan2; // current frame (being decoded)
+            if (_outputBufferSwap)
+            {
+                outputSpan1 = new Span<byte>(_outputBuf2);
+                outputSpan2 = new Span<byte>(_outputBuf1);
+            }
+            else
+            {
+                outputSpan1 = new Span<byte>(_outputBuf1);
+                outputSpan2 = new Span<byte>(_outputBuf2);
+            }
             int offset1 = BinaryPrimitives.ReadInt32LittleEndian(videoData) + 8;
+            // the usage of the byte pointer is to get table indices that yield values used to offset into the previous frame.
+            // for the first frame, the byte pointer points to 8, but it's zero length because there is no previous frame and therefore no indices.
+            // therefore offset1 also points to 8, the start of the word ("content") data (and offset2 is the start of the bitstream "control" data).
+            // on subsequent frames, the byte pointer indices/other prev frame data start at 8 and end somewhere, after which offset1 picks up.
+            // this matches the byte pointer not being used in any of the code paths used by the first frame of this movie (no data/zero length).
             int offset2 = BinaryPrimitives.ReadInt32LittleEndian(videoData.Slice(4));
             Span<uint> videoDataUint = MemoryMarshal.Cast<byte, uint>(videoData.Slice(offset1 + offset2));
             Span<ushort> videoDataUshort = MemoryMarshal.Cast<byte, ushort>(videoData.Slice(offset1));
             Span<byte> videoDataByte = videoData.Slice(8);
+            // the unused first bit of frame 0 is always 1, and the unused first bit of subsequent frames is usually (but not always) 0
+            // regardless, the decoder always starts as if it just read a 1 bit (i.e. the senintel 1 bit indicating the end of a previous dword)
             _readBit = 1;
             uint value = NextValueCarry(ref videoDataUint);
-            uint r2 = 0;
-            // todo: frame height and width as variables
-            for (int y = 192 / 8; y > 0; y--)
+            uint outputPos = 0;
+            Debug.Assert(width % 8 == 0);
+            Debug.Assert(height % 8 == 0);
+            // 24 rows of 32 columns of 8x8-pixel blocks
+            for (int y = 0; y < height / 8; y++)
             {
-                for (int x = 256 / 8; x > 0; x--)
+                for (int x = 0; x < width / 8; x++)
                 {
-                    Sub20679B0(ref r2, ref value, ref outputSpan1, ref outputSpan2, ref videoDataUint, ref videoDataUshort, ref videoDataByte);
-                    r2 += 16;
+                    int block = y * 32 + x;
+                    int breakFrame = 6;
+                    int breakBlock = 187;
+                    bool breakBefore = false;
+                    bool breakAfter = false;
+                    if (breakBefore && frameIndex == breakFrame && block == breakBlock)
+                    {
+                        Debugger.Break();
+                    }
+
+                    Sub20679B0(ref outputPos, ref value, ref outputSpan1, ref outputSpan2, ref videoDataUint, ref videoDataUshort, ref videoDataByte);
+
+                    if (breakAfter && frameIndex == breakFrame && block == breakBlock)
+                    {
+                        Debugger.Break();
+                    }
+
+                    LogBlock(block);
+
+                    // advance by 16 bytes = 8 words/pixels to the next 8x8 block
+                    outputPos += 16;
                 }
-                r2 += 4096 - 16 * (256 / 8);
+                // advance by 3584 bytes = 1792 words/pixels = 7 lines to the next 8x8 block
+                // (the final +16 in the inner loop us at the start of line 1, so we need to advance by 7 from there, not 8)
+                outputPos += 4096 - 16 * (256 / 8);
             }
             _ = 5;
             _ = 5;
@@ -400,7 +528,7 @@ namespace MphRead.Testing
             0xE0C, 0xE0E
         ];
 
-        private static void Sub20679B0(ref uint r2, ref uint value, ref Span<byte> outputSpan1, ref Span<byte> outputSpan2,
+        private static void Sub20679B0(ref uint outputPos, ref uint value, ref Span<byte> outputSpan1, ref Span<byte> outputSpan2,
             ref Span<uint> intBuf, ref Span<ushort> wordBuf, ref Span<byte> byteBuf)
         {
             ReadNextBit(ref value, ref intBuf);
@@ -415,13 +543,133 @@ namespace MphRead.Testing
                     if (_readBit != 0)
                     {
                         // 1 1 1
-                        // todo: actual code
-                        byte v129 = byteBuf.Consume();
-                        int v130 = _dword206B2A0[v129];
-                        ushort v131 = wordBuf.Consume();
-                        int v132 = v131 | (v131 << 16);
-                        Span<byte> v133 = outputSpan1.Slice(v130 + r2);
-                        Span<byte> v134 = outputSpan2.Slice(r2);
+                        byte v130 = byteBuf.Consume();
+                        uint v131 = (uint)_dword206B2A0[v130];
+                        ushort v132 = wordBuf.Consume();
+                        int v133 = v132 | (v132 << 16);
+                        uint prevOffset = v131 + outputPos;
+                        // todo: might not need both code paths, unless there are performance problems or a risk of running off the end when unaligned
+                        Span<uint> outputSpan2Int = MemoryMarshal.Cast<byte, uint>(outputSpan2.Slice(outputPos));
+                        if (prevOffset % 4 != 0)
+                        {
+                            Span<ushort> outputSpan1Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan1.Slice(prevOffset));
+                            int v163 = (outputSpan1Slice[2] | (outputSpan1Slice[3] << 16)) + v133;
+                            int v164 = (outputSpan1Slice[4] | (outputSpan1Slice[5] << 16)) + v133;
+                            int v165 = (outputSpan1Slice[6] | (outputSpan1Slice[7] << 16)) + v133;
+                            outputSpan2Int[0] = (uint)((outputSpan1Slice[0] | (outputSpan1Slice[1] << 16)) + v133);
+                            outputSpan2Int[1] = (uint)v163;
+                            outputSpan2Int[2] = (uint)v164;
+                            outputSpan2Int[3] = (uint)v165;
+                            int v168 = (outputSpan1Slice[256 + 2] | (outputSpan1Slice[256 + 3] << 16)) + v133;
+                            int v169 = (outputSpan1Slice[256 + 4] | (outputSpan1Slice[256 + 5] << 16)) + v133;
+                            int v170 = (outputSpan1Slice[256 + 6] | (outputSpan1Slice[256 + 7] << 16)) + v133;
+                            outputSpan2Int[256 / 2] = (uint)((outputSpan1Slice[256] | (outputSpan1Slice[256 + 1] << 16)) + v133);
+                            outputSpan2Int[256 / 2 + 1] = (uint)v168;
+                            outputSpan2Int[256 / 2 + 2] = (uint)v169;
+                            outputSpan2Int[256 / 2 + 3] = (uint)v170;
+                            int v171 = (outputSpan1Slice[256 * 2 + 2] | (outputSpan1Slice[256 * 2 + 3] << 16)) + v133;
+                            int v172 = (outputSpan1Slice[256 * 2 + 4] | (outputSpan1Slice[256 * 2 + 5] << 16)) + v133;
+                            int v173 = (outputSpan1Slice[256 * 2 + 6] | (outputSpan1Slice[256 * 2 + 7] << 16)) + v133;
+                            outputSpan2Int[256 * 2 / 2] = (uint)((outputSpan1Slice[256 * 2] | (outputSpan1Slice[256 * 2 + 1] << 16)) + v133);
+                            outputSpan2Int[256 * 2 / 2 + 1] = (uint)v171;
+                            outputSpan2Int[256 * 2 / 2 + 2] = (uint)v172;
+                            outputSpan2Int[256 * 2 / 2 + 3] = (uint)v173;
+                            int v174 = (outputSpan1Slice[256 * 3 + 2] | (outputSpan1Slice[256 * 3 + 3] << 16)) + v133;
+                            int v175 = (outputSpan1Slice[256 * 3 + 4] | (outputSpan1Slice[256 * 3 + 5] << 16)) + v133;
+                            int v176 = (outputSpan1Slice[256 * 3 + 6] | (outputSpan1Slice[256 * 3 + 7] << 16)) + v133;
+                            outputSpan2Int[256 * 3 / 2] = (uint)((outputSpan1Slice[256 * 3] | (outputSpan1Slice[256 * 3 + 1] << 16)) + v133);
+                            outputSpan2Int[256 * 3 / 2 + 1] = (uint)v174;
+                            outputSpan2Int[256 * 3 / 2 + 2] = (uint)v175;
+                            outputSpan2Int[256 * 3 / 2 + 3] = (uint)v176;
+                            int v177 = (outputSpan1Slice[256 * 4 + 2] | (outputSpan1Slice[256 * 4 + 3] << 16)) + v133;
+                            int v178 = (outputSpan1Slice[256 * 4 + 4] | (outputSpan1Slice[256 * 4 + 5] << 16)) + v133;
+                            int v179 = (outputSpan1Slice[256 * 4 + 6] | (outputSpan1Slice[256 * 4 + 7] << 16)) + v133;
+                            outputSpan2Int[256 * 4 / 2] = (uint)((outputSpan1Slice[256 * 4] | (outputSpan1Slice[256 * 4 + 1] << 16)) + v133);
+                            outputSpan2Int[256 * 4 / 2 + 1] = (uint)v177;
+                            outputSpan2Int[256 * 4 / 2 + 2] = (uint)v178;
+                            outputSpan2Int[256 * 4 / 2 + 3] = (uint)v179;
+                            int v180 = (outputSpan1Slice[256 * 5 + 2] | (outputSpan1Slice[256 * 5 + 3] << 16)) + v133;
+                            int v181 = (outputSpan1Slice[256 * 5 + 4] | (outputSpan1Slice[256 * 5 + 5] << 16)) + v133;
+                            int v182 = (outputSpan1Slice[256 * 5 + 6] | (outputSpan1Slice[256 * 5 + 7] << 16)) + v133;
+                            outputSpan2Int[256 * 5 / 2] = (uint)((outputSpan1Slice[256 * 5] | (outputSpan1Slice[256 * 5 + 1] << 16)) + v133);
+                            outputSpan2Int[256 * 5 / 2 + 1] = (uint)v180;
+                            outputSpan2Int[256 * 5 / 2 + 2] = (uint)v181;
+                            outputSpan2Int[256 * 5 / 2 + 3] = (uint)v182;
+                            int v183 = (outputSpan1Slice[256 * 6 + 2] | (outputSpan1Slice[256 * 6 + 3] << 16)) + v133;
+                            int v184 = (outputSpan1Slice[256 * 6 + 4] | (outputSpan1Slice[256 * 6 + 5] << 16)) + v133;
+                            int v185 = (outputSpan1Slice[256 * 6 + 6] | (outputSpan1Slice[256 * 6 + 7] << 16)) + v133;
+                            outputSpan2Int[256 * 6 / 2] = (uint)((outputSpan1Slice[256 * 6] | (outputSpan1Slice[256 * 6 + 1] << 16)) + v133);
+                            outputSpan2Int[256 * 6 / 2 + 1] = (uint)v183;
+                            outputSpan2Int[256 * 6 / 2 + 2] = (uint)v184;
+                            outputSpan2Int[256 * 6 / 2 + 3] = (uint)v185;
+                            int v160 = (outputSpan1Slice[256 * 7 + 2] | (outputSpan1Slice[256 * 7 + 3] << 16)) + v133;
+                            int v161 = (outputSpan1Slice[256 * 7 + 4] | (outputSpan1Slice[256 * 7 + 5] << 16)) + v133;
+                            int v162 = (outputSpan1Slice[256 * 7 + 6] | (outputSpan1Slice[256 * 7 + 7] << 16)) + v133;
+                            outputSpan2Int[256 * 7 / 2] = (uint)((outputSpan1Slice[256 * 7] | (outputSpan1Slice[256 * 7 + 1] << 16)) + v133);
+                            outputSpan2Int[256 * 7 / 2 + 1] = (uint)v160;
+                            outputSpan2Int[256 * 7 / 2 + 2] = (uint)v161;
+                            outputSpan2Int[256 * 7 / 2 + 3] = (uint)v162;
+                        }
+                        else
+                        {
+                            Span<uint> outputSpan1Int = MemoryMarshal.Cast<byte, uint>(outputSpan1.Slice(prevOffset));
+                            uint v136 = outputSpan1Int[1] + (uint)v133;
+                            uint v137 = outputSpan1Int[2] + (uint)v133;
+                            uint v138 = outputSpan1Int[3] + (uint)v133;
+                            outputSpan2Int[0] = outputSpan1Int[0] + (uint)v133;
+                            outputSpan2Int[1] = v136;
+                            outputSpan2Int[2] = v137;
+                            outputSpan2Int[3] = v138;
+                            uint v141 = outputSpan1Int[256 / 2 + 1] + (uint)v133;
+                            uint v142 = outputSpan1Int[256 / 2 + 2] + (uint)v133;
+                            uint v143 = outputSpan1Int[256 / 2 + 3] + (uint)v133;
+                            outputSpan2Int[256 / 2] = outputSpan1Int[256 / 2] + (uint)v133;
+                            outputSpan2Int[256 / 2 + 1] = v141;
+                            outputSpan2Int[256 / 2 + 2] = v142;
+                            outputSpan2Int[256 / 2 + 3] = v143;
+                            uint v144 = outputSpan1Int[256 * 2 / 2 + 1] + (uint)v133;
+                            uint v145 = outputSpan1Int[256 * 2 / 2 + 2] + (uint)v133;
+                            uint v146 = outputSpan1Int[256 * 2 / 2 + 3] + (uint)v133;
+                            outputSpan2Int[256 * 2 / 2] = outputSpan1Int[256 * 2 / 2] + (uint)v133;
+                            outputSpan2Int[256 * 2 / 2 + 1] = v144;
+                            outputSpan2Int[256 * 2 / 2 + 2] = v145;
+                            outputSpan2Int[256 * 2 / 2 + 3] = v146;
+                            uint v147 = outputSpan1Int[256 * 3 / 2 + 1] + (uint)v133;
+                            uint v148 = outputSpan1Int[256 * 3 / 2 + 2] + (uint)v133;
+                            uint v149 = outputSpan1Int[256 * 3 / 2 + 3] + (uint)v133;
+                            outputSpan2Int[256 * 3 / 2] = outputSpan1Int[256 * 3 / 2] + (uint)v133;
+                            outputSpan2Int[256 * 3 / 2 + 1] = v147;
+                            outputSpan2Int[256 * 3 / 2 + 2] = v148;
+                            outputSpan2Int[256 * 3 / 2 + 3] = v149;
+                            uint v150 = outputSpan1Int[256 * 4 / 2 + 1] + (uint)v133;
+                            uint v151 = outputSpan1Int[256 * 4 / 2 + 2] + (uint)v133;
+                            uint v152 = outputSpan1Int[256 * 4 / 2 + 3] + (uint)v133;
+                            outputSpan2Int[256 * 4 / 2] = outputSpan1Int[256 * 4 / 2] + (uint)v133;
+                            outputSpan2Int[256 * 4 / 2 + 1] = v150;
+                            outputSpan2Int[256 * 4 / 2 + 2] = v151;
+                            outputSpan2Int[256 * 4 / 2 + 3] = v152;
+                            uint v153 = outputSpan1Int[256 * 5 / 2 + 1] + (uint)v133;
+                            uint v154 = outputSpan1Int[256 * 5 / 2 + 2] + (uint)v133;
+                            uint v155 = outputSpan1Int[256 * 5 / 2 + 3] + (uint)v133;
+                            outputSpan2Int[256 * 5 / 2] = outputSpan1Int[256 * 5 / 2] + (uint)v133;
+                            outputSpan2Int[256 * 5 / 2 + 1] = v153;
+                            outputSpan2Int[256 * 5 / 2 + 2] = v154;
+                            outputSpan2Int[256 * 5 / 2 + 3] = v155;
+                            uint v156 = outputSpan1Int[256 * 6 / 2 + 1] + (uint)v133;
+                            uint v157 = outputSpan1Int[256 * 6 / 2 + 2] + (uint)v133;
+                            uint v158 = outputSpan1Int[256 * 6 / 2 + 3] + (uint)v133;
+                            outputSpan2Int[256 * 6 / 2] = outputSpan1Int[256 * 6 / 2] + (uint)v133;
+                            outputSpan2Int[256 * 6 / 2 + 1] = v156;
+                            outputSpan2Int[256 * 6 / 2 + 2] = v157;
+                            outputSpan2Int[256 * 6 / 2 + 3] = v158;
+                            uint v160 = outputSpan1Int[256 * 7 / 2 + 1] + (uint)v133;
+                            uint v161 = outputSpan1Int[256 * 7 / 2 + 2] + (uint)v133;
+                            uint v162 = outputSpan1Int[256 * 7 / 2 + 3] + (uint)v133;
+                            outputSpan2Int[256 * 7 / 2] = outputSpan1Int[256 * 7 / 2] + (uint)v133;
+                            outputSpan2Int[256 * 7 / 2 + 1] = v160;
+                            outputSpan2Int[256 * 7 / 2 + 2] = v161;
+                            outputSpan2Int[256 * 7 / 2 + 3] = v162;
+                        }
                     }
                     else
                     {
@@ -434,18 +682,198 @@ namespace MphRead.Testing
                             if (_readBit != 0)
                             {
                                 // 1 1 0 1 1
-                                // todo: actual code
+                                Sub20674E4(ref wordBuf, outputSpan2, outputPos);
                             }
                             else
                             {
                                 // 1 1 0 1 0
-                                // todo: actual code
+                                Debugger.Break();
+                                Span<ushort> outputSpan2Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan2.Slice(outputPos));
+                                Sub2067388(ref wordBuf, outputSpan2Slice);
+                                // advanced by 1536 bytes, subtract 1528 bytes, now positioned at 8 bytes
+                                Sub2067388(ref wordBuf, outputSpan2Slice.Slice(4));
+                                // advanced by 1536 + 8 initial bytes = 1544 bytes, add 504 bytes, now positioned at 2048 bytes
+                                Sub2067388(ref wordBuf, outputSpan2Slice.Slice(1024));
+                                // advanced by 1536 + 2048 initial bytes = 3584 bytes, subtract 1528 bytes, now positioned at 2056 bytes
+                                Sub2067388(ref wordBuf, outputSpan2Slice.Slice(1028));
                             }
                         }
                         else
                         {
                             // 1 1 0 0
-                            // todo: actual code
+                            Debug.Assert(outputPos >= 512);
+                            Span<ushort> outputSpan2Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan2.Slice(outputPos));
+                            Span<ushort> outputSpan2Prev = MemoryMarshal.Cast<byte, ushort>(outputSpan2.Slice(outputPos - 512));
+                            // todo: similar to the inlines in Sub Sub206A0B8 and Sub2068488 and Sub206935C and Sub2068B24
+                            ushort v73 = wordBuf[0];
+                            outputSpan2Slice[256 * 2 + 2] = v73;
+                            outputSpan2Slice[256 * 2 + 3] = v73;
+                            outputSpan2Slice[256 * 2 + 4] = v73;
+                            outputSpan2Slice[256 * 2 + 5] = v73;
+                            outputSpan2Slice[256 * 2 + 6] = v73;
+                            outputSpan2Slice[256 * 2 + 7] = v73;
+                            outputSpan2Slice[256 * 3 + 2] = v73;
+                            outputSpan2Slice[256 * 3 + 3] = v73;
+                            outputSpan2Slice[256 * 3 + 4] = v73;
+                            outputSpan2Slice[256 * 3 + 5] = v73;
+                            outputSpan2Slice[256 * 3 + 6] = v73;
+                            outputSpan2Slice[256 * 3 + 7] = v73;
+                            outputSpan2Slice[256 * 4 + 2] = v73;
+                            outputSpan2Slice[256 * 4 + 3] = v73;
+                            outputSpan2Slice[256 * 4 + 4] = v73;
+                            outputSpan2Slice[256 * 4 + 5] = v73;
+                            outputSpan2Slice[256 * 4 + 6] = v73;
+                            outputSpan2Slice[256 * 4 + 7] = v73;
+                            outputSpan2Slice[256 * 5 + 2] = v73;
+                            outputSpan2Slice[256 * 5 + 3] = v73;
+                            outputSpan2Slice[256 * 5 + 4] = v73;
+                            outputSpan2Slice[256 * 5 + 5] = v73;
+                            outputSpan2Slice[256 * 5 + 6] = v73;
+                            outputSpan2Slice[256 * 5 + 7] = v73;
+                            outputSpan2Slice[256 * 6 + 2] = v73;
+                            outputSpan2Slice[256 * 6 + 3] = v73;
+                            outputSpan2Slice[256 * 6 + 4] = v73;
+                            outputSpan2Slice[256 * 6 + 5] = v73;
+                            outputSpan2Slice[256 * 6 + 6] = v73;
+                            outputSpan2Slice[256 * 6 + 7] = v73;
+                            outputSpan2Slice[256 * 7 + 2] = v73;
+                            outputSpan2Slice[256 * 7 + 3] = v73;
+                            outputSpan2Slice[256 * 7 + 4] = v73;
+                            outputSpan2Slice[256 * 7 + 5] = v73;
+                            outputSpan2Slice[256 * 7 + 6] = v73;
+                            outputSpan2Slice[256 * 7 + 7] = v73;
+                            uint v74 = v73 | ((uint)v73 << 16);
+                            uint v82 = v74 & 0x7BDF7BDF;
+                            uint v83 = v74 & 0x4200420;
+                            uint v86 = outputSpan2Prev[0];
+                            uint v87 = v86 & 0x4200420;
+                            v86 &= 0x7BDF7BDF;
+                            uint v88 = v87 | ((uint)(v82 + v86) >> 1);
+                            outputSpan2Slice[0] = (ushort)v88;
+                            v88 &= 0x7BDF7BDF;
+                            outputSpan2Prev[0] = (ushort)(v83 | ((v88 + v86) >> 1));
+                            outputSpan2Slice[256] = (ushort)(v83 | ((v88 + v82) >> 1));
+                            uint v89 = outputSpan2Prev[1];
+                            v87 = (v87 & 0xFFFF0000) | (v89 & 0x420);
+                            v89 &= 0x7BDF7BDF;
+                            uint v90 = v83 | ((uint)(v82 + v89) >> 1);
+                            outputSpan2Slice[1] = (ushort)v90;
+                            v90 &= 0x7BDF7BDF;
+                            outputSpan2Prev[1] = (ushort)(v87 | ((v90 + v89) >> 1));
+                            outputSpan2Slice[256 + 1] = (ushort)(v87 | ((v90 + v82) >> 1));
+                            uint v91 = outputSpan2Prev[2];
+                            uint v92 = v91 & 0x4200420;
+                            v91 &= 0x7BDF7BDF;
+                            uint v93 = v92 | ((uint)(v82 + v91) >> 1);
+                            outputSpan2Slice[2] = (ushort)v93;
+                            v93 &= 0x7BDF7BDF;
+                            outputSpan2Prev[2] = (ushort)(v83 | ((v93 + v91) >> 1));
+                            outputSpan2Slice[256 + 2] = (ushort)(v83 | ((v93 + v82) >> 1));
+                            uint v94 = outputSpan2Prev[3];
+                            v92 = (v92 & 0xFFFF0000) | (v94 & 0x420);
+                            v94 &= 0x7BDF7BDF;
+                            uint v95 = v83 | ((uint)(v82 + v94) >> 1);
+                            outputSpan2Slice[3] = (ushort)v95;
+                            v95 &= 0x7BDF7BDF;
+                            outputSpan2Prev[3] = (ushort)(v92 | ((v95 + v94) >> 1));
+                            outputSpan2Slice[256 + 3] = (ushort)(v92 | ((v95 + v82) >> 1));
+                            uint v96 = outputSpan2Prev[4];
+                            uint v97 = v96 & 0x4200420;
+                            v96 &= 0x7BDF7BDF;
+                            uint v98 = v97 | ((uint)(v82 + v96) >> 1);
+                            outputSpan2Slice[4] = (ushort)v98;
+                            v98 &= 0x7BDF7BDF;
+                            outputSpan2Prev[4] = (ushort)(v83 | ((v98 + v96) >> 1));
+                            outputSpan2Slice[256 + 4] = (ushort)(v83 | ((v98 + v82) >> 1));
+                            uint v99 = outputSpan2Prev[5];
+                            v97 = (v97 & 0xFFFF0000) | (v99 & 0x420);
+                            v99 &= 0x7BDF7BDF;
+                            uint v100 = v83 | ((uint)(v82 + v99) >> 1);
+                            outputSpan2Slice[5] = (ushort)v100;
+                            v100 &= 0x7BDF7BDF;
+                            outputSpan2Prev[5] = (ushort)(v97 | ((v100 + v99) >> 1));
+                            outputSpan2Slice[256 + 5] = (ushort)(v97 | ((v100 + v82) >> 1));
+                            uint v101 = outputSpan2Prev[6];
+                            uint v102 = v101 & 0x4200420;
+                            v101 &= 0x7BDF7BDF;
+                            uint v103 = v102 | ((uint)(v82 + v101) >> 1);
+                            outputSpan2Slice[6] = (ushort)v103;
+                            v103 &= 0x7BDF7BDF;
+                            outputSpan2Prev[6] = (ushort)(v83 | ((v103 + v101) >> 1));
+                            outputSpan2Slice[256 + 6] = (ushort)(v83 | ((v103 + v82) >> 1));
+                            uint v104 = outputSpan2Prev[7];
+                            v102 = (v102 & 0xFFFF0000) | (v104 & 0x420);
+                            v104 &= 0x7BDF7BDF;
+                            uint v105 = v83 | ((uint)(v82 + v104) >> 1);
+                            outputSpan2Slice[7] = (ushort)v105;
+                            v105 &= 0x7BDF7BDF;
+                            outputSpan2Prev[7] = (ushort)(v102 | ((v105 + v104) >> 1));
+                            outputSpan2Slice[256 + 7] = (ushort)(v102 | ((v105 + v82) >> 1));
+                            uint v106 = outputSpan2Prev[256 - 1];
+                            uint v107 = v106 & 0x4200420;
+                            v106 &= 0x7BDF7BDF;
+                            uint v108 = v107 | ((uint)(v82 + v106) >> 1);
+                            outputSpan2Slice[0] = (ushort)v108;
+                            v108 &= 0x7BDF7BDF;
+                            outputSpan2Prev[256 - 1] = (ushort)(v83 | ((v108 + v106) >> 1));
+                            outputSpan2Slice[1] = (ushort)(v83 | ((v108 + v82) >> 1));
+                            uint v109 = outputSpan2Slice[256 - 1];
+                            v107 = (v107 & 0xFFFF0000) | (v109 & 0x420);
+                            v109 &= 0x7BDF7BDF;
+                            uint v110 = v83 | ((uint)(v82 + v109) >> 1);
+                            outputSpan2Slice[256] = (ushort)v110;
+                            v110 &= 0x7BDF7BDF;
+                            outputSpan2Slice[256 - 1] = (ushort)(v107 | ((v110 + v109) >> 1));
+                            outputSpan2Slice[256 + 1] = (ushort)(v107 | ((v110 + v82) >> 1));
+                            uint v111 = outputSpan2Slice[256 * 2 - 1];
+                            uint v112 = v111 & 0x4200420;
+                            v111 &= 0x7BDF7BDF;
+                            uint v113 = v112 | ((uint)(v82 + v111) >> 1);
+                            outputSpan2Slice[256 * 2] = (ushort)v113;
+                            v113 &= 0x7BDF7BDF;
+                            outputSpan2Slice[256 * 2 - 1] = (ushort)(v83 | ((v113 + v111) >> 1));
+                            outputSpan2Slice[256 * 2 + 1] = (ushort)(v83 | ((v113 + v82) >> 1));
+                            uint v114 = outputSpan2Slice[256 * 3 - 1];
+                            v112 = (v112 & 0xFFFF0000) | (v114 & 0x420);
+                            v114 &= 0x7BDF7BDF;
+                            uint v115 = v83 | ((uint)(v82 + v114) >> 1);
+                            outputSpan2Slice[256 * 3] = (ushort)v115;
+                            v115 &= 0x7BDF7BDF;
+                            outputSpan2Slice[256 * 3 - 1] = (ushort)(v112 | ((v115 + v114) >> 1));
+                            outputSpan2Slice[256 * 3 + 1] = (ushort)(v112 | ((v115 + v82) >> 1));
+                            uint v116 = outputSpan2Slice[256 * 4 - 1];
+                            uint v117 = v116 & 0x4200420;
+                            v116 &= 0x7BDF7BDF;
+                            uint v118 = v117 | ((uint)(v82 + v116) >> 1);
+                            outputSpan2Slice[256 * 4] = (ushort)v118;
+                            v118 &= 0x7BDF7BDF;
+                            outputSpan2Slice[256 * 4 - 1] = (ushort)(v83 | ((v118 + v116) >> 1));
+                            outputSpan2Slice[256 * 4 + 1] = (ushort)(v83 | ((v118 + v82) >> 1));
+                            uint v119 = outputSpan2Slice[256 * 5 - 1];
+                            v117 = (v117 & 0xFFFF0000) | (v119 & 0x420);
+                            v119 &= 0x7BDF7BDF;
+                            uint v120 = v83 | ((uint)(v82 + v119) >> 1);
+                            outputSpan2Slice[256 * 5] = (ushort)v120;
+                            v120 &= 0x7BDF7BDF;
+                            outputSpan2Slice[256 * 5 - 1] = (ushort)(v117 | ((v120 + v119) >> 1));
+                            outputSpan2Slice[256 * 5 + 1] = (ushort)(v117 | ((v120 + v82) >> 1));
+                            uint v121 = outputSpan2Slice[256 * 6 - 1];
+                            uint v122 = v121 & 0x4200420;
+                            v121 &= 0x7BDF7BDF;
+                            uint v123 = v122 | ((uint)(v82 + v121) >> 1);
+                            outputSpan2Slice[256 * 6] = (ushort)v123;
+                            v123 &= 0x7BDF7BDF;
+                            outputSpan2Slice[256 * 6 - 1] = (ushort)(v83 | ((v123 + v121) >> 1));
+                            outputSpan2Slice[256 * 6 + 1] = (ushort)(v83 | ((v123 + v82) >> 1));
+                            uint v124 = outputSpan2Slice[256 * 7 - 1];
+                            v122 = (v122 & 0xFFFF0000) | (v124 & 0x420);
+                            v124 &= 0x7BDF7BDF;
+                            uint v125 = v83 | ((uint)(v82 + v124) >> 1);
+                            outputSpan2Slice[256 * 7] = (ushort)v125;
+                            v125 &= 0x7BDF7BDF;
+                            outputSpan2Slice[256 * 7 - 1] = (ushort)(v122 | ((v125 + v124) >> 1));
+                            outputSpan2Slice[256 * 7 + 1] = (ushort)(v122 | ((v125 + v82) >> 1));
+                            wordBuf = wordBuf.Slice(1);
                         }
                     }
                 }
@@ -456,12 +884,22 @@ namespace MphRead.Testing
                     if (_readBit != 0)
                     {
                         // 1 0 1
-                        // todo: actual code
+                        Sub2068B24(ref outputPos, ref value, ref outputSpan1, ref outputSpan2, ref intBuf, ref wordBuf, ref byteBuf);
+                        outputPos += 8;
+                        Sub2068B24(ref outputPos, ref value, ref outputSpan1, ref outputSpan2, ref intBuf, ref wordBuf, ref byteBuf);
+                        outputPos -= 8;
                     }
                     else
                     {
                         // 1 0 0
-                        // todo: actual code
+                        // decode pixels 0-7 of lines 0-3 of this 8x8 block
+                        Sub2068488(ref outputPos, ref value, ref outputSpan1, ref outputSpan2, ref intBuf, ref wordBuf, ref byteBuf);
+                        // advance by 2048 bytes = 1024 words/pixels = 4 lines
+                        outputPos += 2048;
+                        // decode pixels 0-7 of lines 4-7 of this 8x8 block
+                        Sub2068488(ref outputPos, ref value, ref outputSpan1, ref outputSpan2, ref intBuf, ref wordBuf, ref byteBuf);
+                        // reset output position, to be advanced by the caller to the next 8x8 block
+                        outputPos -= 2048;
                     }
                 }
             }
@@ -469,16 +907,2733 @@ namespace MphRead.Testing
             {
                 // 0
                 ReadNextBit(ref value, ref intBuf);
+                // todo: same as the section in Sub206935C, but sets more values
+                // most of the code is shared between the 01+aligned and 00 code paths
+                // (presumably because 00 is always aligned since it doesn't use an offset from the table)
+                Span<uint> outputSpan1Int;
+                Span<uint> outputSpan2Int = MemoryMarshal.Cast<byte, uint>(outputSpan2.Slice(outputPos));
                 if (_readBit != 0)
                 {
                     // 0 1
-                    // todo: actual code
+                    byte v14 = byteBuf.Consume();
+                    uint v11 = (uint)_dword206B2A0[v14];
+                    uint prevOffset = v11 + outputPos;
+                    // todo: might not need both code paths, unless there are performance problems or a risk of running off the end when unaligned
+                    Span<ushort> outputSpan1Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan1.Slice(prevOffset));
+                    if (prevOffset % 4 != 0)
+                    {
+                        int v41 = outputSpan1Slice[2] | (outputSpan1Slice[3] << 16);
+                        int v42 = outputSpan1Slice[4] | (outputSpan1Slice[5] << 16);
+                        int v43 = outputSpan1Slice[6] | (outputSpan1Slice[7] << 16);
+                        outputSpan2Int[0] = (uint)(outputSpan1Slice[0] | (outputSpan1Slice[1] << 16));
+                        outputSpan2Int[1] = (uint)v41;
+                        outputSpan2Int[2] = (uint)v42;
+                        outputSpan2Int[3] = (uint)v43;
+                        int v46 = outputSpan1Slice[256 + 2] | (outputSpan1Slice[256 + 3] << 16);
+                        int v47 = outputSpan1Slice[256 + 4] | (outputSpan1Slice[256 + 5] << 16);
+                        int v48 = outputSpan1Slice[256 + 6] | (outputSpan1Slice[256 + 7] << 16);
+                        outputSpan2Int[256 / 2] = (uint)(outputSpan1Slice[256] | (outputSpan1Slice[256 + 1] << 16));
+                        outputSpan2Int[256 / 2 + 1] = (uint)v46;
+                        outputSpan2Int[256 / 2 + 2] = (uint)v47;
+                        outputSpan2Int[256 / 2 + 3] = (uint)v48;
+                        int v49 = outputSpan1Slice[256 * 2 + 2] | (outputSpan1Slice[256 * 2 + 3] << 16);
+                        int v50 = outputSpan1Slice[256 * 2 + 4] | (outputSpan1Slice[256 * 2 + 5] << 16);
+                        int v51 = outputSpan1Slice[256 * 2 + 6] | (outputSpan1Slice[256 * 2 + 7] << 16);
+                        outputSpan2Int[256 * 2 / 2] = (uint)(outputSpan1Slice[256 * 2] | (outputSpan1Slice[256 * 2 + 1] << 16));
+                        outputSpan2Int[256 * 2 / 2 + 1] = (uint)v49;
+                        outputSpan2Int[256 * 2 / 2 + 2] = (uint)v50;
+                        outputSpan2Int[256 * 2 / 2 + 3] = (uint)v51;
+                        int v52 = outputSpan1Slice[256 * 3 + 2] | (outputSpan1Slice[256 * 3 + 3] << 16);
+                        int v53 = outputSpan1Slice[256 * 3 + 4] | (outputSpan1Slice[256 * 3 + 5] << 16);
+                        int v54 = outputSpan1Slice[256 * 3 + 6] | (outputSpan1Slice[256 * 3 + 7] << 16);
+                        outputSpan2Int[256 * 3 / 2] = (uint)(outputSpan1Slice[256 * 3] | (outputSpan1Slice[256 * 3 + 1] << 16));
+                        outputSpan2Int[256 * 3 / 2 + 1] = (uint)v52;
+                        outputSpan2Int[256 * 3 / 2 + 2] = (uint)v53;
+                        outputSpan2Int[256 * 3 / 2 + 3] = (uint)v54;
+                        int v55 = outputSpan1Slice[256 * 4 + 2] | (outputSpan1Slice[256 * 4 + 3] << 16);
+                        int v56 = outputSpan1Slice[256 * 4 + 4] | (outputSpan1Slice[256 * 4 + 5] << 16);
+                        int v57 = outputSpan1Slice[256 * 4 + 6] | (outputSpan1Slice[256 * 4 + 7] << 16);
+                        outputSpan2Int[256 * 4 / 2] = (uint)(outputSpan1Slice[256 * 4] | (outputSpan1Slice[256 * 4 + 1] << 16));
+                        outputSpan2Int[256 * 4 / 2 + 1] = (uint)v55;
+                        outputSpan2Int[256 * 4 / 2 + 2] = (uint)v56;
+                        outputSpan2Int[256 * 4 / 2 + 3] = (uint)v57;
+                        int v58 = outputSpan1Slice[256 * 5 + 2] | (outputSpan1Slice[256 * 5 + 3] << 16);
+                        int v59 = outputSpan1Slice[256 * 5 + 4] | (outputSpan1Slice[256 * 5 + 5] << 16);
+                        int v60 = outputSpan1Slice[256 * 5 + 6] | (outputSpan1Slice[256 * 5 + 7] << 16);
+                        outputSpan2Int[256 * 5 / 2] = (uint)(outputSpan1Slice[256 * 5] | (outputSpan1Slice[256 * 5 + 1] << 16));
+                        outputSpan2Int[256 * 5 / 2 + 1] = (uint)v58;
+                        outputSpan2Int[256 * 5 / 2 + 2] = (uint)v59;
+                        outputSpan2Int[256 * 5 / 2 + 3] = (uint)v60;
+                        int v61 = outputSpan1Slice[256 * 6 + 2] | (outputSpan1Slice[256 * 6 + 3] << 16);
+                        int v62 = outputSpan1Slice[256 * 6 + 4] | (outputSpan1Slice[256 * 6 + 5] << 16);
+                        int v63 = outputSpan1Slice[256 * 6 + 6] | (outputSpan1Slice[256 * 6 + 7] << 16);
+                        outputSpan2Int[256 * 6 / 2] = (uint)(outputSpan1Slice[256 * 6] | (outputSpan1Slice[256 * 6 + 1] << 16));
+                        outputSpan2Int[256 * 6 / 2 + 1] = (uint)v61;
+                        outputSpan2Int[256 * 6 / 2 + 2] = (uint)v62;
+                        outputSpan2Int[256 * 6 / 2 + 3] = (uint)v63;
+                        int v64 = outputSpan1Slice[256 * 7 + 2] | (outputSpan1Slice[256 * 7 + 3] << 16);
+                        int v65 = outputSpan1Slice[256 * 7 + 4] | (outputSpan1Slice[256 * 7 + 5] << 16);
+                        int v66 = outputSpan1Slice[256 * 7 + 6] | (outputSpan1Slice[256 * 7 + 7] << 16);
+                        outputSpan2Int[256 * 7 / 2] = (uint)(outputSpan1Slice[256 * 7] | (outputSpan1Slice[256 * 7 + 1] << 16));
+                        outputSpan2Int[256 * 7 / 2 + 1] = (uint)v64;
+                        outputSpan2Int[256 * 7 / 2 + 2] = (uint)v65;
+                        outputSpan2Int[256 * 7 / 2 + 3] = (uint)v66;
+                        return;
+                    }
+                    outputSpan1Int = MemoryMarshal.Cast<ushort, uint>(outputSpan1Slice);
+                }
+                else // use else so outputSpan1Int is definitely assigned
+                {
+                    // 0 0
+                    outputSpan1Int = MemoryMarshal.Cast<byte, uint>(outputSpan1.Slice(outputPos));
+                }
+                uint v15 = outputSpan1Int[1];           // for 0 0, or also 0 1 if it has dword alignment
+                uint v16 = outputSpan1Int[2];
+                uint v17 = outputSpan1Int[3];
+                outputSpan2Int[0] = outputSpan1Int[0];
+                outputSpan2Int[1] = v15;
+                outputSpan2Int[2] = v16;
+                outputSpan2Int[3] = v17;
+                uint v20 = outputSpan1Int[256 / 2 + 1];
+                uint v21 = outputSpan1Int[256 / 2 + 2];
+                uint v22 = outputSpan1Int[256 / 2 + 3];
+                outputSpan2Int[256 / 2] = outputSpan1Int[256 / 2];
+                outputSpan2Int[256 / 2 + 1] = v20;
+                outputSpan2Int[256 / 2 + 2] = v21;
+                outputSpan2Int[256 / 2 + 3] = v22;
+                uint v23 = outputSpan1Int[256 * 2 / 2 + 1];
+                uint v24 = outputSpan1Int[256 * 2 / 2 + 2];
+                uint v25 = outputSpan1Int[256 * 2 / 2 + 3];
+                outputSpan2Int[256 * 2 / 2] = outputSpan1Int[256 * 2 / 2];
+                outputSpan2Int[256 * 2 / 2 + 1] = v23;
+                outputSpan2Int[256 * 2 / 2 + 2] = v24;
+                outputSpan2Int[256 * 2 / 2 + 3] = v25;
+                uint v26 = outputSpan1Int[256 * 3 / 2 + 1];
+                uint v27 = outputSpan1Int[256 * 3 / 2 + 2];
+                uint v28 = outputSpan1Int[256 * 3 / 2 + 3];
+                outputSpan2Int[256 * 3 / 2] = outputSpan1Int[256 * 3 / 2];
+                outputSpan2Int[256 * 3 / 2 + 1] = v26;
+                outputSpan2Int[256 * 3 / 2 + 2] = v27;
+                outputSpan2Int[256 * 3 / 2 + 3] = v28;
+                uint v29 = outputSpan1Int[256 * 4 / 2 + 1];
+                uint v30 = outputSpan1Int[256 * 4 / 2 + 2];
+                uint v31 = outputSpan1Int[256 * 4 / 2 + 3];
+                outputSpan2Int[256 * 4 / 2] = outputSpan1Int[256 * 4 / 2];
+                outputSpan2Int[256 * 4 / 2 + 1] = v29;
+                outputSpan2Int[256 * 4 / 2 + 2] = v30;
+                outputSpan2Int[256 * 4 / 2 + 3] = v31;
+                uint v32 = outputSpan1Int[256 * 5 / 2 + 1];
+                uint v33 = outputSpan1Int[256 * 5 / 2 + 2];
+                uint v34 = outputSpan1Int[256 * 5 / 2 + 3];
+                outputSpan2Int[256 * 5 / 2] = outputSpan1Int[256 * 5 / 2];
+                outputSpan2Int[256 * 5 / 2 + 1] = v32;
+                outputSpan2Int[256 * 5 / 2 + 2] = v33;
+                outputSpan2Int[256 * 5 / 2 + 3] = v34;
+                uint v35 = outputSpan1Int[256 * 6 / 2 + 1];
+                uint v36 = outputSpan1Int[256 * 6 / 2 + 2];
+                uint v37 = outputSpan1Int[256 * 6 / 2 + 3];
+                outputSpan2Int[256 * 6 / 2] = outputSpan1Int[256 * 6 / 2];
+                outputSpan2Int[256 * 6 / 2 + 1] = v35;
+                outputSpan2Int[256 * 6 / 2 + 2] = v36;
+                outputSpan2Int[256 * 6 / 2 + 3] = v37;
+                uint v38 = outputSpan1Int[256 * 7 / 2 + 1];
+                uint v39 = outputSpan1Int[256 * 7 / 2 + 2];
+                uint v40 = outputSpan1Int[256 * 7 / 2 + 3];
+                outputSpan2Int[256 * 7 / 2] = outputSpan1Int[256 * 7 / 2];
+                outputSpan2Int[256 * 7 / 2 + 1] = v38;
+                outputSpan2Int[256 * 7 / 2 + 2] = v39;
+                outputSpan2Int[256 * 7 / 2 + 3] = v40;
+            }
+        }
+
+        // todo: similar structure to Sub20679B0, except 1101 doesn't branch into 11011/11010
+        private static void Sub2068488(ref uint outputPos, ref uint value, ref Span<byte> outputSpan1, ref Span<byte> outputSpan2,
+            ref Span<uint> intBuf, ref Span<ushort> wordBuf, ref Span<byte> byteBuf)
+        {
+            ReadNextBit(ref value, ref intBuf);
+            if (_readBit != 0)
+            {
+                // 1
+                ReadNextBit(ref value, ref intBuf);
+                if (_readBit != 0)
+                {
+                    // 1 1
+                    ReadNextBit(ref value, ref intBuf);
+                    if (_readBit != 0)
+                    {
+                        // 1 1 1
+                        byte v130 = byteBuf.Consume();
+                        uint v131 = (uint)_dword206B2A0[v130];
+                        ushort v132 = wordBuf.Consume();
+                        int v133 = v132 | (v132 << 16);
+                        uint prevOffset = v131 + outputPos;
+                        // todo: might not need both code paths, unless there are performance problems or a risk of running off the end when unaligned
+                        // todo: same as the 111 block in Sub206CA4, but stopping after x3 instead of going through x7
+                        Span<uint> outputSpan2Int = MemoryMarshal.Cast<byte, uint>(outputSpan2.Slice(outputPos));
+                        if (prevOffset % 4 != 0)
+                        {
+                            Span<ushort> outputSpan1Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan1.Slice(prevOffset));
+                            int v163 = (outputSpan1Slice[2] | (outputSpan1Slice[3] << 16)) + v133;
+                            int v164 = (outputSpan1Slice[4] | (outputSpan1Slice[5] << 16)) + v133;
+                            int v165 = (outputSpan1Slice[6] | (outputSpan1Slice[7] << 16)) + v133;
+                            outputSpan2Int[0] = (uint)((outputSpan1Slice[0] | (outputSpan1Slice[1] << 16)) + v133);
+                            outputSpan2Int[1] = (uint)v163;
+                            outputSpan2Int[2] = (uint)v164;
+                            outputSpan2Int[3] = (uint)v165;
+                            int v168 = (outputSpan1Slice[256 + 2] | (outputSpan1Slice[256 + 3] << 16)) + v133;
+                            int v169 = (outputSpan1Slice[256 + 4] | (outputSpan1Slice[256 + 5] << 16)) + v133;
+                            int v170 = (outputSpan1Slice[256 + 6] | (outputSpan1Slice[256 + 7] << 16)) + v133;
+                            outputSpan2Int[256 / 2] = (uint)((outputSpan1Slice[256] | (outputSpan1Slice[256 + 1] << 16)) + v133);
+                            outputSpan2Int[256 / 2 + 1] = (uint)v168;
+                            outputSpan2Int[256 / 2 + 2] = (uint)v169;
+                            outputSpan2Int[256 / 2 + 3] = (uint)v170;
+                            int v171 = (outputSpan1Slice[256 * 2 + 2] | (outputSpan1Slice[256 * 2 + 3] << 16)) + v133;
+                            int v172 = (outputSpan1Slice[256 * 2 + 4] | (outputSpan1Slice[256 * 2 + 5] << 16)) + v133;
+                            int v173 = (outputSpan1Slice[256 * 2 + 6] | (outputSpan1Slice[256 * 2 + 7] << 16)) + v133;
+                            outputSpan2Int[256 * 2 / 2] = (uint)((outputSpan1Slice[256 * 2] | (outputSpan1Slice[256 * 2 + 1] << 16)) + v133);
+                            outputSpan2Int[256 * 2 / 2 + 1] = (uint)v171;
+                            outputSpan2Int[256 * 2 / 2 + 2] = (uint)v172;
+                            outputSpan2Int[256 * 2 / 2 + 3] = (uint)v173;
+                            int v174 = (outputSpan1Slice[256 * 3 + 2] | (outputSpan1Slice[256 * 3 + 3] << 16)) + v133;
+                            int v175 = (outputSpan1Slice[256 * 3 + 4] | (outputSpan1Slice[256 * 3 + 5] << 16)) + v133;
+                            int v176 = (outputSpan1Slice[256 * 3 + 6] | (outputSpan1Slice[256 * 3 + 7] << 16)) + v133;
+                            outputSpan2Int[256 * 3 / 2] = (uint)((outputSpan1Slice[256 * 3] | (outputSpan1Slice[256 * 3 + 1] << 16)) + v133);
+                            outputSpan2Int[256 * 3 / 2 + 1] = (uint)v174;
+                            outputSpan2Int[256 * 3 / 2 + 2] = (uint)v175;
+                            outputSpan2Int[256 * 3 / 2 + 3] = (uint)v176;
+                        }
+                        else
+                        {
+                            Span<uint> outputSpan1Int = MemoryMarshal.Cast<byte, uint>(outputSpan1.Slice(prevOffset));
+                            uint v136 = outputSpan1Int[1] + (uint)v133;
+                            uint v137 = outputSpan1Int[2] + (uint)v133;
+                            uint v138 = outputSpan1Int[3] + (uint)v133;
+                            outputSpan2Int[0] = outputSpan1Int[0] + (uint)v133;
+                            outputSpan2Int[1] = v136;
+                            outputSpan2Int[2] = v137;
+                            outputSpan2Int[3] = v138;
+                            uint v141 = outputSpan1Int[256 / 2 + 1] + (uint)v133;
+                            uint v142 = outputSpan1Int[256 / 2 + 2] + (uint)v133;
+                            uint v143 = outputSpan1Int[256 / 2 + 3] + (uint)v133;
+                            outputSpan2Int[256 / 2] = outputSpan1Int[256 / 2] + (uint)v133;
+                            outputSpan2Int[256 / 2 + 1] = v141;
+                            outputSpan2Int[256 / 2 + 2] = v142;
+                            outputSpan2Int[256 / 2 + 3] = v143;
+                            uint v144 = outputSpan1Int[256 * 2 / 2 + 1] + (uint)v133;
+                            uint v145 = outputSpan1Int[256 * 2 / 2 + 2] + (uint)v133;
+                            uint v146 = outputSpan1Int[256 * 2 / 2 + 3] + (uint)v133;
+                            outputSpan2Int[256 * 2 / 2] = outputSpan1Int[256 * 2 / 2] + (uint)v133;
+                            outputSpan2Int[256 * 2 / 2 + 1] = v144;
+                            outputSpan2Int[256 * 2 / 2 + 2] = v145;
+                            outputSpan2Int[256 * 2 / 2 + 3] = v146;
+                            uint v147 = outputSpan1Int[256 * 3 / 2 + 1] + (uint)v133;
+                            uint v148 = outputSpan1Int[256 * 3 / 2 + 2] + (uint)v133;
+                            uint v149 = outputSpan1Int[256 * 3 / 2 + 3] + (uint)v133;
+                            outputSpan2Int[256 * 3 / 2] = outputSpan1Int[256 * 3 / 2] + (uint)v133;
+                            outputSpan2Int[256 * 3 / 2 + 1] = v147;
+                            outputSpan2Int[256 * 3 / 2 + 2] = v148;
+                            outputSpan2Int[256 * 3 / 2 + 3] = v149;
+                        }
+                    }
+                    else
+                    {
+                        // 1 1 0
+                        ReadNextBit(ref value, ref intBuf);
+                        if (_readBit != 0)
+                        {
+                            // 1 1 0 1
+                            Span<ushort> outputSpan2Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan2.Slice(outputPos));
+                            // decode pixels 0-3 of lines 0-3 of this 8x8 block
+                            Sub2067388(ref wordBuf, outputSpan2Slice);
+                            // decode pixels 4-7 of lines 0-3 of this 8x8 block
+                            Sub2067388(ref wordBuf, outputSpan2Slice.Slice(4));
+                        }
+                        else
+                        {
+                            // 1 1 0 0
+                            Debug.Assert(outputPos >= 512);
+                            Span<ushort> outputSpan2Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan2.Slice(outputPos));
+                            Span<ushort> outputSpan2Prev = MemoryMarshal.Cast<byte, ushort>(outputSpan2.Slice(outputPos - 512));
+                            ushort v29 = wordBuf[0];
+                            // lines 6-7 pixels 2-7
+                            outputSpan2Slice[256 * 2 + 2] = v29;
+                            outputSpan2Slice[256 * 2 + 3] = v29;
+                            outputSpan2Slice[256 * 2 + 4] = v29;
+                            outputSpan2Slice[256 * 2 + 5] = v29;
+                            outputSpan2Slice[256 * 2 + 6] = v29;
+                            outputSpan2Slice[256 * 2 + 7] = v29;
+                            outputSpan2Slice[256 * 3 + 2] = v29;
+                            outputSpan2Slice[256 * 3 + 3] = v29;
+                            outputSpan2Slice[256 * 3 + 4] = v29;
+                            outputSpan2Slice[256 * 3 + 5] = v29;
+                            outputSpan2Slice[256 * 3 + 6] = v29;
+                            outputSpan2Slice[256 * 3 + 7] = v29;
+                            uint v30 = v29 | ((uint)v29 << 16);
+                            uint v33 = v30 & 0x7BDF7BDF;
+                            uint v34 = v30 & 0x4200420;
+                            uint v37 = outputSpan2Prev[0]; // line 3 pixel 0
+                            uint v38 = v37 & 0x4200420;
+                            v37 &= 0x7BDF7BDF;
+                            uint v39 = v38 | ((uint)(v33 + v37) >> 1);
+                            // line 4 pixel 0
+                            outputSpan2Slice[0] = (ushort)v39; // overwritten below
+                            v39 &= 0x7BDF7BDF;
+                            // line 3 pixel 0
+                            outputSpan2Prev[0] = (ushort)(v34 | ((v39 + v37) >> 1));
+                            // line 5 pixel 0
+                            outputSpan2Slice[256] = (ushort)(v34 | ((v39 + v33) >> 1)); // overwritten below
+                            uint v40 = outputSpan2Prev[1]; // line 3 pixel 1
+                            v38 = (v38 & 0xFFFF0000) | (v40 & 0x420);
+                            v40 &= 0x7BDF7BDF;
+                            uint v41 = v34 | ((uint)(v33 + v40) >> 1);
+                            // line 4 pixel 1
+                            outputSpan2Slice[1] = (ushort)v41; // overwritten below
+                            v41 &= 0x7BDF7BDF;
+                            // line 3 pixel 1
+                            outputSpan2Prev[1] = (ushort)(v38 | ((v41 + v40) >> 1));
+                            // line 5 pixel 1
+                            outputSpan2Slice[256 + 1] = (ushort)(v38 | ((v41 + v33) >> 1)); // overwritten below
+                            uint v42 = outputSpan2Prev[2]; // line 3 pixel 2
+                            uint v43 = v42 & 0x4200420;
+                            v42 &= 0x7BDF7BDF;
+                            uint v44 = v43 | ((uint)(v33 + v42) >> 1);
+                            // line 4 pixel 2
+                            outputSpan2Slice[2] = (ushort)v44;
+                            v44 &= 0x7BDF7BDF;
+                            // line 3 pixel 2
+                            outputSpan2Prev[2] = (ushort)(v34 | ((v44 + v42) >> 1));
+                            // line 5 pixel 2
+                            outputSpan2Slice[256 + 2] = (ushort)(v34 | ((v44 + v33) >> 1));
+                            uint v45 = outputSpan2Prev[3]; // line 3 pixel 3
+                            v43 = (v43 & 0xFFFF0000) | (v45 & 0x420);
+                            v45 &= 0x7BDF7BDF;
+                            uint v46 = v34 | ((uint)(v33 + v45) >> 1);
+                            // line 4 pixel 3
+                            outputSpan2Slice[3] = (ushort)v46;
+                            v46 &= 0x7BDF7BDF;
+                            // line 3 pixel 3
+                            outputSpan2Prev[3] = (ushort)(v43 | ((v46 + v45) >> 1));
+                            // line 5 pixel 3
+                            outputSpan2Slice[256 + 3] = (ushort)(v43 | ((v46 + v33) >> 1));
+                            // todo: same as the 1100 inline in Sub206A0B8 except for having this section and setting more with v29 above
+                            uint v47 = outputSpan2Prev[4]; // line 3 pixel 4
+                            uint v48 = v47 & 0x4200420;
+                            v47 &= 0x7BDF7BDF;
+                            uint v49 = v48 | ((uint)(v33 + v47) >> 1);
+                            // line 4 pixel 4
+                            outputSpan2Slice[4] = (ushort)v49;
+                            v49 &= 0x7BDF7BDF;
+                            outputSpan2Prev[4] = (ushort)(v34 | ((v49 + v47) >> 1));
+                            // line 5 pixel 4
+                            outputSpan2Slice[256 + 4] = (ushort)(v34 | ((v49 + v33) >> 1));
+                            uint v16 = outputSpan2Prev[5]; // line 3 pixel 5
+                            v48 = (v48 & 0xFFFF0000) | (v16 & 0x420);
+                            v16 &= 0x7BDF7BDF;
+                            uint v17 = v34 | ((uint)(v33 + v16) >> 1);
+                            // line 4 pixel 5
+                            outputSpan2Slice[5] = (ushort)v17;
+                            v17 &= 0x7BDF7BDF;
+                            outputSpan2Prev[5] = (ushort)(v48 | ((v17 + v16) >> 1));
+                            // line 5 pixel 5
+                            outputSpan2Slice[256 + 5] = (ushort)(v48 | ((v17 + v33) >> 1));
+                            uint v18 = outputSpan2Prev[6]; // line 3 pixel 6
+                            uint v19 = v18 & 0x4200420;
+                            v18 &= 0x7BDF7BDF;
+                            uint v20 = v19 | ((uint)(v33 + v18) >> 1);
+                            // line 4 pixel 6
+                            outputSpan2Slice[6] = (ushort)v20;
+                            v20 &= 0x7BDF7BDF;
+                            outputSpan2Prev[6] = (ushort)(v34 | ((v20 + v18) >> 1));
+                            // line 5 pixel 6
+                            outputSpan2Slice[256 + 6] = (ushort)(v34 | ((v20 + v33) >> 1));
+                            uint v21 = outputSpan2Prev[7]; // line 3 pixel 7
+                            v19 = (v19 & 0xFFFF0000) | (v21 & 0x420);
+                            v21 &= 0x7BDF7BDF;
+                            uint v22 = v34 | ((uint)(v33 + v21) >> 1);
+                            // line 4 pixel 7
+                            outputSpan2Slice[7] = (ushort)v22;
+                            v22 &= 0x7BDF7BDF;
+                            outputSpan2Prev[7] = (ushort)(v19 | ((v22 + v21) >> 1));
+                            // line 5 pixel 7
+                            outputSpan2Slice[256 + 7] = (ushort)(v19 | ((v22 + v33) >> 1));
+                            uint v23 = outputSpan2Prev[256 - 1]; // line 4 pixel -1
+                            uint v24 = v23 & 0x4200420;
+                            v23 &= 0x7BDF7BDF;
+                            v47 = v23;
+                            v49 = v24 | ((uint)(v33 + v23) >> 1);
+                            // todo: ^ (last two lines move values into earlier variables to continue being used below)
+                            // line 4 pixel 0
+                            outputSpan2Slice[0] = (ushort)v49; // overwriting value set above
+                            v49 &= 0x7BDF7BDF;
+                            // line 4 pixel -1
+                            outputSpan2Prev[256 - 1] = (ushort)(v34 | ((v49 + v47) >> 1));
+                            // line 4 pixel 1
+                            outputSpan2Slice[1] = (ushort)(v34 | ((v49 + v33) >> 1)); // overwriting value set above
+                            uint v50 = outputSpan2Slice[256 - 1]; // line 5 pixel -1
+                            v48 = (v48 & 0xFFFF0000) | (v50 & 0x420);
+                            v50 &= 0x7BDF7BDF;
+                            uint v51 = v34 | ((uint)(v33 + v50) >> 1);
+                            // line 5 pixel 0
+                            outputSpan2Slice[256] = (ushort)v51; // overwriting value set above
+                            v51 &= 0x7BDF7BDF;
+                            // line 5 pixel -1
+                            outputSpan2Slice[256 - 1] = (ushort)(v48 | ((v51 + v50) >> 1));
+                            // line 5 pixel 1
+                            outputSpan2Slice[256 + 1] = (ushort)(v48 | ((v51 + v33) >> 1)); // overwriting value set above
+                            uint v52 = outputSpan2Slice[256 * 2 - 1]; // line 6 pixel -1
+                            uint v53 = v52 & 0x4200420;
+                            v52 &= 0x7BDF7BDF;
+                            uint v54 = v53 | ((uint)(v33 + v52) >> 1);
+                            // line 6 pixel 0
+                            outputSpan2Slice[256 * 2] = (ushort)v54;
+                            v54 &= 0x7BDF7BDF;
+                            // line 6 pixel -1
+                            outputSpan2Slice[256 * 2 - 1] = (ushort)(v34 | ((v54 + v52) >> 1));
+                            // line 6 pixel 1
+                            outputSpan2Slice[256 * 2 + 1] = (ushort)(v34 | ((v54 + v33) >> 1));
+                            uint v55 = outputSpan2Slice[256 * 3 - 1]; // line 7 pixel -1
+                            v53 = (v53 & 0xFFFF0000) | (v55 & 0x420);
+                            v55 &= 0x7BDF7BDF;
+                            uint v56 = v34 | ((uint)(v33 + v55) >> 1);
+                            // line 7 pixel 0
+                            outputSpan2Slice[256 * 3] = (ushort)v56;
+                            v56 &= 0x7BDF7BDF;
+                            // line 7 pixel -1
+                            outputSpan2Slice[256 * 3 - 1] = (ushort)(v53 | ((v56 + v55) >> 1));
+                            // line 7 pixel 1
+                            outputSpan2Slice[256 * 3 + 1] = (ushort)(v53 | ((v56 + v33) >> 1));
+                            wordBuf = wordBuf.Slice(1);
+                        }
+                    }
+                }
+                else
+                {
+                    // 1 0
+                    ReadNextBit(ref value, ref intBuf);
+                    if (_readBit != 0)
+                    {
+                        // 1 0 1
+                        // decode pixels 0-3 of lines 4-7 of this 8x8 block
+                        Sub206A0B8(ref outputPos, ref value, ref outputSpan1, ref outputSpan2, ref intBuf, ref wordBuf, ref byteBuf);
+                        // advance by 8 bytes = 4 words/pixels
+                        outputPos += 8;
+                        // decode pixels 4-7 of lines 4-7 of this 8x8 block
+                        Sub206A0B8(ref outputPos, ref value, ref outputSpan1, ref outputSpan2, ref intBuf, ref wordBuf, ref byteBuf);
+                        // reset output position, to be advanced by the caller to the next 8x8 block
+                        outputPos -= 8;
+                    }
+                    else
+                    {
+                        // 1 0 0
+                        Sub206935C(ref outputPos, ref value, ref outputSpan1, ref outputSpan2, ref intBuf, ref wordBuf, ref byteBuf);
+                        outputPos += 1024;
+                        Sub206935C(ref outputPos, ref value, ref outputSpan1, ref outputSpan2, ref intBuf, ref wordBuf, ref byteBuf);
+                        outputPos -= 1024;
+                    }
+                }
+            }
+            else
+            {
+                // 0
+                ReadNextBit(ref value, ref intBuf);
+                // todo: same as the section in Sub206935C, but sets more values (but fewer than in Sub20679B0)
+                // most of the code is shared between the 01+aligned and 00 code paths
+                // (presumably because 00 is always aligned since it doesn't use an offset from the table)
+                Span<uint> outputSpan1Int;
+                Span<uint> outputSpan2Int = MemoryMarshal.Cast<byte, uint>(outputSpan2.Slice(outputPos));
+                if (_readBit != 0)
+                {
+                    // 0 1
+                    byte v14 = byteBuf.Consume();
+                    uint v11 = (uint)_dword206B2A0[v14];
+                    uint prevOffset = v11 + outputPos;
+                    // todo: might not need both code paths, unless there are performance problems or a risk of running off the end when unaligned
+                    Span<ushort> outputSpan1Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan1.Slice(prevOffset));
+                    if (prevOffset % 4 != 0)
+                    {
+                        int v41 = outputSpan1Slice[2] | (outputSpan1Slice[3] << 16);
+                        int v42 = outputSpan1Slice[4] | (outputSpan1Slice[5] << 16);
+                        int v43 = outputSpan1Slice[6] | (outputSpan1Slice[7] << 16);
+                        outputSpan2Int[0] = (uint)(outputSpan1Slice[0] | (outputSpan1Slice[1] << 16));
+                        outputSpan2Int[1] = (uint)v41;
+                        outputSpan2Int[2] = (uint)v42;
+                        outputSpan2Int[3] = (uint)v43;
+                        int v46 = outputSpan1Slice[256 + 2] | (outputSpan1Slice[256 + 3] << 16);
+                        int v47 = outputSpan1Slice[256 + 4] | (outputSpan1Slice[256 + 5] << 16);
+                        int v48 = outputSpan1Slice[256 + 6] | (outputSpan1Slice[256 + 7] << 16);
+                        outputSpan2Int[256 / 2] = (uint)(outputSpan1Slice[256] | (outputSpan1Slice[256 + 1] << 16));
+                        outputSpan2Int[256 / 2 + 1] = (uint)v46;
+                        outputSpan2Int[256 / 2 + 2] = (uint)v47;
+                        outputSpan2Int[256 / 2 + 3] = (uint)v48;
+                        int v49 = outputSpan1Slice[256 * 2 + 2] | (outputSpan1Slice[256 * 2 + 3] << 16);
+                        int v50 = outputSpan1Slice[256 * 2 + 4] | (outputSpan1Slice[256 * 2 + 5] << 16);
+                        int v51 = outputSpan1Slice[256 * 2 + 6] | (outputSpan1Slice[256 * 2 + 7] << 16);
+                        outputSpan2Int[256 * 2 / 2] = (uint)(outputSpan1Slice[256 * 2] | (outputSpan1Slice[256 * 2 + 1] << 16));
+                        outputSpan2Int[256 * 2 / 2 + 1] = (uint)v49;
+                        outputSpan2Int[256 * 2 / 2 + 2] = (uint)v50;
+                        outputSpan2Int[256 * 2 / 2 + 3] = (uint)v51;
+                        int v52 = outputSpan1Slice[256 * 3 + 2] | (outputSpan1Slice[256 * 3 + 3] << 16);
+                        int v53 = outputSpan1Slice[256 * 3 + 4] | (outputSpan1Slice[256 * 3 + 5] << 16);
+                        int v54 = outputSpan1Slice[256 * 3 + 6] | (outputSpan1Slice[256 * 3 + 7] << 16);
+                        outputSpan2Int[256 * 3 / 2] = (uint)(outputSpan1Slice[256 * 3] | (outputSpan1Slice[256 * 3 + 1] << 16));
+                        outputSpan2Int[256 * 3 / 2 + 1] = (uint)v52;
+                        outputSpan2Int[256 * 3 / 2 + 2] = (uint)v53;
+                        outputSpan2Int[256 * 3 / 2 + 3] = (uint)v54;
+                        return;
+                    }
+                    outputSpan1Int = MemoryMarshal.Cast<ushort, uint>(outputSpan1Slice);
+                }
+                else // use else so outputSpan1Int is definitely assigned
+                {
+                    // 0 0
+                    outputSpan1Int = MemoryMarshal.Cast<byte, uint>(outputSpan1.Slice(outputPos));
+                }
+                uint v15 = outputSpan1Int[1];           // for 0 0, or also 0 1 if it has dword alignment
+                uint v16 = outputSpan1Int[2];
+                uint v17 = outputSpan1Int[3];
+                outputSpan2Int[0] = outputSpan1Int[0];
+                outputSpan2Int[1] = v15;
+                outputSpan2Int[2] = v16;
+                outputSpan2Int[3] = v17;
+                uint v20 = outputSpan1Int[256 / 2 + 1];
+                uint v21 = outputSpan1Int[256 / 2 + 2];
+                uint v22 = outputSpan1Int[256 / 2 + 3];
+                outputSpan2Int[256 / 2] = outputSpan1Int[256 / 2];
+                outputSpan2Int[256 / 2 + 1] = v20;
+                outputSpan2Int[256 / 2 + 2] = v21;
+                outputSpan2Int[256 / 2 + 3] = v22;
+                uint v23 = outputSpan1Int[256 * 2 / 2 + 1];
+                uint v24 = outputSpan1Int[256 * 2 / 2 + 2];
+                uint v25 = outputSpan1Int[256 * 2 / 2 + 3];
+                outputSpan2Int[256 * 2 / 2] = outputSpan1Int[256 * 2 / 2];
+                outputSpan2Int[256 * 2 / 2 + 1] = v23;
+                outputSpan2Int[256 * 2 / 2 + 2] = v24;
+                outputSpan2Int[256 * 2 / 2 + 3] = v25;
+                uint v26 = outputSpan1Int[256 * 3 / 2 + 1];
+                uint v27 = outputSpan1Int[256 * 3 / 2 + 2];
+                uint v28 = outputSpan1Int[256 * 3 / 2 + 3];
+                outputSpan2Int[256 * 3 / 2] = outputSpan1Int[256 * 3 / 2];
+                outputSpan2Int[256 * 3 / 2 + 1] = v26;
+                outputSpan2Int[256 * 3 / 2 + 2] = v27;
+                outputSpan2Int[256 * 3 / 2 + 3] = v28;
+            }
+        }
+
+        // todo: same structure as Sub2068488
+        private static void Sub206A0B8(ref uint outputPos, ref uint value, ref Span<byte> outputSpan1, ref Span<byte> outputSpan2,
+            ref Span<uint> intBuf, ref Span<ushort> wordBuf, ref Span<byte> byteBuf)
+        {
+            ReadNextBit(ref value, ref intBuf);
+            if (_readBit != 0)
+            {
+                // 1
+                ReadNextBit(ref value, ref intBuf);
+                if (_readBit != 0)
+                {
+                    // 1 1
+                    ReadNextBit(ref value, ref intBuf);
+                    if (_readBit != 0)
+                    {
+                        // 1 1 1
+                        // todo: like the section in Sub20679B0, but sets fewer values
+                        byte v57 = byteBuf.Consume();
+                        uint v58 = (uint)_dword206B2A0[v57];
+                        ushort v59 = wordBuf.Consume();
+                        int v60 = v59 | (v59 << 16);
+                        uint prevOffset = v58 + outputPos;
+                        // todo: might not need both code paths, unless there are performance problems or a risk of running off the end when unaligned
+                        Span<uint> outputSpan2Int = MemoryMarshal.Cast<byte, uint>(outputSpan2.Slice(outputPos));
+                        if (prevOffset % 4 != 0)
+                        {
+                            Span<ushort> outputSpan1Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan1.Slice(prevOffset));
+                            outputSpan2Int[0] = (uint)((outputSpan1Slice[0] | (outputSpan1Slice[1] << 16)) + v60);
+                            outputSpan2Int[1] = (uint)((outputSpan1Slice[2] | (outputSpan1Slice[3] << 16)) + v60);
+                            outputSpan2Int[256 / 2] = (uint)((outputSpan1Slice[256] | (outputSpan1Slice[256 + 1] << 16)) + v60);
+                            outputSpan2Int[256 / 2 + 1] = (uint)((outputSpan1Slice[256 + 2] | (outputSpan1Slice[256 + 3] << 16)) + v60);
+                            outputSpan2Int[256 * 2 / 2] = (uint)((outputSpan1Slice[256 * 2] | (outputSpan1Slice[256 * 2 + 1] << 16)) + v60);
+                            outputSpan2Int[256 * 2 / 2 + 1] = (uint)((outputSpan1Slice[256 * 2 + 2] | (outputSpan1Slice[256 * 2 + 3] << 16)) + v60);
+                            outputSpan2Int[256 * 3 / 2] = (uint)((outputSpan1Slice[256 * 3] | (outputSpan1Slice[256 * 3 + 1] << 16)) + v60);
+                            outputSpan2Int[256 * 3 / 2 + 1] = (uint)((outputSpan1Slice[256 * 3 + 2] | (outputSpan1Slice[256 * 3 + 3] << 16)) + v60);
+                        }
+                        else
+                        {
+                            Span<uint> outputSpan1Int = MemoryMarshal.Cast<byte, uint>(outputSpan1.Slice(prevOffset));
+                            outputSpan2Int[0] = outputSpan1Int[0] + (uint)v60;
+                            outputSpan2Int[1] = outputSpan1Int[1] + (uint)v60;
+                            outputSpan2Int[256 / 2] = outputSpan1Int[256 / 2] + (uint)v60;
+                            outputSpan2Int[256 / 2 + 1] = outputSpan1Int[256 / 2 + 1] + (uint)v60;
+                            outputSpan2Int[256 * 2 / 2] = outputSpan1Int[256 * 2 / 2] + (uint)v60;
+                            outputSpan2Int[256 * 2 / 2 + 1] = outputSpan1Int[256 * 2 / 2 + 1] + (uint)v60;
+                            outputSpan2Int[256 * 3 / 2] = outputSpan1Int[256 * 3 / 2] + (uint)v60;
+                            outputSpan2Int[256 * 3 / 2 + 1] = outputSpan1Int[256 * 3 / 2 + 1] + (uint)v60;
+                        }
+                    }
+                    else
+                    {
+                        // 1 1 0
+                        ReadNextBit(ref value, ref intBuf);
+                        if (_readBit != 0)
+                        {
+                            // 1 1 0 1
+                            Span<ushort> outputSpan2Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan2.Slice(outputPos));
+                            // decode pixels 0-3 of lines 4-7 of this 8x8 block
+                            Sub2067388(ref wordBuf, outputSpan2Slice);
+                        }
+                        else
+                        {
+                            // 1 1 0 0
+                            // decode pixels 4-7 of lines 4-7 of this 8x8 block (and others?)
+                            Debug.Assert(outputPos >= 512);
+                            Span<ushort> outputSpan2Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan2.Slice(outputPos));
+                            Span<ushort> outputSpan2Prev = MemoryMarshal.Cast<byte, ushort>(outputSpan2.Slice(outputPos - 512));
+                            ushort v29 = wordBuf[0];
+                            outputSpan2Slice[256 * 2 + 2] = v29;
+                            outputSpan2Slice[256 * 2 + 3] = v29;
+                            outputSpan2Slice[256 * 3 + 2] = v29;
+                            outputSpan2Slice[256 * 3 + 3] = v29;
+                            uint v30 = v29 | ((uint)v29 << 16);
+                            uint v33 = v30 & 0x7BDF7BDF;
+                            uint v34 = v30 & 0x4200420;
+                            uint v37 = outputSpan2Prev[0];
+                            uint v38 = v37 & 0x4200420;
+                            v37 &= 0x7BDF7BDF;
+                            uint v39 = v38 | ((uint)(v33 + v37) >> 1);
+                            outputSpan2Slice[0] = (ushort)v39; // overwritten below
+                            v39 &= 0x7BDF7BDF;
+                            outputSpan2Prev[0] = (ushort)(v34 | ((v39 + v37) >> 1));
+                            outputSpan2Slice[256] = (ushort)(v34 | ((v39 + v33) >> 1));
+                            uint v40 = outputSpan2Prev[1];
+                            v38 = (v38 & 0xFFFF0000) | (v40 & 0x420);
+                            v40 &= 0x7BDF7BDF;
+                            uint v41 = v34 | ((uint)(v33 + v40) >> 1);
+                            outputSpan2Slice[1] = (ushort)v41; // overwritten below
+                            v41 &= 0x7BDF7BDF;
+                            outputSpan2Prev[1] = (ushort)(v38 | ((v41 + v40) >> 1));
+                            outputSpan2Slice[256 + 1] = (ushort)(v38 | ((v41 + v33) >> 1));
+                            uint v42 = outputSpan2Prev[2];
+                            uint v43 = v42 & 0x4200420;
+                            v42 &= 0x7BDF7BDF;
+                            uint v44 = v43 | ((uint)(v33 + v42) >> 1);
+                            outputSpan2Slice[2] = (ushort)v44;
+                            v44 &= 0x7BDF7BDF;
+                            outputSpan2Prev[2] = (ushort)(v34 | ((v44 + v42) >> 1));
+                            outputSpan2Slice[256 + 2] = (ushort)(v34 | ((v44 + v33) >> 1));
+                            uint v45 = outputSpan2Prev[3];
+                            v43 = (v43 & 0xFFFF0000) | (v45 & 0x420);
+                            v45 &= 0x7BDF7BDF;
+                            uint v46 = v34 | ((uint)(v33 + v45) >> 1);
+                            outputSpan2Slice[3] = (ushort)v46;
+                            v46 &= 0x7BDF7BDF;
+                            outputSpan2Prev[3] = (ushort)(v43 | ((v46 + v45) >> 1));
+                            outputSpan2Slice[256 + 3] = (ushort)(v43 | ((v46 + v33) >> 1));
+                            uint v47 = outputSpan2Prev[256 - 1];
+                            uint v48 = v47 & 0x4200420;
+                            v47 &= 0x7BDF7BDF;
+                            uint v49 = v48 | ((uint)(v33 + v47) >> 1);
+                            outputSpan2Slice[0] = (ushort)v49; // overwriting value set above
+                            v49 &= 0x7BDF7BDF;
+                            outputSpan2Prev[256 - 1] = (ushort)(v34 | ((v49 + v47) >> 1));
+                            outputSpan2Slice[1] = (ushort)(v34 | ((v49 + v33) >> 1)); // overwriting value set above
+                            uint v50 = outputSpan2Slice[256 - 1];
+                            v48 = (v48 & 0xFFFF0000) | (v50 & 0x420);
+                            v50 &= 0x7BDF7BDF;
+                            uint v51 = v34 | ((uint)(v33 + v50) >> 1);
+                            outputSpan2Slice[256] = (ushort)v51;
+                            v51 &= 0x7BDF7BDF;
+                            outputSpan2Slice[256 - 1] = (ushort)(v48 | ((v51 + v50) >> 1));
+                            outputSpan2Slice[256 + 1] = (ushort)(v48 | ((v51 + v33) >> 1));
+                            uint v52 = outputSpan2Slice[256 * 2 - 1];
+                            uint v53 = v52 & 0x4200420;
+                            v52 &= 0x7BDF7BDF;
+                            uint v54 = v53 | ((uint)(v33 + v52) >> 1);
+                            outputSpan2Slice[256 * 2] = (ushort)v54;
+                            v54 &= 0x7BDF7BDF;
+                            outputSpan2Slice[256 * 2 - 1] = (ushort)(v34 | ((v54 + v52) >> 1));
+                            outputSpan2Slice[256 * 2 + 1] = (ushort)(v34 | ((v54 + v33) >> 1));
+                            uint v55 = outputSpan2Slice[256 * 3 - 1];
+                            v53 = (v53 & 0xFFFF0000) | (v55 & 0x420);
+                            v55 &= 0x7BDF7BDF;
+                            uint v56 = v34 | ((uint)(v33 + v55) >> 1);
+                            outputSpan2Slice[256 * 3] = (ushort)v56;
+                            v56 &= 0x7BDF7BDF;
+                            outputSpan2Slice[256 * 3 - 1] = (ushort)(v53 | ((v56 + v55) >> 1));
+                            outputSpan2Slice[256 * 3 + 1] = (ushort)(v53 | ((v56 + v33) >> 1));
+                            wordBuf = wordBuf.Slice(1);
+                        }
+                    }
+                }
+                else
+                {
+                    // 1 0
+                    ReadNextBit(ref value, ref intBuf);
+                    if (_readBit != 0)
+                    {
+                        // 1 0 1
+                        Sub206A8C0(ref outputPos, ref value, ref outputSpan1, ref outputSpan2, ref intBuf, ref wordBuf, ref byteBuf);
+                        outputPos += 4;
+                        Sub206A8C0(ref outputPos, ref value, ref outputSpan1, ref outputSpan2, ref intBuf, ref wordBuf, ref byteBuf);
+                        outputPos -= 4;
+                    }
+                    else
+                    {
+                        // 1 0 0
+                        Sub206A5A4(ref outputPos, ref value, ref outputSpan1, ref outputSpan2, ref intBuf, ref wordBuf, ref byteBuf);
+                        outputPos += 1024;
+                        Sub206A5A4(ref outputPos, ref value, ref outputSpan1, ref outputSpan2, ref intBuf, ref wordBuf, ref byteBuf);
+                        outputPos -= 1024;
+                    }
+                }
+            }
+            else
+            {
+                // 0
+                ReadNextBit(ref value, ref intBuf);
+                // todo: same as the section in Sub206935C, but sets even fewer values
+                // most of the code is shared between the 01+aligned and 00 code paths
+                // (presumably because 00 is always aligned since it doesn't use an offset from the table)
+                Span<uint> outputSpan1Int;
+                Span<uint> outputSpan2Int = MemoryMarshal.Cast<byte, uint>(outputSpan2.Slice(outputPos));
+                if (_readBit != 0)
+                {
+                    // 0 1
+                    byte v14 = byteBuf.Consume();
+                    uint v11 = (uint)_dword206B2A0[v14];
+                    uint prevOffset = v11 + outputPos;
+                    // todo: might not need both code paths, unless there are performance problems or a risk of running off the end when unaligned
+                    Span<ushort> outputSpan1Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan1.Slice(prevOffset));
+                    if (prevOffset % 4 != 0)
+                    {
+                        outputSpan2Int[0] = (uint)(outputSpan1Slice[0] | (outputSpan1Slice[1] << 16));
+                        outputSpan2Int[1] = (uint)(outputSpan1Slice[2] | (outputSpan1Slice[3] << 16));
+                        outputSpan2Int[256 / 2] = (uint)(outputSpan1Slice[256] | (outputSpan1Slice[256 + 1] << 16));
+                        outputSpan2Int[256 / 2 + 1] = (uint)(outputSpan1Slice[256 + 2] | (outputSpan1Slice[256 + 3] << 16));
+                        outputSpan2Int[256 * 2 / 2] = (uint)(outputSpan1Slice[256 * 2] | (outputSpan1Slice[256 * 2 + 1] << 16));
+                        outputSpan2Int[256 * 2 / 2 + 1] = (uint)(outputSpan1Slice[256 * 2 + 2] | (outputSpan1Slice[256 * 2 + 3] << 16));
+                        outputSpan2Int[256 * 3 / 2] = (uint)(outputSpan1Slice[256 * 3] | (outputSpan1Slice[256 * 3 + 1] << 16));
+                        outputSpan2Int[256 * 3 / 2 + 1] = (uint)(outputSpan1Slice[256 * 3 + 2] | (outputSpan1Slice[256 * 3 + 3] << 16));
+                        return;
+                    }
+                    outputSpan1Int = MemoryMarshal.Cast<ushort, uint>(outputSpan1Slice);
+                }
+                else // use else so outputSpan1Int is definitely assigned
+                {
+                    // 0 0
+                    outputSpan1Int = MemoryMarshal.Cast<byte, uint>(outputSpan1.Slice(outputPos));
+                }
+                outputSpan2Int[0] = outputSpan1Int[0];
+                outputSpan2Int[1] = outputSpan1Int[1];
+                outputSpan2Int[256 / 2] = outputSpan1Int[256 / 2];
+                outputSpan2Int[256 / 2 + 1] = outputSpan1Int[256 / 2 + 1];
+                outputSpan2Int[256 * 2 / 2] = outputSpan1Int[256 * 2 / 2];
+                outputSpan2Int[256 * 2 / 2 + 1] = outputSpan1Int[256 * 2 / 2 + 1];
+                outputSpan2Int[256 * 3 / 2] = outputSpan1Int[256 * 3 / 2];
+                outputSpan2Int[256 * 3 / 2 + 1] = outputSpan1Int[256 * 3 / 2 + 1];
+            }
+        }
+
+        // todo: same structure as Sub2068488 and Sub206A0B8, except 110 doesn't branch into 1101/1100
+        private static void Sub206935C(ref uint outputPos, ref uint value, ref Span<byte> outputSpan1, ref Span<byte> outputSpan2,
+            ref Span<uint> intBuf, ref Span<ushort> wordBuf, ref Span<byte> byteBuf)
+        {
+            ReadNextBit(ref value, ref intBuf);
+            if (_readBit != 0)
+            {
+                // 1
+                ReadNextBit(ref value, ref intBuf);
+                if (_readBit != 0)
+                {
+                    // 1 1
+                    ReadNextBit(ref value, ref intBuf);
+                    if (_readBit != 0)
+                    {
+                        // 1 1 1
+                        Debug.Assert(outputPos >= 512);
+                        Span<ushort> outputSpan2Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan2.Slice(outputPos));
+                        Span<ushort> outputSpan2Prev = MemoryMarshal.Cast<byte, ushort>(outputSpan2.Slice(outputPos - 512));
+                        // todo: similar to the inlines in Sub Sub206A0B8 and Sub2068488
+                        uint v58 = wordBuf[0];
+                        v58 = v58 | (v58 << 16);
+                        uint v61 = outputSpan2Prev[0];
+                        uint v62 = v61 & 0x4200420;
+                        v61 &= 0x7BDF7BDF;
+                        uint v63 = v62 | (((v58 & 0x7BDF7BDF) + v61) >> 1);
+                        outputSpan2Slice[0] = (ushort)v63;
+                        v63 &= 0x7BDF7BDF;
+                        outputSpan2Prev[0] = (ushort)(v58 & 0x420 | ((v63 + v61) >> 1));
+                        outputSpan2Slice[256] = (ushort)(v58 & 0x420 | ((v63 + (v58 & 0x7BDF7BDF)) >> 1));
+                        uint v64 = outputSpan2Prev[1];
+                        v62 = (v62 & 0xFFFF0000) | (v64 & 0x420);
+                        v64 &= 0x7BDF7BDF;
+                        outputSpan2Slice[1] = (ushort)(v58 & 0x420 | (((v58 & 0x7BDF7BDF) + v64) >> 1));
+                        uint v65 = (((v58 & 0x7BDF7BDF) + v64) >> 1) & 0x7BDF7BDF;
+                        outputSpan2Prev[1] = (ushort)(v62 | ((v65 + v64) >> 1));
+                        outputSpan2Slice[256 + 1] = (ushort)(v62 | ((v65 + (v58 & 0x7BDF7BDF)) >> 1));
+                        uint v66 = outputSpan2Prev[2];
+                        uint v67 = v66 & 0x4200420;
+                        v66 &= 0x7BDF7BDF;
+                        uint v68 = v67 | (((v58 & 0x7BDF7BDF) + v66) >> 1);
+                        outputSpan2Slice[2] = (ushort)v68;
+                        v68 &= 0x7BDF7BDF;
+                        outputSpan2Prev[2] = (ushort)(v58 & 0x420 | ((v68 + v66) >> 1));
+                        outputSpan2Slice[256 + 2] = (ushort)(v58 & 0x420 | ((v68 + (v58 & 0x7BDF7BDF)) >> 1));
+                        uint v69 = outputSpan2Prev[3];
+                        v67 = (v67 & 0xFFFF0000) | (v69 & 0x420);
+                        v69 &= 0x7BDF7BDF;
+                        outputSpan2Slice[3] = (ushort)(v58 & 0x420 | (((v58 & 0x7BDF7BDF) + v69) >> 1));
+                        uint v70 = (((v58 & 0x7BDF7BDF) + v69) >> 1) & 0x7BDF7BDF;
+                        outputSpan2Prev[3] = (ushort)(v67 | ((v70 + v69) >> 1));
+                        outputSpan2Slice[256 + 3] = (ushort)(v67 | ((v70 + (v58 & 0x7BDF7BDF)) >> 1));
+                        uint v71 = outputSpan2Prev[4];
+                        uint v72 = v71 & 0x4200420;
+                        v71 &= 0x7BDF7BDF;
+                        uint v73 = v72 | (((v58 & 0x7BDF7BDF) + v71) >> 1);
+                        outputSpan2Slice[4] = (ushort)v73;
+                        v73 &= 0x7BDF7BDF;
+                        outputSpan2Prev[4] = (ushort)(v58 & 0x420 | ((v73 + v71) >> 1));
+                        outputSpan2Slice[256 + 4] = (ushort)(v58 & 0x420 | ((v73 + (v58 & 0x7BDF7BDF)) >> 1));
+                        uint v74 = outputSpan2Prev[5];
+                        v72 = (v74 & 0xFFFF0000) | (v74 & 0x420);
+                        v74 &= 0x7BDF7BDF;
+                        outputSpan2Slice[5] = (ushort)(v58 & 0x420 | (((v58 & 0x7BDF7BDF) + v74) >> 1));
+                        uint v75 = (((v58 & 0x7BDF7BDF) + v74) >> 1) & 0x7BDF7BDF;
+                        outputSpan2Prev[5] = (ushort)(v72 | ((v75 + v74) >> 1));
+                        outputSpan2Slice[256 + 5] = (ushort)(v72 | ((v75 + (v58 & 0x7BDF7BDF)) >> 1));
+                        uint v76 = outputSpan2Prev[6];
+                        uint v77 = v76 & 0x4200420;
+                        v76 &= 0x7BDF7BDF;
+                        uint v78 = v77 | (((v58 & 0x7BDF7BDF) + v76) >> 1);
+                        outputSpan2Slice[6] = (ushort)v78;
+                        v78 &= 0x7BDF7BDF;
+                        outputSpan2Prev[6] = (ushort)(v58 & 0x420 | ((v78 + v76) >> 1));
+                        outputSpan2Slice[256 + 6] = (ushort)(v58 & 0x420 | ((v78 + (v58 & 0x7BDF7BDF)) >> 1));
+                        uint v79 = outputSpan2Prev[7];
+                        v77 = (v77 & 0xFFFF0000) | (v79 & 0x420);
+                        v79 &= 0x7BDF7BDF;
+                        outputSpan2Slice[7] = (ushort)(v58 & 0x420 | (((v58 & 0x7BDF7BDF) + v79) >> 1));
+                        uint v80 = (((v58 & 0x7BDF7BDF) + v79) >> 1) & 0x7BDF7BDF;
+                        outputSpan2Prev[7] = (ushort)(v77 | ((v80 + v79) >> 1));
+                        outputSpan2Slice[256 + 7] = (ushort)(v77 | ((v80 + (v58 & 0x7BDF7BDF)) >> 1));
+                        uint v81 = outputSpan2Prev[256 - 1];
+                        uint v82 = v81 & 0x4200420;
+                        v81 &= 0x7BDF7BDF;
+                        uint v83 = v82 | (((v58 & 0x7BDF7BDF) + v81) >> 1);
+                        outputSpan2Slice[0] = (ushort)v83;
+                        v83 &= 0x7BDF7BDF;
+                        outputSpan2Prev[256 - 1] = (ushort)(v58 & 0x420 | ((v83 + v81) >> 1));
+                        outputSpan2Slice[1] = (ushort)(v58 & 0x420 | ((v83 + (v58 & 0x7BDF7BDF)) >> 1));
+                        uint v84 = outputSpan2Slice[256 - 1];
+                        v82 = (v82 & 0xFFFF0000) | (v84 & 0x420);
+                        v84 &= 0x7BDF7BDF;
+                        outputSpan2Slice[256] = (ushort)(v58 & 0x420 | (((v58 & 0x7BDF7BDF) + v84) >> 1));
+                        uint v85 = (((v58 & 0x7BDF7BDF) + v84) >> 1) & 0x7BDF7BDF;
+                        outputSpan2Slice[256 - 1] = (ushort)(v82 | ((v85 + v84) >> 1));
+                        outputSpan2Slice[256 + 1] = (ushort)(v82 | ((v85 + (v58 & 0x7BDF7BDF)) >> 1));
+                        wordBuf = wordBuf.Slice(1);
+                    }
+                    else
+                    {
+                        // 1 1 0
+                        byte v37 = byteBuf.Consume();
+                        uint v38 = (uint)_dword206B2A0[v37];
+                        ushort v39 = wordBuf.Consume();
+                        int v40 = v39 | (v39 << 16);
+                        uint prevOffset = v38 + outputPos;
+                        // todo: might not need both code paths, unless there are performance problems or a risk of running off the end when unaligned
+                        // todo: similar to other blocks with the dword alignment thing
+                        Span<ushort> outputSpan2Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan2.Slice(outputPos));
+                        if (prevOffset % 4 != 0)
+                        {
+                            Span<ushort> outputSpan1Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan1.Slice(prevOffset));
+                            int v53 = (outputSpan1Slice[0] | (outputSpan1Slice[1] << 16)) + v40;
+                            int v54 = (outputSpan1Slice[2] | (outputSpan1Slice[3] << 16)) + v40;
+                            int v55 = (outputSpan1Slice[4] | (outputSpan1Slice[5] << 16)) + v40;
+                            int v56 = (outputSpan1Slice[6] | (outputSpan1Slice[7] << 16)) + v40;
+                            outputSpan2Slice[0] = (ushort)(v53 & 0xFFFF);
+                            outputSpan2Slice[1] = (ushort)(v53 >> 16);
+                            outputSpan2Slice[2] = (ushort)(v54 & 0xFFFF);
+                            outputSpan2Slice[3] = (ushort)(v54 >> 16);
+                            outputSpan2Slice[4] = (ushort)(v55 & 0xFFFF);
+                            outputSpan2Slice[5] = (ushort)(v55 >> 16);
+                            outputSpan2Slice[6] = (ushort)(v56 & 0xFFFF);
+                            outputSpan2Slice[7] = (ushort)(v56 >> 16);
+                            int v49 = (outputSpan1Slice[256] | (outputSpan1Slice[256 + 1] << 16)) + v40;
+                            int v50 = (outputSpan1Slice[256 + 2] | (outputSpan1Slice[256 + 3] << 16)) + v40;
+                            int v51 = (outputSpan1Slice[256 + 4] | (outputSpan1Slice[256 + 5] << 16)) + v40;
+                            int v52 = (outputSpan1Slice[256 + 6] | (outputSpan1Slice[256 + 7] << 16)) + v40;
+                            outputSpan2Slice[256] = (ushort)(v49 & 0xFFFF);
+                            outputSpan2Slice[256 + 1] = (ushort)(v49 >> 16);
+                            outputSpan2Slice[256 + 2] = (ushort)(v50 & 0xFFFF);
+                            outputSpan2Slice[256 + 3] = (ushort)(v50 >> 16);
+                            outputSpan2Slice[256 + 4] = (ushort)(v51 & 0xFFFF);
+                            outputSpan2Slice[256 + 5] = (ushort)(v51 >> 16);
+                            outputSpan2Slice[256 + 6] = (ushort)(v52 & 0xFFFF);
+                            outputSpan2Slice[256 + 7] = (ushort)(v52 >> 16);
+                        }
+                        else
+                        {
+                            Span<uint> outputSpan1Int = MemoryMarshal.Cast<byte, uint>(outputSpan1.Slice(prevOffset));
+                            uint v43 = outputSpan1Int[0] + (uint)v40;
+                            uint v44 = outputSpan1Int[1] + (uint)v40;
+                            uint v45 = outputSpan1Int[2] + (uint)v40;
+                            uint v46 = outputSpan1Int[3] + (uint)v40;
+                            outputSpan2Slice[0] = (ushort)(v43 & 0xFFFF);
+                            outputSpan2Slice[1] = (ushort)(v43 >> 16);
+                            outputSpan2Slice[2] = (ushort)(v44 & 0xFFFF);
+                            outputSpan2Slice[3] = (ushort)(v44 >> 16);
+                            outputSpan2Slice[4] = (ushort)(v45 & 0xFFFF);
+                            outputSpan2Slice[5] = (ushort)(v45 >> 16);
+                            outputSpan2Slice[6] = (ushort)(v46 & 0xFFFF);
+                            outputSpan2Slice[7] = (ushort)(v46 >> 16);
+                            uint v49 = outputSpan1Int[256 / 2] + (uint)v40;
+                            uint v50 = outputSpan1Int[256 / 2 + 1] + (uint)v40;
+                            uint v51 = outputSpan1Int[256 / 2 + 2] + (uint)v40;
+                            uint v52 = outputSpan1Int[256 / 2 + 3] + (uint)v40;
+                            outputSpan2Slice[256] = (ushort)(v49 & 0xFFFF);
+                            outputSpan2Slice[256 + 1] = (ushort)(v49 >> 16);
+                            outputSpan2Slice[256 + 2] = (ushort)(v50 & 0xFFFF);
+                            outputSpan2Slice[256 + 3] = (ushort)(v50 >> 16);
+                            outputSpan2Slice[256 + 4] = (ushort)(v51 & 0xFFFF);
+                            outputSpan2Slice[256 + 5] = (ushort)(v51 >> 16);
+                            outputSpan2Slice[256 + 6] = (ushort)(v52 & 0xFFFF);
+                            outputSpan2Slice[256 + 7] = (ushort)(v52 >> 16);
+                        }
+                    }
+                }
+                else
+                {
+                    // 1 0
+                    ReadNextBit(ref value, ref intBuf);
+                    if (_readBit != 0)
+                    {
+                        // 1 0 1
+                        Sub206A5A4(ref outputPos, ref value, ref outputSpan1, ref outputSpan2, ref intBuf, ref wordBuf, ref byteBuf);
+                        outputPos += 8;
+                        Sub206A5A4(ref outputPos, ref value, ref outputSpan1, ref outputSpan2, ref intBuf, ref wordBuf, ref byteBuf);
+                        outputPos -= 8;
+                    }
+                    else
+                    {
+                        // 1 0 0
+                        Sub2069D44(ref outputPos, ref value, ref outputSpan1, ref outputSpan2, ref intBuf, ref wordBuf, ref byteBuf);
+                        outputPos += 512;
+                        Sub2069D44(ref outputPos, ref value, ref outputSpan1, ref outputSpan2, ref intBuf, ref wordBuf, ref byteBuf);
+                        outputPos -= 512;
+                    }
+                }
+            }
+            else
+            {
+                // 0
+                ReadNextBit(ref value, ref intBuf);
+                // most of the code is shared between the 01+aligned and 00 code paths
+                // (presumably because 00 is always aligned since it doesn't use an offset from the table)
+                Span<uint> outputSpan1Int;
+                Span<uint> outputSpan2Int = MemoryMarshal.Cast<byte, uint>(outputSpan2.Slice(outputPos));
+                if (_readBit != 0)
+                {
+                    // 0 1
+                    byte v14 = byteBuf.Consume();
+                    uint v11 = (uint)_dword206B2A0[v14];
+                    uint prevOffset = v11 + outputPos;
+                    // todo: might not need both code paths, unless there are performance problems or a risk of running off the end when unaligned
+                    Span<ushort> outputSpan1Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan1.Slice(prevOffset));
+                    if (prevOffset % 4 != 0)
+                    {
+                        int v24 = outputSpan1Slice[2] | (outputSpan1Slice[3] << 16);
+                        int v25 = outputSpan1Slice[4] | (outputSpan1Slice[5] << 16);
+                        int v26 = outputSpan1Slice[6] | (outputSpan1Slice[7] << 16);
+                        outputSpan2Int[0] = (uint)(outputSpan1Slice[0] | (outputSpan1Slice[1] << 16));
+                        outputSpan2Int[1] = (uint)v24;
+                        outputSpan2Int[2] = (uint)v25;
+                        outputSpan2Int[3] = (uint)v26;
+                        int v29 = outputSpan1Slice[256 + 2] | (outputSpan1Slice[256 + 3] << 16);
+                        int v30 = outputSpan1Slice[256 + 4] | (outputSpan1Slice[256 + 5] << 16);
+                        int v31 = outputSpan1Slice[256 + 6] | (outputSpan1Slice[256 + 7] << 16);
+                        outputSpan2Int[256 / 2] = (uint)(outputSpan1Slice[256] | (outputSpan1Slice[256 + 1] << 16));
+                        outputSpan2Int[256 / 2 + 1] = (uint)v29;
+                        outputSpan2Int[256 / 2 + 2] = (uint)v30;
+                        outputSpan2Int[256 / 2 + 3] = (uint)v31;
+                        return;
+                    }
+                    outputSpan1Int = MemoryMarshal.Cast<ushort, uint>(outputSpan1Slice);
+                }
+                else // use else so outputSpan1Int is definitely assigned
+                {
+                    // 0 0
+                    outputSpan1Int = MemoryMarshal.Cast<byte, uint>(outputSpan1.Slice(outputPos));
+                }
+                uint v15 = outputSpan1Int[1];
+                uint v16 = outputSpan1Int[2];
+                uint v17 = outputSpan1Int[3];
+                outputSpan2Int[0] = outputSpan1Int[0];
+                outputSpan2Int[1] = v15;
+                outputSpan2Int[2] = v16;
+                outputSpan2Int[3] = v17;
+                uint v20 = outputSpan1Int[256 / 2 + 1];
+                uint v21 = outputSpan1Int[256 / 2 + 2];
+                uint v22 = outputSpan1Int[256 / 2 + 3];
+                outputSpan2Int[256 / 2] = outputSpan1Int[256 / 2];
+                outputSpan2Int[256 / 2 + 1] = v20;
+                outputSpan2Int[256 / 2 + 2] = v21;
+                outputSpan2Int[256 / 2 + 3] = v22;
+            }
+        }
+
+        // todo: same structure as others (10 doesn't branch into 101/100)
+        private static void Sub2069D44(ref uint outputPos, ref uint value, ref Span<byte> outputSpan1, ref Span<byte> outputSpan2,
+            ref Span<uint> intBuf, ref Span<ushort> wordBuf, ref Span<byte> byteBuf)
+        {
+            ReadNextBit(ref value, ref intBuf);
+            if (_readBit != 0)
+            {
+                // 1
+                ReadNextBit(ref value, ref intBuf);
+                if (_readBit != 0)
+                {
+                    // 1 1
+                    ReadNextBit(ref value, ref intBuf);
+                    if (_readBit != 0)
+                    {
+                        // 1 1 1
+                        Span<uint> outputSpan2Int = MemoryMarshal.Cast<byte, uint>(outputSpan2.Slice(outputPos));
+                        ushort v33 = wordBuf.Consume();
+                        uint v34 = (uint)(v33 | (v33 << 16));
+                        outputSpan2Int[0] = v34;
+                        outputSpan2Int[1] = v34;
+                        outputSpan2Int[2] = v34;
+                        outputSpan2Int[3] = v34;
+                    }
+                    else
+                    {
+                        // 1 1 0
+                        // todo: like the section in Sub20679B0, but sets fewer values
+                        byte v24 = byteBuf.Consume();
+                        uint v25 = (uint)_dword206B2A0[v24];
+                        ushort v26 = wordBuf.Consume();
+                        int v27 = v26 | (v26 << 16);
+                        uint prevOffset = v25 + outputPos;
+                        // todo: might not need both code paths, unless there are performance problems or a risk of running off the end when unaligned
+                        Span<uint> outputSpan2Int = MemoryMarshal.Cast<byte, uint>(outputSpan2.Slice(outputPos));
+                        if (prevOffset % 4 != 0)
+                        {
+                            Span<ushort> outputSpan1Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan1.Slice(prevOffset));
+                            outputSpan2Int[0] = (uint)((outputSpan1Slice[0] | (outputSpan1Slice[1] << 16)) + v27);
+                            outputSpan2Int[1] = (uint)((outputSpan1Slice[2] | (outputSpan1Slice[3] << 16)) + v27);
+                            outputSpan2Int[2] = (uint)((outputSpan1Slice[4] | (outputSpan1Slice[5] << 16)) + v27);
+                            outputSpan2Int[3] = (uint)((outputSpan1Slice[6] | (outputSpan1Slice[7] << 16)) + v27);
+                        }
+                        else
+                        {
+                            Span<uint> outputSpan1Int = MemoryMarshal.Cast<byte, uint>(outputSpan1.Slice(prevOffset));
+                            outputSpan2Int[0] = outputSpan1Int[0] + (uint)v27;
+                            outputSpan2Int[1] = outputSpan1Int[1] + (uint)v27;
+                            outputSpan2Int[2] = outputSpan1Int[2] + (uint)v27;
+                            outputSpan2Int[3] = outputSpan1Int[3] + (uint)v27;
+                        }
+                    }
+                }
+                else
+                {
+                    // 1 0
+                    Sub206AC14(ref outputPos, ref value, ref outputSpan1, ref outputSpan2, ref intBuf, ref wordBuf, ref byteBuf);
+                    outputPos += 8;
+                    Sub206AC14(ref outputPos, ref value, ref outputSpan1, ref outputSpan2, ref intBuf, ref wordBuf, ref byteBuf);
+                    outputPos -= 8;
+                }
+            }
+            else
+            {
+                // 0
+                ReadNextBit(ref value, ref intBuf);
+                // todo: same as the section in Sub206935C, but sets even fewer values
+                // most of the code is shared between the 01+aligned and 00 code paths
+                // (presumably because 00 is always aligned since it doesn't use an offset from the table)
+                Span<uint> outputSpan1Int;
+                Span<uint> outputSpan2Int = MemoryMarshal.Cast<byte, uint>(outputSpan2.Slice(outputPos));
+                if (_readBit != 0)
+                {
+                    // 0 1
+                    byte v14 = byteBuf.Consume();
+                    uint v11 = (uint)_dword206B2A0[v14];
+                    uint prevOffset = v11 + outputPos;
+                    // todo: might not need both code paths, unless there are performance problems or a risk of running off the end when unaligned
+                    Span<ushort> outputSpan1Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan1.Slice(prevOffset));
+                    if (prevOffset % 4 != 0)
+                    {
+                        outputSpan2Int[0] = (uint)(outputSpan1Slice[0] | (outputSpan1Slice[1] << 16));
+                        outputSpan2Int[1] = (uint)(outputSpan1Slice[2] | (outputSpan1Slice[3] << 16));
+                        outputSpan2Int[2] = (uint)(outputSpan1Slice[4] | (outputSpan1Slice[5] << 16));
+                        outputSpan2Int[3] = (uint)(outputSpan1Slice[6] | (outputSpan1Slice[7] << 16));
+                        return;
+                    }
+                    outputSpan1Int = MemoryMarshal.Cast<ushort, uint>(outputSpan1Slice);
+                }
+                else // use else so outputSpan1Int is definitely assigned
+                {
+                    // 0 0
+                    outputSpan1Int = MemoryMarshal.Cast<byte, uint>(outputSpan1.Slice(outputPos));
+                }
+                outputSpan2Int[0] = outputSpan1Int[0];
+                outputSpan2Int[1] = outputSpan1Int[1];
+                outputSpan2Int[2] = outputSpan1Int[2];
+                outputSpan2Int[3] = outputSpan1Int[3];
+            }
+        }
+
+        // todo: same structure as Sub2068488 and Sub206A0B8
+        private static void Sub2068B24(ref uint outputPos, ref uint value, ref Span<byte> outputSpan1, ref Span<byte> outputSpan2,
+            ref Span<uint> intBuf, ref Span<ushort> wordBuf, ref Span<byte> byteBuf)
+        {
+            ReadNextBit(ref value, ref intBuf);
+            if (_readBit != 0)
+            {
+                // 1
+                ReadNextBit(ref value, ref intBuf);
+                if (_readBit != 0)
+                {
+                    // 1 1
+                    ReadNextBit(ref value, ref intBuf);
+                    if (_readBit != 0)
+                    {
+                        // 1 1 1
+                        // todo: like the section in Sub20679B0, but sets fewer values
+                        byte v77 = byteBuf.Consume();
+                        uint v78 = (uint)_dword206B2A0[v77];
+                        ushort v79 = wordBuf.Consume();
+                        int v80 = v79 | (v79 << 16);
+                        uint prevOffset = v78 + outputPos;
+                        // todo: might not need both code paths, unless there are performance problems or a risk of running off the end when unaligned
+                        Span<uint> outputSpan2Int = MemoryMarshal.Cast<byte, uint>(outputSpan2.Slice(outputPos));
+                        if (prevOffset % 4 != 0)
+                        {
+                            Span<ushort> outputSpan1Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan1.Slice(prevOffset));
+                            outputSpan2Int[0] = (uint)((outputSpan1Slice[0] | (outputSpan1Slice[1] << 16)) + v80);
+                            outputSpan2Int[1] = (uint)((outputSpan1Slice[2] | (outputSpan1Slice[3] << 16)) + v80);
+                            outputSpan2Int[256 / 2] = (uint)((outputSpan1Slice[256] | (outputSpan1Slice[256 + 1] << 16)) + v80);
+                            outputSpan2Int[256 / 2 + 1] = (uint)((outputSpan1Slice[256 + 2] | (outputSpan1Slice[256 + 3] << 16)) + v80);
+                            outputSpan2Int[256 * 2 / 2] = (uint)((outputSpan1Slice[256 * 2] | (outputSpan1Slice[256 * 2 + 1] << 16)) + v80);
+                            outputSpan2Int[256 * 2 / 2 + 1] = (uint)((outputSpan1Slice[256 * 2 + 2] | (outputSpan1Slice[256 * 2 + 3] << 16)) + v80);
+                            outputSpan2Int[256 * 3 / 2] = (uint)((outputSpan1Slice[256 * 3] | (outputSpan1Slice[256 * 3 + 1] << 16)) + v80);
+                            outputSpan2Int[256 * 3 / 2 + 1] = (uint)((outputSpan1Slice[256 * 3 + 2] | (outputSpan1Slice[256 * 3 + 3] << 16)) + v80);
+                            outputSpan2Int[256 * 4 / 2] = (uint)((outputSpan1Slice[256 * 4] | (outputSpan1Slice[256 * 4 + 1] << 16)) + v80);
+                            outputSpan2Int[256 * 4 / 2 + 1] = (uint)((outputSpan1Slice[256 * 4 + 2] | (outputSpan1Slice[256 * 4 + 3] << 16)) + v80);
+                            outputSpan2Int[256 * 5 / 2] = (uint)((outputSpan1Slice[256 * 5] | (outputSpan1Slice[256 * 5 + 1] << 16)) + v80);
+                            outputSpan2Int[256 * 5 / 2 + 1] = (uint)((outputSpan1Slice[256 * 5 + 2] | (outputSpan1Slice[256 * 5 + 3] << 16)) + v80);
+                            outputSpan2Int[256 * 6 / 2] = (uint)((outputSpan1Slice[256 * 6] | (outputSpan1Slice[256 * 6 + 1] << 16)) + v80);
+                            outputSpan2Int[256 * 6 / 2 + 1] = (uint)((outputSpan1Slice[256 * 6 + 2] | (outputSpan1Slice[256 * 6 + 3] << 16)) + v80);
+                            outputSpan2Int[256 * 7 / 2] = (uint)((outputSpan1Slice[256 * 7] | (outputSpan1Slice[256 * 7 + 1] << 16)) + v80);
+                            outputSpan2Int[256 * 7 / 2 + 1] = (uint)((outputSpan1Slice[256 * 7 + 2] | (outputSpan1Slice[256 * 7 + 3] << 16)) + v80);
+                        }
+                        else
+                        {
+                            Span<uint> outputSpan1Int = MemoryMarshal.Cast<byte, uint>(outputSpan1.Slice(prevOffset));
+                            outputSpan2Int[0] = outputSpan1Int[0] + (uint)v80;
+                            outputSpan2Int[1] = outputSpan1Int[1] + (uint)v80;
+                            outputSpan2Int[256 / 2] = outputSpan1Int[256 / 2] + (uint)v80;
+                            outputSpan2Int[256 / 2 + 1] = outputSpan1Int[256 / 2 + 1] + (uint)v80;
+                            outputSpan2Int[256 * 2 / 2] = outputSpan1Int[256 * 2 / 2] + (uint)v80;
+                            outputSpan2Int[256 * 2 / 2 + 1] = outputSpan1Int[256 * 2 / 2 + 1] + (uint)v80;
+                            outputSpan2Int[256 * 3 / 2] = outputSpan1Int[256 * 3 / 2] + (uint)v80;
+                            outputSpan2Int[256 * 3 / 2 + 1] = outputSpan1Int[256 * 3 / 2 + 1] + (uint)v80;
+                            outputSpan2Int[256 * 4 / 2] = outputSpan1Int[256 * 4 / 2] + (uint)v80;
+                            outputSpan2Int[256 * 4 / 2 + 1] = outputSpan1Int[256 * 4 / 2 + 1] + (uint)v80;
+                            outputSpan2Int[256 * 5 / 2] = outputSpan1Int[256 * 5 / 2] + (uint)v80;
+                            outputSpan2Int[256 * 5 / 2 + 1] = outputSpan1Int[256 * 5 / 2 + 1] + (uint)v80;
+                            outputSpan2Int[256 * 6 / 2] = outputSpan1Int[256 * 6 / 2] + (uint)v80;
+                            outputSpan2Int[256 * 6 / 2 + 1] = outputSpan1Int[256 * 6 / 2 + 1] + (uint)v80;
+                            outputSpan2Int[256 * 7 / 2] = outputSpan1Int[256 * 7 / 2] + (uint)v80;
+                            outputSpan2Int[256 * 7 / 2 + 1] = outputSpan1Int[256 * 7 / 2 + 1] + (uint)v80;
+                        }
+                    }
+                    else
+                    {
+                        // 1 1 0
+                        ReadNextBit(ref value, ref intBuf);
+                        if (_readBit != 0)
+                        {
+                            // 1 1 0 1
+                            Span<ushort> outputSpan2Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan2.Slice(outputPos));
+                            Sub2067388(ref wordBuf, outputSpan2Slice);
+                            // normally advanced by 1536 bytes (768 words), this call advances another 512 bytes (256 words) = 2048 bytes (1024 words)
+                            Sub2067388(ref wordBuf, outputSpan2Slice.Slice(1024));
+                        }
+                        else
+                        {
+                            // 1 1 0 0
+                            Debug.Assert(outputPos >= 512);
+                            Span<ushort> outputSpan2Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan2.Slice(outputPos));
+                            Span<ushort> outputSpan2Prev = MemoryMarshal.Cast<byte, ushort>(outputSpan2.Slice(outputPos - 512));
+                            // todo: similar to the inlines in Sub Sub206A0B8 and Sub2068488 and Sub206935C
+                            ushort v33 = wordBuf[0];
+                            outputSpan2Slice[256 * 2 + 2] = v33;
+                            outputSpan2Slice[256 * 2 + 3] = v33;
+                            outputSpan2Slice[256 * 3 + 2] = v33;
+                            outputSpan2Slice[256 * 3 + 3] = v33;
+                            outputSpan2Slice[256 * 4 + 2] = v33;
+                            outputSpan2Slice[256 * 4 + 3] = v33;
+                            outputSpan2Slice[256 * 5 + 2] = v33;
+                            outputSpan2Slice[256 * 5 + 3] = v33;
+                            outputSpan2Slice[256 * 6 + 2] = v33;
+                            outputSpan2Slice[256 * 6 + 3] = v33;
+                            outputSpan2Slice[256 * 7 + 2] = v33;
+                            outputSpan2Slice[256 * 7 + 3] = v33;
+                            uint v34 = v33 | ((uint)v33 << 16);
+                            uint v42 = v34 & 0x7BDF7BDF;
+                            uint v43 = v34 & 0x4200420;
+                            uint v46 = outputSpan2Prev[0];
+                            uint v47 = v46 & 0x4200420;
+                            v46 &= 0x7BDF7BDF;
+                            uint v48 = v47 | ((uint)(v42 + v46) >> 1);
+                            outputSpan2Slice[0] = (ushort)v48;
+                            v48 &= 0x7BDF7BDF;
+                            outputSpan2Prev[0] = (ushort)(v43 | ((v48 + v46) >> 1));
+                            outputSpan2Slice[256] = (ushort)(v43 | ((v48 + v42) >> 1));
+                            uint v49 = outputSpan2Prev[1];
+                            v47 = (v47 & 0xFFFF0000) | (v49 & 0x420);
+                            v49 &= 0x7BDF7BDF;
+                            uint v50 = v43 | ((uint)(v42 + v49) >> 1);
+                            outputSpan2Slice[1] = (ushort)v50;
+                            v50 &= 0x7BDF7BDF;
+                            outputSpan2Prev[1] = (ushort)(v47 | ((v50 + v49) >> 1));
+                            outputSpan2Slice[256 + 1] = (ushort)(v47 | ((v50 + v42) >> 1));
+                            uint v51 = outputSpan2Prev[2];
+                            uint v52 = v51 & 0x4200420;
+                            v51 &= 0x7BDF7BDF;
+                            uint v53 = v52 | ((uint)(v42 + v51) >> 1);
+                            outputSpan2Slice[2] = (ushort)v53;
+                            v53 &= 0x7BDF7BDF;
+                            outputSpan2Prev[2] = (ushort)(v43 | ((v53 + v51) >> 1));
+                            outputSpan2Slice[256 + 2] = (ushort)(v43 | ((v53 + v42) >> 1));
+                            uint v54 = outputSpan2Prev[3];
+                            v52 = (v52 & 0xFFFF0000) | (v54 & 0x420);
+                            v54 &= 0x7BDF7BDF;
+                            uint v55 = v43 | ((uint)(v42 + v54) >> 1);
+                            outputSpan2Slice[3] = (ushort)v55;
+                            v55 &= 0x7BDF7BDF;
+                            outputSpan2Prev[3] = (ushort)(v52 | ((v55 + v54) >> 1));
+                            outputSpan2Slice[256 + 3] = (ushort)(v52 | ((v55 + v42) >> 1));
+                            uint v56 = outputSpan2Prev[256 - 1];
+                            uint v57 = v56 & 0x4200420;
+                            v56 &= 0x7BDF7BDF;
+                            uint v58 = v57 | ((uint)(v42 + v56) >> 1);
+                            outputSpan2Slice[0] = (ushort)v58;
+                            v58 &= 0x7BDF7BDF;
+                            outputSpan2Prev[256 - 1] = (ushort)(v43 | ((v58 + v56) >> 1));
+                            outputSpan2Slice[1] = (ushort)(v43 | ((v58 + v42) >> 1));
+                            uint v59 = outputSpan2Slice[256 - 1];
+                            v57 = (v57 & 0xFFFF0000) | (v59 & 0x420);
+                            v59 &= 0x7BDF7BDF;
+                            uint v60 = v43 | ((uint)(v42 + v59) >> 1);
+                            outputSpan2Slice[256] = (ushort)v60;
+                            v60 &= 0x7BDF7BDF;
+                            outputSpan2Slice[256 - 1] = (ushort)(v57 | ((v60 + v59) >> 1));
+                            outputSpan2Slice[256 + 1] = (ushort)(v57 | ((v60 + v42) >> 1));
+                            uint v61 = outputSpan2Slice[256 * 2 - 1];
+                            uint v62 = v61 & 0x4200420;
+                            v61 &= 0x7BDF7BDF;
+                            uint v63 = v62 | ((uint)(v42 + v61) >> 1);
+                            outputSpan2Slice[256 * 2] = (ushort)v63;
+                            v63 &= 0x7BDF7BDF;
+                            outputSpan2Slice[256 * 2 - 1] = (ushort)(v43 | ((v63 + v61) >> 1));
+                            outputSpan2Slice[256 * 2 + 1] = (ushort)(v43 | ((v63 + v42) >> 1));
+                            uint v64 = outputSpan2Slice[256 * 3 - 1];
+                            v62 = (v62 & 0xFFFF0000) | (v64 & 0x420);
+                            v64 &= 0x7BDF7BDF;
+                            uint v65 = v43 | ((uint)(v42 + v64) >> 1);
+                            outputSpan2Slice[256 * 3] = (ushort)v65;
+                            v65 &= 0x7BDF7BDF;
+                            outputSpan2Slice[256 * 3 - 1] = (ushort)(v62 | ((v65 + v64) >> 1));
+                            outputSpan2Slice[256 * 3 + 1] = (ushort)(v62 | ((v65 + v42) >> 1));
+                            uint v66 = outputSpan2Slice[256 * 4 - 1];
+                            uint v67 = v66 & 0x4200420;
+                            v66 &= 0x7BDF7BDF;
+                            uint v68 = v67 | ((uint)(v42 + v66) >> 1);
+                            outputSpan2Slice[256 * 4] = (ushort)v68;
+                            v68 &= 0x7BDF7BDF;
+                            outputSpan2Slice[256 * 4 - 1] = (ushort)(v43 | ((v68 + v66) >> 1));
+                            outputSpan2Slice[256 * 4 + 1] = (ushort)(v43 | ((v68 + v42) >> 1));
+                            uint v69 = outputSpan2Slice[256 * 5 - 1];
+                            v67 = (v67 & 0xFFFF0000) | (v69 & 0x420);
+                            v69 &= 0x7BDF7BDF;
+                            uint v70 = v43 | ((uint)(v42 + v69) >> 1);
+                            outputSpan2Slice[256 * 5] = (ushort)v70;
+                            v70 &= 0x7BDF7BDF;
+                            outputSpan2Slice[256 * 5 - 1] = (ushort)(v67 | ((v70 + v69) >> 1));
+                            outputSpan2Slice[256 * 5 + 1] = (ushort)(v67 | ((v70 + v42) >> 1));
+                            uint v71 = outputSpan2Slice[256 * 6 - 1];
+                            uint v72 = v71 & 0x4200420;
+                            v71 &= 0x7BDF7BDF;
+                            uint v73 = v72 | ((uint)(v42 + v71) >> 1);
+                            outputSpan2Slice[256 * 6] = (ushort)v73;
+                            v73 &= 0x7BDF7BDF;
+                            outputSpan2Slice[256 * 6 - 1] = (ushort)(v43 | ((v73 + v71) >> 1));
+                            outputSpan2Slice[256 * 6 + 1] = (ushort)(v43 | ((v73 + v42) >> 1));
+                            uint v74 = outputSpan2Slice[256 * 7 - 1];
+                            v72 = (v72 & 0xFFFF0000) | (v74 & 0x420);
+                            v74 &= 0x7BDF7BDF;
+                            uint v75 = v43 | ((uint)(v42 + v74) >> 1);
+                            outputSpan2Slice[256 * 7] = (ushort)v75;
+                            v75 &= 0x7BDF7BDF;
+                            outputSpan2Slice[256 * 7 - 1] = (ushort)(v72 | ((v75 + v74) >> 1));
+                            outputSpan2Slice[256 * 7 + 1] = (ushort)(v72 | ((v75 + v42) >> 1));
+                            wordBuf = wordBuf.Slice(1);
+                        }
+                    }
+                }
+                else
+                {
+                    // 1 0
+                    ReadNextBit(ref value, ref intBuf);
+                    if (_readBit != 0)
+                    {
+                        // 1 0 1
+                        Sub20697D0(ref outputPos, ref value, ref outputSpan1, ref outputSpan2, ref intBuf, ref wordBuf, ref byteBuf);
+                        outputPos += 4;
+                        Sub20697D0(ref outputPos, ref value, ref outputSpan1, ref outputSpan2, ref intBuf, ref wordBuf, ref byteBuf);
+                        outputPos -= 4;
+                    }
+                    else
+                    {
+                        // 1 0 0
+                        Sub206A0B8(ref outputPos, ref value, ref outputSpan1, ref outputSpan2, ref intBuf, ref wordBuf, ref byteBuf);
+                        outputPos += 2048;
+                        Sub206A0B8(ref outputPos, ref value, ref outputSpan1, ref outputSpan2, ref intBuf, ref wordBuf, ref byteBuf);
+                        outputPos -= 2048;
+                    }
+                }
+            }
+            else
+            {
+                // 0
+                ReadNextBit(ref value, ref intBuf);
+                // todo: same as the section in Sub206935C, but sets fewer values
+                // most of the code is shared between the 01+aligned and 00 code paths
+                // (presumably because 00 is always aligned since it doesn't use an offset from the table)
+                Span<uint> outputSpan1Int;
+                Span<uint> outputSpan2Int = MemoryMarshal.Cast<byte, uint>(outputSpan2.Slice(outputPos));
+                if (_readBit != 0)
+                {
+                    // 0 1
+                    byte v14 = byteBuf.Consume();
+                    uint v11 = (uint)_dword206B2A0[v14];
+                    uint prevOffset = v11 + outputPos;
+                    // todo: might not need both code paths, unless there are performance problems or a risk of running off the end when unaligned
+                    Span<ushort> outputSpan1Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan1.Slice(prevOffset));
+                    if (prevOffset % 4 != 0)
+                    {
+                        outputSpan2Int[0] = (uint)(outputSpan1Slice[0] | (outputSpan1Slice[1] << 16));
+                        outputSpan2Int[1] = (uint)(outputSpan1Slice[2] | (outputSpan1Slice[3] << 16));
+                        outputSpan2Int[256 / 2] = (uint)(outputSpan1Slice[256] | (outputSpan1Slice[256 + 1] << 16));
+                        outputSpan2Int[256 / 2 + 1] = (uint)(outputSpan1Slice[256 + 2] | (outputSpan1Slice[256 + 3] << 16));
+                        outputSpan2Int[256 * 2 / 2] = (uint)(outputSpan1Slice[256 * 2] | (outputSpan1Slice[256 * 2 + 1] << 16));
+                        outputSpan2Int[256 * 2 / 2 + 1] = (uint)(outputSpan1Slice[256 * 2 + 2] | (outputSpan1Slice[256 * 2 + 3] << 16));
+                        outputSpan2Int[256 * 3 / 2] = (uint)(outputSpan1Slice[256 * 3] | (outputSpan1Slice[256 * 3 + 1] << 16));
+                        outputSpan2Int[256 * 3 / 2 + 1] = (uint)(outputSpan1Slice[256 * 3 + 2] | (outputSpan1Slice[256 * 3 + 3] << 16));
+                        outputSpan2Int[256 * 4 / 2] = (uint)(outputSpan1Slice[256 * 4] | (outputSpan1Slice[256 * 4 + 1] << 16));
+                        outputSpan2Int[256 * 4 / 2 + 1] = (uint)(outputSpan1Slice[256 * 4 + 2] | (outputSpan1Slice[256 * 4 + 3] << 16));
+                        outputSpan2Int[256 * 5 / 2] = (uint)(outputSpan1Slice[256 * 5] | (outputSpan1Slice[256 * 5 + 1] << 16));
+                        outputSpan2Int[256 * 5 / 2 + 1] = (uint)(outputSpan1Slice[256 * 5 + 2] | (outputSpan1Slice[256 * 5 + 3] << 16));
+                        outputSpan2Int[256 * 6 / 2] = (uint)(outputSpan1Slice[256 * 6] | (outputSpan1Slice[256 * 6 + 1] << 16));
+                        outputSpan2Int[256 * 6 / 2 + 1] = (uint)(outputSpan1Slice[256 * 6 + 2] | (outputSpan1Slice[256 * 6 + 3] << 16));
+                        outputSpan2Int[256 * 7 / 2] = (uint)(outputSpan1Slice[256 * 7] | (outputSpan1Slice[256 * 7 + 1] << 16));
+                        outputSpan2Int[256 * 7 / 2 + 1] = (uint)(outputSpan1Slice[256 * 7 + 2] | (outputSpan1Slice[256 * 7 + 3] << 16));
+                        return;
+                    }
+                    outputSpan1Int = MemoryMarshal.Cast<ushort, uint>(outputSpan1Slice);
+                }
+                else // use else so outputSpan1Int is definitely assigned
+                {
+                    // 0 0
+                    outputSpan1Int = MemoryMarshal.Cast<byte, uint>(outputSpan1.Slice(outputPos));
+                }
+                outputSpan2Int[0] = outputSpan1Int[0];
+                outputSpan2Int[1] = outputSpan1Int[1];
+                outputSpan2Int[256 / 2] = outputSpan1Int[256 / 2];
+                outputSpan2Int[256 / 2 + 1] = outputSpan1Int[256 / 2 + 1];
+                outputSpan2Int[256 * 2 / 2] = outputSpan1Int[256 * 2 / 2];
+                outputSpan2Int[256 * 2 / 2 + 1] = outputSpan1Int[256 * 2 / 2 + 1];
+                outputSpan2Int[256 * 3 / 2] = outputSpan1Int[256 * 3 / 2];
+                outputSpan2Int[256 * 3 / 2 + 1] = outputSpan1Int[256 * 3 / 2 + 1];
+                outputSpan2Int[256 * 4 / 2] = outputSpan1Int[256 * 4 / 2];
+                outputSpan2Int[256 * 4 / 2 + 1] = outputSpan1Int[256 * 4 / 2 + 1];
+                outputSpan2Int[256 * 5 / 2] = outputSpan1Int[256 * 5 / 2];
+                outputSpan2Int[256 * 5 / 2 + 1] = outputSpan1Int[256 * 5 / 2 + 1];
+                outputSpan2Int[256 * 6 / 2] = outputSpan1Int[256 * 6 / 2];
+                outputSpan2Int[256 * 6 / 2 + 1] = outputSpan1Int[256 * 6 / 2 + 1];
+                outputSpan2Int[256 * 7 / 2] = outputSpan1Int[256 * 7 / 2];
+                outputSpan2Int[256 * 7 / 2 + 1] = outputSpan1Int[256 * 7 / 2 + 1];
+            }
+        }
+
+        // todo: same structure as Sub206935C (same structure as Sub2068488 and Sub206A0B8, except 110 doesn't branch into 1101/1100)
+        private static void Sub206A5A4(ref uint outputPos, ref uint value, ref Span<byte> outputSpan1, ref Span<byte> outputSpan2,
+            ref Span<uint> intBuf, ref Span<ushort> wordBuf, ref Span<byte> byteBuf)
+        {
+            ReadNextBit(ref value, ref intBuf);
+            if (_readBit != 0)
+            {
+                // 1
+                ReadNextBit(ref value, ref intBuf);
+                if (_readBit != 0)
+                {
+                    // 1 1
+                    ReadNextBit(ref value, ref intBuf);
+                    if (_readBit != 0)
+                    {
+                        // 1 1 1
+                        Debug.Assert(outputPos >= 512);
+                        Span<ushort> outputSpan2Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan2.Slice(outputPos));
+                        Span<ushort> outputSpan2Prev = MemoryMarshal.Cast<byte, ushort>(outputSpan2.Slice(outputPos - 512));
+                        // todo: similar to the inlines in Sub Sub206A0B8 and Sub2068488 and Sub206935C and Sub2068B24 and Sub20679B0
+                        ushort v31 = wordBuf[0];
+                        uint v32 = v31 | ((uint)v31 << 16);
+                        uint v35 = outputSpan2Prev[0];
+                        uint v36 = v35 & 0x4200420;
+                        v35 &= 0x7BDF7BDF;
+                        uint v37 = v36 | (((v32 & 0x7BDF7BDF) + v35) >> 1);
+                        outputSpan2Slice[0] = (ushort)v37;
+                        v37 &= 0x7BDF7BDF;
+                        outputSpan2Prev[0] = (ushort)(v32 & 0x420 | ((v37 + v35) >> 1));
+                        outputSpan2Slice[256] = (ushort)(v32 & 0x420 | ((v37 + (v32 & 0x7BDF7BDF)) >> 1));
+                        uint v38 = outputSpan2Prev[1];
+                        v36 = (v36 & 0xFFFF0000) | (v38 & 0x420);
+                        v38 &= 0x7BDF7BDF;
+                        outputSpan2Slice[1] = (ushort)(v32 & 0x420 | (((v32 & 0x7BDF7BDF) + v38) >> 1));
+                        uint v39 = (((v32 & 0x7BDF7BDF) + v38) >> 1) & 0x7BDF7BDF;
+                        outputSpan2Prev[1] = (ushort)(v36 | ((v39 + v38) >> 1));
+                        outputSpan2Slice[256 + 1] = (ushort)(v36 | ((v39 + (v32 & 0x7BDF7BDF)) >> 1));
+                        uint v40 = outputSpan2Prev[2];
+                        uint v41 = v40 & 0x4200420;
+                        v40 &= 0x7BDF7BDF;
+                        uint v42 = v41 | (((v32 & 0x7BDF7BDF) + v40) >> 1);
+                        outputSpan2Slice[2] = (ushort)v42;
+                        v42 &= 0x7BDF7BDF;
+                        outputSpan2Prev[2] = (ushort)(v32 & 0x420 | ((v42 + v40) >> 1));
+                        outputSpan2Slice[256 + 2] = (ushort)(v32 & 0x420 | ((v42 + (v32 & 0x7BDF7BDF)) >> 1));
+                        uint v43 = outputSpan2Prev[3];
+                        v41 = (v41 & 0xFFFF0000) | (v43 & 0x420);
+                        v43 &= 0x7BDF7BDF;
+                        outputSpan2Slice[3] = (ushort)(v32 & 0x420 | (((v32 & 0x7BDF7BDF) + v43) >> 1));
+                        uint v44 = (((v32 & 0x7BDF7BDF) + v43) >> 1) & 0x7BDF7BDF;
+                        outputSpan2Prev[3] = (ushort)(v41 | ((v44 + v43) >> 1));
+                        outputSpan2Slice[256 + 3] = (ushort)(v41 | ((v44 + (v32 & 0x7BDF7BDF)) >> 1));
+                        uint v45 = outputSpan2Prev[256 - 1];
+                        uint v46 = v45 & 0x4200420;
+                        v45 &= 0x7BDF7BDF;
+                        uint v47 = v46 | (((v32 & 0x7BDF7BDF) + v45) >> 1);
+                        outputSpan2Slice[0] = (ushort)v47;
+                        v47 &= 0x7BDF7BDF;
+                        outputSpan2Prev[256 - 1] = (ushort)(v32 & 0x420 | ((v47 + v45) >> 1));
+                        outputSpan2Slice[1] = (ushort)(v32 & 0x420 | ((v47 + (v32 & 0x7BDF7BDF)) >> 1));
+                        uint v48 = outputSpan2Slice[256 - 1];
+                        v46 = (v46 & 0xFFFF0000) | (v48 & 0x420);
+                        v48 &= 0x7BDF7BDF;
+                        outputSpan2Slice[256] = (ushort)(v32 & 0x420 | (((v32 & 0x7BDF7BDF) + v48) >> 1));
+                        uint v49 = (((v32 & 0x7BDF7BDF) + v48) >> 1) & 0x7BDF7BDF;
+                        outputSpan2Slice[256 - 1] = (ushort)(v46 | ((v49 + v48) >> 1));
+                        outputSpan2Slice[256 + 1] = (ushort)(v46 | ((v49 + (v32 & 0x7BDF7BDF)) >> 1));
+                        wordBuf = wordBuf.Slice(1);
+                    }
+                    else
+                    {
+                        // 1 1 0
+                        // todo: like the section in Sub20679B0, but sets fewer values
+                        byte v23 = byteBuf.Consume();
+                        uint v24 = (uint)_dword206B2A0[v23];
+                        ushort v25 = wordBuf.Consume();
+                        int v26 = v25 | (v25 << 16);
+                        uint prevOffset = v24 + outputPos;
+                        // todo: might not need both code paths, unless there are performance problems or a risk of running off the end when unaligned
+                        Span<uint> outputSpan2Int = MemoryMarshal.Cast<byte, uint>(outputSpan2.Slice(outputPos));
+                        if (prevOffset % 4 != 0)
+                        {
+                            Span<ushort> outputSpan1Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan1.Slice(prevOffset));
+                            outputSpan2Int[0] = (uint)((outputSpan1Slice[0] | (outputSpan1Slice[1] << 16)) + v26);
+                            outputSpan2Int[1] = (uint)((outputSpan1Slice[2] | (outputSpan1Slice[3] << 16)) + v26);
+                            outputSpan2Int[256 / 2] = (uint)((outputSpan1Slice[256] | (outputSpan1Slice[256 + 1] << 16)) + v26);
+                            outputSpan2Int[256 / 2 + 1] = (uint)((outputSpan1Slice[256 + 2] | (outputSpan1Slice[256 + 3] << 16)) + v26);
+                        }
+                        else
+                        {
+                            Span<uint> outputSpan1Int = MemoryMarshal.Cast<byte, uint>(outputSpan1.Slice(prevOffset));
+                            outputSpan2Int[0] = outputSpan1Int[0] + (uint)v26;
+                            outputSpan2Int[1] = outputSpan1Int[1] + (uint)v26;
+                            outputSpan2Int[256 / 2] = outputSpan1Int[256 / 2] + (uint)v26;
+                            outputSpan2Int[256 / 2 + 1] = outputSpan1Int[256 / 2 + 1] + (uint)v26;
+                        }
+                    }
+                }
+                else
+                {
+                    // 1 0
+                    ReadNextBit(ref value, ref intBuf);
+                    if (_readBit != 0)
+                    {
+                        // 1 0 1
+                        Sub206AE88(ref outputPos, ref value, ref outputSpan1, ref outputSpan2, ref intBuf, ref wordBuf, ref byteBuf);
+                        outputPos += 4;
+                        Sub206AE88(ref outputPos, ref value, ref outputSpan1, ref outputSpan2, ref intBuf, ref wordBuf, ref byteBuf);
+                        outputPos -= 4;
+                    }
+                    else
+                    {
+                        // 1 0 0
+                        Sub206AC14(ref outputPos, ref value, ref outputSpan1, ref outputSpan2, ref intBuf, ref wordBuf, ref byteBuf);
+                        outputPos += 512;
+                        Sub206AC14(ref outputPos, ref value, ref outputSpan1, ref outputSpan2, ref intBuf, ref wordBuf, ref byteBuf);
+                        outputPos -= 512;
+                    }
+                }
+            }
+            else
+            {
+                // 0
+                ReadNextBit(ref value, ref intBuf);
+                // todo: same as the section in Sub206935C, but sets even fewer values
+                // most of the code is shared between the 01+aligned and 00 code paths
+                // (presumably because 00 is always aligned since it doesn't use an offset from the table)
+                Span<uint> outputSpan1Int;
+                Span<uint> outputSpan2Int = MemoryMarshal.Cast<byte, uint>(outputSpan2.Slice(outputPos));
+                if (_readBit != 0)
+                {
+                    // 0 1
+                    byte v14 = byteBuf.Consume();
+                    uint v11 = (uint)_dword206B2A0[v14];
+                    uint prevOffset = v11 + outputPos;
+                    // todo: might not need both code paths, unless there are performance problems or a risk of running off the end when unaligned
+                    Span<ushort> outputSpan1Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan1.Slice(prevOffset));
+                    if (prevOffset % 4 != 0)
+                    {
+                        outputSpan2Int[0] = (uint)(outputSpan1Slice[0] | (outputSpan1Slice[1] << 16));
+                        outputSpan2Int[1] = (uint)(outputSpan1Slice[2] | (outputSpan1Slice[3] << 16));
+                        outputSpan2Int[256 / 2] = (uint)(outputSpan1Slice[256] | (outputSpan1Slice[256 + 1] << 16));
+                        outputSpan2Int[256 / 2 + 1] = (uint)(outputSpan1Slice[256 + 2] | (outputSpan1Slice[256 + 3] << 16));
+                        return;
+                    }
+                    outputSpan1Int = MemoryMarshal.Cast<ushort, uint>(outputSpan1Slice);
+                }
+                else // use else so outputSpan1Int is definitely assigned
+                {
+                    // 0 0
+                    outputSpan1Int = MemoryMarshal.Cast<byte, uint>(outputSpan1.Slice(outputPos));
+                }
+                outputSpan2Int[0] = outputSpan1Int[0];
+                outputSpan2Int[1] = outputSpan1Int[1];
+                outputSpan2Int[256 / 2] = outputSpan1Int[256 / 2];
+                outputSpan2Int[256 / 2 + 1] = outputSpan1Int[256 / 2 + 1];
+            }
+        }
+
+        // todo: same structure as Sub206935C and Sub206A5A4 etc. (same structure as Sub2068488 and Sub206A0B8, except 110 doesn't branch into 1101/1100)
+        private static void Sub20697D0(ref uint outputPos, ref uint value, ref Span<byte> outputSpan1, ref Span<byte> outputSpan2,
+            ref Span<uint> intBuf, ref Span<ushort> wordBuf, ref Span<byte> byteBuf)
+        {
+            ReadNextBit(ref value, ref intBuf);
+            if (_readBit != 0)
+            {
+                // 1
+                ReadNextBit(ref value, ref intBuf);
+                if (_readBit != 0)
+                {
+                    // 1 1
+                    ReadNextBit(ref value, ref intBuf);
+                    if (_readBit != 0)
+                    {
+                        // 1 1 1
+                        Debug.Assert(outputPos >= 512);
+                        Span<ushort> outputSpan2Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan2.Slice(outputPos));
+                        Span<ushort> outputSpan2Prev = MemoryMarshal.Cast<byte, ushort>(outputSpan2.Slice(outputPos - 512));
+                        // todo: similar to the inlines in Sub Sub206A0B8 and Sub2068488 and Sub206935C and Sub2068B24 and Sub20679B0 etc.
+                        ushort v41 = wordBuf[0];
+                        uint v42 = v41 | ((uint)v41 << 16);
+                        uint v44 = v42 & 0x7BDF7BDF;
+                        uint v45 = v42 & 0x4200420;
+                        uint v48 = outputSpan2Prev[0];
+                        uint v49 = v48 & 0x4200420;
+                        v48 &= 0x7BDF7BDF;
+                        uint v50 = v49 | ((uint)(v44 + v48) >> 1);
+                        outputSpan2Slice[0] = (ushort)v50;
+                        v50 &= 0x7BDF7BDF;
+                        outputSpan2Prev[0] = (ushort)(v45 | ((v50 + v48) >> 1));
+                        outputSpan2Slice[256] = (ushort)(v45 | ((v50 + v44) >> 1));
+                        uint v51 = outputSpan2Prev[1];
+                        v49 = (v49 & 0xFFFF0000) | (v51 & 0x420);
+                        v51 &= 0x7BDF7BDF;
+                        uint v52 = v45 | ((uint)(v44 + v51) >> 1);
+                        outputSpan2Slice[1] = (ushort)v52;
+                        v52 &= 0x7BDF7BDF;
+                        outputSpan2Prev[1] = (ushort)(v49 | ((v52 + v51) >> 1));
+                        outputSpan2Slice[256 + 1] = (ushort)(v49 | ((v52 + v44) >> 1));
+                        uint v53 = outputSpan2Prev[256 - 1];
+                        uint v54 = v53 & 0x4200420;
+                        v53 &= 0x7BDF7BDF;
+                        uint v55 = v54 | ((uint)(v44 + v53) >> 1);
+                        outputSpan2Slice[0] = (ushort)v55;
+                        v55 &= 0x7BDF7BDF;
+                        outputSpan2Prev[256 - 1] = (ushort)(v45 | ((v55 + v53) >> 1));
+                        outputSpan2Slice[1] = (ushort)(v45 | ((v55 + v44) >> 1));
+                        uint v56 = outputSpan2Slice[256 - 1];
+                        v54 = (v54 & 0xFFFF0000) | (v56 & 0x420);
+                        v56 &= 0x7BDF7BDF;
+                        uint v57 = v45 | ((uint)(v44 + v56) >> 1);
+                        outputSpan2Slice[256] = (ushort)v57;
+                        v57 &= 0x7BDF7BDF;
+                        outputSpan2Slice[256 - 1] = (ushort)(v54 | ((v57 + v56) >> 1));
+                        outputSpan2Slice[256 + 1] = (ushort)(v54 | ((v57 + v44) >> 1));
+                        uint v58 = outputSpan2Slice[256 * 2 - 1];
+                        uint v59 = v58 & 0x4200420;
+                        v58 &= 0x7BDF7BDF;
+                        uint v60 = v59 | ((uint)(v44 + v58) >> 1);
+                        outputSpan2Slice[256 * 2] = (ushort)v60;
+                        v60 &= 0x7BDF7BDF;
+                        outputSpan2Slice[256 * 2 - 1] = (ushort)(v45 | ((v60 + v58) >> 1));
+                        outputSpan2Slice[256 * 2 + 1] = (ushort)(v45 | ((v60 + v44) >> 1));
+                        uint v61 = outputSpan2Slice[256 * 3 - 1];
+                        v59 = (v59 & 0xFFFF0000) | (v61 & 0x420);
+                        v61 &= 0x7BDF7BDF;
+                        uint v62 = v45 | ((uint)(v44 + v61) >> 1);
+                        outputSpan2Slice[256 * 3] = (ushort)v62;
+                        v62 &= 0x7BDF7BDF;
+                        outputSpan2Slice[256 * 3 - 1] = (ushort)(v59 | ((v62 + v61) >> 1));
+                        outputSpan2Slice[256 * 3 + 1] = (ushort)(v59 | ((v62 + v44) >> 1));
+                        uint v63 = outputSpan2Slice[256 * 4 - 1];
+                        uint v64 = v63 & 0x4200420;
+                        v63 &= 0x7BDF7BDF;
+                        uint v65 = v64 | ((uint)(v44 + v63) >> 1);
+                        outputSpan2Slice[256 * 4] = (ushort)v65;
+                        v65 &= 0x7BDF7BDF;
+                        outputSpan2Slice[256 * 4 - 1] = (ushort)(v45 | ((v65 + v63) >> 1));
+                        outputSpan2Slice[256 * 4 + 1] = (ushort)(v45 | ((v65 + v44) >> 1));
+                        uint v66 = outputSpan2Slice[256 * 5 - 1];
+                        v64 = (v64 & 0xFFFF0000) | (v66 & 0x420);
+                        v66 &= 0x7BDF7BDF;
+                        uint v67 = v45 | ((uint)(v44 + v66) >> 1);
+                        outputSpan2Slice[256 * 5] = (ushort)v67;
+                        v67 &= 0x7BDF7BDF;
+                        outputSpan2Slice[256 * 5 - 1] = (ushort)(v64 | ((v67 + v66) >> 1));
+                        outputSpan2Slice[256 * 5 + 1] = (ushort)(v64 | ((v67 + v44) >> 1));
+                        uint v68 = outputSpan2Slice[256 * 6 - 1];
+                        uint v69 = v68 & 0x4200420;
+                        v68 &= 0x7BDF7BDF;
+                        uint v70 = v69 | ((uint)(v44 + v68) >> 1);
+                        outputSpan2Slice[256 * 6] = (ushort)v70;
+                        v70 &= 0x7BDF7BDF;
+                        outputSpan2Slice[256 * 6 - 1] = (ushort)(v45 | ((v70 + v68) >> 1));
+                        outputSpan2Slice[256 * 6 + 1] = (ushort)(v45 | ((v70 + v44) >> 1));
+                        uint v71 = outputSpan2Slice[256 * 7 - 1];
+                        v69 = (v69 & 0xFFFF0000) | (v71 & 0x420);
+                        v71 &= 0x7BDF7BDF;
+                        uint v72 = v45 | ((uint)(v44 + v71) >> 1);
+                        outputSpan2Slice[256 * 7] = (ushort)v72;
+                        v72 &= 0x7BDF7BDF;
+                        outputSpan2Slice[256 * 7 - 1] = (ushort)(v69 | ((v72 + v71) >> 1));
+                        outputSpan2Slice[256 * 7 + 1] = (ushort)(v69 | ((v72 + v44) >> 1));
+                        wordBuf = wordBuf.Slice(1);
+                    }
+                    else
+                    {
+                        // 1 1 0
+                        // todo: like the section in Sub20679B0, but sets fewer values
+                        byte v28 = byteBuf.Consume();
+                        uint v29 = (uint)_dword206B2A0[v28];
+                        ushort v30 = wordBuf.Consume();
+                        int v31 = v30 | (v30 << 16);
+                        uint prevOffset = v29 + outputPos;
+                        // todo: might not need both code paths, unless there are performance problems or a risk of running off the end when unaligned
+                        Span<uint> outputSpan2Int = MemoryMarshal.Cast<byte, uint>(outputSpan2.Slice(outputPos));
+                        if (prevOffset % 4 != 0)
+                        {
+                            Span<ushort> outputSpan1Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan1.Slice(prevOffset));
+                            outputSpan2Int[0] = (uint)((outputSpan1Slice[0] | (outputSpan1Slice[1] << 16)) + v31);
+                            outputSpan2Int[256 / 2] = (uint)((outputSpan1Slice[256] | (outputSpan1Slice[256 + 1] << 16)) + v31);
+                            outputSpan2Int[256 * 2 / 2] = (uint)((outputSpan1Slice[256 * 2] | (outputSpan1Slice[256 * 2 + 1] << 16)) + v31);
+                            outputSpan2Int[256 * 3 / 2] = (uint)((outputSpan1Slice[256 * 3] | (outputSpan1Slice[256 * 3 + 1] << 16)) + v31);
+                            outputSpan2Int[256 * 4 / 2] = (uint)((outputSpan1Slice[256 * 4] | (outputSpan1Slice[256 * 4 + 1] << 16)) + v31);
+                            outputSpan2Int[256 * 5 / 2] = (uint)((outputSpan1Slice[256 * 5] | (outputSpan1Slice[256 * 5 + 1] << 16)) + v31);
+                            outputSpan2Int[256 * 6 / 2] = (uint)((outputSpan1Slice[256 * 6] | (outputSpan1Slice[256 * 6 + 1] << 16)) + v31);
+                            outputSpan2Int[256 * 7 / 2] = (uint)((outputSpan1Slice[256 * 7] | (outputSpan1Slice[256 * 7 + 1] << 16)) + v31);
+                        }
+                        else
+                        {
+                            Span<uint> outputSpan1Int = MemoryMarshal.Cast<byte, uint>(outputSpan1.Slice(prevOffset));
+                            outputSpan2Int[0] = outputSpan1Int[0] + (uint)v31;
+                            outputSpan2Int[256 / 2] = outputSpan1Int[256 / 2] + (uint)v31;
+                            outputSpan2Int[256 * 2 / 2] = outputSpan1Int[256 * 2 / 2] + (uint)v31;
+                            outputSpan2Int[256 * 3 / 2] = outputSpan1Int[256 * 3 / 2] + (uint)v31;
+                            outputSpan2Int[256 * 4 / 2] = outputSpan1Int[256 * 4 / 2] + (uint)v31;
+                            outputSpan2Int[256 * 5 / 2] = outputSpan1Int[256 * 5 / 2] + (uint)v31;
+                            outputSpan2Int[256 * 6 / 2] = outputSpan1Int[256 * 6 / 2] + (uint)v31;
+                            outputSpan2Int[256 * 7 / 2] = outputSpan1Int[256 * 7 / 2] + (uint)v31;
+                        }
+                    }
+                }
+                else
+                {
+                    // 1 0
+                    ReadNextBit(ref value, ref intBuf);
+                    if (_readBit != 0)
+                    {
+                        // 1 0 1
+                        Sub2069EC0(ref outputPos, ref value, ref outputSpan1, ref outputSpan2, ref intBuf, ref wordBuf, ref byteBuf);
+                        outputPos += 2;
+                        Sub2069EC0(ref outputPos, ref value, ref outputSpan1, ref outputSpan2, ref intBuf, ref wordBuf, ref byteBuf);
+                        outputPos -= 2;
+                    }
+                    else
+                    {
+                        // 1 0 0
+                        Sub206A8C0(ref outputPos, ref value, ref outputSpan1, ref outputSpan2, ref intBuf, ref wordBuf, ref byteBuf);
+                        outputPos += 2048;
+                        Sub206A8C0(ref outputPos, ref value, ref outputSpan1, ref outputSpan2, ref intBuf, ref wordBuf, ref byteBuf);
+                        outputPos -= 2048;
+                    }
+                }
+            }
+            else
+            {
+                // 0
+                ReadNextBit(ref value, ref intBuf);
+                // todo: same as the section in Sub206935C, but sets fewer values
+                // most of the code is shared between the 01+aligned and 00 code paths
+                // (presumably because 00 is always aligned since it doesn't use an offset from the table)
+                Span<uint> outputSpan1Int;
+                Span<uint> outputSpan2Int = MemoryMarshal.Cast<byte, uint>(outputSpan2.Slice(outputPos));
+                if (_readBit != 0)
+                {
+                    // 0 1
+                    byte v14 = byteBuf.Consume();
+                    uint v11 = (uint)_dword206B2A0[v14];
+                    uint prevOffset = v11 + outputPos;
+                    // todo: might not need both code paths, unless there are performance problems or a risk of running off the end when unaligned
+                    Span<ushort> outputSpan1Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan1.Slice(prevOffset));
+                    if (prevOffset % 4 != 0)
+                    {
+                        outputSpan2Int[0] = (uint)(outputSpan1Slice[0] | (outputSpan1Slice[1] << 16));
+                        outputSpan2Int[256 / 2] = (uint)(outputSpan1Slice[256] | (outputSpan1Slice[256 + 1] << 16));
+                        outputSpan2Int[256 * 2 / 2] = (uint)(outputSpan1Slice[256 * 2] | (outputSpan1Slice[256 * 2 + 1] << 16));
+                        outputSpan2Int[256 * 3 / 2] = (uint)(outputSpan1Slice[256 * 3] | (outputSpan1Slice[256 * 3 + 1] << 16));
+                        outputSpan2Int[256 * 4 / 2] = (uint)(outputSpan1Slice[256 * 4] | (outputSpan1Slice[256 * 4 + 1] << 16));
+                        outputSpan2Int[256 * 5 / 2] = (uint)(outputSpan1Slice[256 * 5] | (outputSpan1Slice[256 * 5 + 1] << 16));
+                        outputSpan2Int[256 * 6 / 2] = (uint)(outputSpan1Slice[256 * 6] | (outputSpan1Slice[256 * 6 + 1] << 16));
+                        outputSpan2Int[256 * 7 / 2] = (uint)(outputSpan1Slice[256 * 7] | (outputSpan1Slice[256 * 7 + 1] << 16));
+                        return;
+                    }
+                    outputSpan1Int = MemoryMarshal.Cast<ushort, uint>(outputSpan1Slice);
+                }
+                else // use else so outputSpan1Int is definitely assigned
+                {
+                    // 0 0
+                    outputSpan1Int = MemoryMarshal.Cast<byte, uint>(outputSpan1.Slice(outputPos));
+                }
+                outputSpan2Int[0] = outputSpan1Int[0];
+                outputSpan2Int[256 / 2] = outputSpan1Int[256 / 2];
+                outputSpan2Int[256 * 2 / 2] = outputSpan1Int[256 * 2 / 2];
+                outputSpan2Int[256 * 3 / 2] = outputSpan1Int[256 * 3 / 2];
+                outputSpan2Int[256 * 4 / 2] = outputSpan1Int[256 * 4 / 2];
+                outputSpan2Int[256 * 5 / 2] = outputSpan1Int[256 * 5 / 2];
+                outputSpan2Int[256 * 6 / 2] = outputSpan1Int[256 * 6 / 2];
+                outputSpan2Int[256 * 7 / 2] = outputSpan1Int[256 * 7 / 2];
+            }
+        }
+
+        // todo: similar structure to Sub206935C and Sub206A5A4 etc., except 10 doesn't branch into 101/100
+        private static void Sub2069EC0(ref uint outputPos, ref uint value, ref Span<byte> outputSpan1, ref Span<byte> outputSpan2,
+            ref Span<uint> intBuf, ref Span<ushort> wordBuf, ref Span<byte> byteBuf)
+        {
+            ReadNextBit(ref value, ref intBuf);
+            if (_readBit != 0)
+            {
+                // 1
+                ReadNextBit(ref value, ref intBuf);
+                if (_readBit != 0)
+                {
+                    // 1 1
+                    ReadNextBit(ref value, ref intBuf);
+                    if (_readBit != 0)
+                    {
+                        // 1 1 1
+                        Span<ushort> outputSpan2Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan2.Slice(outputPos));
+                        ushort v36 = wordBuf[0];
+                        outputSpan2Slice[0] = v36;
+                        outputSpan2Slice[256] = v36;
+                        outputSpan2Slice[256 * 2] = v36;
+                        outputSpan2Slice[256 * 3] = v36;
+                        outputSpan2Slice[256 * 4] = v36;
+                        outputSpan2Slice[256 * 5] = v36;
+                        outputSpan2Slice[256 * 6] = v36;
+                        outputSpan2Slice[256 * 7] = v36;
+                        wordBuf = wordBuf.Slice(1);
+                    }
+                    else
+                    {
+                        // 1 1 0
+                        byte v25 = byteBuf.Consume();
+                        uint v27 = (uint)_dword206B2A0[v25];
+                        ushort v26 = wordBuf.Consume();
+                        uint prevOffset = v27 + outputPos;
+                        Span<ushort> outputSpan1Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan1.Slice(prevOffset));
+                        Span<ushort> outputSpan2Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan2.Slice(outputPos));
+                        outputSpan2Slice[0] = (ushort)(outputSpan1Slice[0] + v26);
+                        outputSpan2Slice[256] = (ushort)(outputSpan1Slice[256] + v26);
+                        outputSpan2Slice[256 * 2] = (ushort)(outputSpan1Slice[256 * 2] + v26);
+                        outputSpan2Slice[256 * 3] = (ushort)(outputSpan1Slice[256 * 3] + v26);
+                        outputSpan2Slice[256 * 4] = (ushort)(outputSpan1Slice[256 * 4] + v26);
+                        outputSpan2Slice[256 * 5] = (ushort)(outputSpan1Slice[256 * 5] + v26);
+                        outputSpan2Slice[256 * 6] = (ushort)(outputSpan1Slice[256 * 6] + v26);
+                        outputSpan2Slice[256 * 7] = (ushort)(outputSpan1Slice[256 * 7] + v26);
+                    }
+                }
+                else
+                {
+                    // 1 0
+                    Sub206AD40(ref outputPos, ref value, ref outputSpan1, ref outputSpan2, ref intBuf, ref wordBuf, ref byteBuf);
+                    outputPos += 2048;
+                    Sub206AD40(ref outputPos, ref value, ref outputSpan1, ref outputSpan2, ref intBuf, ref wordBuf, ref byteBuf);
+                    outputPos -= 2048;
+                }
+            }
+            else
+            {
+                // 0
+                ReadNextBit(ref value, ref intBuf);
+                // todo: similar to the section in Sub206935C and others, but all the code is shared except for the buf1 pointer
+                Span<ushort> outputSpan1Slice;
+                Span<ushort> outputSpan2Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan2.Slice(outputPos));
+                if (_readBit != 0)
+                {
+                    // 0 1
+                    byte v14 = byteBuf.Consume();
+                    uint v11 = (uint)_dword206B2A0[v14];
+                    uint prevOffset = v11 + outputPos;
+                    outputSpan1Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan1.Slice(prevOffset));
                 }
                 else
                 {
                     // 0 0
-                    // todo: actual code
+                    outputSpan1Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan1.Slice(outputPos));
                 }
+                outputSpan2Slice[0] = outputSpan1Slice[0];
+                outputSpan2Slice[256] = outputSpan1Slice[256];
+                outputSpan2Slice[256 * 2] = outputSpan1Slice[256 * 2];
+                outputSpan2Slice[256 * 3] = outputSpan1Slice[256 * 3];
+                outputSpan2Slice[256 * 4] = outputSpan1Slice[256 * 4];
+                outputSpan2Slice[256 * 5] = outputSpan1Slice[256 * 5];
+                outputSpan2Slice[256 * 6] = outputSpan1Slice[256 * 6];
+                outputSpan2Slice[256 * 7] = outputSpan1Slice[256 * 7];
+            }
+        }
+
+        // todo: similar structure to Sub206935C and Sub206A5A4 etc., except 10 doesn't branch into 101/100
+        private static void Sub206AD40(ref uint outputPos, ref uint value, ref Span<byte> outputSpan1, ref Span<byte> outputSpan2,
+            ref Span<uint> intBuf, ref Span<ushort> wordBuf, ref Span<byte> byteBuf)
+        {
+            ReadNextBit(ref value, ref intBuf);
+            if (_readBit != 0)
+            {
+                // 1
+                ReadNextBit(ref value, ref intBuf);
+                if (_readBit != 0)
+                {
+                    // 1 1
+                    ReadNextBit(ref value, ref intBuf);
+                    if (_readBit != 0)
+                    {
+                        // 1 1 1
+                        Span<ushort> outputSpan2Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan2.Slice(outputPos));
+                        ushort v28 = wordBuf[0];
+                        outputSpan2Slice[0] = v28;
+                        outputSpan2Slice[256] = v28;
+                        outputSpan2Slice[256 * 2] = v28;
+                        outputSpan2Slice[256 * 3] = v28;
+                        wordBuf = wordBuf.Slice(1);
+                    }
+                    else
+                    {
+                        // 1 1 0
+                        byte v25 = byteBuf.Consume();
+                        uint v27 = (uint)_dword206B2A0[v25];
+                        ushort v26 = wordBuf.Consume();
+                        uint prevOffset = v27 + outputPos;
+                        Span<ushort> outputSpan1Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan1.Slice(prevOffset));
+                        Span<ushort> outputSpan2Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan2.Slice(outputPos));
+                        outputSpan2Slice[0] = (ushort)(outputSpan1Slice[0] + v26);
+                        outputSpan2Slice[256] = (ushort)(outputSpan1Slice[256] + v26);
+                        outputSpan2Slice[256 * 2] = (ushort)(outputSpan1Slice[256 * 2] + v26);
+                        outputSpan2Slice[256 * 3] = (ushort)(outputSpan1Slice[256 * 3] + v26);
+
+                    }
+                }
+                else
+                {
+                    // 1 0
+                    Sub206B1B8(ref outputPos, ref value, ref outputSpan1, ref outputSpan2, ref intBuf, ref wordBuf, ref byteBuf);
+                    outputPos += 1024;
+                    Sub206B1B8(ref outputPos, ref value, ref outputSpan1, ref outputSpan2, ref intBuf, ref wordBuf, ref byteBuf);
+                    outputPos -= 1024;
+                }
+            }
+            else
+            {
+                // 0
+                ReadNextBit(ref value, ref intBuf);
+                // todo: similar to that other section, but sets fewer values
+                Span<ushort> outputSpan1Slice;
+                Span<ushort> outputSpan2Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan2.Slice(outputPos));
+                if (_readBit != 0)
+                {
+                    // 0 1
+                    byte v14 = byteBuf.Consume();
+                    uint v11 = (uint)_dword206B2A0[v14];
+                    uint prevOffset = v11 + outputPos;
+                    outputSpan1Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan1.Slice(prevOffset));
+                }
+                else
+                {
+                    // 0 0
+                    outputSpan1Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan1.Slice(outputPos));
+                }
+                outputSpan2Slice[0] = outputSpan1Slice[0];
+                outputSpan2Slice[256] = outputSpan1Slice[256];
+                outputSpan2Slice[256 * 2] = outputSpan1Slice[256 * 2];
+                outputSpan2Slice[256 * 3] = outputSpan1Slice[256 * 3];
+            }
+        }
+
+        // todo: similar structure to Sub206935C and Sub206A5A4 etc.
+        private static void Sub206AE88(ref uint outputPos, ref uint value, ref Span<byte> outputSpan1, ref Span<byte> outputSpan2,
+            ref Span<uint> intBuf, ref Span<ushort> wordBuf, ref Span<byte> byteBuf)
+        {
+            ReadNextBit(ref value, ref intBuf);
+            if (_readBit != 0)
+            {
+                // 1
+                ReadNextBit(ref value, ref intBuf);
+                if (_readBit != 0)
+                {
+                    // 1 1
+                    ReadNextBit(ref value, ref intBuf);
+                    if (_readBit != 0)
+                    {
+                        // 1 1 1
+                        Debug.Assert(outputPos >= 512);
+                        Span<ushort> outputSpan2Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan2.Slice(outputPos));
+                        Span<ushort> outputSpan2Prev = MemoryMarshal.Cast<byte, ushort>(outputSpan2.Slice(outputPos - 512));
+                        // todo: similar to the inlines in Sub Sub206A0B8 and Sub2068488
+                        uint v27 = wordBuf[0];
+                        uint v28 = v27 | (v27 << 16);
+                        uint v31 = outputSpan2Prev[0];
+                        uint v32 = v31 & 0x4200420;
+                        v31 &= 0x7BDF7BDFu;
+                        uint v33 = v32 | (((v28 & 0x7BDF7BDFu) + v31) >> 1);
+                        outputSpan2Slice[0] = (ushort)v33;
+                        v33 &= 0x7BDF7BDFu;
+                        outputSpan2Prev[0] = (ushort)(v28 & 0x420 | ((v33 + v31) >> 1));
+                        outputSpan2Slice[256] = (ushort)(v28 & 0x420 | ((v33 + (v28 & 0x7BDF7BDF)) >> 1));
+                        uint v34 = outputSpan2Prev[1];
+                        v32 = (v32 & 0xFFFF0000) | (v34 & 0x420);
+                        v34 &= 0x7BDF7BDFu;
+                        outputSpan2Slice[1] = (ushort)(v28 & 0x420 | (((v28 & 0x7BDF7BDFu) + v34) >> 1));
+                        uint v35 = (((v28 & 0x7BDF7BDFu) + v34) >> 1) & 0x7BDF7BDF;
+                        outputSpan2Prev[1] = (ushort)(v32 | ((v35 + v34) >> 1));
+                        outputSpan2Slice[256 + 1] = (ushort)(v32 | ((v35 + (v28 & 0x7BDF7BDF)) >> 1));
+                        uint v36 = outputSpan2Prev[256 - 1];
+                        uint v37 = v36 & 0x4200420;
+                        v36 &= 0x7BDF7BDFu;
+                        uint v38 = v37 | (((v28 & 0x7BDF7BDFu) + v36) >> 1);
+                        outputSpan2Slice[0] = (ushort)v38;
+                        v38 &= 0x7BDF7BDFu;
+                        outputSpan2Prev[256 - 1] = (ushort)(v28 & 0x420 | ((v38 + v36) >> 1));
+                        outputSpan2Slice[1] = (ushort)(v28 & 0x420 | ((v38 + (v28 & 0x7BDF7BDF)) >> 1));
+                        uint v39 = outputSpan2Slice[256 - 1];
+                        v37 = (v37 & 0xFFFF0000) | (v39 & 0x420);
+                        v39 &= 0x7BDF7BDFu;
+                        outputSpan2Slice[256] = (ushort)(v28 & 0x420 | (((v28 & 0x7BDF7BDFu) + v39) >> 1));
+                        uint v40 = (((v28 & 0x7BDF7BDFu) + v39) >> 1) & 0x7BDF7BDF;
+                        outputSpan2Slice[256 - 1] = (ushort)(v37 | ((v40 + v39) >> 1));
+                        outputSpan2Slice[256 + 1] = (ushort)(v37 | ((v40 + (v28 & 0x7BDF7BDF)) >> 1));
+                        wordBuf = wordBuf.Slice(1);
+                    }
+                    else
+                    {
+                        // 1 1 0
+                        // todo: like the section in Sub20679B0, but sets even fewer values
+                        byte v21 = byteBuf.Consume();
+                        uint v22 = (uint)_dword206B2A0[v21];
+                        ushort v23 = wordBuf.Consume();
+                        int v24 = v23 | (v23 << 16);
+                        uint prevOffset = v22 + outputPos;
+                        // todo: might not need both code paths, unless there are performance problems or a risk of running off the end when unaligned
+                        Span<uint> outputSpan2Int = MemoryMarshal.Cast<byte, uint>(outputSpan2.Slice(outputPos));
+                        if (prevOffset % 4 != 0)
+                        {
+                            Span<ushort> outputSpan1Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan1.Slice(prevOffset));
+                            outputSpan2Int[0] = (uint)((outputSpan1Slice[0] | (outputSpan1Slice[1] << 16)) + v24);
+                            outputSpan2Int[256 / 2] = (uint)((outputSpan1Slice[256] | (outputSpan1Slice[256 + 1] << 16)) + v24);
+                        }
+                        else
+                        {
+                            Span<uint> outputSpan1Int = MemoryMarshal.Cast<byte, uint>(outputSpan1.Slice(prevOffset));
+                            outputSpan2Int[0] = outputSpan1Int[0] + (uint)v24;
+                            outputSpan2Int[256 / 2] = outputSpan1Int[256 / 2] + (uint)v24;
+                        }
+                    }
+                }
+                else
+                {
+                    // 1 0
+                    ReadNextBit(ref value, ref intBuf);
+                    if (_readBit != 0)
+                    {
+                        // 1 0 1
+                        Sub206B1B8(ref outputPos, ref value, ref outputSpan1, ref outputSpan2, ref intBuf, ref wordBuf, ref byteBuf);
+                        outputPos += 2;
+                        Sub206B1B8(ref outputPos, ref value, ref outputSpan1, ref outputSpan2, ref intBuf, ref wordBuf, ref byteBuf);
+                        outputPos -= 2;
+                    }
+                    else
+                    {
+                        // 1 0 0
+                        Sub206B0C4(ref outputPos, ref value, ref outputSpan1, ref outputSpan2, ref intBuf, ref wordBuf, ref byteBuf);
+                        outputPos += 512;
+                        Sub206B0C4(ref outputPos, ref value, ref outputSpan1, ref outputSpan2, ref intBuf, ref wordBuf, ref byteBuf);
+                        outputPos -= 512;
+                    }
+                }
+            }
+            else
+            {
+                // 0
+                ReadNextBit(ref value, ref intBuf);
+                // todo: same as the section in Sub206935C, but sets even fewer values
+                // most of the code is shared between the 01+aligned and 00 code paths
+                // (presumably because 00 is always aligned since it doesn't use an offset from the table)
+                Span<uint> outputSpan1Int;
+                Span<uint> outputSpan2Int = MemoryMarshal.Cast<byte, uint>(outputSpan2.Slice(outputPos));
+                if (_readBit != 0)
+                {
+                    // 0 1
+                    byte v14 = byteBuf.Consume();
+                    uint v11 = (uint)_dword206B2A0[v14];
+                    uint prevOffset = v11 + outputPos;
+                    // todo: might not need both code paths, unless there are performance problems or a risk of running off the end when unaligned
+                    Span<ushort> outputSpan1Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan1.Slice(prevOffset));
+                    if (prevOffset % 4 != 0)
+                    {
+                        outputSpan2Int[0] = (uint)(outputSpan1Slice[0] | (outputSpan1Slice[1] << 16));
+                        outputSpan2Int[256 / 2] = (uint)(outputSpan1Slice[256] | (outputSpan1Slice[256 + 1] << 16));
+                        return;
+                    }
+                    outputSpan1Int = MemoryMarshal.Cast<ushort, uint>(outputSpan1Slice);
+                }
+                else // use else so outputSpan1Int is definitely assigned
+                {
+                    // 0 0
+                    outputSpan1Int = MemoryMarshal.Cast<byte, uint>(outputSpan1.Slice(outputPos));
+                }
+                outputSpan2Int[0] = outputSpan1Int[0];
+                outputSpan2Int[256 / 2] = outputSpan1Int[256 / 2];
+            }
+        }
+
+        // todo: similar structure to Sub206935C and Sub206A5A4 etc.
+        private static void Sub206AC14(ref uint outputPos, ref uint value, ref Span<byte> outputSpan1, ref Span<byte> outputSpan2,
+            ref Span<uint> intBuf, ref Span<ushort> wordBuf, ref Span<byte> byteBuf)
+        {
+            ReadNextBit(ref value, ref intBuf);
+            if (_readBit != 0)
+            {
+                // 1
+                ReadNextBit(ref value, ref intBuf);
+                if (_readBit != 0)
+                {
+                    // 1 1
+                    ReadNextBit(ref value, ref intBuf);
+                    if (_readBit != 0)
+                    {
+                        // 1 1 1
+                        Span<uint> outputSpan2Int = MemoryMarshal.Cast<byte, uint>(outputSpan2.Slice(outputPos));
+                        ushort v26 = wordBuf.Consume();
+                        uint v27 = (uint)(v26 | (v26 << 16));
+                        outputSpan2Int[0] = v27;
+                        outputSpan2Int[1] = v27;
+                    }
+                    else
+                    {
+                        // 1 1 0
+                        // todo: like the section in Sub20679B0, but sets even fewer values
+                        byte v19 = byteBuf.Consume();
+                        uint v20 = (uint)_dword206B2A0[v19];
+                        ushort v21 = wordBuf.Consume();
+                        int v22 = v21 | (v21 << 16);
+                        uint prevOffset = v20 + outputPos;
+                        // todo: might not need both code paths, unless there are performance problems or a risk of running off the end when unaligned
+                        Span<uint> outputSpan2Int = MemoryMarshal.Cast<byte, uint>(outputSpan2.Slice(outputPos));
+                        if (prevOffset % 4 != 0)
+                        {
+                            Span<ushort> outputSpan1Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan1.Slice(prevOffset));
+                            outputSpan2Int[0] = (uint)((outputSpan1Slice[0] | (outputSpan1Slice[1] << 16)) + v22);
+                            outputSpan2Int[1] = (uint)((outputSpan1Slice[2] | (outputSpan1Slice[3] << 16)) + v22);
+                        }
+                        else
+                        {
+                            Span<uint> outputSpan1Int = MemoryMarshal.Cast<byte, uint>(outputSpan1.Slice(prevOffset));
+                            outputSpan2Int[0] = outputSpan1Int[0] + (uint)v22;
+                            outputSpan2Int[1] = outputSpan1Int[1] + (uint)v22;
+                        }
+                    }
+                }
+                else
+                {
+                    // 1 0
+                    Sub206B0C4(ref outputPos, ref value, ref outputSpan1, ref outputSpan2, ref intBuf, ref wordBuf, ref byteBuf);
+                    outputPos += 4;
+                    Sub206B0C4(ref outputPos, ref value, ref outputSpan1, ref outputSpan2, ref intBuf, ref wordBuf, ref byteBuf);
+                    outputPos -= 4;
+                }
+            }
+            else
+            {
+                // 0
+                ReadNextBit(ref value, ref intBuf);
+                // todo: same as the section in Sub206935C, but sets even fewer values
+                // most of the code is shared between the 01+aligned and 00 code paths
+                // (presumably because 00 is always aligned since it doesn't use an offset from the table)
+                Span<uint> outputSpan1Int;
+                Span<uint> outputSpan2Int = MemoryMarshal.Cast<byte, uint>(outputSpan2.Slice(outputPos));
+                if (_readBit != 0)
+                {
+                    // 0 1
+                    byte v14 = byteBuf.Consume();
+                    uint v11 = (uint)_dword206B2A0[v14];
+                    uint prevOffset = v11 + outputPos;
+                    // todo: might not need both code paths, unless there are performance problems or a risk of running off the end when unaligned
+                    Span<ushort> outputSpan1Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan1.Slice(prevOffset));
+                    if (prevOffset % 4 != 0)
+                    {
+                        outputSpan2Int[0] = (uint)(outputSpan1Slice[0] | (outputSpan1Slice[1] << 16));
+                        outputSpan2Int[1] = (uint)(outputSpan1Slice[2] | (outputSpan1Slice[3] << 16));
+                        return;
+                    }
+                    outputSpan1Int = MemoryMarshal.Cast<ushort, uint>(outputSpan1Slice);
+                }
+                else // use else so outputSpan1Int is definitely assigned
+                {
+                    // 0 0
+                    outputSpan1Int = MemoryMarshal.Cast<byte, uint>(outputSpan1.Slice(outputPos));
+                }
+                outputSpan2Int[0] = outputSpan1Int[0];
+                outputSpan2Int[1] = outputSpan1Int[1];
+            }
+        }
+
+        // todo: same structure as others (10 doesn't branch into 101/100)
+        private static void Sub206B0C4(ref uint outputPos, ref uint value, ref Span<byte> outputSpan1, ref Span<byte> outputSpan2,
+            ref Span<uint> intBuf, ref Span<ushort> wordBuf, ref Span<byte> byteBuf)
+        {
+            ReadNextBit(ref value, ref intBuf);
+            if (_readBit != 0)
+            {
+                // 1
+                ReadNextBit(ref value, ref intBuf);
+                if (_readBit != 0)
+                {
+                    // 1 1
+                    ReadNextBit(ref value, ref intBuf);
+                    if (_readBit != 0)
+                    {
+                        // 1 1 1
+                        Span<ushort> outputSpan2Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan2.Slice(outputPos));
+                        outputSpan2Slice[0] = wordBuf.Consume();
+                        outputSpan2Slice[1] = wordBuf.Consume();
+                    }
+                    else
+                    {
+                        // 1 1 0
+                        ushort v23 = wordBuf.Consume();
+                        int v24 = v23 | (v23 << 16);
+                        Span<uint> outputSpan2Int = MemoryMarshal.Cast<byte, uint>(outputSpan2.Slice(outputPos));
+                        outputSpan2Int[0] = (uint)v24;
+                    }
+                }
+                else
+                {
+                    // 1 0
+                    // todo: like the section in Sub20679B0, but sets yet fewer values
+                    byte v16 = byteBuf.Consume();
+                    uint v17 = (uint)_dword206B2A0[v16];
+                    ushort v18 = wordBuf.Consume();
+                    int v19 = v18 | (v18 << 16);
+                    uint prevOffset = v17 + outputPos;
+                    // todo: might not need both code paths, unless there are performance problems or a risk of running off the end when unaligned
+                    Span<uint> outputSpan2Int = MemoryMarshal.Cast<byte, uint>(outputSpan2.Slice(outputPos));
+                    if (prevOffset % 4 != 0)
+                    {
+                        Span<ushort> outputSpan1Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan1.Slice(prevOffset));
+                        outputSpan2Int[0] = (uint)((outputSpan1Slice[0] | (outputSpan1Slice[1] << 16)) + v19);
+                    }
+                    else
+                    {
+                        Span<uint> outputSpan1Int = MemoryMarshal.Cast<byte, uint>(outputSpan1.Slice(prevOffset));
+                        outputSpan2Int[0] = outputSpan1Int[0] + (uint)v19;
+                    }
+                }
+            }
+            else
+            {
+                // 0
+                ReadNextBit(ref value, ref intBuf);
+                // todo: same as the section in Sub206935C, but sets yet fewer values
+                // most of the code is shared between the 01+aligned and 00 code paths
+                // (presumably because 00 is always aligned since it doesn't use an offset from the table)
+                Span<uint> outputSpan1Int;
+                Span<uint> outputSpan2Int = MemoryMarshal.Cast<byte, uint>(outputSpan2.Slice(outputPos));
+                if (_readBit != 0)
+                {
+                    // 0 1
+                    byte v14 = byteBuf.Consume();
+                    uint v11 = (uint)_dword206B2A0[v14];
+                    uint prevOffset = v11 + outputPos;
+                    // todo: might not need both code paths, unless there are performance problems or a risk of running off the end when unaligned
+                    Span<ushort> outputSpan1Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan1.Slice(prevOffset));
+                    if (prevOffset % 4 != 0)
+                    {
+                        outputSpan2Int[0] = (uint)(outputSpan1Slice[0] | (outputSpan1Slice[1] << 16));
+                        return;
+                    }
+                    outputSpan1Int = MemoryMarshal.Cast<ushort, uint>(outputSpan1Slice);
+                }
+                else // use else so outputSpan1Int is definitely assigned
+                {
+                    // 0 0
+                    outputSpan1Int = MemoryMarshal.Cast<byte, uint>(outputSpan1.Slice(outputPos));
+                }
+                outputSpan2Int[0] = outputSpan1Int[0];
+            }
+        }
+
+        // todo: same structure as others (10 doesn't branch into 101/100)
+        private static void Sub206B1B8(ref uint outputPos, ref uint value, ref Span<byte> outputSpan1, ref Span<byte> outputSpan2,
+            ref Span<uint> intBuf, ref Span<ushort> wordBuf, ref Span<byte> byteBuf)
+        {
+            ReadNextBit(ref value, ref intBuf);
+            if (_readBit != 0)
+            {
+                // 1
+                ReadNextBit(ref value, ref intBuf);
+                if (_readBit != 0)
+                {
+                    // 1 1
+                    ReadNextBit(ref value, ref intBuf);
+                    if (_readBit != 0)
+                    {
+                        // 1 1 1
+                        Span<ushort> outputSpan2Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan2.Slice(outputPos));
+                        outputSpan2Slice[0] = wordBuf.Consume();
+                        outputSpan2Slice[256] = wordBuf.Consume();
+                    }
+                    else
+                    {
+                        // 1 1 0
+                        ushort v22 = wordBuf.Consume();
+                        Span<ushort> outputSpan2Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan2.Slice(outputPos));
+                        outputSpan2Slice[0] = v22;
+                        outputSpan2Slice[256] = v22;
+                    }
+                }
+                else
+                {
+                    // 1 0
+                    byte v25 = byteBuf.Consume();
+                    uint v27 = (uint)_dword206B2A0[v25];
+                    ushort v26 = wordBuf.Consume();
+                    uint prevOffset = v27 + outputPos;
+                    Span<ushort> outputSpan1Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan1.Slice(prevOffset));
+                    Span<ushort> outputSpan2Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan2.Slice(outputPos));
+                    outputSpan2Slice[0] = (ushort)(outputSpan1Slice[0] + v26);
+                    outputSpan2Slice[256] = (ushort)(outputSpan1Slice[256] + v26);
+                }
+            }
+            else
+            {
+                // 0
+                ReadNextBit(ref value, ref intBuf);
+                // todo: similar to that other section, but sets even fewer values
+                Span<ushort> outputSpan1Slice;
+                Span<ushort> outputSpan2Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan2.Slice(outputPos));
+                if (_readBit != 0)
+                {
+                    // 0 1
+                    byte v14 = byteBuf.Consume();
+                    uint v11 = (uint)_dword206B2A0[v14];
+                    uint prevOffset = v11 + outputPos;
+                    outputSpan1Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan1.Slice(prevOffset));
+                }
+                else
+                {
+                    // 0 0
+                    outputSpan1Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan1.Slice(outputPos));
+                }
+                outputSpan2Slice[0] = outputSpan1Slice[0];
+                outputSpan2Slice[256] = outputSpan1Slice[256];
+            }
+        }
+
+        private static readonly ImmutableArray<byte> _byte2067320 =
+        [
+            0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, 6, 7, 7, 7, 8, 8, 8, 9, 9, 9,
+            10, 10, 10, 11, 11, 11, 12, 12, 12, 13, 13, 13, 14, 14, 14, 15, 15, 15, 16, 16, 16, 17, 17, 17, 18, 18, 18, 19, 19, 19,
+            20, 20, 20, 21, 21, 21, 22, 22, 22, 23, 23, 23, 24, 24, 24, 25, 25, 25, 26, 26, 26, 27, 27, 27, 28, 28, 28, 29, 29, 29,
+            30, 30, 30, 31, 31, 0, 0
+        ];
+
+        private static void Sub2067388(ref Span<ushort> wordBuf, Span<ushort> outputSpan2Slice)
+        {
+            ushort word0 = wordBuf[0];
+            ushort word1 = wordBuf[1];
+            int prevInt23 = wordBuf[2] | (wordBuf[3] << 16);
+            int bits0A = (word0 >> 10) & 0x1F; // bits 10-14
+            int bits1A = (word1 >> 10) & 0x1F;
+            int bits0B = (word0 >> 5) & 0x1F; // bits 5-9
+            int bits1B = (word1 >> 5) & 0x1F;
+            int bits0C = word0 & 0x1F; // bits 0-4
+            int bits1C = word1 & 0x1F;
+            wordBuf[2] = (ushort)(_byte2067320[2 * bits0C + bits1C] + 32 * (_byte2067320[2 * bits0B + bits1B] + 32 * _byte2067320[bits1A + 2 * bits0A]));
+            wordBuf[3] = (ushort)(_byte2067320[2 * bits1C + bits0C] + 32 * (_byte2067320[2 * bits1B + bits0B] + 32 * _byte2067320[2 * bits1A + bits0A]));
+            // todo: clean this up once it's confirmed the indices work this way and we don't need to un-align
+            int wordIdx0 = (prevInt23 << 1) & 6;
+            int wordIdx1 = (prevInt23 >> 1) & 6;
+            int wordIdx2 = (prevInt23 >> 3) & 6;
+            int wordIdx3 = (prevInt23 >> 5) & 6;
+            int wordIdx4 = (prevInt23 >> 7) & 6;
+            int wordIdx5 = (prevInt23 >> 9) & 6;
+            int wordIdx6 = (prevInt23 >> 11) & 6;
+            int wordIdx7 = (prevInt23 >> 13) & 6;
+            int wordIdx8 = (prevInt23 >> 15) & 6;
+            int wordIdx9 = (prevInt23 >> 17) & 6;
+            int wordIdxA = (prevInt23 >> 19) & 6;
+            int wordIdxB = (prevInt23 >> 21) & 6;
+            int wordIdxC = (prevInt23 >> 23) & 6;
+            int wordIdxD = (prevInt23 >> 25) & 6;
+            int wordIdxE = (prevInt23 >> 27) & 6;
+            int wordIdxF = (prevInt23 >> 29) & 6;
+            Debug.Assert(wordIdx0 % 2 == 0);
+            Debug.Assert(wordIdx1 % 2 == 0);
+            Debug.Assert(wordIdx2 % 2 == 0);
+            Debug.Assert(wordIdx3 % 2 == 0);
+            Debug.Assert(wordIdx4 % 2 == 0);
+            Debug.Assert(wordIdx5 % 2 == 0);
+            Debug.Assert(wordIdx6 % 2 == 0);
+            Debug.Assert(wordIdx7 % 2 == 0);
+            Debug.Assert(wordIdx8 % 2 == 0);
+            Debug.Assert(wordIdx9 % 2 == 0);
+            Debug.Assert(wordIdxA % 2 == 0);
+            Debug.Assert(wordIdxB % 2 == 0);
+            Debug.Assert(wordIdxC % 2 == 0);
+            Debug.Assert(wordIdxD % 2 == 0);
+            Debug.Assert(wordIdxE % 2 == 0);
+            Debug.Assert(wordIdxF % 2 == 0);
+            wordIdx0 /= 2;
+            wordIdx1 /= 2;
+            wordIdx2 /= 2;
+            wordIdx3 /= 2;
+            wordIdx4 /= 2;
+            wordIdx5 /= 2;
+            wordIdx6 /= 2;
+            wordIdx7 /= 2;
+            wordIdx8 /= 2;
+            wordIdx9 /= 2;
+            wordIdxA /= 2;
+            wordIdxB /= 2;
+            wordIdxC /= 2;
+            wordIdxD /= 2;
+            wordIdxE /= 2;
+            wordIdxF /= 2;
+            outputSpan2Slice[0] = wordBuf[wordIdx0];
+            outputSpan2Slice[1] = wordBuf[wordIdx1];
+            outputSpan2Slice[2] = wordBuf[wordIdx2];
+            outputSpan2Slice[3] = wordBuf[wordIdx3];
+            outputSpan2Slice[256] = wordBuf[wordIdx4];
+            outputSpan2Slice[256 + 1] = wordBuf[wordIdx5];
+            outputSpan2Slice[256 + 2] = wordBuf[wordIdx6];
+            outputSpan2Slice[256 + 3] = wordBuf[wordIdx7];
+            outputSpan2Slice[256 * 2] = wordBuf[wordIdx8];
+            outputSpan2Slice[256 * 2 + 1] = wordBuf[wordIdx9];
+            outputSpan2Slice[256 * 2 + 2] = wordBuf[wordIdxA];
+            outputSpan2Slice[256 * 2 + 3] = wordBuf[wordIdxB];
+            outputSpan2Slice[256 * 3] = wordBuf[wordIdxC];
+            outputSpan2Slice[256 * 3 + 1] = wordBuf[wordIdxD];
+            outputSpan2Slice[256 * 3 + 2] = wordBuf[wordIdxE];
+            outputSpan2Slice[256 * 3 + 3] = wordBuf[wordIdxF];
+            wordBuf = wordBuf.Slice(4);
+        }
+
+        private static void Sub20674E4(ref Span<ushort> wordBuf, Span<byte> outputSpan2, uint outputPos)
+        {
+            // todo: this section is exactly the same as in Sub2067388
+            ushort word0 = wordBuf[0];
+            ushort word1 = wordBuf[1];
+            int prevInt23 = wordBuf[2] | (wordBuf[3] << 16);
+            int bits0A = (word0 >> 10) & 0x1F; // bits 10-14
+            int bits1A = (word1 >> 10) & 0x1F;
+            int bits0B = (word0 >> 5) & 0x1F; // bits 5-9
+            int bits1B = (word1 >> 5) & 0x1F;
+            int bits0C = word0 & 0x1F; // bits 0-4
+            int bits1C = word1 & 0x1F;
+            wordBuf[2] = (ushort)(_byte2067320[2 * bits0C + bits1C] + 32 * (_byte2067320[2 * bits0B + bits1B] + 32 * _byte2067320[bits1A + 2 * bits0A]));
+            wordBuf[3] = (ushort)(_byte2067320[2 * bits1C + bits0C] + 32 * (_byte2067320[2 * bits1B + bits0B] + 32 * _byte2067320[2 * bits1A + bits0A]));
+            // todo: ^
+            Span<ushort> outputSpan2Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan2.Slice(outputPos));
+            // todo: clean this up once it's confirmed the indices work this way and we don't need to un-align
+            int wordIdx0 = (prevInt23 << 1) & 6;
+            int wordIdx1 = (prevInt23 >> 1) & 6;
+            int wordIdx2 = (prevInt23 >> 3) & 6;
+            int wordIdx3 = (prevInt23 >> 5) & 6;
+            int wordIdx4 = (prevInt23 >> 7) & 6;
+            int wordIdx5 = (prevInt23 >> 9) & 6;
+            int wordIdx6 = (prevInt23 >> 11) & 6;
+            int wordIdx7 = (prevInt23 >> 13) & 6;
+            int wordIdx8 = (prevInt23 >> 15) & 6;
+            int wordIdx9 = (prevInt23 >> 17) & 6;
+            int wordIdxA = (prevInt23 >> 19) & 6;
+            int wordIdxB = (prevInt23 >> 21) & 6;
+            int wordIdxC = (prevInt23 >> 23) & 6;
+            int wordIdxD = (prevInt23 >> 25) & 6;
+            int wordIdxE = (prevInt23 >> 27) & 6;
+            int wordIdxF = (prevInt23 >> 29) & 6;
+            Debug.Assert(wordIdx0 % 2 == 0);
+            Debug.Assert(wordIdx1 % 2 == 0);
+            Debug.Assert(wordIdx2 % 2 == 0);
+            Debug.Assert(wordIdx3 % 2 == 0);
+            Debug.Assert(wordIdx4 % 2 == 0);
+            Debug.Assert(wordIdx5 % 2 == 0);
+            Debug.Assert(wordIdx6 % 2 == 0);
+            Debug.Assert(wordIdx7 % 2 == 0);
+            Debug.Assert(wordIdx8 % 2 == 0);
+            Debug.Assert(wordIdx9 % 2 == 0);
+            Debug.Assert(wordIdxA % 2 == 0);
+            Debug.Assert(wordIdxB % 2 == 0);
+            Debug.Assert(wordIdxC % 2 == 0);
+            Debug.Assert(wordIdxD % 2 == 0);
+            Debug.Assert(wordIdxE % 2 == 0);
+            Debug.Assert(wordIdxF % 2 == 0);
+            wordIdx0 /= 2;
+            wordIdx1 /= 2;
+            wordIdx2 /= 2;
+            wordIdx3 /= 2;
+            wordIdx4 /= 2;
+            wordIdx5 /= 2;
+            wordIdx6 /= 2;
+            wordIdx7 /= 2;
+            wordIdx8 /= 2;
+            wordIdx9 /= 2;
+            wordIdxA /= 2;
+            wordIdxB /= 2;
+            wordIdxC /= 2;
+            wordIdxD /= 2;
+            wordIdxE /= 2;
+            wordIdxF /= 2;
+            //buf_2_ptr_add_512 = (unsigned __int16 *)(buf_2_ptr + 512);
+            uint v13 = (uint)outputSpan2Slice[256 - 1] & 0x7BDF;
+            uint v14 = wordBuf[wordIdx0];
+            uint v15 = v14 & 0x420;
+            outputSpan2Slice[256 + 1] = (ushort)v14;
+            v14 &= 0x7BDF7BDF;
+            outputSpan2Slice[256] = (ushort)(v15 | ((uint)(v13 + v14) >> 1));
+            uint v16 = wordBuf[wordIdx1];
+            uint v17 = v16 & 0x420;
+            outputSpan2Slice[256 + 3] = (ushort)v16;
+            v16 &= 0x7BDF7BDF;
+            outputSpan2Slice[256 + 2] = (ushort)(v17 | ((uint)(v14 + v16) >> 1));
+            uint v18 = wordBuf[wordIdx2];
+            uint v19 = v18 & 0x420;
+            outputSpan2Slice[256 + 5] = (ushort)v18;
+            v18 &= 0x7BDF7BDF;
+            outputSpan2Slice[256 + 4] = (ushort)(v19 | ((uint)(v16 + v18) >> 1));
+            uint v20 = wordBuf[wordIdx3];
+            outputSpan2Slice[256 + 7] = (ushort)v20;
+            outputSpan2Slice[256 + 6] = (ushort)(v20 & 0x420 | ((v18 + (v20 & 0x7BDF7BDF)) >> 1));
+            uint v21 = (uint)outputSpan2Slice[256 * 3 - 1] & 0x7BDF;
+            uint v22 = wordBuf[wordIdx4];
+            uint v23 = v22 & 0x420;
+            outputSpan2Slice[256 * 3 + 1] = (ushort)v22;
+            v22 &= 0x7BDF7BDF;
+            outputSpan2Slice[256 * 3] = (ushort)(v23 | ((uint)(v21 + v22) >> 1));
+            uint v24 = wordBuf[wordIdx5];
+            uint v25 = v24 & 0x420;
+            outputSpan2Slice[256 * 3 + 3] = (ushort)v24;
+            v24 &= 0x7BDF7BDF;
+            outputSpan2Slice[256 * 3 + 2] = (ushort)(v25 | ((uint)(v22 + v24) >> 1));
+            uint v26 = wordBuf[wordIdx6];
+            uint v27 = v26 & 0x420;
+            outputSpan2Slice[256 * 3 + 5] = (ushort)v26;
+            v26 &= 0x7BDF7BDF;
+            outputSpan2Slice[256 * 3 + 4] = (ushort)(v27 | ((uint)(v24 + v26) >> 1));
+            uint v28 = wordBuf[wordIdx7];
+            outputSpan2Slice[256 * 3 + 7] = (ushort)v28;
+            outputSpan2Slice[256 * 3 + 6] = (ushort)(v28 & 0x420 | ((v26 + (v28 & 0x7BDF7BDF)) >> 1));
+            uint v29 = (uint)outputSpan2Slice[256 * 5 - 1] & 0x7BDF;
+            uint v30 = wordBuf[wordIdx8];
+            uint v31 = v30 & 0x420;
+            outputSpan2Slice[256 * 5 + 1] = (ushort)v30;
+            v30 &= 0x7BDF7BDF;
+            outputSpan2Slice[256 * 5] = (ushort)(v31 | ((uint)(v29 + v30) >> 1));
+            uint v32 = wordBuf[wordIdx9];
+            uint v33 = v32 & 0x420;
+            outputSpan2Slice[256 * 5 + 3] = (ushort)v32;
+            v32 &= 0x7BDF7BDF;
+            outputSpan2Slice[256 * 5 + 2] = (ushort)(v33 | ((uint)(v30 + v32) >> 1));
+            uint v34 = wordBuf[wordIdxA];
+            uint v35 = v34 & 0x420;
+            outputSpan2Slice[256 * 5 + 5] = (ushort)v34;
+            v34 &= 0x7BDF7BDF;
+            outputSpan2Slice[256 * 5 + 4] = (ushort)(v35 | ((uint)(v32 + v34) >> 1));
+            uint v36 = wordBuf[wordIdxB];
+            outputSpan2Slice[256 * 5 + 7] = (ushort)v36;
+            outputSpan2Slice[256 * 5 + 6] = (ushort)(v36 & 0x420 | ((v34 + (v36 & 0x7BDF7BDF)) >> 1));
+            uint v37 = (uint)outputSpan2Slice[256 * 7 - 1] & 0x7BDF;
+            uint v38 = wordBuf[wordIdxC];
+            uint v39 = v38 & 0x420;
+            outputSpan2Slice[256 * 7 + 1] = (ushort)v38;
+            v38 &= 0x7BDF7BDF;
+            outputSpan2Slice[256 * 7] = (ushort)(v39 | ((uint)(v37 + v38) >> 1));
+            uint v40 = wordBuf[wordIdxD];
+            uint v41 = v40 & 0x420;
+            outputSpan2Slice[256 * 7 + 3] = (ushort)v40;
+            v40 &= 0x7BDF7BDF;
+            outputSpan2Slice[256 * 7 + 2] = (ushort)(v41 | ((uint)(v38 + v40) >> 1));
+            uint v42 = wordBuf[wordIdxE];
+            uint v43 = v42 & 0x420;
+            outputSpan2Slice[256 * 7 + 5] = (ushort)v42;
+            v42 &= 0x7BDF7BDF;
+            outputSpan2Slice[256 * 7 + 4] = (ushort)(v43 | ((uint)(v40 + v42) >> 1));
+            uint v44 = wordBuf[wordIdxF];
+            outputSpan2Slice[256 * 7 + 7] = (ushort)v44;
+            outputSpan2Slice[256 * 7 + 6] = (ushort)(v44 & 0x420 | ((v42 + (v44 & 0x7BDF7BDF)) >> 1));
+            Debug.Assert(outputPos >= 512);
+            Span<uint> outputSpan2Int = MemoryMarshal.Cast<ushort, uint>(outputSpan2Slice);
+            Span<uint> outputSpan2IntPrev = MemoryMarshal.Cast<byte, uint>(outputSpan2.Slice(outputPos - 512));
+            uint v01 = outputSpan2Int[256 * 7 / 2];
+            uint v46 = v01 & 0x4200420;
+            uint v47 = v01 & 0x7BDF7BDF;
+            uint v02 = outputSpan2Int[256 * 5 / 2];
+            uint v48 = v02 & 0x4200420;
+            uint v49 = v02 & 0x7BDF7BDF;
+            outputSpan2Int[256 * 6 / 2] = v46 | ((uint)(v47 + v49) >> 1);
+            uint v03 = outputSpan2Int[256 * 3 / 2];
+            uint v50 = v03 & 0x4200420;
+            uint v51 = v03 & 0x7BDF7BDF;
+            outputSpan2Int[256 * 4 / 2] = v48 | ((uint)(v49 + v51) >> 1);
+            uint v04 = outputSpan2Int[256 / 2];
+            uint v52 = v04 & 0x4200420;
+            uint v53 = v04 & 0x7BDF7BDF;
+            outputSpan2Int[256 * 2 / 2] = v50 | ((uint)(v51 + v53) >> 1);
+            outputSpan2Int[0] = v52 | ((v53 + (outputSpan2IntPrev[0] & 0x7BDF7BDF)) >> 1);
+            uint v54 = outputSpan2Int[256 * 7 / 2 + 1];
+            uint v55 = outputSpan2Int[256 * 5 / 2 + 1];
+            uint v56 = v55 & 0x4200420;
+            v55 &= 0x7BDF7BDF;
+            outputSpan2Int[256 * 6 / 2 + 1] = v54 & 0x4200420 | (((v54 & 0x7BDF7BDF) + v55) >> 1);
+            uint v57 = outputSpan2Int[256 * 3 / 2 + 1];
+            uint v58 = v57 & 0x4200420;
+            v57 &= 0x7BDF7BDF;
+            outputSpan2Int[256 * 4 / 2 + 1] = v56 | ((uint)(v55 + v57) >> 1);
+            uint v59 = outputSpan2Int[256 / 2 + 1];
+            uint v60 = v59 & 0x4200420;
+            v59 &= 0x7BDF7BDF;
+            outputSpan2Int[256 * 2 / 2 + 1] = v58 | ((uint)(v57 + v59) >> 1);
+            outputSpan2Int[1] = v60 | ((v59 + (outputSpan2IntPrev[1] & 0x7BDF7BDF)) >> 1);
+            uint v61 = outputSpan2Int[256 * 7 / 2 + 2];
+            uint v62 = outputSpan2Int[256 * 5 / 2 + 2];
+            uint v63 = v62 & 0x4200420;
+            v62 &= 0x7BDF7BDF;
+            outputSpan2Int[256 * 6 / 2 + 2] = v61 & 0x4200420 | (((v61 & 0x7BDF7BDF) + v62) >> 1);
+            uint v64 = outputSpan2Int[256 * 3 / 2 + 2];
+            uint v65 = v64 & 0x4200420;
+            v64 &= 0x7BDF7BDF;
+            outputSpan2Int[256 * 4 / 2 + 2] = v63 | ((uint)(v62 + v64) >> 1);
+            uint v66 = outputSpan2Int[256 / 2 + 2];
+            uint v67 = v66 & 0x4200420;
+            v66 &= 0x7BDF7BDF;
+            outputSpan2Int[256 * 2 / 2 + 2] = v65 | ((uint)(v64 + v66) >> 1);
+            outputSpan2Int[2] = v67 | ((v66 + (outputSpan2IntPrev[2] & 0x7BDF7BDF)) >> 1);
+            uint v68 = outputSpan2Int[256 * 7 / 2 + 3];
+            uint v69 = outputSpan2Int[256 * 5 / 2 + 3];
+            uint v70 = v69 & 0x4200420;
+            v69 &= 0x7BDF7BDF;
+            outputSpan2Int[256 * 6 / 2 + 3] = v68 & 0x4200420 | (((v68 & 0x7BDF7BDF) + v69) >> 1);
+            uint v71 = outputSpan2Int[256 * 3 / 2 + 3];
+            uint v72 = v71 & 0x4200420;
+            v71 &= 0x7BDF7BDF;
+            outputSpan2Int[256 * 4 / 2 + 3] = v70 | ((uint)(v69 + v71) >> 1);
+            uint v73 = outputSpan2Int[256 / 2 + 3];
+            uint v74 = v73 & 0x4200420;
+            v73 &= 0x7BDF7BDF;
+            outputSpan2Int[256 * 2 / 2 + 3] = v72 | ((uint)(v71 + v73) >> 1);
+            outputSpan2Int[3] = v74 | ((v73 + (outputSpan2IntPrev[3] & 0x7BDF7BDF)) >> 1);
+            wordBuf = wordBuf.Slice(4);
+        }
+
+        // todo: same structure as Sub206935C (same structure as Sub2068488 and Sub206A0B8, except 110 doesn't branch into 1101/1100)
+        private static void Sub206A8C0(ref uint outputPos, ref uint value, ref Span<byte> outputSpan1, ref Span<byte> outputSpan2,
+            ref Span<uint> intBuf, ref Span<ushort> wordBuf, ref Span<byte> byteBuf)
+        {
+            ReadNextBit(ref value, ref intBuf);
+            if (_readBit != 0)
+            {
+                // 1
+                ReadNextBit(ref value, ref intBuf);
+                if (_readBit != 0)
+                {
+                    // 1 1
+                    ReadNextBit(ref value, ref intBuf);
+                    if (_readBit != 0)
+                    {
+                        // 1 1 1
+                        Debug.Assert(outputPos >= 512);
+                        Span<ushort> outputSpan2Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan2.Slice(outputPos));
+                        Span<ushort> outputSpan2Prev = MemoryMarshal.Cast<byte, ushort>(outputSpan2.Slice(outputPos - 512));
+                        // todo: similar to the inlines in Sub Sub206A0B8 and Sub2068488
+                        uint v37 = wordBuf[0];
+                        uint v38 = v37 | (v37 << 16);
+                        uint v40 = v38 & 0x7BDF7BDF;
+                        uint v41 = v38 & 0x4200420;
+                        uint v44 = outputSpan2Prev[0];
+                        uint v45 = v44 & 0x4200420;
+                        v44 &= 0x7BDF7BDF;
+                        uint v46 = v45 | ((uint)(v40 + v44) >> 1);
+                        outputSpan2Slice[0] = (ushort)v46;
+                        v46 &= 0x7BDF7BDF;
+                        outputSpan2Prev[0] = (ushort)(v41 | ((v46 + v44) >> 1));
+                        outputSpan2Slice[256] = (ushort)(v41 | ((v46 + v40) >> 1));
+                        uint v47 = outputSpan2Prev[1];
+                        v45 = (v45 & 0xFFFF0000) | (v47 & 0x420);
+                        v47 &= 0x7BDF7BDF;
+                        uint v48 = v41 | ((uint)(v40 + v47) >> 1);
+                        outputSpan2Slice[1] = (ushort)v48;
+                        v48 &= 0x7BDF7BDF;
+                        outputSpan2Prev[1] = (ushort)(v45 | ((v48 + v47) >> 1));
+                        outputSpan2Slice[256 + 1] = (ushort)(v45 | ((v48 + v40) >> 1));
+                        uint v49 = outputSpan2Prev[256 - 1];
+                        uint v50 = v49 & 0x4200420;
+                        v49 &= 0x7BDF7BDF;
+                        uint v51 = v50 | ((uint)(v40 + v49) >> 1);
+                        outputSpan2Slice[0] = (ushort)v51;
+                        v51 &= 0x7BDF7BDF;
+                        outputSpan2Prev[256 - 1] = (ushort)(v41 | ((v51 + v49) >> 1));
+                        outputSpan2Slice[1] = (ushort)(v41 | ((v51 + v40) >> 1));
+                        uint v52 = outputSpan2Slice[256 - 1];
+                        v50 = (v50 & 0xFFFF0000) | (v52 & 0x420);
+                        v52 &= 0x7BDF7BDF;
+                        uint v53 = v41 | ((uint)(v40 + v52) >> 1);
+                        outputSpan2Slice[256] = (ushort)v53;
+                        v53 &= 0x7BDF7BDF;
+                        outputSpan2Slice[256 - 1] = (ushort)(v50 | ((v53 + v52) >> 1));
+                        outputSpan2Slice[256 + 1] = (ushort)(v50 | ((v53 + v40) >> 1));
+                        uint v54 = outputSpan2Slice[256 * 2 - 1];
+                        uint v55 = v54 & 0x4200420;
+                        v54 &= 0x7BDF7BDF;
+                        uint v56 = v55 | ((uint)(v40 + v54) >> 1);
+                        outputSpan2Slice[256 * 2] = (ushort)v56;
+                        v56 &= 0x7BDF7BDF;
+                        outputSpan2Slice[256 * 2 - 1] = (ushort)(v41 | ((v56 + v54) >> 1));
+                        outputSpan2Slice[256 * 2 + 1] = (ushort)(v41 | ((v56 + v40) >> 1));
+                        uint v57 = outputSpan2Slice[256 * 3 - 1];
+                        v55 = (v55 & 0xFFFF0000) | (v57 & 0x420);
+                        v57 &= 0x7BDF7BDF;
+                        uint v58 = v41 | ((uint)(v40 + v57) >> 1);
+                        outputSpan2Slice[256 * 3] = (ushort)v58;
+                        v58 &= 0x7BDF7BDF;
+                        outputSpan2Slice[256 * 3 - 1] = (ushort)(v55 | ((v58 + v57) >> 1));
+                        outputSpan2Slice[256 * 3 + 1] = (ushort)(v55 | ((v58 + v40) >> 1));
+                        wordBuf = wordBuf.Slice(1);
+                    }
+                    else
+                    {
+                        // 1 1 0
+                        // todo: like the section in Sub20679B0, but sets fewer values
+                        byte v26 = byteBuf.Consume();
+                        uint v27 = (uint)_dword206B2A0[v26];
+                        ushort v28 = wordBuf.Consume();
+                        int v29 = v28 | (v28 << 16);
+                        uint prevOffset = v27 + outputPos;
+                        // todo: might not need both code paths, unless there are performance problems or a risk of running off the end when unaligned
+                        Span<uint> outputSpan2Int = MemoryMarshal.Cast<byte, uint>(outputSpan2.Slice(outputPos));
+                        if (prevOffset % 4 != 0)
+                        {
+                            Span<ushort> outputSpan1Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan1.Slice(prevOffset));
+                            outputSpan2Int[0] = (uint)((outputSpan1Slice[0] | (outputSpan1Slice[1] << 16)) + v29);
+                            outputSpan2Int[256 / 2] = (uint)((outputSpan1Slice[256] | (outputSpan1Slice[256 + 1] << 16)) + v29);
+                            outputSpan2Int[256 * 2 / 2] = (uint)((outputSpan1Slice[256 * 2] | (outputSpan1Slice[256 * 2 + 1] << 16)) + v29);
+                            outputSpan2Int[256 * 3 / 2] = (uint)((outputSpan1Slice[256 * 3] | (outputSpan1Slice[256 * 3 + 1] << 16)) + v29);
+                        }
+                        else
+                        {
+                            Span<uint> outputSpan1Int = MemoryMarshal.Cast<byte, uint>(outputSpan1.Slice(prevOffset));
+                            outputSpan2Int[0] = outputSpan1Int[0] + (uint)v29;
+                            outputSpan2Int[256 / 2] = outputSpan1Int[256 / 2] + (uint)v29;
+                            outputSpan2Int[256 * 2 / 2] = outputSpan1Int[256 * 2 / 2] + (uint)v29;
+                            outputSpan2Int[256 * 3 / 2] = outputSpan1Int[256 * 3 / 2] + (uint)v29;
+                        }
+                    }
+                }
+                else
+                {
+                    // 1 0
+                    ReadNextBit(ref value, ref intBuf);
+                    if (_readBit != 0)
+                    {
+                        // 1 0 1
+                        Sub206AD40(ref outputPos, ref value, ref outputSpan1, ref outputSpan2, ref intBuf, ref wordBuf, ref byteBuf);
+                        outputPos += 2;
+                        Sub206AD40(ref outputPos, ref value, ref outputSpan1, ref outputSpan2, ref intBuf, ref wordBuf, ref byteBuf);
+                        outputPos -= 2;
+                    }
+                    else
+                    {
+                        // 1 0 0
+                        Sub206AE88(ref outputPos, ref value, ref outputSpan1, ref outputSpan2, ref intBuf, ref wordBuf, ref byteBuf);
+                        outputPos += 1024;
+                        Sub206AE88(ref outputPos, ref value, ref outputSpan1, ref outputSpan2, ref intBuf, ref wordBuf, ref byteBuf);
+                        outputPos -= 1024;
+                    }
+                }
+            }
+            else
+            {
+                // 0
+                ReadNextBit(ref value, ref intBuf);
+                // todo: same as the section in Sub206935C, but sets even fewer values
+                // most of the code is shared between the 01+aligned and 00 code paths
+                // (presumably because 00 is always aligned since it doesn't use an offset from the table)
+                Span<uint> outputSpan1Int;
+                Span<uint> outputSpan2Int = MemoryMarshal.Cast<byte, uint>(outputSpan2.Slice(outputPos));
+                if (_readBit != 0)
+                {
+                    // 0 1
+                    byte v14 = byteBuf.Consume();
+                    uint v11 = (uint)_dword206B2A0[v14];
+                    uint prevOffset = v11 + outputPos;
+                    // todo: might not need both code paths, unless there are performance problems or a risk of running off the end when unaligned
+                    Span<ushort> outputSpan1Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan1.Slice(prevOffset));
+                    if (prevOffset % 4 != 0)
+                    {
+                        outputSpan2Int[0] = (uint)(outputSpan1Slice[0] | (outputSpan1Slice[1] << 16));
+                        outputSpan2Int[256 / 2] = (uint)(outputSpan1Slice[256] | (outputSpan1Slice[256 + 1] << 16));
+                        outputSpan2Int[256 * 2 / 2] = (uint)(outputSpan1Slice[256 * 2] | (outputSpan1Slice[256 * 2 + 1] << 16));
+                        outputSpan2Int[256 * 3 / 2] = (uint)(outputSpan1Slice[256 * 3] | (outputSpan1Slice[256 * 3 + 1] << 16));
+                        return;
+                    }
+                    outputSpan1Int = MemoryMarshal.Cast<ushort, uint>(outputSpan1Slice);
+                }
+                else // use else so outputSpan1Int is definitely assigned
+                {
+                    // 0 0
+                    outputSpan1Int = MemoryMarshal.Cast<byte, uint>(outputSpan1.Slice(outputPos));
+                }
+                outputSpan2Int[0] = outputSpan1Int[0];
+                outputSpan2Int[256 / 2] = outputSpan1Int[256 / 2];
+                outputSpan2Int[256 * 2 / 2] = outputSpan1Int[256 * 2 / 2];
+                outputSpan2Int[256 * 3 / 2] = outputSpan1Int[256 * 3 / 2];
             }
         }
 
