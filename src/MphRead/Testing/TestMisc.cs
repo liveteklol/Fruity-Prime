@@ -224,33 +224,30 @@ namespace MphRead.Testing
                 }
                 // video
                 TestVideo(frameWidth, frameHeight, dataBuffer.Slice(0, videoSize), frameIndex);
-                if (frameIndex > 0)
+                byte[] outputBuf = _outputBufferSwap ? _outputBuf1 : _outputBuf2;
+                int p = 0;
+                for (int j = 0; j < outputBuf.Length; j += 2)
                 {
-                    byte[] outputBuf = _outputBufferSwap ? _outputBuf1 : _outputBuf2;
-                    int p = 0;
-                    for (int j = 0; j < outputBuf.Length; j += 2)
-                    {
-                        int color = outputBuf[j] + (outputBuf[j + 1] << 8);
-                        int r = color & 0x1F;
-                        int g = (color >> 5) & 0x1F;
-                        int b = (color >> 10) & 0x1F;
-                        imageOutput[p] = (byte)(r * 8);
-                        imageOutput[p + 1] = (byte)(g * 8);
-                        imageOutput[p + 2] = (byte)(b * 8);
-                        // sktodo: support both output approaches
-                        //imageOutput[p] = (byte)MathF.Round(r / 31f * 255);
-                        //imageOutput[p + 1] = (byte)MathF.Round(g / 31f * 255);
-                        //imageOutput[p + 2] = (byte)MathF.Round(b / 31f * 255);
-                        // sktodo: for understanding/documenting the format, it would be cool to instrument the code with
-                        // intermediate image outputs + images that show pixels as changed vs. unchanged at each step
-                        p += 3;
-                    }
-                    string outputPath = $@"C:\Users\auser\Home\MPH\Data\_Export\FV\{Path.GetFileNameWithoutExtension(path)}\"
-                        + $@"{frameIndex.ToString().PadLeft(3, '0')}.png";
-                    Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
-                    using FileStream fs = File.Create(outputPath);
-                    StbImage.WritePng<byte>(imageOutput, 256, 192, StbiImageFormat.Rgb, fs);
+                    int color = outputBuf[j] + (outputBuf[j + 1] << 8);
+                    int r = color & 0x1F;
+                    int g = (color >> 5) & 0x1F;
+                    int b = (color >> 10) & 0x1F;
+                    imageOutput[p] = (byte)(r * 8);
+                    imageOutput[p + 1] = (byte)(g * 8);
+                    imageOutput[p + 2] = (byte)(b * 8);
+                    // sktodo: support both output approaches
+                    //imageOutput[p] = (byte)MathF.Round(r / 31f * 255);
+                    //imageOutput[p + 1] = (byte)MathF.Round(g / 31f * 255);
+                    //imageOutput[p + 2] = (byte)MathF.Round(b / 31f * 255);
+                    // sktodo: for understanding/documenting the format, it would be cool to instrument the code with
+                    // intermediate image outputs + images that show pixels as changed vs. unchanged at each step
+                    p += 3;
                 }
+                string outputPath = $@"C:\Users\auser\Home\MPH\Data\_Export\_FV\{Path.GetFileNameWithoutExtension(path)}\"
+                    + $@"{frameIndex.ToString().PadLeft(3, '0')}.png";
+                Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
+                using FileStream fs = File.Create(outputPath);
+                StbImage.WritePng<byte>(imageOutput, 256, 192, StbiImageFormat.Rgb, fs);
                 // audio
                 int audioFrameCount = audioSize / 40;
                 audioFrameTotal += audioFrameCount;
@@ -355,7 +352,7 @@ namespace MphRead.Testing
             int lastFrameValue3 = reader.ReadInt32();
             Debug.Assert(lastFrameValue3 == 0);
             Debug.Assert(reader.BaseStream.Position == fileBytes.Length);
-            string audioOutput = $@"C:\Users\auser\Home\MPH\Data\_Export\FV\{Path.GetFileNameWithoutExtension(path)}\audio.wav";
+            string audioOutput = $@"C:\Users\auser\Home\MPH\Data\_Export\_FV\{Path.GetFileNameWithoutExtension(path)}\audio.wav";
             Directory.CreateDirectory(Path.GetDirectoryName(audioOutput)!);
             using var output = File.Create(audioOutput);
             using var writer = new BinaryWriter(output);
@@ -687,7 +684,6 @@ namespace MphRead.Testing
                             else
                             {
                                 // 1 1 0 1 0
-                                Debugger.Break();
                                 Span<ushort> outputSpan2Slice = MemoryMarshal.Cast<byte, ushort>(outputSpan2.Slice(outputPos));
                                 Sub2067388(ref wordBuf, outputSpan2Slice);
                                 // advanced by 1536 bytes, subtract 1528 bytes, now positioned at 8 bytes
