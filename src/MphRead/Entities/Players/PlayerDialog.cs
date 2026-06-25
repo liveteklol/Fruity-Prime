@@ -622,6 +622,7 @@ namespace MphRead.Entities
                         _overlayBuffer1, maxLength: characters);
                     _textInst.SetPaletteData(_textPaletteData, _scene);
                     _textSpacingY = 0;
+                    // todo?: the game tracks the blips by the draw position x/y, but even empty spaces advance that, so I think this is equivalent?
                     if (characters > _prevOverlayCharacters
                         && characters <= _overlayMessage1.Length)
                     {

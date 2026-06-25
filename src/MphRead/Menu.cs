@@ -3764,10 +3764,6 @@ namespace MphRead
                         {
                             _octoliths[octolith] = (_octoliths[octolith] + 1) % 2;
                         }
-                        else
-                        {
-                            prompt = selection + 1;
-                        }
                     }
                     else if (keyInfo.Key == ConsoleKey.A)
                     {
