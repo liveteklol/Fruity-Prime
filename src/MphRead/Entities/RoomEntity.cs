@@ -431,6 +431,7 @@ namespace MphRead.Entities
             }
             ProcessTransition(CancellationToken.None);
             EndTransition();
+            GameState.PausePrevented = false;
             Music.TryPlayRoomMusic(_scene.RoomId, GameState.SinglePlayer && (((int)GameState.StorySave.BossFlags >> (2 * _scene.AreaId)) & 3) != 0 ? 1 : 0);
             if (!resume)
             {
@@ -741,6 +742,7 @@ namespace MphRead.Entities
                         Vector3 newPosition = (targetDoor.Position + targetDoor.FacingVector * 0.75f)
                             .AddY(Fixed.ToFloat(-PlayerEntity.Main.Values.MinPickupHeight));
                         // todo?: faster loading makes this transition kind of abrupt
+                        GameState.PausePrevented = true;
                         _scene.StartMovie(movieId, FadeType.FadeOutInBlack, 0, FadeType.FadeOutInBlack, 5 / 30f, newPosition, targetDoor.FacingVector);
                     }
                     break;

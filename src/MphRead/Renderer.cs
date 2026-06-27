@@ -1188,7 +1188,7 @@ namespace MphRead
                 UpdateCameraPosition();
             }
             UpdateProjection();
-            if (ProcessFrame && PlayerEntity.Main.LoadFlags.TestFlag(LoadFlags.Active) && !GameState.DialogPause)
+            if (ProcessFrame && PlayerEntity.Main.LoadFlags.TestFlag(LoadFlags.Active))
             {
                 PlayerEntity.Main.UpdateHud();
             }

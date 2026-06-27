@@ -2004,6 +2004,7 @@ namespace MphRead.Entities
                         {
                             GameState.StorySave.Stats.EnemyHunterDeaths++;
                         }
+                        GameState.PausePrevented = true;
                         _deathCountdown = 150 / 30f;
                         _deathProcessed = false;
                         _deathLostOctolithSfxPlayed = false;

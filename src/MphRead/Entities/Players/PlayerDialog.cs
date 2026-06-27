@@ -327,6 +327,7 @@ namespace MphRead.Entities
             StopLongSfx();
             bool discard = false;
             EndWeaponMenu(ref discard);
+            GameState.PausePrevented = true;
             GameState.PauseDialog();
             _eventType = eventType;
             _overlayMessage1 = entry.Value1;
@@ -495,6 +496,7 @@ namespace MphRead.Entities
                                 Music.FadeVolume(1, 5 / 30f);
                             }
                             RestartLongSfx();
+                            GameState.PausePrevented = false;
                         }
                         else if (GameState.DialogPause)
                         {

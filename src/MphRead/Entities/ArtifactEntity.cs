@@ -188,6 +188,7 @@ namespace MphRead.Entities
                     else
                     {
                         GameState.UpdateCleanSave(force: false);
+                        GameState.PausePrevented = true;
                         _scene.StartMovie(Movie.OctolithPickUp, FadeType.FadeOutInWhite, 5 / 30f, FadeType.FadeOutInWhite, 5 / 30f);
                         GameState.UpdateBossFlags(_scene.AreaId);
                         int collected = GameState.StorySave.CountFoundOctoliths();

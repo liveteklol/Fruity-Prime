@@ -9,6 +9,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
+using MphRead.Entities;
 using MphRead.Formats;
 using MphRead.Formats.Sound;
 using MphRead.Sound;
@@ -73,6 +74,10 @@ namespace MphRead
             _movieSettings.AfterPosition = afterPosition;
             _movieSettings.AfterFacing = afterFacing;
             _movieSettings.AfterMovieAction = afterMovieAction;
+            if (GameState.MatchState == MatchState.InProgress && PlayerEntity.Main.Health > 0)
+            {
+                GameState.PausePrevented = true;
+            }
             SetFade(fadeToMovieType, fadeToMovieLength, overwrite: true, AfterFade.PlayMovie);
         }
 

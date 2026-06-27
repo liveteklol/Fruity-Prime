@@ -216,6 +216,7 @@ namespace MphRead.Entities
                                     GameState.TransitionAltForm = PlayerEntity.Main.IsAltForm;
                                     GameState.TransitionRoomId = _targetRoomId;
                                     _scene.Room.LoadEntityId = _data.TargetIndex;
+                                    GameState.PausePrevented = true;
                                     _scene.SetFade(FadeType.FadeOutBlack, length: 10 / 30f, overwrite: true, AfterFade.LoadRoom);
                                 }
                                 player.Speed = new Vector3(0, player.Speed.Y, 0);

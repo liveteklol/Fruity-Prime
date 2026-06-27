@@ -481,16 +481,49 @@ namespace MphRead.Entities
             _scene.Layer3Info.BindingId = -1;
             _scene.Layer4Info.BindingId = -1;
             _scene.Layer5Info.BindingId = -1;
-            _scene.Layer1Info.ShiftX = 0;
-            _scene.Layer1Info.ShiftY = 0;
-            _scene.Layer2Info.ShiftX = 0;
-            _scene.Layer2Info.ShiftY = 0;
-            _scene.Layer3Info.ShiftX = 0;
-            _scene.Layer3Info.ShiftY = 0;
-            _scene.Layer4Info.ShiftX = 0;
-            _scene.Layer4Info.ShiftY = 0;
-            _scene.Layer5Info.ShiftX = 0;
-            _scene.Layer5Info.ShiftY = 0;
+        }
+
+        // need to set and restore these because pausing is allowed while a dialog is open,
+        // and if a dialog is open, the normal HUD update code won't run to set these as needed
+        private int _pausedPrevBindingId1 = -1;
+        private float _pausedPrevAlpha = 1;
+        private float _pausedPrevShiftX = 0;
+        private float _pausedPrevShiftY = 0;
+        private int _pausedPrevMaskId = -1;
+        private int _pausedPrevBindingId2 = -1;
+        private int _pausedPrevBindingId3 = -1;
+        private int _pausedPrevBindingId4 = -1;
+        private int _pausedPrevBindingId5 = -1;
+
+        public void SetMenuPauseHud()
+        {
+            _pausedPrevBindingId1 = _scene.Layer1Info.BindingId;
+            _pausedPrevAlpha = _scene.Layer1Info.Alpha;
+            _pausedPrevShiftX = _scene.Layer1Info.ShiftX;
+            _pausedPrevShiftY = _scene.Layer1Info.ShiftY;
+            _pausedPrevMaskId = _scene.Layer1Info.MaskId;
+            _pausedPrevBindingId2 = _scene.Layer2Info.BindingId;
+            _pausedPrevBindingId3 = _scene.Layer3Info.BindingId;
+            _pausedPrevBindingId4 = _scene.Layer4Info.BindingId;
+            _pausedPrevBindingId5 = _scene.Layer5Info.BindingId;
+        }
+
+        public void EndMenuPauseHud()
+        {
+            InitHudState();
+            _scene.Layer1Info.BindingId = _pausedPrevBindingId1;
+            _scene.Layer1Info.Alpha = _pausedPrevAlpha;
+            _scene.Layer1Info.ShiftX = _pausedPrevShiftX;
+            _scene.Layer1Info.ShiftY = _pausedPrevShiftY;
+            _scene.Layer1Info.MaskId = _pausedPrevMaskId;
+            _scene.Layer2Info.BindingId = _pausedPrevBindingId2;
+            _scene.Layer3Info.BindingId = _pausedPrevBindingId3;
+            _scene.Layer4Info.BindingId = _pausedPrevBindingId4;
+            _scene.Layer5Info.BindingId = _pausedPrevBindingId5;
+            if (GameState.DialogPause)
+            {
+                UpdateDialogs();
+            }
         }
 
         public void UpdateHud()
@@ -501,8 +534,13 @@ namespace MphRead.Entities
                 // todo-pause: does this need to be darkened somehow?
                 _scene.Layer1Info.BindingId = _pauseBindingId;
                 _scene.Layer1Info.Alpha = 1;
+                _scene.Layer1Info.ShiftX = 0;
                 _scene.Layer1Info.ShiftY = -1 / 3f;
                 _scene.Layer1Info.MaskId = -1;
+                return;
+            }
+            if (GameState.DialogPause)
+            {
                 return;
             }
             UpdateScanState();
@@ -544,6 +582,16 @@ namespace MphRead.Entities
                 UpdateScanHud();
             }
             InitHudState();
+            _scene.Layer1Info.ShiftX = 0;
+            _scene.Layer1Info.ShiftY = 0;
+            _scene.Layer2Info.ShiftX = 0;
+            _scene.Layer2Info.ShiftY = 0;
+            _scene.Layer3Info.ShiftX = 0;
+            _scene.Layer3Info.ShiftY = 0;
+            _scene.Layer4Info.ShiftX = 0;
+            _scene.Layer4Info.ShiftY = 0;
+            _scene.Layer5Info.ShiftX = 0;
+            _scene.Layer5Info.ShiftY = 0;
             if (CameraSequence.Current?.Flags.TestFlag(CamSeqFlags.BlockInput) == true)
             {
                 return;

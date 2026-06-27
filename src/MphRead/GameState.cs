@@ -41,6 +41,7 @@ namespace MphRead
         public static bool SinglePlayer => Mode == GameMode.SinglePlayer;
         public static bool Multiplayer => Mode != GameMode.SinglePlayer;
         public static bool IsOctolithMode => Mode == GameMode.Capture || Mode == GameMode.Bounty || Mode == GameMode.BountyTeams;
+        public static bool PausePrevented { get; set; }
         public static bool MenuPause { get; private set; }
         public static bool DialogPause { get; private set; }
         public static MatchState MatchState { get; set; } = MatchState.InProgress;
@@ -284,12 +285,13 @@ namespace MphRead
             }
             if (MatchState == MatchState.InProgress)
             {
-                if (SinglePlayer) // todo-pause: need state change flag to prevent pausing while teleporting, returning to ship, etc.
+                if (SinglePlayer && !PausePrevented && !scene.MoviePlaying)
                 {
                     if (MenuPause && PlayerEntity.Main.Controls.Pause.IsPressed)
                     {
                         Sfx.Instance.PlayFreeSfx(SfxId.MENU_CANCEL);
                         UnpauseMenu();
+                        PlayerEntity.Main.EndMenuPauseHud();
                         // todo-pause: clear (some) input
                         PlayerEntity.Main.Controls.Pause.IsPressed = false;
                         return;
@@ -299,6 +301,7 @@ namespace MphRead
                         PlayerEntity.Main.Controls.Pause.IsPressed = false;
                         // todo-pause: end weapon menu
                         PauseMenu();
+                        PlayerEntity.Main.SetMenuPauseHud();
                         Sfx.Instance.PlayFreeSfx(SfxId.MENU_CONFIRM);
                     }
                     if (MenuPause) // todo-pause: do we need the pausing/apply thing for this?
@@ -520,6 +523,7 @@ namespace MphRead
                     {
                         if (StorySave.CurrentOctoliths == 0xFF)
                         {
+                            GameState.PausePrevented = true;
                             scene.StartMovie(Movie.OublietteUnlock, FadeType.FadeOutInWhite, 20 / 30f, FadeType.FadeOutInBlack, 5 / 30f);
                             GameState.QueuedOublietteUnlockMessage = true;
                         }
@@ -735,6 +739,7 @@ namespace MphRead
                         }
                         Music.Stop(fadeTime: 20 / 30f);
                         // todo: fade SFX
+                        GameState.PausePrevented = true;
                         Sfx.Instance.PlaySample((int)SfxId.RETURN_TO_SHIP_YES, source: null, loop: false,
                             noUpdate: false, recency: -1, sourceOnly: false, cancellable: false);
                     }
@@ -783,6 +788,7 @@ namespace MphRead
                         TransitionRoomId = StorySave.CheckpointRoomId;
                         Sfx.Instance.PlaySample((int)SfxId.MENU_CONFIRM, source: null, loop: false,
                             noUpdate: false, recency: -1, sourceOnly: false, cancellable: false);
+                        GameState.PausePrevented = true;
                         scene.SetFade(FadeType.FadeOutWhite, length: 10 / 30f, overwrite: true, AfterFade.LoadRoom);
                         UnpauseDialog();
                         PlayerEntity.Main.RestartLongSfx(force: true);
@@ -1652,7 +1658,7 @@ namespace MphRead
             DialogPause = false;
             _pausingDialog = false;
             _unpausingDialog = false;
-            MenuPause = false;
+            PausePrevented = false;
             _drawPauseState = 0;
             _navAvailableTimer = 0;
             _navUnavailableLoading = false;
