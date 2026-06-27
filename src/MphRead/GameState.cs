@@ -288,7 +288,7 @@ namespace MphRead
                 {
                     if (MenuPause && PlayerEntity.Main.Controls.Pause.IsPressed)
                     {
-                        // todo-pause: play SFX
+                        Sfx.Instance.PlayFreeSfx(SfxId.MENU_CANCEL);
                         UnpauseMenu();
                         // todo-pause: clear (some) input
                         PlayerEntity.Main.Controls.Pause.IsPressed = false;
@@ -299,7 +299,7 @@ namespace MphRead
                         PlayerEntity.Main.Controls.Pause.IsPressed = false;
                         // todo-pause: end weapon menu
                         PauseMenu();
-                        // todo-pause: play SFX
+                        Sfx.Instance.PlayFreeSfx(SfxId.MENU_CONFIRM);
                     }
                     if (MenuPause) // todo-pause: do we need the pausing/apply thing for this?
                     {
