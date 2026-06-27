@@ -892,7 +892,7 @@ namespace MphRead.Entities
                     WrapText(entry.String1, 150, buffer);
                     // note: the game assumes the topo init message doesn't exceed 60 characters
                     int characters = (int)(GameState.NavAvailableTimer / (1 / 30f));
-                    DrawText2D(128, 96, Align.PadCenter, 0, buffer, maxLength: characters); // sktodo: palette 1?
+                    DrawText2D(128, 96, Align.PadCenter, 0, buffer, maxLength: characters);
                     if (characters > 0 && characters != _prevIntroChars && characters <= entry.String1.Length)
                     {
                         _soundSource.PlayFreeSfx(SfxId.LETTER_BLIP);
