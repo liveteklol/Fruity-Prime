@@ -2767,7 +2767,9 @@ namespace MphRead.Entities
                         int index = ch - font.MinCharacter;
                         width += font.Widths[index];
                     }
-                    x = startX - width / 2;
+                    // character widths include their rightmost empty pixel, leading to a slight overestimation of the total width before the line break,
+                    // making the text shift to the left instead of being centered. fix by flooring (which the game does implicitly with integer division).
+                    x = startX - MathF.Floor(width / 2);
                     for (int i = start; i < end; i++)
                     {
                         int ch = text[i];
