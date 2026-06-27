@@ -62,6 +62,7 @@ namespace MphRead.Entities
         private int _helmetDropBindingId = -1;
         private int _visorBindingId = -1;
         private int _scanBindingId = -1;
+        private int _pauseBindingId = -1;
         private readonly int[] _dialogBindingIds = new int[5] { -1, -1, -1, -1, -1 };
 
         private IReadOnlyList<ColorRgba> _textPaletteData = null!;
@@ -80,6 +81,8 @@ namespace MphRead.Entities
                 visorPal = null;
             }
             (_scanBindingId, _) = HudInfo.CharMapToTexture(_hudObjects.ScanVisor, startX: 0, startY: 96,
+                tilesX: 0, tilesY: 32, _scene, visorPal);
+            (_pauseBindingId, _) = HudInfo.CharMapToTexture(_hudObjects.ScanVisor, startX: 0, startY: 64,
                 tilesX: 0, tilesY: 32, _scene, visorPal);
             // todo: only load what needs to be loaded for the mode
             _filterModel = Read.GetModelInstance("filter");
@@ -467,8 +470,41 @@ namespace MphRead.Entities
         private bool _hudWeaponMenuOpen = false;
         public bool ScanVisor { get; private set; }
 
+        private void InitHudState()
+        {
+            _targetCircleInst.Enabled = false;
+            _ammoBarMeter.BarInst.Enabled = false;
+            _weaponIconInst.Enabled = false;
+            _damageIndicator.Active = false;
+            _scene.Layer1Info.BindingId = -1;
+            _scene.Layer2Info.BindingId = -1;
+            _scene.Layer3Info.BindingId = -1;
+            _scene.Layer4Info.BindingId = -1;
+            _scene.Layer5Info.BindingId = -1;
+            _scene.Layer1Info.ShiftX = 0;
+            _scene.Layer1Info.ShiftY = 0;
+            _scene.Layer2Info.ShiftX = 0;
+            _scene.Layer2Info.ShiftY = 0;
+            _scene.Layer3Info.ShiftX = 0;
+            _scene.Layer3Info.ShiftY = 0;
+            _scene.Layer4Info.ShiftX = 0;
+            _scene.Layer4Info.ShiftY = 0;
+            _scene.Layer5Info.ShiftX = 0;
+            _scene.Layer5Info.ShiftY = 0;
+        }
+
         public void UpdateHud()
         {
+            if (GameState.MenuPause)
+            {
+                InitHudState();
+                // todo-pause: does this need to be darkened somehow?
+                _scene.Layer1Info.BindingId = _pauseBindingId;
+                _scene.Layer1Info.Alpha = 1;
+                _scene.Layer1Info.ShiftY = -1 / 3f;
+                _scene.Layer1Info.MaskId = -1;
+                return;
+            }
             UpdateScanState();
             if (GameState.SinglePlayer)
             {
@@ -507,25 +543,7 @@ namespace MphRead.Entities
             {
                 UpdateScanHud();
             }
-            _targetCircleInst.Enabled = false;
-            _ammoBarMeter.BarInst.Enabled = false;
-            _weaponIconInst.Enabled = false;
-            _damageIndicator.Active = false;
-            _scene.Layer1Info.BindingId = -1;
-            _scene.Layer2Info.BindingId = -1;
-            _scene.Layer3Info.BindingId = -1;
-            _scene.Layer4Info.BindingId = -1;
-            _scene.Layer5Info.BindingId = -1;
-            _scene.Layer1Info.ShiftX = 0;
-            _scene.Layer1Info.ShiftY = 0;
-            _scene.Layer2Info.ShiftX = 0;
-            _scene.Layer2Info.ShiftY = 0;
-            _scene.Layer3Info.ShiftX = 0;
-            _scene.Layer3Info.ShiftY = 0;
-            _scene.Layer4Info.ShiftX = 0;
-            _scene.Layer4Info.ShiftY = 0;
-            _scene.Layer5Info.ShiftX = 0;
-            _scene.Layer5Info.ShiftY = 0;
+            InitHudState();
             if (CameraSequence.Current?.Flags.TestFlag(CamSeqFlags.BlockInput) == true)
             {
                 return;
@@ -861,6 +879,34 @@ namespace MphRead.Entities
             }
         }
 
+        // todo-pause: init _prevIntroChars (and rename it to something more generic)
+        public void DrawPauseMenu()
+        {
+            if (GameState.NavUnavailableLoading)
+            {
+                StringTableEntry? entry = Strings.GetEntry('R', 997, StringTables.LocationNames); // topographical view initializing
+                if (entry != null)
+                {
+                    _textSpacingY = 9;
+                    Span<char> buffer = stackalloc char[128];
+                    WrapText(entry.String1, 150, buffer);
+                    // note: the game assumes the topo init message doesn't exceed 60 characters
+                    int characters = (int)(GameState.NavAvailableTimer / (1 / 30f));
+                    DrawText2D(128, 96, Align.PadCenter, 0, buffer, maxLength: characters); // sktodo: palette 1?
+                    if (characters > 0 && characters != _prevIntroChars && characters <= entry.String1.Length)
+                    {
+                        _soundSource.PlayFreeSfx(SfxId.LETTER_BLIP);
+                        _prevIntroChars = characters;
+                    }
+                    _textSpacingY = 0;
+                }
+            }
+            else if (GameState.DrawPauseState == 1)
+            {
+                // todo-pause: draw collection icons and (maybe) legend
+            }
+        }
+
         public byte HudDisruptedState { get; private set; } = 0;
         public float HudDisruptionFactor { get; private set; } = 0;
         private ushort _hudDisruptedTimer = 0;
@@ -1017,6 +1063,10 @@ namespace MphRead.Entities
 
         public void DrawHudObjects()
         {
+            if (GameState.MenuPause)
+            {
+                return;
+            }
             if (GameState.MatchState == MatchState.GameOver)
             {
                 string text = Strings.GetHudMessage(219); // GAME OVER
@@ -2835,7 +2885,7 @@ namespace MphRead.Entities
             message.DialogHide = dialogHide;
         }
 
-        private int WrapText(string text, int maxWidth, char[] dest, int maxTiles = 0)
+        private int WrapText(string text, int maxWidth, Span<char> dest, int maxTiles = 0)
         {
             int lines = 1;
             if (maxWidth <= 0)
@@ -2972,16 +3022,19 @@ namespace MphRead.Entities
 
         private void DrawQueuedHudMessages()
         {
-            for (int i = 0; i < _hudMessageQueue.Count; i++)
+            if (!GameState.MenuPause)
             {
-                HudMessage message = _hudMessageQueue[i];
-                if (message.Lifetime > 0
-                    && ((message.Category & 1) == 0 || (_scene.FrameCount & (7 * 2)) <= 3 * 2) // todo: FPS stuff
-                    && (!GameState.DialogPause || !message.DialogHide))
+                for (int i = 0; i < _hudMessageQueue.Count; i++)
                 {
-                    // todo: support font size
-                    DrawText2D(message.Position.X, message.Position.Y, message.Align, palette: 0,
-                        message.Text, message.Color, message.Alpha, fontSpacing: message.FontSize);
+                    HudMessage message = _hudMessageQueue[i];
+                    if (message.Lifetime > 0
+                        && ((message.Category & 1) == 0 || (_scene.FrameCount & (7 * 2)) <= 3 * 2) // todo: FPS stuff
+                        && (!GameState.DialogPause || !message.DialogHide))
+                    {
+                        // todo: support font size
+                        DrawText2D(message.Position.X, message.Position.Y, message.Align, palette: 0,
+                            message.Text, message.Color, message.Alpha, fontSpacing: message.FontSize);
+                    }
                 }
             }
         }

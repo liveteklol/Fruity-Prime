@@ -1143,7 +1143,7 @@ namespace MphRead
             if (ProcessFrame)
             {
                 _globalElapsedTime += _frameTime;
-                if (GameState.MatchState == MatchState.InProgress && !GameState.DialogPause)
+                if (GameState.MatchState == MatchState.InProgress && !GameState.DialogPause && !GameState.MenuPause)
                 {
                     _elapsedTime += _frameTime;
                 }
@@ -1172,11 +1172,14 @@ namespace MphRead
             if (ProcessFrame && _room != null)
             {
                 GameState.ProcessFrame(this);
-                if (GameState.MatchState == MatchState.InProgress)
+                if (GameState.MatchState == MatchState.InProgress && !GameState.MenuPause)
                 {
                     UpdateScene();
                 }
-                Sound.Sfx.Update(_frameTime);
+                if (!GameState.MenuPause)
+                {
+                    Sound.Sfx.Update(_frameTime);
+                }
                 Music.UpdateMusic();
             }
             if (ProcessFrame || CameraMode != CameraMode.Player)
@@ -1192,12 +1195,12 @@ namespace MphRead
             GetDrawItems();
             if (ProcessFrame)
             {
-                if (GameState.MatchState == MatchState.InProgress && !GameState.DialogPause)
+                if (GameState.MatchState == MatchState.InProgress && !GameState.DialogPause && !GameState.MenuPause)
                 {
                     ProcessMessageQueue();
                     _liveFrames++;
                 }
-                if (!GameState.DialogPause)
+                if (!GameState.DialogPause && !GameState.MenuPause)
                 {
                     _frameCount++;
                 }
@@ -1424,24 +1427,28 @@ namespace MphRead
             GL.Clear(ClearBufferMask.ColorBufferBit);
             GL.Disable(EnableCap.DepthTest);
             GL.Enable(EnableCap.Blend);
-            GL.BindTexture(TextureTarget.Texture2D, _screenTexture);
 
-            GL.Begin(PrimitiveType.TriangleStrip);
-            // top right
-            GL.TexCoord3(1f, 1f, 0f);
-            GL.Vertex3(1f, 1f, 0f);
-            // top left
-            GL.TexCoord3(0f, 1f, 0f);
-            GL.Vertex3(-1f, 1f, 0f);
-            // bottom right
-            GL.TexCoord3(1f, 0f, 0f);
-            GL.Vertex3(1f, -1f, 0f);
-            // bottom left
-            GL.TexCoord3(0f, 0f, 0f);
-            GL.Vertex3(-1f, -1f, 0f);
-            GL.End();
+            if (!GameState.MenuPause || CameraMode != CameraMode.Player)
+            {
+                GL.BindTexture(TextureTarget.Texture2D, _screenTexture);
 
-            GL.BindTexture(TextureTarget.Texture2D, 0);
+                GL.Begin(PrimitiveType.TriangleStrip);
+                // top right
+                GL.TexCoord3(1f, 1f, 0f);
+                GL.Vertex3(1f, 1f, 0f);
+                // top left
+                GL.TexCoord3(0f, 1f, 0f);
+                GL.Vertex3(-1f, 1f, 0f);
+                // bottom right
+                GL.TexCoord3(1f, 0f, 0f);
+                GL.Vertex3(1f, -1f, 0f);
+                // bottom left
+                GL.TexCoord3(0f, 0f, 0f);
+                GL.Vertex3(-1f, -1f, 0f);
+                GL.End();
+
+                GL.BindTexture(TextureTarget.Texture2D, 0);
+            }
 
             if (PlayerEntity.Main.HudDisruptedState != 0 || PlayerEntity.Main.HudWhiteoutState != -1)
             {
@@ -1471,6 +1478,10 @@ namespace MphRead
                     GL.ActiveTexture(TextureUnit.Texture1);
                     GL.BindTexture(TextureTarget.Texture2D, 0);
                     GL.ActiveTexture(TextureUnit.Texture0);
+                }
+                if (GameState.MenuPause)
+                {
+                    PlayerEntity.Main.DrawPauseMenu();
                 }
             }
             if (_movieFrameIndex != -1)
@@ -2758,7 +2769,7 @@ namespace MphRead
                 }
             }
 
-            if (ProcessFrame && GameState.MatchState == MatchState.InProgress && !GameState.DialogPause)
+            if (ProcessFrame && GameState.MatchState == MatchState.InProgress && !GameState.DialogPause && !GameState.MenuPause)
             {
                 ProcessEffects();
             }

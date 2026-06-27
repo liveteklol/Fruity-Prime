@@ -104,17 +104,54 @@ namespace MphRead
         public static Action<Scene> ModeState { get; private set; } = ModeStateAdventure;
         private static bool _pausingDialog = false;
         private static bool _unpausingDialog = false;
-        private static bool _pausingMenu = false;
-        private static bool _unpausingMenu = false;
+
+        private static int _drawPauseState = 0;
+        private static float _navAvailableTimer = 0;
+        private static bool _navUnavailableLoading = false;
+
+        public static int DrawPauseState => _drawPauseState;
+        public static float NavAvailableTimer => _navAvailableTimer;
+        public static bool NavUnavailableLoading => _navUnavailableLoading;
 
         public static void PauseMenu()
         {
-            _pausingMenu = true;
+            MenuPause = true;
+            Sfx.Instance.StopAllSound();
+            Sfx.TimedSfxMute++;
+            _navAvailableTimer = 0;
+            if (InRoomTransition)
+            {
+                _navUnavailableLoading = true;
+            }
+            else
+            {
+                // todo-pause: load nav
+                _navUnavailableLoading = false;
+            }
+        }
+
+        public static void ProcessPauseMenu(Scene scene)
+        {
+            if (_navUnavailableLoading)
+            {
+                if (_navAvailableTimer < 60 / 30f)
+                {
+                    _navAvailableTimer += scene.FrameTime;
+                }
+                if (_navAvailableTimer >= 60 / 30f && !InRoomTransition) // todo-pause: test for portal availability
+                {
+                    // todo-pause: load nav
+                    _navAvailableTimer = 0;
+                    _navUnavailableLoading = false;
+                }
+            }
+            // todo-pause: check pressed UI buttons
         }
 
         public static void UnpauseMenu()
         {
-            _unpausingMenu = true;
+            MenuPause = false;
+            Sfx.TimedSfxMute--;
         }
 
         public static void PauseDialog()
@@ -141,18 +178,8 @@ namespace MphRead
             {
                 DialogPause = false;
             }
-            if (_pausingMenu)
-            {
-                MenuPause = true;
-            }
-            if (_unpausingMenu)
-            {
-                MenuPause = false;
-            }
             _pausingDialog = false;
             _unpausingDialog = false;
-            _pausingMenu = false;
-            _unpausingMenu = false;
         }
 
         public static void Setup(Scene scene)
@@ -257,7 +284,29 @@ namespace MphRead
             }
             if (MatchState == MatchState.InProgress)
             {
-                // todo: process dialogs or something for 1P
+                if (SinglePlayer) // todo-pause: need state change flag to prevent pausing while teleporting, returning to ship, etc.
+                {
+                    if (MenuPause && PlayerEntity.Main.Controls.Pause.IsPressed)
+                    {
+                        // todo-pause: play SFX
+                        UnpauseMenu();
+                        // todo-pause: clear (some) input
+                        PlayerEntity.Main.Controls.Pause.IsPressed = false;
+                        return;
+                    }
+                    if (!MenuPause && CameraSequence.Current?.BlockInput != true && PlayerEntity.Main.Controls.Pause.IsPressed)
+                    {
+                        PlayerEntity.Main.Controls.Pause.IsPressed = false;
+                        // todo-pause: end weapon menu
+                        PauseMenu();
+                        // todo-pause: play SFX
+                    }
+                    if (MenuPause) // todo-pause: do we need the pausing/apply thing for this?
+                    {
+                        ProcessPauseMenu(scene);
+                        return;
+                    }
+                }
                 // todo: update SFX
                 for (int i = 0; i < scene.MessageQueue.Count; i++)
                 {
@@ -284,7 +333,7 @@ namespace MphRead
                         }
                         invalid = !teams[0] || !teams[1];
                     }
-                    if (invalid)
+                    if (invalid && !MenuPause)
                     {
                         MatchTime = 0;
                         CameraSequence.Current?.End();
@@ -1603,8 +1652,10 @@ namespace MphRead
             DialogPause = false;
             _pausingDialog = false;
             _unpausingDialog = false;
-            _pausingMenu = false;
-            _unpausingMenu = false;
+            MenuPause = false;
+            _drawPauseState = 0;
+            _navAvailableTimer = 0;
+            _navUnavailableLoading = false;
             EscapeState = EscapeState.None;
             EscapeTimer = -1;
             EscapePaused = false;
