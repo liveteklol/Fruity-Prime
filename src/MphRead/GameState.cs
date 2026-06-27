@@ -304,7 +304,7 @@ namespace MphRead
                         PlayerEntity.Main.SetMenuPauseHud();
                         Sfx.Instance.PlayFreeSfx(SfxId.MENU_CONFIRM);
                     }
-                    if (MenuPause) // todo-pause: do we need the pausing/apply thing for this?
+                    if (MenuPause)
                     {
                         ProcessPauseMenu(scene);
                         return;
