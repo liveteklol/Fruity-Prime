@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Linq;
 using MphRead.Entities.Enemies;
@@ -54,6 +55,12 @@ namespace MphRead.Entities
         private HudObjectInstance _dialogCrystalInst = null!;
         private HudObjectInstance _dialogPickupInst = null!;
         private HudObjectInstance _dialogFrameInst = null!;
+
+        // skhere
+        private HudObjectInstance _mapTeleporterInst = null!;
+        private readonly HudObjectInstance[] _mapOctolithInsts = new HudObjectInstance[8];
+        private HudObjectInstance _mapLostOctolithInst = null!;
+        private readonly HudObjectInstance[] _mapArtifactDotInsts = new HudObjectInstance[8];
 
         private ModelInstance _filterModel = null!;
         private bool _showScoreboard = false;
@@ -194,6 +201,34 @@ namespace MphRead.Entities
                 _enemyHealthMeter.BarInst.SetCharacterData(samusSubBar.CharacterData, _scene);
                 _enemyHealthMeter.BarInst.SetPaletteData(healthbarSub.PaletteData, _scene);
                 _enemyHealthMeter.BarInst.Enabled = true;
+                // skhere
+                HudObject teleporter = HudInfo.GetHudObject(HudElements.MapPortal);
+                _mapTeleporterInst = new HudObjectInstance(teleporter.Width, teleporter.Height);
+                _mapTeleporterInst.SetCharacterData(teleporter.CharacterData, _scene);
+                _mapTeleporterInst.SetPaletteData(teleporter.PaletteData, _scene);
+                _mapTeleporterInst.Enabled = true;
+                HudObject mapOctolith = HudInfo.GetHudObject(HudElements.MapOctolith);
+                for (int i = 0; i < 8; i++)
+                {
+                    HudObject dot = HudInfo.GetHudObject(HudElements.MapDots[i]);
+                    var dotInst = new HudObjectInstance(dot.Width, dot.Height);
+                    dotInst.SetCharacterData(dot.CharacterData, _scene);
+                    dotInst.SetPaletteData(dot.PaletteData, _scene);
+                    dotInst.Enabled = true;
+                    _mapArtifactDotInsts[i] = dotInst;
+                    var mapOctolithInst = new HudObjectInstance(mapOctolith.Width, mapOctolith.Height);
+                    mapOctolithInst.SetCharacterData(mapOctolith.CharacterData, _scene);
+                    mapOctolithInst.SetPaletteData(mapOctolith.PaletteData, _scene);
+                    mapOctolithInst.SetAnimationFrames(mapOctolith.AnimParams);
+                    mapOctolithInst.Enabled = true;
+                    _mapOctolithInsts[i] = mapOctolithInst;
+                }
+                HudObject lostOctolith = HudInfo.GetHudObject(HudElements.MapLostOctolith);
+                _mapLostOctolithInst = new HudObjectInstance(lostOctolith.Width, lostOctolith.Height);
+                _mapLostOctolithInst.SetCharacterData(lostOctolith.CharacterData, _scene);
+                _mapLostOctolithInst.SetPaletteData(lostOctolith.PaletteData, _scene);
+                _mapLostOctolithInst.SetAnimationFrames(lostOctolith.AnimParams);
+                _mapLostOctolithInst.Enabled = true;
             }
             if (GameState.SinglePlayer && _hudObjects.EnergyTanks != null)
             {
@@ -486,11 +521,10 @@ namespace MphRead.Entities
         // need to set and restore these because pausing is allowed while a dialog is open,
         // and if a dialog is open, the normal HUD update code won't run to set these as needed
         private int _pausedPrevBindingId1 = -1;
-        private float _pausedPrevAlpha = 1;
-        private float _pausedPrevShiftX = 0;
-        private float _pausedPrevShiftY = 0;
+        private float _pausedPrevAlpha1 = 1;
         private int _pausedPrevMaskId = -1;
         private int _pausedPrevBindingId2 = -1;
+        private float _pausedPrevAlpha2 = 1;
         private int _pausedPrevBindingId3 = -1;
         private int _pausedPrevBindingId4 = -1;
         private int _pausedPrevBindingId5 = -1;
@@ -498,25 +532,30 @@ namespace MphRead.Entities
         public void SetMenuPauseHud()
         {
             _pausedPrevBindingId1 = _scene.Layer1Info.BindingId;
-            _pausedPrevAlpha = _scene.Layer1Info.Alpha;
-            _pausedPrevShiftX = _scene.Layer1Info.ShiftX;
-            _pausedPrevShiftY = _scene.Layer1Info.ShiftY;
+            _pausedPrevAlpha1 = _scene.Layer1Info.Alpha;
             _pausedPrevMaskId = _scene.Layer1Info.MaskId;
             _pausedPrevBindingId2 = _scene.Layer2Info.BindingId;
+            _pausedPrevAlpha2 = _scene.Layer2Info.Alpha;
             _pausedPrevBindingId3 = _scene.Layer3Info.BindingId;
             _pausedPrevBindingId4 = _scene.Layer4Info.BindingId;
             _pausedPrevBindingId5 = _scene.Layer5Info.BindingId;
+            for (int i = 0; i < 8; i++)
+            {
+                int start = (int)Rng.GetRandomInt1(20);
+                int afterAnim = (int)Rng.GetRandomInt1(6);
+                _mapOctolithInsts[i].SetAnimation(start, 35, 36, afterAnim, HudObjectLoopType.Offset);
+            }
+            _mapLostOctolithInst.SetAnimation(0, 19, 20, loop: true);
         }
 
         public void EndMenuPauseHud()
         {
             InitHudState();
             _scene.Layer1Info.BindingId = _pausedPrevBindingId1;
-            _scene.Layer1Info.Alpha = _pausedPrevAlpha;
-            _scene.Layer1Info.ShiftX = _pausedPrevShiftX;
-            _scene.Layer1Info.ShiftY = _pausedPrevShiftY;
+            _scene.Layer1Info.Alpha = _pausedPrevAlpha1;
             _scene.Layer1Info.MaskId = _pausedPrevMaskId;
-            _scene.Layer2Info.BindingId = _pausedPrevBindingId2;
+            _scene.Layer2Info.BindingId = _pausedPrevBindingId2; // redundant
+            _scene.Layer2Info.Alpha = _pausedPrevAlpha2;
             _scene.Layer3Info.BindingId = _pausedPrevBindingId3;
             _scene.Layer4Info.BindingId = _pausedPrevBindingId4;
             _scene.Layer5Info.BindingId = _pausedPrevBindingId5;
@@ -531,12 +570,20 @@ namespace MphRead.Entities
             if (GameState.MenuPause)
             {
                 InitHudState();
-                // todo-pause: does this need to be darkened somehow?
+                // although we don't set HUD shift back to what it was before pausing, if the camera was moving, then it may have some
+                // momentum left after unpausing and may cause the HUD to shift. the game has a different behavior (bug) where HUD shift
+                // from before the pause reappears after unpausing, now stuck in place and not updating until the camera is moved.
+                // use visor layer for the pause bg
                 _scene.Layer1Info.BindingId = _pauseBindingId;
-                _scene.Layer1Info.Alpha = 1;
+                _scene.Layer1Info.Alpha = 0.75f;
                 _scene.Layer1Info.ShiftX = 0;
                 _scene.Layer1Info.ShiftY = -1 / 3f;
                 _scene.Layer1Info.MaskId = -1;
+                // continue to draw the helmet front
+                _scene.Layer2Info.BindingId = _pausedPrevBindingId2;
+                _scene.Layer2Info.Alpha = 1;
+                _scene.Layer2Info.ShiftX = 0;
+                _scene.Layer2Info.ShiftY = 0;
                 return;
             }
             if (GameState.DialogPause)
@@ -927,6 +974,16 @@ namespace MphRead.Entities
             }
         }
 
+        private static readonly ImmutableArray<(short X, short Y)> _mapIconPositions =
+        [
+            (15, 102), (15, 134), (15, 38), (15, 70), (241, 38), (241, 70), (241, 102), (241, 134)
+        ];
+
+        private static readonly ImmutableArray<(short X, short Y)> _mapDotOffsets =
+        [
+            (-10, -7), (10, -7), (0, 12)
+        ];
+
         // todo-pause: init _prevIntroChars (and rename it to something more generic)
         public void DrawPauseMenu()
         {
@@ -951,7 +1008,63 @@ namespace MphRead.Entities
             }
             else if (GameState.DrawPauseState == 1)
             {
-                // todo-pause: draw collection icons and (maybe) legend
+                // skhere
+                // todo-pause: draw legend somewhere?
+                if (_scene.ProcessFrame)
+                {
+                    for (int i = 0; i < 8; i++)
+                    {
+                        _mapOctolithInsts[i].ProcessAnimation(_scene);
+                    }
+                    _mapLostOctolithInst.ProcessAnimation(_scene);
+                }
+                int artifactIndex = 0;
+                for (int i = 0; i < 8; i++)
+                {
+                    (short posX, short posY) = _mapIconPositions[i];
+                    if ((GameState.StorySave.Areas & (1 << (i / 2 * 2))) != 0)
+                    {
+                        bool hasOctolith = (GameState.StorySave.CurrentOctoliths & (1 << i)) != 0;
+                        uint lostHunter = (GameState.StorySave.LostOctoliths >> (i * 4)) & 15;
+                        if (hasOctolith || lostHunter < 8)
+                        {
+                            HudObjectInstance octoInst = _mapOctolithInsts[i];
+                            int offsetX = 0;
+                            if (!hasOctolith)
+                            {
+                                HudObjectInstance portrait = _hunterInsts[lostHunter];
+                                portrait.PositionX = (posX - 16) / 256f;
+                                portrait.PositionY = (posY - 16) / 192f;
+                                _scene.DrawHudObject(portrait);
+                                octoInst = _mapLostOctolithInst;
+                                offsetX = 6;
+                            }
+                            octoInst.PositionX = (posX + offsetX - (octoInst.Width / 2)) / 256f;
+                            octoInst.PositionY = (posY - (octoInst.Height / 2)) / 192f;
+                            _scene.DrawHudObject(octoInst);
+                        }
+                        else
+                        {
+                            _mapTeleporterInst.PositionX = (posX - _mapTeleporterInst.Width / 2) / 256f;
+                            _mapTeleporterInst.PositionY = (posY - _mapTeleporterInst.Height / 2) / 192f;
+                            int teleporterIndex = (GameState.StorySave.Artifacts & (7 << artifactIndex)) >> artifactIndex == 7 ? 1 : 0;
+                            _mapTeleporterInst.SetIndex(teleporterIndex, _scene);
+                            _scene.DrawHudObject(_mapTeleporterInst);
+                            HudObjectInstance dotInst = _mapArtifactDotInsts[i];
+                            for (int j = 0; j < 3; j++)
+                            {
+                                if ((GameState.StorySave.Artifacts & (1 << (artifactIndex + j))) != 0)
+                                {
+                                    (short offsetX, short offsetY) = _mapDotOffsets[j];
+                                    dotInst.PositionX = (posX + offsetX - dotInst.Width / 2) / 256f;
+                                    dotInst.PositionY = (posY + offsetY - dotInst.Height / 2) / 192f;
+                                    _scene.DrawHudObject(dotInst);
+                                }
+                            }
+                        }
+                    }
+                    artifactIndex += 3;
+                }
             }
         }
 

@@ -120,6 +120,7 @@ namespace MphRead
             Sfx.Instance.StopAllSound();
             Sfx.TimedSfxMute++;
             _navAvailableTimer = 0;
+            _drawPauseState = 1;
             if (InRoomTransition)
             {
                 _navUnavailableLoading = true;
