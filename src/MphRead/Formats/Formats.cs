@@ -174,10 +174,10 @@ namespace MphRead
         public string Name { get; }
         public byte Lighting { get; set; }
         public byte InitLighting { get; }
-        public CullingMode Culling { get; }
+        public CullingMode Culling { get; set; } // todo: yep
         public byte Alpha { get; set; } // todo: yep
         public float CurrentAlpha { get; set; }
-        public byte Wireframe { get; }
+        public byte Wireframe { get; set; } // todo: yep
         public int TextureId { get; }
         public int PaletteId { get; }
         public int TextureBindingId { get; set; }

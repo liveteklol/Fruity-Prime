@@ -109,12 +109,10 @@ namespace MphRead
         private static int _drawPauseState = 0;
         private static float _navTextTimer = 0;
         private static bool _navLoading = false;
-        private static bool _navUnavailable = false;
 
         public static int DrawPauseState => _drawPauseState;
         public static float NavTextTimer => _navTextTimer;
         public static bool NavLoading => _navLoading;
-        public static bool NavUnavailable => _navUnavailable;
 
         public static void PauseMenu()
         {
@@ -129,7 +127,7 @@ namespace MphRead
             }
             else
             {
-                // todo-pause: load nav
+                PlayerEntity.Main.SetUpMenuPauseMapNav();
                 _navLoading = false;
             }
         }
@@ -142,12 +140,16 @@ namespace MphRead
                 {
                     _navTextTimer += scene.FrameTime;
                 }
-                if (_navTextTimer >= 60 / 30f && !InRoomTransition) // todo-pause: test for portal availability
+                if (_navTextTimer >= 60 / 30f && !InRoomTransition) // todo-pause: test for portal availability?
                 {
-                    // todo-pause: load nav
+                    PlayerEntity.Main.SetUpMenuPauseMapNav();
                     _navTextTimer = 0;
                     _navLoading = false;
                 }
+            }
+            else if (_navTextTimer < 200 / 30f) // applies to either the topo unavailable message or the location name
+            {
+                _navTextTimer += scene.FrameTime;
             }
             // todo-pause: check pressed UI buttons
         }
@@ -304,7 +306,7 @@ namespace MphRead
                         PlayerEntity.Main.Controls.Pause.IsPressed = false;
                         // todo-pause: end weapon menu
                         PauseMenu();
-                        PlayerEntity.Main.SetMenuPauseHud();
+                        PlayerEntity.Main.SetUpMenuPauseHud();
                         Sfx.Instance.PlayFreeSfx(SfxId.MENU_CONFIRM);
                     }
                     if (MenuPause)

@@ -251,7 +251,7 @@ namespace MphRead.Entities
             _overlayTextOffsetY = lineCount * 5;
             _overlayTimer = duration / 30f;
             _dialogCharTimer = 9999;
-            _prevIntroChars = 9999;
+            _prevScrollingChars = 9999;
             _dialogPalette = 2;
             _messageBoxInst.SetPalette(_dialogPalette, _scene);
             _messageSpacerInst.SetPalette(_dialogPalette, _scene);

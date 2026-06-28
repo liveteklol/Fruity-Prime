@@ -4958,7 +4958,8 @@ namespace MphRead
 
         protected override void OnRenderFrame(FrameEventArgs args)
         {
-            CursorState = Scene.CameraMode == CameraMode.Player && !Scene.FrameAdvance && !Scene.ShowCursor && !GameState.DialogPause
+            CursorState = Scene.CameraMode == CameraMode.Player && !Scene.FrameAdvance
+                && !Scene.ShowCursor && !GameState.DialogPause && !GameState.MenuPause
                 ? CursorState.Grabbed
                 : CursorState.Normal;
             GameState.ApplyPause();

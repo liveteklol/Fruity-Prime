@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Linq;
 using MphRead.Entities.Enemies;
 using MphRead.Formats;
+using MphRead.Formats.Culling;
 using MphRead.Hud;
 using MphRead.Text;
 using OpenTK.Mathematics;
@@ -56,11 +57,13 @@ namespace MphRead.Entities
         private HudObjectInstance _dialogPickupInst = null!;
         private HudObjectInstance _dialogFrameInst = null!;
 
-        // skhere
         private HudObjectInstance _mapTeleporterInst = null!;
         private readonly HudObjectInstance[] _mapOctolithInsts = new HudObjectInstance[8];
         private HudObjectInstance _mapLostOctolithInst = null!;
         private readonly HudObjectInstance[] _mapArtifactDotInsts = new HudObjectInstance[8];
+        private ModelInstance _navPlayerPosModel = null!;
+        private ModelInstance _navDoorModel = null!;
+        private readonly ModelInstance[] _navMapModels = new ModelInstance[8];
 
         private ModelInstance _filterModel = null!;
         private bool _showScoreboard = false;
@@ -201,7 +204,6 @@ namespace MphRead.Entities
                 _enemyHealthMeter.BarInst.SetCharacterData(samusSubBar.CharacterData, _scene);
                 _enemyHealthMeter.BarInst.SetPaletteData(healthbarSub.PaletteData, _scene);
                 _enemyHealthMeter.BarInst.Enabled = true;
-                // skhere
                 HudObject teleporter = HudInfo.GetHudObject(HudElements.MapPortal);
                 _mapTeleporterInst = new HudObjectInstance(teleporter.Width, teleporter.Height);
                 _mapTeleporterInst.SetCharacterData(teleporter.CharacterData, _scene);
@@ -229,6 +231,39 @@ namespace MphRead.Entities
                 _mapLostOctolithInst.SetPaletteData(lostOctolith.PaletteData, _scene);
                 _mapLostOctolithInst.SetAnimationFrames(lostOctolith.AnimParams);
                 _mapLostOctolithInst.Enabled = true;
+                _navPlayerPosModel = Read.GetModelInstance("PlayerPos_NAV", dir: MetaDir.Hud); // todo-pause: animation/update
+                _scene.LoadModel(_navPlayerPosModel.Model);
+                _navDoorModel = Read.GetModelInstance("Door_NAV", dir: MetaDir.Hud);
+                _scene.LoadModel(_navDoorModel.Model);
+                for (int i = 0; i < 7; i++)
+                {
+                    ModelInstance mapModel = Read.GetModelInstance(Metadata.NavMapModelNames[i], dir: MetaDir.Hud, noCache: true);
+                    for (int j = 0; j < mapModel.Model.Materials.Count; j++)
+                    {
+                        Material material = mapModel.Model.Materials[j];
+                        if (material.Culling == CullingMode.Front)
+                        {
+                            material.Culling = CullingMode.Back;
+                        }
+                        else
+                        {
+                            material.Culling = CullingMode.Front;
+                        }
+                        material.Wireframe = 0;
+                        material.Lighting = 1;
+                        material.Ambient = new ColorRgb(8, 8, 8);
+                    }
+                    for (int j = 0; j < mapModel.Model.Nodes.Count; j++)
+                    {
+                        Node node = mapModel.Model.Nodes[j];
+                        if (node.Name.StartsWith("cent"))
+                        {
+                            node.Enabled = false;
+                        }
+                    }
+                    _scene.LoadModel(mapModel.Model);
+                    _navMapModels[i] = mapModel;
+                }
             }
             if (GameState.SinglePlayer && _hudObjects.EnergyTanks != null)
             {
@@ -529,7 +564,7 @@ namespace MphRead.Entities
         private int _pausedPrevBindingId4 = -1;
         private int _pausedPrevBindingId5 = -1;
 
-        public void SetMenuPauseHud()
+        public void SetUpMenuPauseHud()
         {
             _pausedPrevBindingId1 = _scene.Layer1Info.BindingId;
             _pausedPrevAlpha1 = _scene.Layer1Info.Alpha;
@@ -546,6 +581,95 @@ namespace MphRead.Entities
                 _mapOctolithInsts[i].SetAnimation(start, 35, 36, afterAnim, HudObjectLoopType.Offset);
             }
             _mapLostOctolithInst.SetAnimation(0, 19, 20, loop: true);
+            _prevScrollingChars = 0;
+        }
+
+        // todo-pause: call this when ready
+        public void SetUpMenuPauseMapNav()
+        {
+            _navMapDrawNode = null;
+            _navMapModelEnabled = false;
+            _navDrawVec1 = Vector3.Zero;
+            _navDrawVec2 = Vector3.Zero;
+            _navDrawVecA = Vector3.Zero;
+            _navDrawVecB = Vector3.Zero;
+            _navDrawVecC = Vector3.Zero;
+            if (PlayerEntity.Main.NodeRef != NodeRef.None && _scene.Room != null)
+            {
+                RoomMetadata room = Metadata.GetRoomById(_scene.Room.RoomId)!;
+                int area = _scene.AreaId & ~1;
+                for (int i = 0; i < 2; i++, area++)
+                {
+                    if (area >= 0 && area < _navMapModels.Length)
+                    {
+                        ModelInstance model = _navMapModels[area];
+                        Node? roomNode = null;
+                        for (int j = 0; j < model.Model.Nodes.Count; j++)
+                        {
+                            Node node = model.Model.Nodes[j];
+                            if (node.ParentIndex == 0 && node.Name.Equals(room.Name, StringComparison.InvariantCultureIgnoreCase))
+                            {
+                                roomNode = node;
+                                break;
+                            }
+                        }
+                        if (roomNode == null)
+                        {
+                            continue;
+                        }
+                        Node? centerNode = null;
+                        for (int childId = roomNode.ChildIndex; childId != -1; childId = model.Model.Nodes[childId].NextIndex)
+                        {
+                            Node node = model.Model.Nodes[childId];
+                            if (node.Name.StartsWith("cent"))
+                            {
+                                centerNode = node;
+                                break;
+                            }
+                        }
+                        if (centerNode == null)
+                        {
+                            centerNode = roomNode;
+                        }
+                        SetNavMapDrawNode(roomNode, centerNode, _navMapNodeOffsets[area]);
+                        _navMapModelEnabled = true;
+                        _navDrawVecA = _navDrawVec1;
+                    }
+                }
+                if (_navMapDrawNode != null)
+                {
+                    _navDrawVecB = _navDrawVec1;
+                }
+            }
+        }
+
+        private static readonly ImmutableArray<Vector3> _navMapNodeOffsets =
+        [
+            Vector3.Zero,
+            new Vector3(-80.87378f, 22.282959f, 205.73096f),
+            Vector3.Zero,
+            new Vector3(0, 73, 0),
+            Vector3.Zero,
+            new Vector3(-136.7998f, -0.21191406f, 4.36499f),
+            Vector3.Zero,
+            Vector3.Zero,
+            Vector3.Zero
+        ];
+
+        private bool _navMapModelEnabled = false;
+        private Node? _navMapDrawNode = null;
+        private Vector3 _navDrawVec1 = Vector3.Zero;
+        private Vector3 _navDrawVec2 = Vector3.Zero;
+        private Vector3 _navDrawVecA = Vector3.Zero; // todo-pause: names
+        private Vector3 _navDrawVecB = Vector3.Zero;
+        private Vector3 _navDrawVecC = Vector3.Zero;
+
+        private void SetNavMapDrawNode(Node roomNode, Node centerNode, Vector3 offset)
+        {
+            _navMapDrawNode = roomNode;
+            _navDrawVec1 = roomNode.Position + offset;
+            _navDrawVec2 = centerNode.Position + offset;
+            // todo-pause: when this updates (pan to another room), the text scroll timer needs to be reset -- figure out process vs. draw and this vs. GameState
         }
 
         public void EndMenuPauseHud()
@@ -563,6 +687,13 @@ namespace MphRead.Entities
             {
                 UpdateDialogs();
             }
+            _navMapDrawNode = null;
+            _navMapModelEnabled = false;
+            _navDrawVec1 = Vector3.Zero;
+            _navDrawVec2 = Vector3.Zero;
+            _navDrawVecA = Vector3.Zero;
+            _navDrawVecB = Vector3.Zero;
+            _navDrawVecC = Vector3.Zero;
         }
 
         public void UpdateHud()
@@ -984,7 +1115,6 @@ namespace MphRead.Entities
             (-10, -7), (10, -7), (0, 12)
         ];
 
-        // todo-pause: init _prevIntroChars (and rename it to something more generic)
         public void DrawPauseMenu()
         {
             if (GameState.NavLoading)
@@ -998,17 +1128,16 @@ namespace MphRead.Entities
                     // note: the game assumes the topo init message doesn't exceed 60 characters
                     int characters = (int)(GameState.NavTextTimer / (1 / 30f));
                     DrawText2D(128, 96, Align.PadCenter, 0, buffer, maxLength: characters);
-                    if (characters > 0 && characters != _prevIntroChars && characters <= entry.String1.Length)
+                    if (characters > 0 && characters != _prevScrollingChars && characters <= entry.String1.Length)
                     {
                         _soundSource.PlayFreeSfx(SfxId.LETTER_BLIP);
-                        _prevIntroChars = characters;
+                        _prevScrollingChars = characters;
                     }
                     _textSpacingY = 0;
                 }
             }
             else if (GameState.DrawPauseState == 1)
             {
-                // skhere
                 // todo-pause: draw legend when holding button
                 if (_scene.ProcessFrame)
                 {
@@ -1065,7 +1194,115 @@ namespace MphRead.Entities
                     }
                     artifactIndex += 3;
                 }
+                if (!_navMapModelEnabled)
+                {
+                    StringTableEntry? entry = Strings.GetEntry('R', 998, StringTables.LocationNames); // topographical view unavailable
+                    if (entry != null)
+                    {
+                        _textSpacingY = 9;
+                        Span<char> buffer = stackalloc char[256];
+                        WrapText(entry.String1, 150, buffer);
+                        // note: the game assumes the topo unavailable message doesn't exceed 200 characters
+                        int characters = (int)(GameState.NavTextTimer / (1 / 30f));
+                        DrawText2D(128, 96, Align.PadCenter, 0, buffer, maxLength: characters);
+                        if (characters > 0 && characters != _prevScrollingChars && characters <= entry.String1.Length)
+                        {
+                            _soundSource.PlayFreeSfx(SfxId.LETTER_BLIP);
+                            _prevScrollingChars = characters;
+                        }
+                        _textSpacingY = 0;
+                    }
+                }
+                else
+                {
+                    // skhere: draw location name
+                }
+            }
+        }
 
+        public void GetPauseMapRenderItems()
+        {
+            // skhere
+            if (!_navMapModelEnabled)
+            {
+                return;
+            }
+            int area = _scene.AreaId & ~1;
+            for (int i = 0; i < 2; i++, area++)
+            {
+                if (area >= _navMapModels.Length)
+                {
+                    break;
+                }
+                ModelInstance inst = _navMapModels[area];
+
+                Model model = inst.Model;
+                model.AnimateMaterials(inst.AnimInfo);
+                model.AnimateTextures(inst.AnimInfo);
+                model.ComputeNodeMatrices(index: 0);
+                model.AnimateNodes(index: 0, false, Matrix4.Identity, model.Scale, inst.AnimInfo);
+                model.UpdateMatrixStack();
+                _scene.UpdateMaterials(model, 0);
+
+                IReadOnlyList<Node> nodes = model.Nodes;
+                for (int j = 0; j < nodes.Count; j++)
+                {
+                    Node node = nodes[j];
+                    if (node.ParentIndex != 0)
+                    {
+                        continue;
+                    }
+                    bool isSelected = node == _navMapDrawNode;
+                    for (int k = 0; k < 2; k++)
+                    {
+                        if (k == 0 || !isSelected)
+                        {
+                            // note: the game defines a middle color (247, 140, 60) which goes unused
+                            Vector3 lightColor = isSelected
+                                ? new Vector3(247 / 255f, 153 / 255f, 52 / 255f)
+                                : new Vector3(247 / 255f, 123 / 255f, 22 / 255f);
+                            GetMapDrawItems(inst, nodes[node.ChildIndex], lightColor);
+                        }
+                        else
+                        {
+
+                        }
+                    }
+                }
+            }
+        }
+
+        private void GetMapDrawItems(ModelInstance inst, Node node, Vector3 lightColor, int polygonId = -1)
+        {
+            if (polygonId == -1)
+            {
+                polygonId = _scene.GetNextPolygonId();
+            }
+            Model model = inst.Model;
+            if (node.Enabled)
+            {
+                int start = node.MeshId / 2;
+                for (int k = 0; k < node.MeshCount; k++)
+                {
+                    Mesh mesh = model.Meshes[start + k];
+                    if (!mesh.Visible)
+                    {
+                        continue;
+                    }
+                    Material material = model.Materials[mesh.MaterialId];
+                    var lightInfo = new LightInfo(Vector3.UnitX, lightColor, Vector3.UnitX, Vector3.Zero);
+                    _scene.AddRenderItem(material, polygonId, 1, Vector3.Zero, lightInfo, Matrix4.Identity,
+                        node.Animation, mesh.ListId, model.NodeMatrixIds.Count, model.MatrixStackValues, null,
+                        null, SelectionType.None, node.BillboardMode, 1, null);
+                }
+                if (node.ChildIndex != -1)
+                {
+                    GetMapDrawItems(inst, model.Nodes[node.ChildIndex], lightColor, polygonId);
+                }
+            }
+            if (node.NextIndex != -1)
+            {
+                GetMapDrawItems(inst, model.Nodes[node.NextIndex], lightColor, polygonId);
             }
         }
 
@@ -2718,7 +2955,7 @@ namespace MphRead.Entities
             DrawText2D(posX + 5, posY + 14, Align.Left, 0, score);
         }
 
-        private int _prevIntroChars = 0;
+        private int _prevScrollingChars = 0;
 
         private void DrawModeRules()
         {
@@ -2745,11 +2982,11 @@ namespace MphRead.Entities
                 posY += 13 + _rulesLengths[i].Newlines * 8;
             }
             // todo?: ideally this should be in a process method, not draw
-            if (totalCharacters > _prevIntroChars && totalCharacters > _rulesLengths[0].Length
+            if (totalCharacters > _prevScrollingChars && totalCharacters > _rulesLengths[0].Length
                 && totalCharacters <= _rulesLengths[_rulesInfo.Count - 1].Length)
             {
                 _soundSource.PlayFreeSfx(SfxId.LETTER_BLIP);
-                _prevIntroChars = totalCharacters;
+                _prevScrollingChars = totalCharacters;
             }
             _textSpacingY = 0;
         }
