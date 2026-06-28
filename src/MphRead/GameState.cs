@@ -107,44 +107,46 @@ namespace MphRead
         private static bool _unpausingDialog = false;
 
         private static int _drawPauseState = 0;
-        private static float _navAvailableTimer = 0;
-        private static bool _navUnavailableLoading = false;
+        private static float _navTextTimer = 0;
+        private static bool _navLoading = false;
+        private static bool _navUnavailable = false;
 
         public static int DrawPauseState => _drawPauseState;
-        public static float NavAvailableTimer => _navAvailableTimer;
-        public static bool NavUnavailableLoading => _navUnavailableLoading;
+        public static float NavTextTimer => _navTextTimer;
+        public static bool NavLoading => _navLoading;
+        public static bool NavUnavailable => _navUnavailable;
 
         public static void PauseMenu()
         {
             MenuPause = true;
             Sfx.Instance.StopAllSound();
             Sfx.TimedSfxMute++;
-            _navAvailableTimer = 0;
+            _navTextTimer = 0;
             _drawPauseState = 1;
             if (InRoomTransition)
             {
-                _navUnavailableLoading = true;
+                _navLoading = true;
             }
             else
             {
                 // todo-pause: load nav
-                _navUnavailableLoading = false;
+                _navLoading = false;
             }
         }
 
         public static void ProcessPauseMenu(Scene scene)
         {
-            if (_navUnavailableLoading)
+            if (_navLoading)
             {
-                if (_navAvailableTimer < 60 / 30f)
+                if (_navTextTimer < 60 / 30f)
                 {
-                    _navAvailableTimer += scene.FrameTime;
+                    _navTextTimer += scene.FrameTime;
                 }
-                if (_navAvailableTimer >= 60 / 30f && !InRoomTransition) // todo-pause: test for portal availability
+                if (_navTextTimer >= 60 / 30f && !InRoomTransition) // todo-pause: test for portal availability
                 {
                     // todo-pause: load nav
-                    _navAvailableTimer = 0;
-                    _navUnavailableLoading = false;
+                    _navTextTimer = 0;
+                    _navLoading = false;
                 }
             }
             // todo-pause: check pressed UI buttons
@@ -1661,8 +1663,8 @@ namespace MphRead
             _unpausingDialog = false;
             PausePrevented = false;
             _drawPauseState = 0;
-            _navAvailableTimer = 0;
-            _navUnavailableLoading = false;
+            _navTextTimer = 0;
+            _navLoading = false;
             EscapeState = EscapeState.None;
             EscapeTimer = -1;
             EscapePaused = false;

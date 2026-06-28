@@ -987,7 +987,7 @@ namespace MphRead.Entities
         // todo-pause: init _prevIntroChars (and rename it to something more generic)
         public void DrawPauseMenu()
         {
-            if (GameState.NavUnavailableLoading)
+            if (GameState.NavLoading)
             {
                 StringTableEntry? entry = Strings.GetEntry('R', 997, StringTables.LocationNames); // topographical view initializing
                 if (entry != null)
@@ -996,7 +996,7 @@ namespace MphRead.Entities
                     Span<char> buffer = stackalloc char[128];
                     WrapText(entry.String1, 150, buffer);
                     // note: the game assumes the topo init message doesn't exceed 60 characters
-                    int characters = (int)(GameState.NavAvailableTimer / (1 / 30f));
+                    int characters = (int)(GameState.NavTextTimer / (1 / 30f));
                     DrawText2D(128, 96, Align.PadCenter, 0, buffer, maxLength: characters);
                     if (characters > 0 && characters != _prevIntroChars && characters <= entry.String1.Length)
                     {
@@ -1009,7 +1009,7 @@ namespace MphRead.Entities
             else if (GameState.DrawPauseState == 1)
             {
                 // skhere
-                // todo-pause: draw legend somewhere?
+                // todo-pause: draw legend when holding button
                 if (_scene.ProcessFrame)
                 {
                     for (int i = 0; i < 8; i++)
@@ -1065,6 +1065,7 @@ namespace MphRead.Entities
                     }
                     artifactIndex += 3;
                 }
+
             }
         }
 
