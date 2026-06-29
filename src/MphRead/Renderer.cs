@@ -1395,6 +1395,7 @@ namespace MphRead
             GL.Disable(EnableCap.AlphaTest);
             GL.Disable(EnableCap.StencilTest);
             GL.PolygonMode(TriangleFace.FrontAndBack, OpenTK.Graphics.OpenGL.PolygonMode.Fill);
+            GL.Disable(EnableCap.CullFace);
 
             if (PlayerEntity.Main.LoadFlags.TestFlag(LoadFlags.Active) && CameraMode == CameraMode.Player)
             {
@@ -1427,34 +1428,29 @@ namespace MphRead
             GL.Clear(ClearBufferMask.ColorBufferBit);
             GL.Disable(EnableCap.DepthTest);
             GL.Enable(EnableCap.Blend);
+            GL.BindTexture(TextureTarget.Texture2D, _screenTexture);
 
-            if (!GameState.MenuPause || CameraMode != CameraMode.Player)
-            {
-                GL.BindTexture(TextureTarget.Texture2D, _screenTexture);
+            GL.Begin(PrimitiveType.TriangleStrip);
+            // top right
+            GL.TexCoord3(1f, 1f, 0f);
+            GL.Vertex3(1f, 1f, 0f);
+            // top left
+            GL.TexCoord3(0f, 1f, 0f);
+            GL.Vertex3(-1f, 1f, 0f);
+            // bottom right
+            GL.TexCoord3(1f, 0f, 0f);
+            GL.Vertex3(1f, -1f, 0f);
+            // bottom left
+            GL.TexCoord3(0f, 0f, 0f);
+            GL.Vertex3(-1f, -1f, 0f);
+            GL.End();
 
-                GL.Begin(PrimitiveType.TriangleStrip);
-                // top right
-                GL.TexCoord3(1f, 1f, 0f);
-                GL.Vertex3(1f, 1f, 0f);
-                // top left
-                GL.TexCoord3(0f, 1f, 0f);
-                GL.Vertex3(-1f, 1f, 0f);
-                // bottom right
-                GL.TexCoord3(1f, 0f, 0f);
-                GL.Vertex3(1f, -1f, 0f);
-                // bottom left
-                GL.TexCoord3(0f, 0f, 0f);
-                GL.Vertex3(-1f, -1f, 0f);
-                GL.End();
-
-                GL.BindTexture(TextureTarget.Texture2D, 0);
-            }
+            GL.BindTexture(TextureTarget.Texture2D, 0);
 
             if (PlayerEntity.Main.HudDisruptedState != 0 || PlayerEntity.Main.HudWhiteoutState != -1)
             {
                 GL.UseProgram(_rttShaderProgramId);
             }
-            GL.Disable(EnableCap.CullFace);
             GL.Uniform4(_shaderLocations.FadeColor, _fadeColor, _fadeColor, _fadeColor, 0);
             if (PlayerEntity.Main.LoadFlags.TestFlag(LoadFlags.Active) && CameraMode == CameraMode.Player)
             {
@@ -2735,6 +2731,11 @@ namespace MphRead
 
         private void GetDrawItems()
         {
+            if (GameState.MenuPause)
+            {
+                PlayerEntity.Main.GetPauseMapRenderItems();
+                return;
+            }
             if (_room != null)
             {
                 _room.GetDrawInfo();
@@ -2769,7 +2770,7 @@ namespace MphRead
                 }
             }
 
-            if (ProcessFrame && GameState.MatchState == MatchState.InProgress && !GameState.DialogPause && !GameState.MenuPause)
+            if (ProcessFrame && GameState.MatchState == MatchState.InProgress && !GameState.DialogPause)
             {
                 ProcessEffects();
             }

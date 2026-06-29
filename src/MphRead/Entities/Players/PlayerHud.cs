@@ -1222,7 +1222,6 @@ namespace MphRead.Entities
 
         public void GetPauseMapRenderItems()
         {
-            // skhere
             if (!_navMapModelEnabled)
             {
                 return;
@@ -1235,74 +1234,79 @@ namespace MphRead.Entities
                     break;
                 }
                 ModelInstance inst = _navMapModels[area];
-
-                Model model = inst.Model;
-                model.AnimateMaterials(inst.AnimInfo);
-                model.AnimateTextures(inst.AnimInfo);
-                model.ComputeNodeMatrices(index: 0);
-                model.AnimateNodes(index: 0, false, Matrix4.Identity, model.Scale, inst.AnimInfo);
-                model.UpdateMatrixStack();
-                _scene.UpdateMaterials(model, 0);
-
-                IReadOnlyList<Node> nodes = model.Nodes;
-                for (int j = 0; j < nodes.Count; j++)
-                {
-                    Node node = nodes[j];
-                    if (node.ParentIndex != 0)
-                    {
-                        continue;
-                    }
-                    bool isSelected = node == _navMapDrawNode;
-                    for (int k = 0; k < 2; k++)
-                    {
-                        if (k == 0 || !isSelected)
-                        {
-                            // note: the game defines a middle color (247, 140, 60) which goes unused
-                            Vector3 lightColor = isSelected
-                                ? new Vector3(247 / 255f, 153 / 255f, 52 / 255f)
-                                : new Vector3(247 / 255f, 123 / 255f, 22 / 255f);
-                            GetMapDrawItems(inst, nodes[node.ChildIndex], lightColor);
-                        }
-                        else
-                        {
-
-                        }
-                    }
-                }
+                UpdateTransforms(inst, Matrix4.Identity, 0);
+                GetMapDrawItems(inst);
             }
         }
 
-        private void GetMapDrawItems(ModelInstance inst, Node node, Vector3 lightColor, int polygonId = -1)
+        private void GetMapDrawItems(ModelInstance inst)
         {
-            if (polygonId == -1)
+            int polygonId = _scene.GetNextPolygonId();
+            GetItems(inst, inst.Model.Nodes[0], polygonId);
+
+            void GetItems(ModelInstance inst, Node node, int polygonId)
             {
-                polygonId = _scene.GetNextPolygonId();
-            }
-            Model model = inst.Model;
-            if (node.Enabled)
-            {
-                int start = node.MeshId / 2;
-                for (int k = 0; k < node.MeshCount; k++)
+                Model model = inst.Model;
+                if (node.Enabled)
                 {
-                    Mesh mesh = model.Meshes[start + k];
-                    if (!mesh.Visible)
+                    Node? roomParent = null;
+                    int parentIndex = node.ParentIndex;
+                    while (parentIndex > 0)
                     {
-                        continue;
+                        roomParent = model.Nodes[parentIndex];
+                        parentIndex = roomParent.ParentIndex;
                     }
-                    Material material = model.Materials[mesh.MaterialId];
-                    var lightInfo = new LightInfo(Vector3.UnitX, lightColor, Vector3.UnitX, Vector3.Zero);
-                    _scene.AddRenderItem(material, polygonId, 1, Vector3.Zero, lightInfo, Matrix4.Identity,
-                        node.Animation, mesh.ListId, model.NodeMatrixIds.Count, model.MatrixStackValues, null,
-                        null, SelectionType.None, node.BillboardMode, 1, null);
+                    bool isSelected = _navMapDrawNode != null && roomParent == _navMapDrawNode;
+                    int start = node.MeshId / 2;
+                    for (int k = 0; k < node.MeshCount; k++)
+                    {
+                        Mesh mesh = model.Meshes[start + k];
+                        if (!mesh.Visible)
+                        {
+                            continue;
+                        }
+                        Material material = model.Materials[mesh.MaterialId];
+                        material.Wireframe = 0;
+                        Vector3 emission = Vector3.Zero;
+                        Matrix4 texcoordMatrix = Matrix4.Identity;
+                        Vector4? color = null;
+                        SelectionType selectionType = SelectionType.None;
+                        int? bindingOverride = null;
+                        float alpha = isSelected ? 20 / 31f : 4 / 31f;
+                        Vector3 lightColor = isSelected
+                                ? new Vector3(247 / 255f, 153 / 255f, 52 / 255f)
+                                : new Vector3(247 / 255f, 123 / 255f, 22 / 255f);
+                        var lightInfo = new LightInfo(Vector3.Zero, lightColor, Vector3.Zero, Vector3.Zero);
+                        _scene.AddRenderItem(material, polygonId, alpha, emission, lightInfo, texcoordMatrix,
+                            node.Animation, mesh.ListId, model.NodeMatrixIds.Count, model.MatrixStackValues, color,
+                            PaletteOverride, selectionType, node.BillboardMode, 1, bindingOverride);
+                        emission = isSelected
+                                ? new Vector3(247 / 255f, 123 / 255f, 22 / 255f)
+                                : new Vector3(219 / 255f, 130 / 255f, 42 / 255f); // swapped red and blue
+                        lightInfo = new LightInfo(Vector3.Zero, Vector3.Zero, Vector3.Zero, Vector3.Zero);
+                        if (!isSelected)
+                        {
+                            _scene.AddRenderItem(material, polygonId, alpha, emission, lightInfo, texcoordMatrix,
+                                node.Animation, mesh.ListId, model.NodeMatrixIds.Count, model.MatrixStackValues, color,
+                                PaletteOverride, selectionType, node.BillboardMode, 1, bindingOverride);
+                        }
+                        else if (material.Name.Length > 0 && material.Name[0] != 'T')
+                        {
+                            material.Wireframe = 1;
+                            _scene.AddRenderItem(material, _scene.GetNextPolygonId(), 1, emission, lightInfo, texcoordMatrix,
+                                node.Animation, mesh.ListId, model.NodeMatrixIds.Count, model.MatrixStackValues, color,
+                                PaletteOverride, selectionType, node.BillboardMode, 1, bindingOverride);
+                        }
+                    }
+                    if (node.ChildIndex != -1)
+                    {
+                        GetItems(inst, model.Nodes[node.ChildIndex], polygonId);
+                    }
                 }
-                if (node.ChildIndex != -1)
+                if (node.NextIndex != -1)
                 {
-                    GetMapDrawItems(inst, model.Nodes[node.ChildIndex], lightColor, polygonId);
+                    GetItems(inst, model.Nodes[node.NextIndex], polygonId);
                 }
-            }
-            if (node.NextIndex != -1)
-            {
-                GetMapDrawItems(inst, model.Nodes[node.NextIndex], lightColor, polygonId);
             }
         }
 
