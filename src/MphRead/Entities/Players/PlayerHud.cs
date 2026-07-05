@@ -584,7 +584,6 @@ namespace MphRead.Entities
             _prevScrollingChars = 0;
         }
 
-        // todo-pause: call this when ready
         public void SetUpMenuPauseMapNav()
         {
             _navMapDrawNode = null;
@@ -1468,6 +1467,7 @@ namespace MphRead.Entities
                 Model model = inst.Model;
                 if (node.Enabled)
                 {
+                    // todo-pause: only draw the node if the room/connector has been visited
                     Node? roomParent = null;
                     int parentIndex = node.ParentIndex;
                     while (parentIndex > 0)
