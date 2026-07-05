@@ -636,7 +636,7 @@ namespace MphRead.Entities
                             centerNode = roomNode;
                         }
                         UpdateMapModelTransforms(model, area);
-                        SetNavMapDrawNode(roomNode, centerNode, _navMapNodeOffsets[area]);
+                        SetNavMapDrawNode(roomNode, centerNode);
                         _navMapModelEnabled = true;
                         _navDrawVecA = _navDrawVec1;
                     }
@@ -674,12 +674,11 @@ namespace MphRead.Entities
         private Vector3 _navDrawVecB = Vector3.Zero; // look at pos (vec2 + vecC to add pan offset)
         private Vector3 _navDrawVecC = Vector3.Zero; // panning offset
 
-        private void SetNavMapDrawNode(Node roomNode, Node centerNode, Vector3 offset)
+        private void SetNavMapDrawNode(Node roomNode, Node centerNode)
         {
             _navMapDrawNode = roomNode;
-            _navDrawVec1 = roomNode.Animation.ExtractTranslation() + offset;
-            _navDrawVec2 = centerNode.Animation.ExtractTranslation() + offset;
-            // todo-pause: when this updates (pan to another room), the text scroll timer needs to be reset -- figure out process vs. draw and this vs. GameState
+            _navDrawVec1 = roomNode.Animation.ExtractTranslation();
+            _navDrawVec2 = centerNode.Animation.ExtractTranslation();
         }
 
         public void EndMenuPauseHud()
@@ -1342,7 +1341,6 @@ namespace MphRead.Entities
                 _navPanTimer = 0;
                 float minDist = 512 * 512;
                 int area = _scene.AreaId & ~1;
-                Vector3 newNodeOffset = Vector3.Zero;
                 Node? newRoomNode = null;
                 Node? newCenterNode = null;
                 for (int i = 0; i < 2; i++, area++)
@@ -1371,7 +1369,6 @@ namespace MphRead.Entities
                                     float dist = distX * distX + distY * distY;
                                     if (screenPos.X > 0 && screenPos.X < 1 && screenPos.Y > 0 && screenPos.Y < 1 && dist < minDist)
                                     {
-                                        newNodeOffset = _navMapNodeOffsets[area];
                                         newRoomNode = roomNode;
                                         newCenterNode = node;
                                         minDist = dist;
@@ -1385,7 +1382,7 @@ namespace MphRead.Entities
                 if (newRoomNode != null && newRoomNode != _navMapDrawNode)
                 {
                     Debug.Assert(newCenterNode != null);
-                    SetNavMapDrawNode(newRoomNode, newCenterNode, newNodeOffset);
+                    SetNavMapDrawNode(newRoomNode, newCenterNode);
                     _navDrawVecC = _navDrawVecB - _navDrawVec2;
                     GameState.NavTextTimer = 0;
                     _prevScrollingChars = 0;
