@@ -8,6 +8,7 @@ using MphRead.Formats;
 using MphRead.Hud;
 using MphRead.Text;
 using OpenTK.Mathematics;
+using OpenTK.Windowing.GraphicsLibraryFramework;
 
 namespace MphRead.Entities
 {
@@ -663,11 +664,12 @@ namespace MphRead.Entities
         private float _navDrawZoom = 0;
         private float _navDrawRotX = 0;
         private float _navDrawRotY = 0;
-        private Vector3 _navDrawVec1 = Vector3.Zero;
-        private Vector3 _navDrawVec2 = Vector3.Zero;
-        private Vector3 _navDrawVecA = Vector3.Zero; // todo-pause: names
-        private Vector3 _navDrawVecB = Vector3.Zero;
-        private Vector3 _navDrawVecC = Vector3.Zero;
+        // todo-pause: names
+        private Vector3 _navDrawVec1 = Vector3.Zero; // room node pos
+        private Vector3 _navDrawVec2 = Vector3.Zero; // center node pos
+        private Vector3 _navDrawVecA = Vector3.Zero; // (used for drawing doors, doesn't change after the mpa is opened?)
+        private Vector3 _navDrawVecB = Vector3.Zero; // look at pos (vec2 + vecC to add pan offset)
+        private Vector3 _navDrawVecC = Vector3.Zero; // panning offset
 
         private void SetNavMapDrawNode(Node roomNode, Node centerNode, Vector3 offset)
         {
@@ -1258,6 +1260,44 @@ namespace MphRead.Entities
                     }
                 }
             }
+        }
+
+        public void ProcessPauseMenuInput()
+        {
+            // todo: FPS stuff
+            if (Controls.AimLeft.IsDown)
+            {
+                _navDrawRotX += 2.8125f;
+            }
+            else if (Controls.AimRight.IsDown)
+            {
+                _navDrawRotX -= 2.8125f;
+            }
+            else if (Input.MouseState?.IsButtonDown(MouseButton.Left) == true && Input.MouseDeltaX != 0)
+            {
+                _navDrawRotX += -Input.MouseDeltaX / 8f * 2.8125f;
+            }
+            if (_navDrawRotX >= 360)
+            {
+                _navDrawRotX -= 360;
+            }
+            else if (_navDrawRotX <= -360)
+            {
+                _navDrawRotX += 360;
+            }
+            if (Controls.AimUp.IsDown)
+            {
+                _navDrawRotY -= 2.8125f;
+            }
+            else if (Controls.AimDown.IsDown)
+            {
+                _navDrawRotY += 2.8125f;
+            }
+            else if (Input.MouseState?.IsButtonDown(MouseButton.Left) == true && Input.MouseDeltaY != 0)
+            {
+                _navDrawRotY += Input.MouseDeltaY / 8f * 2.8125f;
+            }
+            _navDrawRotY = Math.Clamp(_navDrawRotY, -71.41113f, 71.41113f);
         }
 
         public (Matrix4, Matrix4) GetPauseMapMatrices()

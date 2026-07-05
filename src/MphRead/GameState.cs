@@ -151,7 +151,10 @@ namespace MphRead
             {
                 _navTextTimer += scene.FrameTime;
             }
-            // todo-pause: check pressed UI buttons
+            if (scene.CameraMode == CameraMode.Player)
+            {
+                PlayerEntity.Main.ProcessPauseMenuInput();
+            }
         }
 
         public static void UnpauseMenu()
