@@ -1265,37 +1265,34 @@ namespace MphRead.Entities
                         {
                             continue;
                         }
+                        // todo-pause: play with these settings some more to make it darker orange like in-game
                         Material material = model.Materials[mesh.MaterialId];
                         material.Wireframe = 0;
-                        Vector3 emission = Vector3.Zero;
-                        Matrix4 texcoordMatrix = Matrix4.Identity;
-                        Vector4? color = null;
-                        SelectionType selectionType = SelectionType.None;
-                        int? bindingOverride = null;
                         float alpha = isSelected ? 20 / 31f : 4 / 31f;
+                        Vector3 emission = Vector3.Zero;
                         Vector3 lightColor = isSelected
                                 ? new Vector3(247 / 255f, 153 / 255f, 52 / 255f)
                                 : new Vector3(247 / 255f, 123 / 255f, 22 / 255f);
                         var lightInfo = new LightInfo(Vector3.Zero, lightColor, Vector3.Zero, Vector3.Zero);
-                        _scene.AddRenderItem(material, polygonId, alpha, emission, lightInfo, texcoordMatrix,
-                            node.Animation, mesh.ListId, model.NodeMatrixIds.Count, model.MatrixStackValues, color,
-                            PaletteOverride, selectionType, node.BillboardMode, 1, bindingOverride);
+                        _scene.AddRenderItem(material, polygonId, alpha, emission, lightInfo, Matrix4.Identity,
+                            node.Animation, mesh.ListId, model.NodeMatrixIds.Count, model.MatrixStackValues, null,
+                            PaletteOverride, SelectionType.None, node.BillboardMode, 1, null);
                         emission = isSelected
                                 ? new Vector3(247 / 255f, 123 / 255f, 22 / 255f)
                                 : new Vector3(219 / 255f, 130 / 255f, 42 / 255f); // swapped red and blue
                         lightInfo = new LightInfo(Vector3.Zero, Vector3.Zero, Vector3.Zero, Vector3.Zero);
                         if (!isSelected)
                         {
-                            _scene.AddRenderItem(material, polygonId, alpha, emission, lightInfo, texcoordMatrix,
-                                node.Animation, mesh.ListId, model.NodeMatrixIds.Count, model.MatrixStackValues, color,
-                                PaletteOverride, selectionType, node.BillboardMode, 1, bindingOverride);
+                            _scene.AddRenderItem(material, polygonId, alpha, emission, lightInfo, Matrix4.Identity,
+                                node.Animation, mesh.ListId, model.NodeMatrixIds.Count, model.MatrixStackValues, null,
+                                PaletteOverride, SelectionType.None, node.BillboardMode, 1, null);
                         }
                         else if (material.Name.Length > 0 && material.Name[0] != 'T')
                         {
                             material.Wireframe = 1;
-                            _scene.AddRenderItem(material, _scene.GetNextPolygonId(), 1, emission, lightInfo, texcoordMatrix,
-                                node.Animation, mesh.ListId, model.NodeMatrixIds.Count, model.MatrixStackValues, color,
-                                PaletteOverride, selectionType, node.BillboardMode, 1, bindingOverride);
+                            _scene.AddRenderItem(material, _scene.GetNextPolygonId(), 1, emission, lightInfo, Matrix4.Identity,
+                                node.Animation, mesh.ListId, model.NodeMatrixIds.Count, model.MatrixStackValues, null,
+                                PaletteOverride, SelectionType.None, node.BillboardMode, 1, null);
                         }
                     }
                     if (node.ChildIndex != -1)
