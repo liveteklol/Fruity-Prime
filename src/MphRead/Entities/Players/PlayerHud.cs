@@ -5,7 +5,6 @@ using System.Diagnostics;
 using System.Linq;
 using MphRead.Entities.Enemies;
 using MphRead.Formats;
-using MphRead.Formats.Culling;
 using MphRead.Hud;
 using MphRead.Text;
 using OpenTK.Mathematics;
@@ -589,6 +588,9 @@ namespace MphRead.Entities
         {
             _navMapDrawNode = null;
             _navMapModelEnabled = false;
+            _navDrawZoom = 0.75f;
+            _navDrawRotX = MathHelper.RadiansToDegrees(MathF.Atan2(-_facingVector.X, -_facingVector.Z));
+            _navDrawRotY = 28.125f;
             _navDrawVec1 = Vector3.Zero;
             _navDrawVec2 = Vector3.Zero;
             _navDrawVecA = Vector3.Zero;
@@ -658,6 +660,9 @@ namespace MphRead.Entities
 
         private bool _navMapModelEnabled = false;
         private Node? _navMapDrawNode = null;
+        private float _navDrawZoom = 0;
+        private float _navDrawRotX = 0;
+        private float _navDrawRotY = 0;
         private Vector3 _navDrawVec1 = Vector3.Zero;
         private Vector3 _navDrawVec2 = Vector3.Zero;
         private Vector3 _navDrawVecA = Vector3.Zero; // todo-pause: names
@@ -667,8 +672,8 @@ namespace MphRead.Entities
         private void SetNavMapDrawNode(Node roomNode, Node centerNode, Vector3 offset)
         {
             _navMapDrawNode = roomNode;
-            _navDrawVec1 = roomNode.Position + offset;
-            _navDrawVec2 = centerNode.Position + offset;
+            _navDrawVec1 = roomNode.Animation.ExtractTranslation() + offset;
+            _navDrawVec2 = centerNode.Animation.ExtractTranslation() + offset;
             // todo-pause: when this updates (pan to another room), the text scroll timer needs to be reset -- figure out process vs. draw and this vs. GameState
         }
 
@@ -689,11 +694,6 @@ namespace MphRead.Entities
             }
             _navMapDrawNode = null;
             _navMapModelEnabled = false;
-            _navDrawVec1 = Vector3.Zero;
-            _navDrawVec2 = Vector3.Zero;
-            _navDrawVecA = Vector3.Zero;
-            _navDrawVecB = Vector3.Zero;
-            _navDrawVecC = Vector3.Zero;
         }
 
         public void UpdateHud()
@@ -1260,6 +1260,22 @@ namespace MphRead.Entities
             }
         }
 
+        public (Matrix4, Matrix4) GetPauseMapMatrices()
+        {
+            // the factor of 32 is the scale of the map models
+            // the factor of 16 used in the ortho mtx and target/pos was chosen empirically to match the game
+            Matrix4 orthoMtx = Matrix4.CreateOrthographic(256 / 256f * 16 * 32 * _navDrawZoom, 192 / 256f * 16 * 32 * _navDrawZoom, -400, 400);
+            int area = _scene.AreaId & ~1;
+            Vector3 offset = _navMapNodeOffsets[area];
+            _navDrawVecB = _navDrawVec2 + _navDrawVecC;
+            Vector3 cameraTarget = _navDrawVecB.AddY(3.75f);
+            (float sinX, float cosX) = MathF.SinCos(MathHelper.DegreesToRadians(_navDrawRotX));
+            (float sinY, float cosY) = MathF.SinCos(MathHelper.DegreesToRadians(_navDrawRotY));
+            Vector3 cameraPos = cameraTarget + new Vector3(sinX * cosY * 90, sinY * 90, cosX * cosY * 90);
+            Matrix4 viewMtx = Matrix4.LookAt(cameraPos, cameraTarget, Vector3.UnitY);
+            return (viewMtx, orthoMtx);
+        }
+
         public void GetPauseMapRenderItems()
         {
             if (!_navMapModelEnabled)
@@ -1274,7 +1290,7 @@ namespace MphRead.Entities
                     break;
                 }
                 ModelInstance inst = _navMapModels[area];
-                UpdateTransforms(inst, Matrix4.Identity, 0);
+                UpdateTransforms(inst, Matrix4.CreateScale(32), 0);
                 GetMapDrawItems(inst);
             }
         }
@@ -1309,6 +1325,7 @@ namespace MphRead.Entities
                         // a wireframe, for non-selected rooms. not really sure if we'll bother recreating that at the moment.
                         Material material = model.Materials[mesh.MaterialId];
                         material.Wireframe = 0;
+                        material.Lighting = 1;
                         float alpha = isSelected ? 20 / 31f : 4 / 31f;
                         Vector3 emission = Vector3.Zero;
                         Vector3 lightColor = isSelected
@@ -1317,20 +1334,26 @@ namespace MphRead.Entities
                         var lightInfo = new LightInfo(new Vector3(0, 0, -0), lightColor, Vector3.Zero, lightColor);
                         _scene.AddRenderItem(material, polygonId, alpha, emission, lightInfo, Matrix4.Identity,
                             node.Animation, mesh.ListId, model.NodeMatrixIds.Count, model.MatrixStackValues, null,
-                            PaletteOverride, SelectionType.None, node.BillboardMode, 1, null);
+                            null, SelectionType.None, node.BillboardMode);
                         if (!isSelected)
                         {
                             _scene.AddRenderItem(material, polygonId, alpha, emission, lightInfo, Matrix4.Identity,
                                 node.Animation, mesh.ListId, model.NodeMatrixIds.Count, model.MatrixStackValues, null,
-                                PaletteOverride, SelectionType.None, node.BillboardMode, 1, null);
+                                null, SelectionType.None, node.BillboardMode);
                         }
                         else if (material.Name.Length > 0 && material.Name[0] != 'T')
                         {
+                            // the game gets the desired color using emission color only with wireframe + no lighting
+                            // we can't use emission the same way if lighting is turned off, so we set the same color as diffuse
                             material.Wireframe = 1;
+                            material.Lighting = 0;
                             emission = new Vector3(247, 123, 22) / 255f;
+                            Vector3 prevDiffuse = material.CurrentDiffuse;
+                            material.CurrentDiffuse = emission;
                             _scene.AddRenderItem(material, polygonId, 1, emission, lightInfo, Matrix4.Identity,
                                 node.Animation, mesh.ListId, model.NodeMatrixIds.Count, model.MatrixStackValues, null,
-                                PaletteOverride, SelectionType.None, node.BillboardMode, 1, null);
+                                null, SelectionType.None, node.BillboardMode);
+                            material.CurrentDiffuse = prevDiffuse;
                         }
                     }
                     if (node.ChildIndex != -1)

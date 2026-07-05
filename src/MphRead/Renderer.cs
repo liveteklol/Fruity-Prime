@@ -1315,6 +1315,7 @@ namespace MphRead
             GL.ClearStencil(0);
 
             UpdateUniforms();
+            SetPauseMenuUniforms();
             if (_exiting)
             {
                 return false;
@@ -3377,6 +3378,16 @@ namespace MphRead
                 GL.TexCoord3(texcoord3);
                 GL.Vertex3(vertex3);
                 GL.End();
+            }
+        }
+
+        private void SetPauseMenuUniforms()
+        {
+            if (GameState.MenuPause && _cameraMode == CameraMode.Player)
+            {
+                (Matrix4 viewMtx, Matrix4 orthoMtx) = PlayerEntity.Main.GetPauseMapMatrices();
+                GL.UniformMatrix4(_shaderLocations.ViewMatrix, transpose: false, ref viewMtx);
+                GL.UniformMatrix4(_shaderLocations.ProjectionMatrix, transpose: false, ref orthoMtx);
             }
         }
 
