@@ -1310,7 +1310,7 @@ namespace MphRead.Entities
                 _navDrawRotY += Input.MouseDeltaY / 8f * 2.8125f;
             }
             _navDrawRotY = Math.Clamp(_navDrawRotY, -71.41113f, 71.41113f);
-            (Matrix4 viewMtx, _) = GetPauseMapMatrices();
+            (Matrix4 viewMtx, Matrix4 orthoMtx) = GetPauseMapMatrices();
             float panDirX = 0;
             if (Controls.MoveLeft.IsDown)
             {
@@ -1340,10 +1340,59 @@ namespace MphRead.Entities
             if (panDirX != 0 || panDirY != 0)
             {
                 _navPanTimer = 0;
+                float minDist = 512 * 512;
+                int area = _scene.AreaId & ~1;
+                Vector3 newNodeOffset = Vector3.Zero;
+                Node? newRoomNode = null;
+                Node? newCenterNode = null;
+                for (int i = 0; i < 2; i++, area++)
+                {
+                    if (area >= 0 && area < _navMapModels.Length)
+                    {
+                        ModelInstance model = _navMapModels[area];
+                        for (int j = 0; j < model.Model.Nodes.Count; j++)
+                        {
+                            // todo-pause: only check the following if the room/connector has been visited
+                            Node roomNode = model.Model.Nodes[j];
+                            if (roomNode.ParentIndex != 0)
+                            {
+                                continue;
+                            }
+                            for (int k = roomNode.ChildIndex; k != -1;)
+                            {
+                                Node node = model.Model.Nodes[k];
+                                Vector3 nodePos = node.Animation.Row3.Xyz;
+                                if (node.Name.StartsWith("cent") && Matrix.ProjectPosition(nodePos, viewMtx, orthoMtx, out Vector2 distPos) > 0)
+                                {
+                                    var screenPos = new Vector2((distPos.X + 1) / 2, (1 - distPos.Y) / 2);
+                                    // undo the coordinate transform so we get percentages from center
+                                    float distX = distPos.X * 2 - 1;
+                                    float distY = 1 - distPos.Y * 2;
+                                    float dist = distX * distX + distY * distY;
+                                    if (screenPos.X > 0 && screenPos.X < 1 && screenPos.Y > 0 && screenPos.Y < 1 && dist < minDist)
+                                    {
+                                        newNodeOffset = _navMapNodeOffsets[area];
+                                        newRoomNode = roomNode;
+                                        newCenterNode = node;
+                                        minDist = dist;
+                                    }
+                                }
+                                k = node.NextIndex;
+                            }
+                        }
+                    }
+                }
+                if (newRoomNode != null && newRoomNode != _navMapDrawNode)
+                {
+                    Debug.Assert(newCenterNode != null);
+                    SetNavMapDrawNode(newRoomNode, newCenterNode, newNodeOffset);
+                    _navDrawVecC = _navDrawVecB - _navDrawVec2;
+                    GameState.NavTextTimer = 0;
+                    _prevScrollingChars = 0;
+                }
             }
             else if (_navDrawVecC != Vector3.Zero)
             {
-                // todo-pause: drift/reset
                 if (_navPanTimer < 16 * 30)
                 {
                     _navPanTimer += _scene.FrameTime;
@@ -1375,7 +1424,7 @@ namespace MphRead.Entities
 
         public (Matrix4, Matrix4) GetPauseMapMatrices()
         {
-            Matrix4 orthoMtx = Matrix4.CreateOrthographic(256 * _navDrawZoom, 192 / 256f * 256 * _navDrawZoom, -400, 800);
+            Matrix4 orthoMtx = Matrix4.CreateOrthographic(256 * _navDrawZoom, 192 / 256f * 256 * _navDrawZoom, -400, 400);
             _navDrawVecB = _navDrawVec2 + _navDrawVecC;
             Vector3 cameraTarget = _navDrawVecB.AddY(3.75f);
             (float sinX, float cosX) = MathF.SinCos(MathHelper.DegreesToRadians(_navDrawRotX));

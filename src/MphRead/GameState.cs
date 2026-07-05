@@ -111,7 +111,7 @@ namespace MphRead
         private static bool _navLoading = false;
 
         public static int DrawPauseState => _drawPauseState;
-        public static float NavTextTimer => _navTextTimer;
+        public static float NavTextTimer { get => _navTextTimer; set => _navTextTimer = value; } // todo-pause: just put all the processing code in the player
         public static bool NavLoading => _navLoading;
 
         public static void PauseMenu()
