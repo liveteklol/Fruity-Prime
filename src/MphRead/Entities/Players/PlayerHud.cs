@@ -1343,9 +1343,7 @@ namespace MphRead.Entities
 
         public (Matrix4, Matrix4) GetPauseMapMatrices()
         {
-            // the factor of 32 is the scale of the map models --> 32 * 16 = 512
-            // the factor of 16 used in the ortho mtx and target/pos was chosen empirically to match the game
-            Matrix4 orthoMtx = Matrix4.CreateOrthographic(512 * _navDrawZoom, 192 / 256f * 512 * _navDrawZoom, -400, 800); // todo-pause: fix clip dist
+            Matrix4 orthoMtx = Matrix4.CreateOrthographic(256 * _navDrawZoom, 192 / 256f * 256 * _navDrawZoom, -400, 800);
             _navDrawVecB = _navDrawVec2 + _navDrawVecC;
             Vector3 cameraTarget = _navDrawVecB.AddY(3.75f);
             (float sinX, float cosX) = MathF.SinCos(MathHelper.DegreesToRadians(_navDrawRotX));
@@ -1357,8 +1355,8 @@ namespace MphRead.Entities
 
         private void UpdateMapModelTransforms(ModelInstance inst, int area)
         {
-            Matrix4 transform = Matrix4.CreateScale(32);
-            Vector3 offset = _navMapNodeOffsets[area]; // todo-pause: CA 2 is not positioned correctly
+            Matrix4 transform = Matrix4.CreateScale(inst.Model.Scale.X);
+            Vector3 offset = _navMapNodeOffsets[area];
             transform.Row3.Xyz += offset;
             UpdateTransforms(inst, transform, 0);
         }
