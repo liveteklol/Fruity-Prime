@@ -1265,22 +1265,19 @@ namespace MphRead.Entities
                         {
                             continue;
                         }
-                        // todo-pause: play with these settings some more to make it darker orange like in-game
+                        // in-game, the overlap between walls and floors causes the outline of the floor to be lightened, like
+                        // a wireframe, for non-selected rooms. not really sure if we'll bother recreating that at the moment.
                         Material material = model.Materials[mesh.MaterialId];
                         material.Wireframe = 0;
                         float alpha = isSelected ? 20 / 31f : 4 / 31f;
                         Vector3 emission = Vector3.Zero;
                         Vector3 lightColor = isSelected
-                                ? new Vector3(247 / 255f, 153 / 255f, 52 / 255f)
-                                : new Vector3(247 / 255f, 123 / 255f, 22 / 255f);
-                        var lightInfo = new LightInfo(Vector3.Zero, lightColor, Vector3.Zero, Vector3.Zero);
+                                ? new Vector3(247, 153, 52) / 255f
+                                : new Vector3(247, 123, 22) / 255f;
+                        var lightInfo = new LightInfo(new Vector3(0, 0, -0), lightColor, Vector3.Zero, lightColor);
                         _scene.AddRenderItem(material, polygonId, alpha, emission, lightInfo, Matrix4.Identity,
                             node.Animation, mesh.ListId, model.NodeMatrixIds.Count, model.MatrixStackValues, null,
                             PaletteOverride, SelectionType.None, node.BillboardMode, 1, null);
-                        emission = isSelected
-                                ? new Vector3(247 / 255f, 123 / 255f, 22 / 255f)
-                                : new Vector3(219 / 255f, 130 / 255f, 42 / 255f); // swapped red and blue
-                        lightInfo = new LightInfo(Vector3.Zero, Vector3.Zero, Vector3.Zero, Vector3.Zero);
                         if (!isSelected)
                         {
                             _scene.AddRenderItem(material, polygonId, alpha, emission, lightInfo, Matrix4.Identity,
@@ -1290,7 +1287,8 @@ namespace MphRead.Entities
                         else if (material.Name.Length > 0 && material.Name[0] != 'T')
                         {
                             material.Wireframe = 1;
-                            _scene.AddRenderItem(material, _scene.GetNextPolygonId(), 1, emission, lightInfo, Matrix4.Identity,
+                            emission = new Vector3(247, 123, 22) / 255f;
+                            _scene.AddRenderItem(material, polygonId, 1, emission, lightInfo, Matrix4.Identity,
                                 node.Animation, mesh.ListId, model.NodeMatrixIds.Count, model.MatrixStackValues, null,
                                 PaletteOverride, SelectionType.None, node.BillboardMode, 1, null);
                         }
