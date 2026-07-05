@@ -592,6 +592,7 @@ namespace MphRead.Entities
             _navDrawZoom = 0.75f;
             _navDrawRotX = MathHelper.RadiansToDegrees(MathF.Atan2(-_facingVector.X, -_facingVector.Z));
             _navDrawRotY = 28.125f;
+            _navPanTimer = 0;
             _navDrawVec1 = Vector3.Zero;
             _navDrawVec2 = Vector3.Zero;
             _navDrawVecA = Vector3.Zero;
@@ -665,6 +666,7 @@ namespace MphRead.Entities
         private float _navDrawZoom = 0;
         private float _navDrawRotX = 0;
         private float _navDrawRotY = 0;
+        private float _navPanTimer = 0;
         // todo-pause: names
         private Vector3 _navDrawVec1 = Vector3.Zero; // room node pos
         private Vector3 _navDrawVec2 = Vector3.Zero; // center node pos
@@ -1335,9 +1337,39 @@ namespace MphRead.Entities
             {
                 _navDrawVecC += viewMtx.Column1.Xyz * (4.6f / 2) * panDirY;
             }
-            if (panDirX == 0 && panDirY == 0)
+            if (panDirX != 0 || panDirY != 0)
+            {
+                _navPanTimer = 0;
+            }
+            else if (_navDrawVecC != Vector3.Zero)
             {
                 // todo-pause: drift/reset
+                if (_navPanTimer < 16 * 30)
+                {
+                    _navPanTimer += _scene.FrameTime;
+                    if (_navPanTimer > 16 * 30)
+                    {
+                        _navPanTimer = 16 * 30;
+                    }
+                }
+                float frames = _navPanTimer * 30f;
+                float factor = 1 - 0.1f * (frames / 16); // max decay of 10% after 16 frames in-game
+                float x = ExponentialDecay(factor, _navDrawVecC.X);
+                float y = ExponentialDecay(factor, _navDrawVecC.Y);
+                float z = ExponentialDecay(factor, _navDrawVecC.Z);
+                if (MathF.Abs(x) < 1 / 4096f)
+                {
+                    x = 0;
+                }
+                if (MathF.Abs(y) < 1 / 4096f)
+                {
+                    y = 0;
+                }
+                if (MathF.Abs(z) < 1 / 4096f)
+                {
+                    z = 0;
+                }
+                _navDrawVecC = new Vector3(x, y, z);
             }
         }
 
