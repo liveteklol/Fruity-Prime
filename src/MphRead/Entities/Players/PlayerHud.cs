@@ -594,9 +594,9 @@ namespace MphRead.Entities
             _navDrawVecA = Vector3.Zero;
             _navDrawVecB = Vector3.Zero;
             _navDrawVecC = Vector3.Zero;
-            if (PlayerEntity.Main.NodeRef != NodeRef.None && _scene.Room != null)
+            string? roomName = PlayerEntity.Main.NodeRef.RoomName;
+            if (roomName != null)
             {
-                RoomMetadata room = Metadata.GetRoomById(_scene.Room.RoomId)!;
                 int area = _scene.AreaId & ~1;
                 for (int i = 0; i < 2; i++, area++)
                 {
@@ -607,7 +607,7 @@ namespace MphRead.Entities
                         for (int j = 0; j < model.Model.Nodes.Count; j++)
                         {
                             Node node = model.Model.Nodes[j];
-                            if (node.ParentIndex == 0 && node.Name.Equals(room.Name, StringComparison.InvariantCultureIgnoreCase))
+                            if (node.ParentIndex == 0 && node.Name.Equals(roomName, StringComparison.InvariantCultureIgnoreCase))
                             {
                                 roomNode = node;
                                 break;
@@ -1215,7 +1215,47 @@ namespace MphRead.Entities
                 }
                 else
                 {
-                    // skhere: draw location name
+                    ReadOnlySpan<char> roomName = ReadOnlySpan<char>.Empty;
+                    StringTableEntry? unknownEntry = Strings.GetEntry('R', 999, StringTables.LocationNames); // unknown location
+                    if (unknownEntry != null)
+                    {
+                        roomName = unknownEntry.String1.AsSpan();
+                    }
+                    if (_navMapDrawNode != null)
+                    {
+                        for (int i = 1; i <= 35; i++)
+                        {
+                            int id = _scene.AreaId / 2 * 100 + i;
+                            StringTableEntry? roomEntry = Strings.GetEntry('R', id, StringTables.LocationNames); // room_name\display_name
+                            if (roomEntry == null)
+                            {
+                                break;
+                            }
+                            // note: display name is empty for connectors, while the room name is e.g. Con01, matching the name found in
+                            // the connector door's entity data used for portals, rather than matching the usual room key (e.g. UNIT2_CZ).
+                            if (MemoryExtensions.CompareTo(roomEntry.String1, _navMapDrawNode.Name, StringComparison.OrdinalIgnoreCase) == 0)
+                            {
+                                roomName = roomEntry.String2;
+                                break;
+                            }
+                        }
+                    }
+                    if (roomName.Length > 0)
+                    {
+                        Debug.Assert(roomName.Length <= 200);
+                        Span<char> buffer = stackalloc char[roomName.Length + 10];
+                        _textSpacingY = 9;
+                        int lines = WrapText(roomName, 175, buffer);
+                        int characters = (int)(GameState.NavTextTimer / (1 / 30f));
+                        int y = 173 - ((8 * lines) >> 1);
+                        DrawText2D(128, y, Align.PadCenter, 0, buffer, maxLength: characters);
+                        if (characters > 0 && characters != _prevScrollingChars && characters <= roomName.Length)
+                        {
+                            _soundSource.PlayFreeSfx(SfxId.LETTER_BLIP);
+                            _prevScrollingChars = characters;
+                        }
+                        _textSpacingY = 0;
+                    }
                 }
             }
         }
@@ -3286,6 +3326,11 @@ namespace MphRead.Entities
         }
 
         private int WrapText(string text, int maxWidth, Span<char> dest, int maxTiles = 0)
+        {
+            return WrapText(text.AsSpan(), maxWidth, dest, maxTiles);
+        }
+
+        private int WrapText(ReadOnlySpan<char> text, int maxWidth, Span<char> dest, int maxTiles = 0)
         {
             int lines = 1;
             if (maxWidth <= 0)
