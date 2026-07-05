@@ -1395,7 +1395,6 @@ namespace MphRead
             GL.Disable(EnableCap.AlphaTest);
             GL.Disable(EnableCap.StencilTest);
             GL.PolygonMode(TriangleFace.FrontAndBack, OpenTK.Graphics.OpenGL.PolygonMode.Fill);
-            GL.Disable(EnableCap.CullFace);
 
             if (PlayerEntity.Main.LoadFlags.TestFlag(LoadFlags.Active) && CameraMode == CameraMode.Player)
             {
@@ -1404,6 +1403,7 @@ namespace MphRead
                 UnsetHudLayerUniforms();
             }
 
+            GL.Disable(EnableCap.CullFace);
             GL.UseProgram(_rttShaderProgramId);
             GL.Uniform1(_shaderLocations.LayerAlpha, 1f);
             GL.Uniform4(_shaderLocations.FadeColor, Vector4.Zero);
