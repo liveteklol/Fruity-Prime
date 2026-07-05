@@ -2074,6 +2074,9 @@ namespace MphRead.Entities
             }
         }
 
+        private static bool _isScrollingUp = false;
+        private static bool _isScrollingDown = false;
+
         public static void ProcessInput(KeyboardState keyboardState, MouseState mouseState, bool noPlayerInput)
         {
             KeyboardState keyboardSnap = keyboardState.GetSnapshot();
@@ -2100,6 +2103,19 @@ namespace MphRead.Entities
                 player.Input.PrevMouseState = prevMouseSnap;
                 player.Input.KeyboardState = keyboardSnap;
                 player.Input.MouseState = mouseSnap;
+                _isScrollingUp = false;
+                _isScrollingDown = false;
+                // todo?: deal with overflow or whatever
+                float curScrollY = mouseSnap.Scroll.Y;
+                float prevScrollY = prevMouseSnap?.Scroll.Y ?? 0;
+                if (curScrollY > prevScrollY)
+                {
+                    _isScrollingUp = true;
+                }
+                else if (curScrollY < prevScrollY)
+                {
+                    _isScrollingDown = true;
+                }
                 if (player.LoadFlags.TestFlag(LoadFlags.Active))
                 {
                     for (int j = 0; j < player.Controls.All.Length; j++)
@@ -2151,11 +2167,8 @@ namespace MphRead.Entities
                         }
                         else
                         {
-                            // todo?: deal with overflow or whatever
-                            float curScrollY = mouseSnap.Scroll.Y;
-                            float prevScrollY = prevMouseSnap?.Scroll.Y ?? 0;
-                            control.IsDown = control.Type == ButtonType.ScrollUp && curScrollY > prevScrollY
-                                || control.Type == ButtonType.ScrollDown && curScrollY < prevScrollY;
+                            control.IsDown = control.Type == ButtonType.ScrollUp && _isScrollingUp
+                                || control.Type == ButtonType.ScrollDown && _isScrollingDown;
                             control.IsPressed = control.IsDown;
                             control.IsReleased = false;
                             if (control.IsDown)
@@ -2202,11 +2215,8 @@ namespace MphRead.Entities
                     }
                     else
                     {
-                        // todo?: deal with overflow or whatever
-                        float curScrollY = mouseSnap.Scroll.Y;
-                        float prevScrollY = prevMouseSnap?.Scroll.Y ?? 0;
-                        bool isDown = skipControl.Type == ButtonType.ScrollUp && curScrollY > prevScrollY
-                            || skipControl.Type == ButtonType.ScrollDown && curScrollY < prevScrollY;
+                        bool isDown = skipControl.Type == ButtonType.ScrollUp && _isScrollingUp
+                            || skipControl.Type == ButtonType.ScrollDown && _isScrollingDown;
                         skipMovie = isDown;
                     }
                     if (skipMovie)

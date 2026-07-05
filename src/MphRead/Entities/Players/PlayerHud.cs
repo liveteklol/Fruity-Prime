@@ -634,6 +634,7 @@ namespace MphRead.Entities
                         {
                             centerNode = roomNode;
                         }
+                        UpdateMapModelTransforms(model, area);
                         SetNavMapDrawNode(roomNode, centerNode, _navMapNodeOffsets[area]);
                         _navMapModelEnabled = true;
                         _navDrawVecA = _navDrawVec1;
@@ -1265,13 +1266,22 @@ namespace MphRead.Entities
         public void ProcessPauseMenuInput()
         {
             // todo: FPS stuff
+            if (_isScrollingUp)
+            {
+                _navDrawZoom -= 0.0625f;
+            }
+            else if (_isScrollingDown)
+            {
+                _navDrawZoom += 0.0625f;
+            }
+            _navDrawZoom = Math.Clamp(_navDrawZoom, 0.4375f, 3);
             if (Controls.AimLeft.IsDown)
             {
-                _navDrawRotX += 2.8125f;
+                _navDrawRotX += 2.8125f / 2;
             }
             else if (Controls.AimRight.IsDown)
             {
-                _navDrawRotX -= 2.8125f;
+                _navDrawRotX -= 2.8125f / 2;
             }
             else if (Input.MouseState?.IsButtonDown(MouseButton.Left) == true && Input.MouseDeltaX != 0)
             {
@@ -1287,26 +1297,55 @@ namespace MphRead.Entities
             }
             if (Controls.AimUp.IsDown)
             {
-                _navDrawRotY -= 2.8125f;
+                _navDrawRotY -= 2.8125f / 2;
             }
             else if (Controls.AimDown.IsDown)
             {
-                _navDrawRotY += 2.8125f;
+                _navDrawRotY += 2.8125f / 2;
             }
             else if (Input.MouseState?.IsButtonDown(MouseButton.Left) == true && Input.MouseDeltaY != 0)
             {
                 _navDrawRotY += Input.MouseDeltaY / 8f * 2.8125f;
             }
             _navDrawRotY = Math.Clamp(_navDrawRotY, -71.41113f, 71.41113f);
+            (Matrix4 viewMtx, _) = GetPauseMapMatrices();
+            float panDirX = 0;
+            if (Controls.MoveLeft.IsDown)
+            {
+                panDirX = -1;
+            }
+            else if (Controls.MoveRight.IsDown)
+            {
+                panDirX = 1;
+            }
+            if (panDirX != 0)
+            {
+                _navDrawVecC += viewMtx.Column0.Xyz * (4.6f / 2) * panDirX;
+            }
+            float panDirY = 0;
+            if (Controls.MoveUp.IsDown)
+            {
+                panDirY = 1;
+            }
+            else if (Controls.MoveDown.IsDown)
+            {
+                panDirY = -1;
+            }
+            if (panDirY != 0)
+            {
+                _navDrawVecC += viewMtx.Column1.Xyz * (4.6f / 2) * panDirY;
+            }
+            if (panDirX == 0 && panDirY == 0)
+            {
+                // todo-pause: drift/reset
+            }
         }
 
         public (Matrix4, Matrix4) GetPauseMapMatrices()
         {
-            // the factor of 32 is the scale of the map models
+            // the factor of 32 is the scale of the map models --> 32 * 16 = 512
             // the factor of 16 used in the ortho mtx and target/pos was chosen empirically to match the game
-            Matrix4 orthoMtx = Matrix4.CreateOrthographic(256 / 256f * 16 * 32 * _navDrawZoom, 192 / 256f * 16 * 32 * _navDrawZoom, -400, 400);
-            int area = _scene.AreaId & ~1;
-            Vector3 offset = _navMapNodeOffsets[area];
+            Matrix4 orthoMtx = Matrix4.CreateOrthographic(512 * _navDrawZoom, 192 / 256f * 512 * _navDrawZoom, -400, 800); // todo-pause: fix clip dist
             _navDrawVecB = _navDrawVec2 + _navDrawVecC;
             Vector3 cameraTarget = _navDrawVecB.AddY(3.75f);
             (float sinX, float cosX) = MathF.SinCos(MathHelper.DegreesToRadians(_navDrawRotX));
@@ -1314,6 +1353,14 @@ namespace MphRead.Entities
             Vector3 cameraPos = cameraTarget + new Vector3(sinX * cosY * 90, sinY * 90, cosX * cosY * 90);
             Matrix4 viewMtx = Matrix4.LookAt(cameraPos, cameraTarget, Vector3.UnitY);
             return (viewMtx, orthoMtx);
+        }
+
+        private void UpdateMapModelTransforms(ModelInstance inst, int area)
+        {
+            Matrix4 transform = Matrix4.CreateScale(32);
+            Vector3 offset = _navMapNodeOffsets[area]; // todo-pause: CA 2 is not positioned correctly
+            transform.Row3.Xyz += offset;
+            UpdateTransforms(inst, transform, 0);
         }
 
         public void GetPauseMapRenderItems()
@@ -1330,7 +1377,7 @@ namespace MphRead.Entities
                     break;
                 }
                 ModelInstance inst = _navMapModels[area];
-                UpdateTransforms(inst, Matrix4.CreateScale(32), 0);
+                UpdateMapModelTransforms(inst, area);
                 GetMapDrawItems(inst);
             }
         }
