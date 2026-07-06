@@ -244,6 +244,7 @@ namespace MphRead.Entities
                 _mapLegendOtherInst.SetCharacterData(legendOther.CharacterData, _scene);
                 _mapLegendOtherInst.SetPaletteData(legendOther.PaletteData, _scene);
                 _mapLegendOtherInst.Enabled = true;
+                // todo?: could also show Omega Cannon doors here
                 _mapLegendInfo = ImmutableCollectionsMarshal.AsImmutableArray(new MapLegendInfo[10]
                 {
                     new MapLegendInfo(unlocked: false, messageId: 4, offsetX: 0, offsetY: 0, _mapLegendDoorInst, objectIndex: 4),   // BATTLEHAMMER
