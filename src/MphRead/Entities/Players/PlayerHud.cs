@@ -587,6 +587,7 @@ namespace MphRead.Entities
         {
             EndWeaponMenu();
             _navTextTimer = 0;
+            _prevScrollingChars = 0;
             _drawPauseState = 1;
             if (GameState.InRoomTransition)
             {
@@ -612,7 +613,6 @@ namespace MphRead.Entities
                 _mapOctolithInsts[i].SetAnimation(start, 35, 36, afterAnim, HudObjectLoopType.Offset);
             }
             _mapLostOctolithInst.SetAnimation(0, 19, 20, loop: true);
-            _prevScrollingChars = 0;
         }
 
         public void SetUpMenuPauseMapNav()
@@ -1242,6 +1242,7 @@ namespace MphRead.Entities
                     DrawText2D(128, 96, Align.PadCenter, 0, buffer, maxLength: characters);
                     if (characters > 0 && characters != _prevScrollingChars && characters <= entry.String1.Length)
                     {
+                        _soundSource.StopFreeSfx(SfxId.LETTER_BLIP);
                         _soundSource.PlayFreeSfx(SfxId.LETTER_BLIP);
                         _prevScrollingChars = characters;
                     }
@@ -1319,6 +1320,7 @@ namespace MphRead.Entities
                         DrawText2D(128, 96, Align.PadCenter, 0, buffer, maxLength: characters);
                         if (characters > 0 && characters != _prevScrollingChars && characters <= entry.String1.Length)
                         {
+                            _soundSource.StopFreeSfx(SfxId.LETTER_BLIP);
                             _soundSource.PlayFreeSfx(SfxId.LETTER_BLIP);
                             _prevScrollingChars = characters;
                         }
@@ -1364,6 +1366,7 @@ namespace MphRead.Entities
                         if ((roomName.Length > 1 || roomName.Length == 1 && roomName[0] != ' ')
                             && characters > 0 && characters != _prevScrollingChars && characters <= roomName.Length)
                         {
+                            _soundSource.StopFreeSfx(SfxId.LETTER_BLIP);
                             _soundSource.PlayFreeSfx(SfxId.LETTER_BLIP);
                             _prevScrollingChars = characters;
                         }
@@ -1378,19 +1381,29 @@ namespace MphRead.Entities
         {
             if (_drawPauseState == 1)
             {
-                float alpha = 1; // todo-pause: use 0.25f by default; make opaque when hovering the button
                 int posX = 26; // todo: invert for left-handed mode
                 _mapQuitInst.PositionX = (posX - _mapQuitInst.Width / 2) / 256f;
                 _mapQuitInst.PositionY = (173 - _mapQuitInst.Height / 2) / 192f;
-                _mapQuitInst.Alpha = alpha;
                 _scene.DrawHudObject(_mapQuitInst);
                 string text = Strings.GetHudMessage(119);
-                DrawText2D(posX, 181, Align.Center, 0, text, alpha: alpha);
+                DrawText2D(posX, 181, Align.Center, 0, text);
             }
             else if (_drawPauseState == 2)
             {
-                // skhere
-                // todo-pause: draw confirmation prompt
+                if (_scene.ProcessFrame)
+                {
+                    _dialogButtonInst.ProcessAnimation(_scene);
+                }
+                string text = Strings.GetHudMessage(122); // QUIT GAME are you sure?
+                int characters = (int)(_navTextTimer / (1 / 30f));
+                DrawText2D(128, 90, Align.PadCenter, 0, text, maxLength: characters);
+                if (characters > 0 && characters != _prevScrollingChars && characters <= text.Length)
+                {
+                    _soundSource.StopFreeSfx(SfxId.LETTER_BLIP);
+                    _soundSource.PlayFreeSfx(SfxId.LETTER_BLIP);
+                    _prevScrollingChars = characters;
+                }
+                DrawDialogConfirmButtons(DialogType.YesNo);
             }
         }
 
@@ -1406,10 +1419,11 @@ namespace MphRead.Entities
                 {
                     SetUpMenuPauseMapNav();
                     _navTextTimer = 0;
+                    _prevScrollingChars = 0;
                     _navLoading = false;
                 }
             }
-            else if (_navTextTimer < 200 / 30f) // applies to either the topo unavailable message or the location name
+            else if (_navTextTimer < 200 / 30f) // applies to topo unavailable, location name, quit game
             {
                 _navTextTimer += _scene.FrameTime;
             }
@@ -1424,8 +1438,51 @@ namespace MphRead.Entities
             }
         }
 
+        private void ResetPauseQuitDisplay()
+        {
+            _navTextTimer = 0;
+            _prevScrollingChars = 0;
+            _dialogButtonInst.SetAnimation(start: 0, target: 2, frames: 3, afterAnim: 2);
+        }
+
         private void ProcessPauseMenuInput()
         {
+            if (GameState.PausePrevented)
+            {
+                return;
+            }
+            if (_drawPauseState == 1 && CheckButtonPressed(DialogButton.Quit))
+            {
+                _soundSource.PlayFreeSfx(SfxId.QUIT_GAME);
+                _drawPauseState = 2;
+                ResetPauseQuitDisplay();
+                return;
+            }
+            if (_drawPauseState == 2)
+            {
+                if (CheckButtonPressed(DialogButton.Yes))
+                {
+                    GameState.PausePrevented = true;
+                    _soundSource.PlayFreeSfx(SfxId.QUIT_GAME);
+                    _soundSource.PlayFreeSfx(SfxId.RETURN_TO_SHIP_YES);
+                    _drawPauseState = 0;
+                    ResetPauseQuitDisplay();
+                    Music.Stop(20 / 30f);
+                    _scene.SetFade(FadeType.FadeOutBlack, 20 / 30f, overwrite: true, AfterFade.Exit);
+                    return;
+                }
+                if (CheckButtonPressed(DialogButton.No))
+                {
+                    _soundSource.PlayFreeSfx(SfxId.RETURN_TO_SHIP_NO);
+                    _drawPauseState = 1;
+                    ResetPauseQuitDisplay();
+                    return;
+                }
+            }
+            if (_drawPauseState != 1)
+            {
+                return;
+            }
             if (_isScrollingUp)
             {
                 _navDrawZoom -= 0.0625f;
@@ -1626,7 +1683,7 @@ namespace MphRead.Entities
 
         public void GetPauseMapRenderItems()
         {
-            if (!_navMapModelEnabled)
+            if (!_navMapModelEnabled || _drawPauseState != 1)
             {
                 return;
             }
@@ -3478,6 +3535,7 @@ namespace MphRead.Entities
             if (totalCharacters > _prevScrollingChars && totalCharacters > _rulesLengths[0].Length
                 && totalCharacters <= _rulesLengths[_rulesInfo.Count - 1].Length)
             {
+                _soundSource.StopFreeSfx(SfxId.LETTER_BLIP);
                 _soundSource.PlayFreeSfx(SfxId.LETTER_BLIP);
                 _prevScrollingChars = totalCharacters;
             }
