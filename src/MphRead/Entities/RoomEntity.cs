@@ -123,14 +123,14 @@ namespace MphRead.Entities
                         {
                             Debug.Assert(node.RoomPartId >= 0);
                             Debug.Assert(node.ChildIndex != -1);
-                            portal.NodeRef1 = new NodeRef(meta.Id, meta.Name, node.RoomPartId, node.ChildIndex, modelIndex: 0);
+                            portal.NodeRef1 = new NodeRef(meta.Name, node.RoomPartId, node.ChildIndex, modelIndex: 0);
                             _portalSides[node.RoomPartId].Add((portal, false));
                         }
                         if (node.Name == portal.NodeName2)
                         {
                             Debug.Assert(node.RoomPartId >= 0);
                             Debug.Assert(node.ChildIndex != -1);
-                            portal.NodeRef2 = new NodeRef(meta.Id, meta.Name, node.RoomPartId, node.ChildIndex, modelIndex: 0);
+                            portal.NodeRef2 = new NodeRef(meta.Name, node.RoomPartId, node.ChildIndex, modelIndex: 0);
                             _portalSides[node.RoomPartId].Add((portal, true));
                         }
                     }
@@ -242,7 +242,6 @@ namespace MphRead.Entities
             Debug.Assert(meta != null);
             ModelInstance conInst = Read.GetRoomModelInstance(meta.Name); // cached
             IReadOnlyList<Node> conNodes = conInst.Model.Nodes;
-            int connectorId = (int)door.Data.ConnectorId;
             string connectorName = door.Data.RoomName.MarshalString();
             for (int i = 0; i < conNodes.Count; i++)
             {
@@ -252,8 +251,8 @@ namespace MphRead.Entities
                     node.RoomPartId = _nextRoomPartId++;
                     var sides = new List<(Portal, bool)>();
                     Portal portal = door.SetUpPort(roomNodeName, node.Name);
-                    portal.NodeRef1 = new NodeRef(Meta.Id, Meta.Name, roomPartId, roomNodeIndex, modelIndex: 0);
-                    portal.NodeRef2 = new NodeRef(connectorId, connectorName, node.RoomPartId, node.ChildIndex, modelIndex: _doorPortalCount);
+                    portal.NodeRef1 = new NodeRef(Meta.Name, roomPartId, roomNodeIndex, modelIndex: 0);
+                    portal.NodeRef2 = new NodeRef(connectorName, node.RoomPartId, node.ChildIndex, modelIndex: _doorPortalCount);
                     if (_portalSides.Count == 0)
                     {
                         Debug.Assert(roomPartId == 0);
@@ -269,8 +268,8 @@ namespace MphRead.Entities
             return NodeRef.None;
         }
 
-        private static readonly IReadOnlyList<Vector3> _connectorSizes = new Vector3[27]
-        {
+        private static readonly ImmutableArray<Vector3> _connectorSizes =
+        [
             new Vector3(10, 0, 0),
             new Vector3(10, 0, 0),
             new Vector3(0, 0, 10),
@@ -298,12 +297,12 @@ namespace MphRead.Entities
             new Vector3(0, 0, 20),
             new Vector3(0, 0, 10),
             new Vector3(0, 0, 10)
-        };
+        ];
 
         public void AddConnector(DoorEntity door)
         {
             int connectorId = (int)door.Data.ConnectorId;
-            Debug.Assert(connectorId >= 0 && connectorId < _connectorSizes.Count);
+            Debug.Assert(connectorId >= 0 && connectorId < _connectorSizes.Length);
             Vector3 size = _connectorSizes[connectorId];
             Vector3 doorFacing = door.FacingVector;
             if (doorFacing.X > Fixed.ToFloat(2896) || doorFacing.Z > Fixed.ToFloat(2896))
@@ -316,7 +315,7 @@ namespace MphRead.Entities
             _scene.LoadModel(conInst.Model);
             _connectorModels.Add(conInst);
             CollisionInstance collision = Collision.GetCollision(meta, roomLayerMask: -1);
-            collision.RoomId = connectorId;
+            collision.ConnectorName = door.Data.RoomName.MarshalString();
             collision.Translation = door.Position + size / 2;
             _roomCollision.Add(collision);
             conInst.Active = false;
@@ -1171,7 +1170,7 @@ namespace MphRead.Entities
                     Debug.Assert(node.RoomPartId >= 0);
                     Debug.Assert(node.ChildIndex != -1);
                     // for the purposes this node ref is returned for, we can assume it belongs to the actual room and not a connector
-                    return new NodeRef(Meta.Id, Meta.Name, node.RoomPartId, node.ChildIndex, modelIndex: 0);
+                    return new NodeRef(Meta.Name, node.RoomPartId, node.ChildIndex, modelIndex: 0);
                 }
             }
             return NodeRef.None;

@@ -64,7 +64,7 @@ namespace MphRead.Entities
         private readonly HudObjectInstance[] _mapArtifactDotInsts = new HudObjectInstance[8];
         private ModelInstance _navPlayerPosModel = null!;
         private ModelInstance _navDoorModel = null!;
-        private readonly ModelInstance[] _navMapModels = new ModelInstance[8];
+        private readonly ModelInstance?[] _navMapModels = new ModelInstance?[8];
         private int _pauseFrameCount = 0;
 
         private ModelInstance _filterModel = null!;
@@ -609,7 +609,11 @@ namespace MphRead.Entities
                 {
                     if (area >= 0 && area < _navMapModels.Length)
                     {
-                        ModelInstance model = _navMapModels[area];
+                        ModelInstance? model = _navMapModels[area];
+                        if (model == null)
+                        {
+                            continue;
+                        }
                         Node? roomNode = null;
                         for (int j = 0; j < model.Model.Nodes.Count; j++)
                         {
@@ -650,6 +654,20 @@ namespace MphRead.Entities
                 }
             }
         }
+
+        private static readonly ImmutableArray<Vector3> _navDoorColors =
+        [
+            new Vector3(230, 230, 230) / 255f,
+            new Vector3(255, 255,   0) / 255f,
+            new Vector3(247, 148,  82) / 255f,
+            new Vector3(  0, 255,   0) / 255f,
+            new Vector3(255,   0,   0) / 255f,
+            new Vector3(165,  74, 255) / 255f,
+            new Vector3(255, 132,   0) / 255f,
+            new Vector3(  0, 132, 255) / 255f,
+            new Vector3(230, 230, 230) / 255f,
+            new Vector3(165, 165, 165) / 255f
+        ];
 
         private static readonly ImmutableArray<Vector3> _navMapNodeOffsets =
         [
@@ -1356,7 +1374,11 @@ namespace MphRead.Entities
                 {
                     if (area >= 0 && area < _navMapModels.Length)
                     {
-                        ModelInstance model = _navMapModels[area];
+                        ModelInstance? model = _navMapModels[area];
+                        if (model == null)
+                        {
+                            continue;
+                        }
                         for (int j = 0; j < model.Model.Nodes.Count; j++)
                         {
                             Node roomNode = model.Model.Nodes[j];
@@ -1477,7 +1499,11 @@ namespace MphRead.Entities
                 {
                     break;
                 }
-                ModelInstance inst = _navMapModels[area];
+                ModelInstance? inst = _navMapModels[area];
+                if (inst == null)
+                {
+                    continue;
+                }
                 UpdateMapModelTransforms(inst, area);
                 GetMapDrawItems(inst);
             }
@@ -1487,18 +1513,74 @@ namespace MphRead.Entities
             for (int i = 0; i < _scene.Room.RoomCollision.Count; i++)
             {
                 CollisionInstance collision = _scene.Room.RoomCollision[i];
-                if (collision.RoomId != -1 && collision.RoomId == NodeRef.RoomId)
+                if (collision.ConnectorName != null && collision.ConnectorName == NodeRef.RoomName)
                 {
                     roomOffset = collision.Translation;
                     break;
                 }
             }
+            // bugfix: the game scales the door Y position in Fan Room Alpha/Beta so that it lines up with the top of the room and the connector,
+            // which have an exaggerated height to make the rooms fit in the combined map. however, the player indicator is unchanged, so when standing
+            // in front of the upper door, it looks like you're only halfway up on the map model, and stepping inside the connector appears discontinuous.
+            // fix by applying the same factor to the player position (only if inside the actual room, and not a connector).
+            float posHeightFactor = 1;
+            if (NodeRef.RoomName == "UNIT2_C2") // Fan Room Alpha
+            {
+                posHeightFactor = 2.05f;
+            }
+            else if (NodeRef.RoomName == "UNIT2_C3") // Fan Room Beta
+            {
+                posHeightFactor = 1.305f;
+            }
             float x = _position.X + _navDrawVecA.X - roomOffset.X;
-            float y = _position.Y + _navDrawVecA.Y - roomOffset.Y + 1;
+            float y = _position.Y * posHeightFactor + _navDrawVecA.Y - roomOffset.Y + 1;
             float z = _position.Z + _navDrawVecA.Z - roomOffset.Z;
             playerPosTransform.Row3.Xyz = new Vector3(x, y, z);
             UpdateTransforms(_navPlayerPosModel, playerPosTransform, 0);
             GetDrawItems(_navPlayerPosModel, 0);
+            if (_navMapDrawNode == null || _navMapDrawNode.Name.StartsWith("Con"))
+            {
+                // doors are only draw for a selected non-connector room 
+                return;
+            }
+            float doorHeightFactor = 1;
+            if (_navMapDrawNode.Name == "UNIT2_C2") // Fan Room Alpha
+            {
+                doorHeightFactor = 2.05f;
+            }
+            else if (_navMapDrawNode.Name == "UNIT2_C3") // Fan Room Beta
+            {
+                doorHeightFactor = 1.305f;
+            }
+            // todo-pause: need the lighting to appear as it does in-game with the vectors set to zero (still changes with camera angle?)
+            // --> why isn't this an issue (or at least not the same issue) with the map model?
+            var lightInfo = new LightInfo(Vector3.UnitX, Vector3.One, -Vector3.UnitX, Vector3.One);
+            foreach (DoorEntity door in _scene.GetDoorEntities())
+            {
+                if (door.ConnectorDoor != null)
+                {
+                    continue;
+                }
+                bool locked = door.Data.Locked != 0;
+                if (door.Id != -1)
+                {
+                    locked = GameState.StorySave.GetRoomState(_scene.RoomId, door.Id) != 0;
+                }
+                int palette = 0;
+                if (locked)
+                {
+                    palette = (int)door.Data.PaletteId;
+                    if (palette > 7)
+                    {
+                        palette = 9;
+                    }
+                }
+                Vector3 doorPos = door.LockPosition.WithY(door.LockPosition.Y * doorHeightFactor) + _navDrawVec1;
+                Matrix4 doorTransform = GetTransformMatrix(door.FacingVector, door.UpVector, doorPos);
+                UpdateTransforms(_navDoorModel, doorTransform, 0);
+                _navDoorModel.Model.Materials[0].CurrentDiffuse = _navDoorColors[palette];
+                GetDrawItems(_navDoorModel, 0, lightInfo);
+            }
         }
 
         private void GetMapDrawItems(ModelInstance inst)

@@ -5,7 +5,6 @@ namespace MphRead.Formats.Culling
 {
     public struct NodeRef
     {
-        public int RoomId;
         public string? RoomName;
         public int PartIndex;
         public int NodeIndex;
@@ -13,15 +12,13 @@ namespace MphRead.Formats.Culling
 
         public static readonly NodeRef None = new NodeRef
         {
-            RoomId = -1,
             PartIndex = -1,
             NodeIndex = -1,
             ModelIndex = -1
         };
 
-        public NodeRef(int roomId, string roomName, int partIndex, int nodeIndex, int modelIndex)
+        public NodeRef(string roomName, int partIndex, int nodeIndex, int modelIndex)
         {
-            RoomId = roomId;
             RoomName = roomName;
             PartIndex = partIndex;
             NodeIndex = nodeIndex;
