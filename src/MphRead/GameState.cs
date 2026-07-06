@@ -140,7 +140,7 @@ namespace MphRead
                 {
                     _navTextTimer += scene.FrameTime;
                 }
-                if (_navTextTimer >= 60 / 30f && !InRoomTransition) // the game also checks for portals being loaded
+                if (_navTextTimer >= 60 / 30f && !InRoomTransition)
                 {
                     PlayerEntity.Main.SetUpMenuPauseMapNav();
                     _navTextTimer = 0;

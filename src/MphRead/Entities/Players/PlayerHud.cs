@@ -1481,7 +1481,7 @@ namespace MphRead.Entities
                 UpdateMapModelTransforms(inst, area);
                 GetMapDrawItems(inst);
             }
-            Matrix4 playerPosTransform = Matrix4.CreateScale(2) *  GetTransformMatrix(_facingVector, _upVector);
+            Matrix4 playerPosTransform = Matrix4.CreateScale(2) * GetTransformMatrix(_facingVector, _upVector);
             Vector3 roomOffset = Vector3.Zero;
             Debug.Assert(_scene.Room != null);
             for (int i = 0; i < _scene.Room.RoomCollision.Count; i++)
