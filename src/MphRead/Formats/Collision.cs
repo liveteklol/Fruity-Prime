@@ -377,6 +377,7 @@ namespace MphRead.Formats.Collision
         public bool Active { get; set; } = true;
         public CollisionInfo Info { get; }
         public bool IsEntity { get; }
+        public int RoomId { get; set; }
 
         public Vector3 Translation { get; set; }
 

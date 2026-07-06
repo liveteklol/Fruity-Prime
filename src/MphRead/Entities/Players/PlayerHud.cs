@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Linq;
 using MphRead.Entities.Enemies;
 using MphRead.Formats;
+using MphRead.Formats.Collision;
 using MphRead.Hud;
 using MphRead.Text;
 using OpenTK.Mathematics;
@@ -64,6 +65,7 @@ namespace MphRead.Entities
         private ModelInstance _navPlayerPosModel = null!;
         private ModelInstance _navDoorModel = null!;
         private readonly ModelInstance[] _navMapModels = new ModelInstance[8];
+        private int _pauseFrameCount = 0;
 
         private ModelInstance _filterModel = null!;
         private bool _showScoreboard = false;
@@ -231,8 +233,9 @@ namespace MphRead.Entities
                 _mapLostOctolithInst.SetPaletteData(lostOctolith.PaletteData, _scene);
                 _mapLostOctolithInst.SetAnimationFrames(lostOctolith.AnimParams);
                 _mapLostOctolithInst.Enabled = true;
-                _navPlayerPosModel = Read.GetModelInstance("PlayerPos_NAV", dir: MetaDir.Hud); // todo-pause: animation/update
+                _navPlayerPosModel = Read.GetModelInstance("PlayerPos_NAV", dir: MetaDir.Hud);
                 _scene.LoadModel(_navPlayerPosModel.Model);
+                _navPlayerPosModel.SetAnimation(0, AnimFlags.None);
                 _navDoorModel = Read.GetModelInstance("Door_NAV", dir: MetaDir.Hud);
                 _scene.LoadModel(_navDoorModel.Model);
                 for (int i = 0; i < 7; i++)
@@ -597,6 +600,7 @@ namespace MphRead.Entities
             _navDrawVecA = Vector3.Zero;
             _navDrawVecB = Vector3.Zero;
             _navDrawVecC = Vector3.Zero;
+            _pauseFrameCount = 0;
             string? roomName = PlayerEntity.Main.NodeRef.RoomName;
             if (roomName != null)
             {
@@ -669,7 +673,7 @@ namespace MphRead.Entities
         // todo-pause: names
         private Vector3 _navDrawVec1 = Vector3.Zero; // room node pos
         private Vector3 _navDrawVec2 = Vector3.Zero; // center node pos
-        private Vector3 _navDrawVecA = Vector3.Zero; // (used for drawing doors, doesn't change after the mpa is opened?)
+        private Vector3 _navDrawVecA = Vector3.Zero; // player's current room node pos (does not update when panning to another room)
         private Vector3 _navDrawVecB = Vector3.Zero; // look at pos (vec2 + vecC to add pan offset)
         private Vector3 _navDrawVecC = Vector3.Zero; // panning offset
 
@@ -1266,7 +1270,12 @@ namespace MphRead.Entities
 
         public void ProcessPauseMenuInput()
         {
-            // todo: FPS stuff
+            // todo-pause: this will more clearly belong here once this is the general pause process method
+            if (_pauseFrameCount > 0 && _pauseFrameCount % 2 == 0) // todo: FPS stuff
+            {
+                _navPlayerPosModel.UpdateAnimFrames();
+            }
+            _pauseFrameCount++;
             if (_isScrollingUp)
             {
                 _navDrawZoom -= 0.0625f;
@@ -1472,6 +1481,24 @@ namespace MphRead.Entities
                 UpdateMapModelTransforms(inst, area);
                 GetMapDrawItems(inst);
             }
+            Matrix4 playerPosTransform = Matrix4.CreateScale(2) *  GetTransformMatrix(_facingVector, _upVector);
+            Vector3 roomOffset = Vector3.Zero;
+            Debug.Assert(_scene.Room != null);
+            for (int i = 0; i < _scene.Room.RoomCollision.Count; i++)
+            {
+                CollisionInstance collision = _scene.Room.RoomCollision[i];
+                if (collision.RoomId != -1 && collision.RoomId == NodeRef.RoomId)
+                {
+                    roomOffset = collision.Translation;
+                    break;
+                }
+            }
+            float x = _position.X + _navDrawVecA.X - roomOffset.X;
+            float y = _position.Y + _navDrawVecA.Y - roomOffset.Y + 1;
+            float z = _position.Z + _navDrawVecA.Z - roomOffset.Z;
+            playerPosTransform.Row3.Xyz = new Vector3(x, y, z);
+            UpdateTransforms(_navPlayerPosModel, playerPosTransform, 0);
+            GetDrawItems(_navPlayerPosModel, 0);
         }
 
         private void GetMapDrawItems(ModelInstance inst)

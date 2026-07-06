@@ -140,7 +140,7 @@ namespace MphRead
                 {
                     _navTextTimer += scene.FrameTime;
                 }
-                if (_navTextTimer >= 60 / 30f && !InRoomTransition) // todo-pause: test for portal availability?
+                if (_navTextTimer >= 60 / 30f && !InRoomTransition) // the game also checks for portals being loaded
                 {
                     PlayerEntity.Main.SetUpMenuPauseMapNav();
                     _navTextTimer = 0;
@@ -300,7 +300,6 @@ namespace MphRead
                         Sfx.Instance.PlayFreeSfx(SfxId.MENU_CANCEL);
                         UnpauseMenu();
                         PlayerEntity.Main.EndMenuPauseHud();
-                        // todo-pause: clear (some) input
                         PlayerEntity.Main.Controls.Pause.IsPressed = false;
                         return;
                     }

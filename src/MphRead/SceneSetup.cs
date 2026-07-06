@@ -366,6 +366,7 @@ namespace MphRead
                 nodeLayerMask = GetNodeLayer(mode, metadata.NodeLayer, nodePlayerCount);
             }
             CollisionInstance collision = Collision.GetCollision(metadata, nodeLayerMask);
+            collision.RoomId = metadata.Id;
             if (isRoomTransition)
             {
                 collision.Active = false;
