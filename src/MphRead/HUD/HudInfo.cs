@@ -1430,7 +1430,8 @@ namespace MphRead.Hud
         public static readonly string MapPortal = @"_archives\spSamus\map_portal.bin";
         public static readonly string MapOctolith = @"_archives\spSamus\map_crystalbig.bin";
         public static readonly string MapLostOctolith = @"_archives\spSamus\map_crystalred.bin";
-        public static readonly string MapLegend = @"_archives\spSamus\map_legendOthers.bin";
+        public static readonly string MapLegendDoors = @"_archives\spSamus\map_legendDoors.bin";
+        public static readonly string MapLegendOther = @"_archives\spSamus\map_legendOthers.bin";
         public static readonly string MapQuit = @"_archives\spSamus\map_quit.bin";
 
         public static readonly IReadOnlyList<string> Hunters = new string[8]

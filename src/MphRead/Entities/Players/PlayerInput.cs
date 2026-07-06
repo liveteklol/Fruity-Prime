@@ -2347,6 +2347,7 @@ namespace MphRead.Entities
         public Keybind OmegaCannon { get; }
         public Keybind AffinitySlot { get; }
         public Keybind Pause { get; }
+        public Keybind HudOverlay { get; }
 
         public bool InvertAimY { get; }
         public bool InvertAimX { get; }
@@ -2358,7 +2359,8 @@ namespace MphRead.Entities
             Keybind rollUp, Keybind rollDown, Keybind aimLeft, Keybind aimRight, Keybind aimUp, Keybind aimDown, Keybind shoot, Keybind zoom,
             Keybind jump, Keybind morph, Keybind boost, Keybind altAttack, Keybind scanVisor, Keybind scan, Keybind nextWeapon,
             Keybind prevWeapon, Keybind weaponMenu, Keybind powerBeam, Keybind missile, Keybind voltDriver, Keybind battlehammer,
-            Keybind imperialist, Keybind judicator, Keybind magmaul, Keybind shockCoil, Keybind omegaCannon, Keybind affinitySlot, Keybind pause)
+            Keybind imperialist, Keybind judicator, Keybind magmaul, Keybind shockCoil, Keybind omegaCannon, Keybind affinitySlot,
+            Keybind pause, Keybind hudOverlay)
         {
             MouseAim = true;
             KeyboardAim = true;
@@ -2397,11 +2399,13 @@ namespace MphRead.Entities
             OmegaCannon = omegaCannon;
             AffinitySlot = affinitySlot;
             Pause = pause;
+            HudOverlay = hudOverlay;
             All = new[]
             {
                 moveLeft, moveRight, moveUp, moveDown, rollLeft, rollRight, rollUp, rollDown, aimLeft, aimRight, aimUp, aimDown,
                 shoot, zoom, jump, morph, boost, altAttack, scanVisor, scan, nextWeapon, prevWeapon, weaponMenu, powerBeam,
-                missile, voltDriver, battlehammer, imperialist, judicator, magmaul, shockCoil, omegaCannon, affinitySlot, pause
+                missile, voltDriver, battlehammer, imperialist, judicator, magmaul, shockCoil, omegaCannon, affinitySlot,
+                pause, hudOverlay
             };
         }
 
@@ -2459,7 +2463,8 @@ namespace MphRead.Entities
                 shockCoil: new Keybind(Keys.D8),
                 omegaCannon: new Keybind(Keys.D9),
                 affinitySlot: new Keybind(Keys.Unknown),
-                pause: new Keybind(Keys.Tab)
+                pause: new Keybind(Keys.Tab),
+                hudOverlay: new Keybind(Keys.LeftShift)
             );
         }
     }
