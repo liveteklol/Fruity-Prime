@@ -1683,6 +1683,7 @@ namespace MphRead
         // use jagged arrays since 2D arrays can't be serialized out of the box
         public byte[][] RoomState { get; init; } // 66 x 60
         public byte[] VisitedRooms { get; init; } = new byte[9];
+        public int[] VisitedConnectors { get; init; } = new int[9];
         public byte[] TriggerState { get; init; } = new byte[4];
         public byte[] Logbook { get; init; } = new byte[68];
         public byte[][] EnemyEncounters { get; init; } // 9 x 8
@@ -1828,6 +1829,37 @@ namespace MphRead
             roomId -= 27;
             (int byteIndex, int bitIndex) = Math.DivRem(roomId, 8);
             VisitedRooms[byteIndex] |= (byte)(1 << bitIndex);
+        }
+
+        public bool CheckVisitedConnector(int connectorId, int areaId)
+        {
+            if (connectorId < 0 || connectorId > 63)
+            {
+                return false;
+            }
+            // there are two ints per planet (plus one for Oubliette, which doesn't have any connectors),
+            // for 64 total connectors across both sub-areas, though the max number of connectors in any area is 15.
+            if (connectorId >= 32)
+            {
+                return ((VisitedConnectors[(areaId & ~1) + 1] >> (connectorId - 32)) & 1) != 0;
+            }
+            return ((VisitedConnectors[areaId & ~1] >> connectorId) & 1) != 0;
+        }
+
+        public void SetVisitedConnector(int connectorId, int areaId)
+        {
+            if (connectorId < 0 || connectorId > 63)
+            {
+                return;
+            }
+            if (connectorId >= 32)
+            {
+                VisitedConnectors[(areaId & ~1) + 1] |= 1 << (connectorId - 32);
+            }
+            else
+            {
+                VisitedConnectors[areaId & ~1] |= 1 << connectorId;
+            }
         }
 
         public bool CheckFoundOctolith(int areaId)
@@ -1997,6 +2029,7 @@ namespace MphRead
                 Array.Copy(source, other.EnemyEncounters[i], source.Length);
             }
             VisitedRooms.CopyTo(other.VisitedRooms, index: 0);
+            VisitedConnectors.CopyTo(other.VisitedConnectors, index: 0);
             TriggerState.CopyTo(other.TriggerState, index: 0);
             Logbook.CopyTo(other.Logbook, index: 0);
             other.ScanCount = ScanCount;

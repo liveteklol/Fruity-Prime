@@ -1252,7 +1252,8 @@ namespace MphRead.Entities
                         int characters = (int)(GameState.NavTextTimer / (1 / 30f));
                         int y = 173 - ((8 * lines) >> 1);
                         DrawText2D(128, y, Align.PadCenter, 0, buffer, maxLength: characters);
-                        if (characters > 0 && characters != _prevScrollingChars && characters <= roomName.Length)
+                        if ((roomName.Length > 1 || roomName.Length == 1 && roomName[0] != ' ')
+                            && characters > 0 && characters != _prevScrollingChars && characters <= roomName.Length)
                         {
                             _soundSource.PlayFreeSfx(SfxId.LETTER_BLIP);
                             _prevScrollingChars = characters;
@@ -1349,9 +1350,8 @@ namespace MphRead.Entities
                         ModelInstance model = _navMapModels[area];
                         for (int j = 0; j < model.Model.Nodes.Count; j++)
                         {
-                            // todo-pause: only check the following if the room/connector has been visited
                             Node roomNode = model.Model.Nodes[j];
-                            if (roomNode.ParentIndex != 0)
+                            if (roomNode.ParentIndex != 0 || !CheckRoomVisited(roomNode))
                             {
                                 continue;
                             }
@@ -1438,6 +1438,23 @@ namespace MphRead.Entities
             UpdateTransforms(inst, transform, 0);
         }
 
+        private bool CheckRoomVisited(Node node)
+        {
+            if (node.Name.StartsWith("Con") && node.Name.Length >= 5 && Int32.TryParse(node.Name.AsSpan(3, 2), out int id) && id >= 1)
+            {
+                return GameState.StorySave.CheckVisitedConnector(id - 1, _scene.AreaId);
+            }
+            for (int i = 27; i <= 92; i++)
+            {
+                RoomMetadata meta = Metadata.GetRoomById(i)!;
+                if (String.Compare(node.Name, meta.Name, StringComparison.OrdinalIgnoreCase) == 0)
+                {
+                    return GameState.StorySave.CheckVisitedRoom(i);
+                }
+            }
+            return false;
+        }
+
         public void GetPauseMapRenderItems()
         {
             if (!_navMapModelEnabled)
@@ -1467,13 +1484,16 @@ namespace MphRead.Entities
                 Model model = inst.Model;
                 if (node.Enabled)
                 {
-                    // todo-pause: only draw the node if the room/connector has been visited
                     Node? roomParent = null;
                     int parentIndex = node.ParentIndex;
                     while (parentIndex > 0)
                     {
                         roomParent = model.Nodes[parentIndex];
                         parentIndex = roomParent.ParentIndex;
+                    }
+                    if (roomParent != null && !CheckRoomVisited(roomParent))
+                    {
+                        return;
                     }
                     bool isSelected = _navMapDrawNode != null && roomParent == _navMapDrawNode;
                     int start = node.MeshId / 2;

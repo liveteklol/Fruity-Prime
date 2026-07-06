@@ -7131,7 +7131,7 @@ namespace MphRead.Memory
         public ByteArray VisitedRooms { get; }
 
         private const int _off17 = 0x30; // int[9]
-        public Int32Array Field30 { get; }
+        public Int32Array VisitedConnectors { get; }
 
         private const int _off18 = 0x54; // RoomState[66]
         public StructArray<RoomState> RoomState { get; }
@@ -7277,7 +7277,7 @@ namespace MphRead.Memory
             Ammo = new UInt16Array(memory, address + _off3, 2);
             AmmoCaps = new UInt16Array(memory, address + _off4, 2);
             VisitedRooms = new ByteArray(memory, address + _off16, 9);
-            Field30 = new Int32Array(memory, address + _off17, 9);
+            VisitedConnectors = new Int32Array(memory, address + _off17, 9);
             RoomState = new StructArray<RoomState>(memory, address + _off18, 66,
                 60, (Memory m, int a) => new RoomState(m, a));
             FieldFCC = new ByteArray(memory, address + _off19, 8);
@@ -7292,7 +7292,7 @@ namespace MphRead.Memory
             Ammo = new UInt16Array(memory, address + _off3, 2);
             AmmoCaps = new UInt16Array(memory, address + _off4, 2);
             VisitedRooms = new ByteArray(memory, address + _off16, 9);
-            Field30 = new Int32Array(memory, address + _off17, 9);
+            VisitedConnectors = new Int32Array(memory, address + _off17, 9);
             RoomState = new StructArray<RoomState>(memory, address + _off18, 66,
                 60, (Memory m, int a) => new RoomState(m, a));
             FieldFCC = new ByteArray(memory, address + _off19, 8);
