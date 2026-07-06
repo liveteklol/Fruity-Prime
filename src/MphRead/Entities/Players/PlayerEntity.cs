@@ -1318,7 +1318,10 @@ namespace MphRead.Entities
             {
                 if (IsMainPlayer)
                 {
-                    _soundSource.PlayFreeSfx(SfxId.BEAM_SWITCH_FAIL);
+                    if (!GameState.MenuPause)
+                    {
+                        _soundSource.PlayFreeSfx(SfxId.BEAM_SWITCH_FAIL);
+                    }
                     if (!hasAmmo)
                     {
                         ShowNoAmmoMessage();
@@ -1347,7 +1350,7 @@ namespace MphRead.Entities
             _timeSinceInput = 0;
             if (!silent)
             {
-                if (IsMainPlayer && !IsAltForm && beam != BeamType.Missile)
+                if (IsMainPlayer && !IsAltForm && beam != BeamType.Missile && !GameState.MenuPause)
                 {
                     int sfx = Metadata.HunterSfx[(int)Hunter, (int)HunterSfx.BeamSwitch];
                     if (sfx != -1)

@@ -106,55 +106,11 @@ namespace MphRead
         private static bool _pausingDialog = false;
         private static bool _unpausingDialog = false;
 
-        private static int _drawPauseState = 0;
-        private static float _navTextTimer = 0;
-        private static bool _navLoading = false;
-
-        public static int DrawPauseState => _drawPauseState;
-        public static float NavTextTimer { get => _navTextTimer; set => _navTextTimer = value; } // todo-pause: just put all the processing code in the player
-        public static bool NavLoading => _navLoading;
-
         public static void PauseMenu()
         {
             MenuPause = true;
             Sfx.Instance.StopAllSound();
             Sfx.TimedSfxMute++;
-            _navTextTimer = 0;
-            _drawPauseState = 1;
-            if (InRoomTransition)
-            {
-                _navLoading = true;
-            }
-            else
-            {
-                PlayerEntity.Main.SetUpMenuPauseMapNav();
-                _navLoading = false;
-            }
-        }
-
-        public static void ProcessPauseMenu(Scene scene)
-        {
-            if (_navLoading)
-            {
-                if (_navTextTimer < 60 / 30f)
-                {
-                    _navTextTimer += scene.FrameTime;
-                }
-                if (_navTextTimer >= 60 / 30f && !InRoomTransition)
-                {
-                    PlayerEntity.Main.SetUpMenuPauseMapNav();
-                    _navTextTimer = 0;
-                    _navLoading = false;
-                }
-            }
-            else if (_navTextTimer < 200 / 30f) // applies to either the topo unavailable message or the location name
-            {
-                _navTextTimer += scene.FrameTime;
-            }
-            if (scene.CameraMode == CameraMode.Player)
-            {
-                PlayerEntity.Main.ProcessPauseMenuInput();
-            }
         }
 
         public static void UnpauseMenu()
@@ -306,14 +262,13 @@ namespace MphRead
                     if (!MenuPause && CameraSequence.Current?.BlockInput != true && PlayerEntity.Main.Controls.Pause.IsPressed)
                     {
                         PlayerEntity.Main.Controls.Pause.IsPressed = false;
-                        // todo-pause: end weapon menu
                         PauseMenu();
                         PlayerEntity.Main.SetUpMenuPauseHud();
                         Sfx.Instance.PlayFreeSfx(SfxId.MENU_CONFIRM);
                     }
                     if (MenuPause)
                     {
-                        ProcessPauseMenu(scene);
+                        PlayerEntity.Main.ProcessPauseMenu();
                         return;
                     }
                 }
@@ -1666,9 +1621,6 @@ namespace MphRead
             _pausingDialog = false;
             _unpausingDialog = false;
             PausePrevented = false;
-            _drawPauseState = 0;
-            _navTextTimer = 0;
-            _navLoading = false;
             EscapeState = EscapeState.None;
             EscapeTimer = -1;
             EscapePaused = false;

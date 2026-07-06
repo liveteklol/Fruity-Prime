@@ -130,7 +130,7 @@ namespace MphRead.Entities
             bool selected = false;
             if (!Controls.WeaponMenu.IsDown)
             {
-                EndWeaponMenu(ref selected);
+                selected = EndWeaponMenu();
             }
             if (!selected)
             {
@@ -259,8 +259,9 @@ namespace MphRead.Entities
             }
         }
 
-        private void EndWeaponMenu(ref bool selected)
+        private bool EndWeaponMenu()
         {
+            bool selected = false;
             if (WeaponSelection != BeamType.None)
             {
                 if (WeaponSelection != CurrentWeapon)
@@ -276,6 +277,7 @@ namespace MphRead.Entities
             }
             Flags1 &= ~PlayerFlags1.NoAimInput;
             Flags1 &= ~PlayerFlags1.WeaponMenuOpen;
+            return selected;
         }
 
         private void UpdateAimFacing()

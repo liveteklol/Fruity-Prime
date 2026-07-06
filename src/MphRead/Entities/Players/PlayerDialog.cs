@@ -267,8 +267,7 @@ namespace MphRead.Entities
                 return;
             }
             StopLongSfx();
-            bool discard = false;
-            EndWeaponMenu(ref discard);
+            EndWeaponMenu();
             if (entry.Prefix == 'G') // gunship
             {
                 _soundSource.PlayFreeSfx(SfxId.GUNSHIP_TRANSMISSION);
@@ -306,8 +305,7 @@ namespace MphRead.Entities
         private void ShowDialogScan()
         {
             StopLongSfx();
-            bool discard = false;
-            EndWeaponMenu(ref discard);
+            EndWeaponMenu();
             GameState.PauseDialog();
             _dialogCharTimer = 0;
             _dialogPalette = 0;
@@ -325,8 +323,7 @@ namespace MphRead.Entities
                 return;
             }
             StopLongSfx();
-            bool discard = false;
-            EndWeaponMenu(ref discard);
+            EndWeaponMenu();
             GameState.PausePrevented = true;
             GameState.PauseDialog();
             _eventType = eventType;

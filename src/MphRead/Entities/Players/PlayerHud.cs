@@ -568,6 +568,10 @@ namespace MphRead.Entities
             _scene.Layer5Info.BindingId = -1;
         }
 
+        private static int _drawPauseState = 0;
+        private static float _navTextTimer = 0;
+        private static bool _navLoading = false;
+
         // need to set and restore these because pausing is allowed while a dialog is open,
         // and if a dialog is open, the normal HUD update code won't run to set these as needed
         private int _pausedPrevBindingId1 = -1;
@@ -581,6 +585,18 @@ namespace MphRead.Entities
 
         public void SetUpMenuPauseHud()
         {
+            EndWeaponMenu();
+            _navTextTimer = 0;
+            _drawPauseState = 1;
+            if (GameState.InRoomTransition)
+            {
+                _navLoading = true;
+            }
+            else
+            {
+                SetUpMenuPauseMapNav();
+                _navLoading = false;
+            }
             _pausedPrevBindingId1 = _scene.Layer1Info.BindingId;
             _pausedPrevAlpha1 = _scene.Layer1Info.Alpha;
             _pausedPrevMaskId = _scene.Layer1Info.MaskId;
@@ -607,13 +623,13 @@ namespace MphRead.Entities
             _navDrawRotX = MathHelper.RadiansToDegrees(MathF.Atan2(-_facingVector.X, -_facingVector.Z));
             _navDrawRotY = 28.125f;
             _navPanTimer = 0;
-            _navDrawVec1 = Vector3.Zero;
-            _navDrawVec2 = Vector3.Zero;
-            _navDrawVecA = Vector3.Zero;
-            _navDrawVecB = Vector3.Zero;
-            _navDrawVecC = Vector3.Zero;
+            _navCurRoomNodePos = Vector3.Zero;
+            _navCurCenterNodePos = Vector3.Zero;
+            _navInitRoomNodePos = Vector3.Zero;
+            _navTargetPos = Vector3.Zero;
+            _navPanOffset = Vector3.Zero;
             _pauseFrameCount = 0;
-            string? roomName = PlayerEntity.Main.NodeRef.RoomName;
+            string? roomName = NodeRef.RoomName;
             if (roomName != null)
             {
                 int area = _scene.AreaId & ~1;
@@ -657,12 +673,12 @@ namespace MphRead.Entities
                         UpdateMapModelTransforms(model, area);
                         SetNavMapDrawNode(roomNode, centerNode);
                         _navMapModelEnabled = true;
-                        _navDrawVecA = _navDrawVec1;
+                        _navInitRoomNodePos = _navCurRoomNodePos;
                     }
                 }
                 if (_navMapDrawNode != null)
                 {
-                    _navDrawVecB = _navDrawVec1;
+                    _navTargetPos = _navCurRoomNodePos;
                 }
             }
         }
@@ -700,18 +716,17 @@ namespace MphRead.Entities
         private float _navDrawRotX = 0;
         private float _navDrawRotY = 0;
         private float _navPanTimer = 0;
-        // todo-pause: names
-        private Vector3 _navDrawVec1 = Vector3.Zero; // room node pos
-        private Vector3 _navDrawVec2 = Vector3.Zero; // center node pos
-        private Vector3 _navDrawVecA = Vector3.Zero; // player's current room node pos (does not update when panning to another room)
-        private Vector3 _navDrawVecB = Vector3.Zero; // look at pos (vec2 + vecC to add pan offset)
-        private Vector3 _navDrawVecC = Vector3.Zero; // panning offset
+        private Vector3 _navCurRoomNodePos = Vector3.Zero;
+        private Vector3 _navCurCenterNodePos = Vector3.Zero;
+        private Vector3 _navInitRoomNodePos = Vector3.Zero; // does not update when panning to another room
+        private Vector3 _navTargetPos = Vector3.Zero; // center node pos + panning offset
+        private Vector3 _navPanOffset = Vector3.Zero;
 
         private void SetNavMapDrawNode(Node roomNode, Node centerNode)
         {
             _navMapDrawNode = roomNode;
-            _navDrawVec1 = roomNode.Animation.ExtractTranslation();
-            _navDrawVec2 = centerNode.Animation.ExtractTranslation();
+            _navCurRoomNodePos = roomNode.Animation.ExtractTranslation();
+            _navCurCenterNodePos = centerNode.Animation.ExtractTranslation();
         }
 
         public void EndMenuPauseHud()
@@ -1154,7 +1169,7 @@ namespace MphRead.Entities
 
         public void DrawPauseMenuBackground()
         {
-            if (GameState.DrawPauseState != 1 || !_scene.NavMapRoomSymbols.HasValue)
+            if (!_navMapModelEnabled || _drawPauseState != 1 || !_scene.NavMapRoomSymbols.HasValue)
             {
                 return;
             }
@@ -1214,7 +1229,7 @@ namespace MphRead.Entities
 
         public void DrawPauseMenuForeground()
         {
-            if (GameState.NavLoading)
+            if (_navLoading)
             {
                 StringTableEntry? entry = Strings.GetEntry('R', 997, StringTables.LocationNames); // topographical view initializing
                 if (entry != null)
@@ -1223,7 +1238,7 @@ namespace MphRead.Entities
                     Span<char> buffer = stackalloc char[128];
                     WrapText(entry.String1, 150, buffer);
                     // note: the game assumes the topo init message doesn't exceed 60 characters
-                    int characters = (int)(GameState.NavTextTimer / (1 / 30f));
+                    int characters = (int)(_navTextTimer / (1 / 30f));
                     DrawText2D(128, 96, Align.PadCenter, 0, buffer, maxLength: characters);
                     if (characters > 0 && characters != _prevScrollingChars && characters <= entry.String1.Length)
                     {
@@ -1233,7 +1248,7 @@ namespace MphRead.Entities
                     _textSpacingY = 0;
                 }
             }
-            else if (GameState.DrawPauseState == 1)
+            else if (_drawPauseState == 1)
             {
                 // todo-pause: draw legend when holding button
                 if (_scene.ProcessFrame)
@@ -1300,7 +1315,7 @@ namespace MphRead.Entities
                         Span<char> buffer = stackalloc char[256];
                         WrapText(entry.String1, 150, buffer);
                         // note: the game assumes the topo unavailable message doesn't exceed 200 characters
-                        int characters = (int)(GameState.NavTextTimer / (1 / 30f));
+                        int characters = (int)(_navTextTimer / (1 / 30f));
                         DrawText2D(128, 96, Align.PadCenter, 0, buffer, maxLength: characters);
                         if (characters > 0 && characters != _prevScrollingChars && characters <= entry.String1.Length)
                         {
@@ -1343,7 +1358,7 @@ namespace MphRead.Entities
                         Span<char> buffer = stackalloc char[roomName.Length + 10];
                         _textSpacingY = 9;
                         int lines = WrapText(roomName, 175, buffer);
-                        int characters = (int)(GameState.NavTextTimer / (1 / 30f));
+                        int characters = (int)(_navTextTimer / (1 / 30f));
                         int y = 173 - ((8 * lines) >> 1);
                         DrawText2D(128, y, Align.PadCenter, 0, buffer, maxLength: characters);
                         if ((roomName.Length > 1 || roomName.Length == 1 && roomName[0] != ' ')
@@ -1361,7 +1376,7 @@ namespace MphRead.Entities
 
         private void DrawPauseQuitInterface()
         {
-            if (GameState.DrawPauseState == 1)
+            if (_drawPauseState == 1)
             {
                 float alpha = 1; // todo-pause: use 0.25f by default; make opaque when hovering the button
                 int posX = 26; // todo: invert for left-handed mode
@@ -1372,21 +1387,45 @@ namespace MphRead.Entities
                 string text = Strings.GetHudMessage(119);
                 DrawText2D(posX, 181, Align.Center, 0, text, alpha: alpha);
             }
-            else if (GameState.DrawPauseState == 2)
+            else if (_drawPauseState == 2)
             {
                 // skhere
                 // todo-pause: draw confirmation prompt
             }
         }
 
-        public void ProcessPauseMenuInput()
+        public void ProcessPauseMenu()
         {
-            // todo-pause: this will more clearly belong here once this is the general pause process method
+            if (_navLoading)
+            {
+                if (_navTextTimer < 60 / 30f)
+                {
+                    _navTextTimer += _scene.FrameTime;
+                }
+                if (_navTextTimer >= 60 / 30f && !GameState.InRoomTransition)
+                {
+                    SetUpMenuPauseMapNav();
+                    _navTextTimer = 0;
+                    _navLoading = false;
+                }
+            }
+            else if (_navTextTimer < 200 / 30f) // applies to either the topo unavailable message or the location name
+            {
+                _navTextTimer += _scene.FrameTime;
+            }
             if (_pauseFrameCount > 0 && _pauseFrameCount % 2 == 0) // todo: FPS stuff
             {
                 _navPlayerPosModel.UpdateAnimFrames();
             }
             _pauseFrameCount++;
+            if (_scene.CameraMode == CameraMode.Player)
+            {
+                ProcessPauseMenuInput();
+            }
+        }
+
+        private void ProcessPauseMenuInput()
+        {
             if (_isScrollingUp)
             {
                 _navDrawZoom -= 0.0625f;
@@ -1441,7 +1480,7 @@ namespace MphRead.Entities
             }
             if (panDirX != 0)
             {
-                _navDrawVecC += viewMtx.Column0.Xyz * (4.6f / 2) * panDirX;
+                _navPanOffset += viewMtx.Column0.Xyz * (4.6f / 2) * panDirX;
             }
             float panDirY = 0;
             if (Controls.MoveUp.IsDown)
@@ -1454,7 +1493,7 @@ namespace MphRead.Entities
             }
             if (panDirY != 0)
             {
-                _navDrawVecC += viewMtx.Column1.Xyz * (4.6f / 2) * panDirY;
+                _navPanOffset += viewMtx.Column1.Xyz * (4.6f / 2) * panDirY;
             }
             if (panDirX != 0 || panDirY != 0)
             {
@@ -1506,12 +1545,12 @@ namespace MphRead.Entities
                 {
                     Debug.Assert(newCenterNode != null);
                     SetNavMapDrawNode(newRoomNode, newCenterNode);
-                    _navDrawVecC = _navDrawVecB - _navDrawVec2;
-                    GameState.NavTextTimer = 0;
+                    _navPanOffset = _navTargetPos - _navCurCenterNodePos;
+                    _navTextTimer = 0;
                     _prevScrollingChars = 0;
                 }
             }
-            else if (_navDrawVecC != Vector3.Zero)
+            else if (_navPanOffset != Vector3.Zero)
             {
                 if (_navPanTimer < 16 * 30)
                 {
@@ -1523,9 +1562,9 @@ namespace MphRead.Entities
                 }
                 float frames = _navPanTimer * 30f;
                 float factor = 1 - 0.1f * (frames / 16); // max decay of 10% after 16 frames in-game
-                float x = ExponentialDecay(factor, _navDrawVecC.X);
-                float y = ExponentialDecay(factor, _navDrawVecC.Y);
-                float z = ExponentialDecay(factor, _navDrawVecC.Z);
+                float x = ExponentialDecay(factor, _navPanOffset.X);
+                float y = ExponentialDecay(factor, _navPanOffset.Y);
+                float z = ExponentialDecay(factor, _navPanOffset.Z);
                 if (MathF.Abs(x) < 1 / 4096f)
                 {
                     x = 0;
@@ -1538,14 +1577,14 @@ namespace MphRead.Entities
                 {
                     z = 0;
                 }
-                _navDrawVecC = new Vector3(x, y, z);
+                _navPanOffset = new Vector3(x, y, z);
             }
         }
 
         private (Vector3 CameraPosition, Vector3 CameraTarget) GetPauseMapLookVectors()
         {
-            _navDrawVecB = _navDrawVec2 + _navDrawVecC;
-            Vector3 cameraTarget = _navDrawVecB.AddY(3.75f);
+            _navTargetPos = _navCurCenterNodePos + _navPanOffset;
+            Vector3 cameraTarget = _navTargetPos.AddY(3.75f);
             (float sinX, float cosX) = MathF.SinCos(MathHelper.DegreesToRadians(_navDrawRotX));
             (float sinY, float cosY) = MathF.SinCos(MathHelper.DegreesToRadians(_navDrawRotY));
             Vector3 cameraPos = cameraTarget + new Vector3(sinX * cosY * 90, sinY * 90, cosX * cosY * 90);
@@ -1631,9 +1670,9 @@ namespace MphRead.Entities
             {
                 posHeightFactor = 1.305f;
             }
-            float x = _position.X + _navDrawVecA.X - roomOffset.X;
-            float y = _position.Y * posHeightFactor + _navDrawVecA.Y - roomOffset.Y + 1;
-            float z = _position.Z + _navDrawVecA.Z - roomOffset.Z;
+            float x = _position.X + _navInitRoomNodePos.X - roomOffset.X;
+            float y = _position.Y * posHeightFactor + _navInitRoomNodePos.Y - roomOffset.Y + 1;
+            float z = _position.Z + _navInitRoomNodePos.Z - roomOffset.Z;
             playerPosTransform.Row3.Xyz = new Vector3(x, y, z);
             UpdateTransforms(_navPlayerPosModel, playerPosTransform, 0);
             GetDrawItems(_navPlayerPosModel, 0);
@@ -1673,7 +1712,7 @@ namespace MphRead.Entities
                                 palette = 9;
                             }
                         }
-                        Vector3 doorPos = entitySymbol.Position + _navDrawVec1;
+                        Vector3 doorPos = entitySymbol.Position + _navCurRoomNodePos;
                         Matrix4 doorTransform = GetTransformMatrix(entitySymbol.FacingVector, entitySymbol.UpVector, doorPos);
                         UpdateTransforms(_navDoorModel, doorTransform, 0);
                         _navDoorModel.Model.Materials[0].CurrentDiffuse = _navDoorColors[palette];
