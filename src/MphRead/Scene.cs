@@ -1,9 +1,12 @@
 using System;
 using System.Collections.Frozen;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using MphRead.Entities;
+using MphRead.Text;
+using OpenTK.Mathematics;
 
 namespace MphRead
 {
@@ -99,6 +102,89 @@ namespace MphRead
         public void RemoveEntityFromMap(EntityBase entity)
         {
             _entityMap.Remove(entity.Id);
+        }
+
+        private ImmutableArray<NavMapRoomSymbols>? _navMapRoomSymbols = null;
+        public ImmutableArray<NavMapRoomSymbols>? NavMapRoomSymbols => _navMapRoomSymbols;
+
+        public void LoadMapSymbolEntities(int areaId)
+        {
+            // todo?: like the game, we only load these for the rooms of the current area (planet) to save time.
+            // however, if one teleports or otherwise transitions between areas, then these won't be loaded.
+            // it might be nice to support loading them (on demand during the transition I guess) for other areas.
+            if (_navMapRoomSymbols.HasValue || areaId > 7)
+            {
+                return;
+            }
+            BossFlags bossFlags = GameState.StorySave.BossFlags;
+            int layerId = ((int)bossFlags >> (2 * areaId)) & 3;
+            var rooms = new List<NavMapRoomSymbols>();
+            for (int i = 1; i <= 35; i++)
+            {
+                int id = areaId / 2 * 100 + i;
+                StringTableEntry? roomEntry = Strings.GetEntry('R', id, StringTables.LocationNames); // room_name\display_name
+                if (roomEntry == null)
+                {
+                    break;
+                }
+                if (!roomEntry.String1.StartsWith("Con"))
+                {
+                    (RoomMetadata? meta, _) = Metadata.GetRoomByName(roomEntry.String1.ToUpperInvariant());
+                    if (meta == null || meta.EntityPath == null)
+                    {
+                        Debugger.Break();
+                        continue;
+                    }
+                    IReadOnlyList<Entity> entities = Read.GetEntities(meta.EntityPath, layerId, firstHunt: false);
+                    int count = 0;
+                    foreach (Entity entity in entities)
+                    {
+                        if (entity.Type == EntityType.Door || entity.Type == EntityType.Teleporter)
+                        {
+                            count++;
+                        }
+                    }
+                    if (count == 0)
+                    {
+                        continue;
+                    }
+                    var list = new NavMapEntitySymbol[count];
+                    count = 0;
+                    foreach (Entity entity in entities)
+                    {
+                        if (entity.Type == EntityType.Door)
+                        {
+                            DoorEntityData data = ((Entity<DoorEntityData>)entity).Data;
+                            float heightFactor = 1;
+                            if (meta.Name == "UNIT2_C2") // Fan Room Alpha
+                            {
+                                heightFactor = 2.05f;
+                            }
+                            else if (meta.Name == "UNIT2_C3") // Fan Room Beta
+                            {
+                                heightFactor = 1.305f;
+                            }
+                            DoorMetadata doorMeta = Metadata.Doors[(int)data.DoorType];
+                            Vector3 lockPos = entity.Position + entity.UpVector * doorMeta.LockOffset;
+                            lockPos = lockPos.WithY(lockPos.Y * heightFactor);
+                            list[count++] = new NavMapEntitySymbol(EntityType.Door, entity.EntityId,
+                                (int)data.PaletteId, data.Locked != 0, lockPos, entity.UpVector, entity.FacingVector);
+                        }
+                        else if (entity.Type == EntityType.Teleporter)
+                        {
+                            TeleporterEntityData data = ((Entity<TeleporterEntityData>)entity).Data;
+                            int type = data.ArtifactId < 8 && data.Invisible == 0 ? 1 : 0;
+                            list[count++] = new NavMapEntitySymbol(EntityType.Teleporter, entity.EntityId,
+                                type, locked: false, entity.Position, entity.UpVector, entity.FacingVector);
+                        }
+                    }
+                    rooms.Add(new NavMapRoomSymbols(meta.Name, meta.Id, list));
+                }
+            }
+            if (rooms.Count > 0)
+            {
+                _navMapRoomSymbols = rooms.ToImmutableArray();
+            }
         }
 
         #region Iterator Methods

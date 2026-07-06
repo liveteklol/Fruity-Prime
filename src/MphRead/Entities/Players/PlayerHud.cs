@@ -1553,50 +1553,49 @@ namespace MphRead.Entities
             playerPosTransform.Row3.Xyz = new Vector3(x, y, z);
             UpdateTransforms(_navPlayerPosModel, playerPosTransform, 0);
             GetDrawItems(_navPlayerPosModel, 0);
-            if (_navMapDrawNode == null || _navMapDrawNode.Name.StartsWith("Con"))
+            if (_navMapDrawNode == null || _navMapDrawNode.Name.StartsWith("Con") || !_scene.NavMapRoomSymbols.HasValue)
             {
                 // doors are only draw for a selected non-connector room
                 return;
             }
-            float doorHeightFactor = 1;
-            if (_navMapDrawNode.Name == "UNIT2_C2") // Fan Room Alpha
-            {
-                doorHeightFactor = 2.05f;
-            }
-            else if (_navMapDrawNode.Name == "UNIT2_C3") // Fan Room Beta
-            {
-                doorHeightFactor = 1.305f;
-            }
-            // hack(?) to make the door lighting appear as it does in game where the light vectors are all zeroes
+            // hack(?) to make the door lighting appear as it does in-game where the light vectors are all zeroes
             (Vector3 cameraPos, Vector3 cameraTarget) = GetPauseMapLookVectors();
             Vector3 lightVec = (cameraTarget - cameraPos).Normalized();
             var lightInfo = new LightInfo(lightVec, Vector3.One, Vector3.Zero, Vector3.Zero);
-            // skhere todo-pause: need to load and draw doors for other rooms
-            foreach (DoorEntity door in _scene.GetDoorEntities())
+            ImmutableArray<NavMapRoomSymbols> navMapRoomSymbols = _scene.NavMapRoomSymbols.Value;
+            for (int i = 0; i < navMapRoomSymbols.Length; i++)
             {
-                if (door.ConnectorDoor != null)
+                NavMapRoomSymbols roomSymbols = navMapRoomSymbols[i];
+                if (!String.Equals(roomSymbols.Name, _navMapDrawNode.Name, StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }
-                bool locked = door.Data.Locked != 0;
-                if (door.Id != -1)
+                for (int j = 0; j < roomSymbols.Symbols.Length; j++)
                 {
-                    locked = GameState.StorySave.GetRoomState(_scene.RoomId, door.Id) != 0;
-                }
-                int palette = 0;
-                if (locked)
-                {
-                    palette = (int)door.Data.PaletteId;
-                    if (palette > 7)
+                    NavMapEntitySymbol entitySymbol = roomSymbols.Symbols[j];
+                    if (entitySymbol.Type == EntityType.Door)
                     {
-                        palette = 9;
+                        bool locked = entitySymbol.Locked;
+                        if (entitySymbol.Id != -1)
+                        {
+                            locked = GameState.StorySave.GetRoomState(_scene.RoomId, entitySymbol.Id) != 0;
+                        }
+                        int palette = 0;
+                        if (locked)
+                        {
+                            palette = entitySymbol.SubType;
+                            if (palette > 7)
+                            {
+                                palette = 9;
+                            }
+                        }
+                        Vector3 doorPos = entitySymbol.Position + _navDrawVec1;
+                        Matrix4 doorTransform = GetTransformMatrix(entitySymbol.FacingVector, entitySymbol.UpVector, doorPos);
+                        UpdateTransforms(_navDoorModel, doorTransform, 0);
+                        _navDoorModel.Model.Materials[0].CurrentDiffuse = _navDoorColors[palette];
+                        GetDrawItems(_navDoorModel, 0, lightInfo);
                     }
                 }
-                Vector3 doorPos = door.LockPosition.WithY(door.LockPosition.Y * doorHeightFactor) + _navDrawVec1;
-                Matrix4 doorTransform = GetTransformMatrix(door.FacingVector, door.UpVector, doorPos);
-                UpdateTransforms(_navDoorModel, doorTransform, 0);
-                _navDoorModel.Model.Materials[0].CurrentDiffuse = _navDoorColors[palette];
-                GetDrawItems(_navDoorModel, 0, lightInfo);
             }
         }
 

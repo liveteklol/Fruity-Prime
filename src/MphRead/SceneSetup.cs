@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using MphRead.Entities;
 using MphRead.Formats;
 using MphRead.Formats.Collision;
@@ -72,6 +74,7 @@ namespace MphRead
             {
                 UpdateAreaHunters();
                 InitHunterSpawns(scene, entities, initialize: false); // see: "probably revisit this"
+                scene.LoadMapSymbolEntities(scene.AreaId);
             }
             AiPersonality.LoadAll(mode);
             room.SetNodeData(LoadNodeData(metadata.NodePath, room.RoomId, mode, entities));
@@ -1269,6 +1272,43 @@ namespace MphRead
                 list.Add(CreateJumpPad("rmend", new Vector3(-19.6f, 12, -28.3f), 0.3f, 0.4f)); // same ^
             }
             return list;
+        }
+    }
+
+    public class NavMapRoomSymbols
+    {
+        public string Name { get; }
+        public int Id { get; }
+        public ImmutableArray<NavMapEntitySymbol> Symbols { get; }
+
+        public NavMapRoomSymbols(string name, int id, NavMapEntitySymbol[] symbols)
+        {
+            Name = name;
+            Id = id;
+            Symbols = ImmutableCollectionsMarshal.AsImmutableArray(symbols);
+        }
+    }
+
+    public class NavMapEntitySymbol
+    {
+        public EntityType Type { get; }
+        public short Id { get; }
+        public int SubType { get; }
+        public bool Locked { get; }
+        public Vector3 Position { get; }
+        public Vector3 UpVector { get; }
+        public Vector3 FacingVector { get; }
+
+        public NavMapEntitySymbol(EntityType type, short id, int subType, bool locked,
+            Vector3 position, Vector3 upVector, Vector3 facingVector)
+        {
+            Type = type;
+            Id = id;
+            SubType = subType;
+            Locked = locked;
+            Position = position;
+            UpVector = upVector;
+            FacingVector = facingVector;
         }
     }
 }
