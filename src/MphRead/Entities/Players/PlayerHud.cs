@@ -63,6 +63,7 @@ namespace MphRead.Entities
         private HudObjectInstance _mapLostOctolithInst = null!;
         private readonly HudObjectInstance[] _mapArtifactDotInsts = new HudObjectInstance[8];
         private HudObjectInstance _mapLegendInst = null!;
+        private HudObjectInstance _mapQuitInst = null!;
         private ModelInstance _navPlayerPosModel = null!;
         private ModelInstance _navDoorModel = null!;
         private readonly ModelInstance?[] _navMapModels = new ModelInstance?[8];
@@ -239,6 +240,11 @@ namespace MphRead.Entities
                 _mapLegendInst.SetCharacterData(legend.CharacterData, _scene);
                 _mapLegendInst.SetPaletteData(legend.PaletteData, _scene);
                 _mapLegendInst.Enabled = true;
+                HudObject quit = HudInfo.GetHudObject(HudElements.MapQuit);
+                _mapQuitInst = new HudObjectInstance(quit.Width, quit.Height);
+                _mapQuitInst.SetCharacterData(quit.CharacterData, _scene);
+                _mapQuitInst.SetPaletteData(quit.PaletteData, _scene);
+                _mapQuitInst.Enabled = true;
                 _navPlayerPosModel = Read.GetModelInstance("PlayerPos_NAV", dir: MetaDir.Hud);
                 _scene.LoadModel(_navPlayerPosModel.Model);
                 _navPlayerPosModel.SetAnimation(0, AnimFlags.None);
@@ -1349,6 +1355,27 @@ namespace MphRead.Entities
                         _textSpacingY = 0;
                     }
                 }
+            }
+            DrawPauseQuitInterface();
+        }
+
+        private void DrawPauseQuitInterface()
+        {
+            if (GameState.DrawPauseState == 1)
+            {
+                float alpha = 1; // todo-pause: use 0.25f by default; make opaque when hovering the button
+                int posX = 26; // todo: invert for left-handed mode
+                _mapQuitInst.PositionX = (posX - _mapQuitInst.Width / 2) / 256f;
+                _mapQuitInst.PositionY = (173 - _mapQuitInst.Height / 2) / 192f;
+                _mapQuitInst.Alpha = alpha;
+                _scene.DrawHudObject(_mapQuitInst);
+                string text = Strings.GetHudMessage(119);
+                DrawText2D(posX, 181, Align.Center, 0, text, alpha: alpha);
+            }
+            else if (GameState.DrawPauseState == 2)
+            {
+                // skhere
+                // todo-pause: draw confirmation prompt
             }
         }
 
