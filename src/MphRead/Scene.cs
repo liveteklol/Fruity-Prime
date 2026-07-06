@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.InteropServices;
 using MphRead.Entities;
 using MphRead.Text;
 using OpenTK.Mathematics;
@@ -564,6 +565,43 @@ namespace MphRead
             _node = next;
             _next = next.Next;
             return true;
+        }
+    }
+
+    public class NavMapRoomSymbols
+    {
+        public string Name { get; }
+        public int Id { get; }
+        public ImmutableArray<NavMapEntitySymbol> Symbols { get; }
+
+        public NavMapRoomSymbols(string name, int id, NavMapEntitySymbol[] symbols)
+        {
+            Name = name;
+            Id = id;
+            Symbols = ImmutableCollectionsMarshal.AsImmutableArray(symbols);
+        }
+    }
+
+    public class NavMapEntitySymbol
+    {
+        public EntityType Type { get; }
+        public short Id { get; }
+        public int SubType { get; }
+        public bool Locked { get; }
+        public Vector3 Position { get; }
+        public Vector3 UpVector { get; }
+        public Vector3 FacingVector { get; }
+
+        public NavMapEntitySymbol(EntityType type, short id, int subType, bool locked,
+            Vector3 position, Vector3 upVector, Vector3 facingVector)
+        {
+            Type = type;
+            Id = id;
+            SubType = subType;
+            Locked = locked;
+            Position = position;
+            UpVector = upVector;
+            FacingVector = facingVector;
         }
     }
 }

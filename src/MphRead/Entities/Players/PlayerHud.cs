@@ -62,6 +62,7 @@ namespace MphRead.Entities
         private readonly HudObjectInstance[] _mapOctolithInsts = new HudObjectInstance[8];
         private HudObjectInstance _mapLostOctolithInst = null!;
         private readonly HudObjectInstance[] _mapArtifactDotInsts = new HudObjectInstance[8];
+        private HudObjectInstance _mapLegendInst = null!;
         private ModelInstance _navPlayerPosModel = null!;
         private ModelInstance _navDoorModel = null!;
         private readonly ModelInstance?[] _navMapModels = new ModelInstance?[8];
@@ -233,6 +234,11 @@ namespace MphRead.Entities
                 _mapLostOctolithInst.SetPaletteData(lostOctolith.PaletteData, _scene);
                 _mapLostOctolithInst.SetAnimationFrames(lostOctolith.AnimParams);
                 _mapLostOctolithInst.Enabled = true;
+                HudObject legend = HudInfo.GetHudObject(HudElements.MapLegend);
+                _mapLegendInst = new HudObjectInstance(legend.Width, legend.Height);
+                _mapLegendInst.SetCharacterData(legend.CharacterData, _scene);
+                _mapLegendInst.SetPaletteData(legend.PaletteData, _scene);
+                _mapLegendInst.Enabled = true;
                 _navPlayerPosModel = Read.GetModelInstance("PlayerPos_NAV", dir: MetaDir.Hud);
                 _scene.LoadModel(_navPlayerPosModel.Model);
                 _navPlayerPosModel.SetAnimation(0, AnimFlags.None);
@@ -1142,10 +1148,61 @@ namespace MphRead.Entities
 
         public void DrawPauseMenuBackground()
         {
-            if (GameState.DrawPauseState == 1)
+            if (GameState.DrawPauseState != 1 || !_scene.NavMapRoomSymbols.HasValue)
             {
-                // skhere
-                // todo-pause: draw teleporter symbols
+                return;
+            }
+            ImmutableArray<NavMapRoomSymbols> navMapRoomSymbols = _scene.NavMapRoomSymbols.Value;
+            (Matrix4 viewMtx, Matrix4 orthoMtx) = GetPauseMapMatrices();
+            int area = _scene.AreaId & ~1;
+            for (int i = 0; i < 2; i++, area++)
+            {
+                if (area < 0 || area >= _navMapModels.Length)
+                {
+                    continue;
+                }
+                ModelInstance? model = _navMapModels[area];
+                if (model == null)
+                {
+                    continue;
+                }
+                for (int j = 0; j < model.Model.Nodes.Count; j++)
+                {
+                    Node roomNode = model.Model.Nodes[j];
+                    if (roomNode.ParentIndex != 0 || !CheckRoomVisited(roomNode))
+                    {
+                        continue;
+                    }
+                    for (int k = 0; k < navMapRoomSymbols.Length; k++)
+                    {
+                        NavMapRoomSymbols roomSymbols = navMapRoomSymbols[k];
+                        if (!GameState.StorySave.CheckVisitedRoom(roomSymbols.Id)
+                            || !String.Equals(roomSymbols.Name, roomNode.Name, StringComparison.OrdinalIgnoreCase))
+                        {
+                            continue;
+                        }
+                        for (int l = 0; l < roomSymbols.Symbols.Length; l++)
+                        {
+                            NavMapEntitySymbol entitySymbol = roomSymbols.Symbols[l];
+                            if (entitySymbol.Type != EntityType.Teleporter)
+                            {
+                                continue;
+                            }
+                            Vector3 teleporterPos = entitySymbol.Position + roomNode.Animation.Row3.Xyz.AddY(1);
+                            if (Matrix.ProjectPosition(teleporterPos, viewMtx, orthoMtx, out Vector2 distPos) > 0)
+                            {
+                                var screenPos = new Vector2((distPos.X + 1) / 2, (1 - distPos.Y) / 2);
+                                if (screenPos.X > 0 && screenPos.X < 1 && screenPos.Y > 0 && screenPos.Y < 1)
+                                {
+                                    _mapLegendInst.PositionX = distPos.X - 1 / (256 / 8f);
+                                    _mapLegendInst.PositionY = distPos.Y - 1 / (192 / 8f);
+                                    _mapLegendInst.SetIndex(entitySymbol.SubType, _scene);
+                                    _scene.DrawHudObject(_mapLegendInst);
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -1376,9 +1433,9 @@ namespace MphRead.Entities
             {
                 _navPanTimer = 0;
                 float minDist = 512 * 512;
-                int area = _scene.AreaId & ~1;
                 Node? newRoomNode = null;
                 Node? newCenterNode = null;
+                int area = _scene.AreaId & ~1;
                 for (int i = 0; i < 2; i++, area++)
                 {
                     if (area >= 0 && area < _navMapModels.Length)
@@ -1578,7 +1635,7 @@ namespace MphRead.Entities
                         bool locked = entitySymbol.Locked;
                         if (entitySymbol.Id != -1)
                         {
-                            locked = GameState.StorySave.GetRoomState(_scene.RoomId, entitySymbol.Id) != 0;
+                            locked = GameState.StorySave.GetRoomState(roomSymbols.Id, entitySymbol.Id) != 0;
                         }
                         int palette = 0;
                         if (locked)
