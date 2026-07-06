@@ -1795,6 +1795,7 @@ namespace MphRead
                     Console.WriteLine($"{X(s++)} (F) Target Info Sway: {OnOff(Features.TargetInfoSway)}");
                     Console.WriteLine($"{X(s++)} (W) Delayed Idle Sway: {OnOff(Features.DelayedIdleSway)}");
                     Console.WriteLine($"{X(s++)} (N) No Idle Sway: {OnOff(Features.NoIdleSway)}");
+                    Console.WriteLine($"{X(s++)} (M) No Map Centering: {OnOff(Features.NoMapCentering)}");
                     Console.WriteLine($"{X(s++)} (R) Maximum Room Detail: {OnOff(Features.MaxRoomDetail)}");
                     Console.WriteLine($"{X(s++)} (P) Maximum Player Detail: {OnOff(Features.MaxPlayerDetail)}");
                     Console.WriteLine($"{X(s++)} (L) Logarithmic Spatial Audio: {OnOff(Features.LogSpatialAudio)}");
@@ -2011,29 +2012,33 @@ namespace MphRead
                         }
                         else if (selection == 11)
                         {
-                            Features.MaxRoomDetail = false;
+                            Features.NoMapCentering = false;
                         }
                         else if (selection == 12)
                         {
-                            Features.MaxPlayerDetail = true;
+                            Features.MaxRoomDetail = false;
                         }
                         else if (selection == 13)
                         {
-                            Features.LogSpatialAudio = false;
+                            Features.MaxPlayerDetail = true;
                         }
                         else if (selection == 14)
                         {
-                            Features.HalfSecondAlarm = false;
+                            Features.LogSpatialAudio = false;
                         }
                         else if (selection == 15)
                         {
-                            Features.FullBoostCharge = false;
+                            Features.HalfSecondAlarm = false;
                         }
                         else if (selection == 16)
                         {
-                            Features.BoostOpensDoors = false;
+                            Features.FullBoostCharge = false;
                         }
                         else if (selection == 17)
+                        {
+                            Features.BoostOpensDoors = false;
+                        }
+                        else if (selection == 18)
                         {
                             Features.AlternateHunters1P = true;
                         }
@@ -2126,29 +2131,33 @@ namespace MphRead
                         }
                         else if (selection == 11)
                         {
-                            Features.MaxRoomDetail = !Features.MaxRoomDetail;
+                            Features.NoMapCentering = !Features.NoMapCentering;
                         }
                         else if (selection == 12)
                         {
-                            Features.MaxPlayerDetail = !Features.MaxPlayerDetail;
+                            Features.MaxRoomDetail = !Features.MaxRoomDetail;
                         }
                         else if (selection == 13)
                         {
-                            Features.LogSpatialAudio = !Features.LogSpatialAudio;
+                            Features.MaxPlayerDetail = !Features.MaxPlayerDetail;
                         }
                         else if (selection == 14)
                         {
-                            Features.HalfSecondAlarm = !Features.HalfSecondAlarm;
+                            Features.LogSpatialAudio = !Features.LogSpatialAudio;
                         }
                         else if (selection == 15)
                         {
-                            Features.FullBoostCharge = !Features.FullBoostCharge;
+                            Features.HalfSecondAlarm = !Features.HalfSecondAlarm;
                         }
                         else if (selection == 16)
                         {
-                            Features.BoostOpensDoors = !Features.BoostOpensDoors;
+                            Features.FullBoostCharge = !Features.FullBoostCharge;
                         }
                         else if (selection == 17)
+                        {
+                            Features.BoostOpensDoors = !Features.BoostOpensDoors;
+                        }
+                        else if (selection == 18)
                         {
                             Features.AlternateHunters1P = !Features.AlternateHunters1P;
                         }
@@ -2989,6 +2998,7 @@ namespace MphRead
             Features.TargetInfoSway = false;
             Features.DelayedIdleSway = true;
             Features.NoIdleSway = false;
+            Features.NoMapCentering = false;
             Features.MaxRoomDetail = false;
             Features.MaxPlayerDetail = true;
             Features.LogSpatialAudio = false;

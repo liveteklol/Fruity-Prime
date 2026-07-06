@@ -69,6 +69,7 @@ namespace MphRead
         public static bool TargetInfoSway { get; set; } = false; // "false"
         public static bool DelayedIdleSway { get; set; } = true; // false
         public static bool NoIdleSway { get; set; } = false; // false
+        public static bool NoMapCentering { get; set; } = false; // false
         public static bool MaxRoomDetail { get; set; } = false; // false
         public static bool MaxPlayerDetail { get; set; } = true; // false
         public static bool LogSpatialAudio { get; set; } = false; // false
@@ -123,6 +124,10 @@ namespace MphRead
             {
                 NoIdleSway = boolean;
             }
+            if (values.TryGetValue(nameof(NoMapCentering), out value) && Boolean.TryParse(value, out boolean))
+            {
+                NoMapCentering = boolean;
+            }
             if (values.TryGetValue(nameof(MaxRoomDetail), out value) && Boolean.TryParse(value, out boolean))
             {
                 MaxRoomDetail = boolean;
@@ -168,6 +173,7 @@ namespace MphRead
                 new(nameof(TargetInfoSway), TargetInfoSway.ToString().ToLower()),
                 new(nameof(DelayedIdleSway), DelayedIdleSway.ToString().ToLower()),
                 new(nameof(NoIdleSway), NoIdleSway.ToString().ToLower()),
+                new(nameof(NoMapCentering), NoMapCentering.ToString().ToLower()),
                 new(nameof(MaxRoomDetail), MaxRoomDetail.ToString().ToLower()),
                 new(nameof(MaxPlayerDetail), MaxPlayerDetail.ToString().ToLower()),
                 new(nameof(LogSpatialAudio), LogSpatialAudio.ToString().ToLower()),

@@ -689,7 +689,7 @@ namespace MphRead.Entities
                     _prevScrollingChars = 0;
                 }
             }
-            else if (_navPanOffset != Vector3.Zero)
+            else if (_navPanOffset != Vector3.Zero && !Features.NoMapCentering)
             {
                 if (_navPanTimer < 16 * 30)
                 {
