@@ -112,7 +112,7 @@ namespace MphRead.Entities.Enemies
             {
                 _models[0].SetAnimation(12, AnimFlags.NoLoop);
                 Vector3 facing = (PlayerEntity.Main.Position - Position).AddY(0.5f).Normalized();
-                _speed = (facing * 0.3f).WithY(0) / 2; // todo: FPS stuff   
+                _speed = (facing * 0.3f).WithY(0) / 2; // todo: FPS stuff
             }
             else if (_state2 == 5)
             {

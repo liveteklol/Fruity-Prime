@@ -45,7 +45,7 @@ def material_get_node(self, name):
     try:
         for node in self.node_tree.nodes:
             if node.bl_idname == name:
-                return node                            
+                return node
     except:
         return None
 
@@ -111,7 +111,7 @@ def set_common():
         if hasattr(material, 'shadow_method'):
             material.shadow_method = 'NONE'
         set_vertex_colors(material)
-        
+
 def set_vertex_colors(material):
     color = material.add_node('ShaderNodeVertexColor')
     texture = material.get_node('ShaderNodeTexImage')
@@ -137,7 +137,7 @@ def set_vertex_colors(material):
             color, 'Color',
             'ShaderNodeBsdfPrincipled', 'Base Color'
         )
-    
+
 def set_material_alpha(name, materialAlpha):
     material = get_material(name)
     material.blend_method = 'BLEND'
@@ -150,7 +150,7 @@ def set_material_alpha(name, materialAlpha):
         math, 'Value',
         'ShaderNodeBsdfPrincipled', 'Alpha'
     )
-    
+
 def set_texture_alpha(name, materialAlpha, textureAlpha):
     material = get_material(name)
     material.blend_method = 'BLEND'
@@ -166,7 +166,7 @@ def set_texture_alpha(name, materialAlpha, textureAlpha):
         math, 'Value',
         'ShaderNodeBsdfPrincipled', 'Alpha'
     )
-        
+
 def set_billboard(name, mode):
     obj = get_object(name)
     constraint = obj.constraints.new('LOCKED_TRACK')
@@ -178,11 +178,11 @@ def set_billboard(name, mode):
         constraint.target = bpy.data.objects['Camera']
         constraint.track_axis = 'TRACK_Z'
         constraint.lock_axis = 'LOCK_X'
-    
+
 def set_back_culling(name):
     material = get_material(name)
     material.use_backface_culling = True
-    
+
 def invert_normals(name):
     if (bpy.context.object.mode != 'OBJECT'):
         bpy.ops.object.mode_set(mode = 'OBJECT')
@@ -195,7 +195,7 @@ def invert_normals(name):
     bpy.ops.mesh.select_all(action = 'SELECT')
     bpy.ops.mesh.flip_normals()
     bpy.ops.mesh.select_all(action = 'DESELECT')
-    
+
 def set_mirror(name, x, y):
     material = get_material(name)
     uvs = material.add_node('ShaderNodeUVMap')

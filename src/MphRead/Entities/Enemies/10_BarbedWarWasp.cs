@@ -381,7 +381,7 @@ namespace MphRead.Entities.Enemies
             return true;
         }
 
-        // todo: same as War Wasp Behavior08    
+        // todo: same as War Wasp Behavior08
         private bool Behavior08()
         {
             if (_homeVolume.TestPoint(PlayerEntity.Main.Position))

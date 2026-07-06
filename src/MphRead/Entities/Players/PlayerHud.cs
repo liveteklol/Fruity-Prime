@@ -1140,7 +1140,16 @@ namespace MphRead.Entities
             (-10, -7), (10, -7), (0, 12)
         ];
 
-        public void DrawPauseMenu()
+        public void DrawPauseMenuBackground()
+        {
+            if (GameState.DrawPauseState == 1)
+            {
+                // skhere
+                // todo-pause: draw teleporter symbols
+            }
+        }
+
+        public void DrawPauseMenuForeground()
         {
             if (GameState.NavLoading)
             {
@@ -1546,7 +1555,7 @@ namespace MphRead.Entities
             GetDrawItems(_navPlayerPosModel, 0);
             if (_navMapDrawNode == null || _navMapDrawNode.Name.StartsWith("Con"))
             {
-                // doors are only draw for a selected non-connector room 
+                // doors are only draw for a selected non-connector room
                 return;
             }
             float doorHeightFactor = 1;
@@ -1562,6 +1571,7 @@ namespace MphRead.Entities
             (Vector3 cameraPos, Vector3 cameraTarget) = GetPauseMapLookVectors();
             Vector3 lightVec = (cameraTarget - cameraPos).Normalized();
             var lightInfo = new LightInfo(lightVec, Vector3.One, Vector3.Zero, Vector3.Zero);
+            // skhere todo-pause: need to load and draw doors for other rooms
             foreach (DoorEntity door in _scene.GetDoorEntities())
             {
                 if (door.ConnectorDoor != null)

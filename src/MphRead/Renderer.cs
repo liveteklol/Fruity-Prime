@@ -1455,6 +1455,10 @@ namespace MphRead
             GL.Uniform4(_shaderLocations.FadeColor, _fadeColor, _fadeColor, _fadeColor, 0);
             if (PlayerEntity.Main.LoadFlags.TestFlag(LoadFlags.Active) && CameraMode == CameraMode.Player)
             {
+                if (GameState.MenuPause)
+                {
+                    PlayerEntity.Main.DrawPauseMenuBackground();
+                }
                 DrawHudLayer(Layer4Info); // ice layer
                 DrawHudLayer(Layer3Info); // helmet back
                 DrawHudLayer(Layer1Info); // visor
@@ -1478,7 +1482,7 @@ namespace MphRead
                 }
                 if (GameState.MenuPause)
                 {
-                    PlayerEntity.Main.DrawPauseMenu();
+                    PlayerEntity.Main.DrawPauseMenuForeground();
                 }
             }
             if (_movieFrameIndex != -1)
