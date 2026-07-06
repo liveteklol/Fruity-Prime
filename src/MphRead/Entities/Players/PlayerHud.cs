@@ -1449,14 +1449,20 @@ namespace MphRead.Entities
             }
         }
 
-        public (Matrix4, Matrix4) GetPauseMapMatrices()
+        private (Vector3 CameraPosition, Vector3 CameraTarget) GetPauseMapLookVectors()
         {
-            Matrix4 orthoMtx = Matrix4.CreateOrthographic(256 * _navDrawZoom, 192 / 256f * 256 * _navDrawZoom, -400, 400);
             _navDrawVecB = _navDrawVec2 + _navDrawVecC;
             Vector3 cameraTarget = _navDrawVecB.AddY(3.75f);
             (float sinX, float cosX) = MathF.SinCos(MathHelper.DegreesToRadians(_navDrawRotX));
             (float sinY, float cosY) = MathF.SinCos(MathHelper.DegreesToRadians(_navDrawRotY));
             Vector3 cameraPos = cameraTarget + new Vector3(sinX * cosY * 90, sinY * 90, cosX * cosY * 90);
+            return (cameraPos, cameraTarget);
+        }
+
+        public (Matrix4 ViewMatrix, Matrix4 PerspectiveMatrix) GetPauseMapMatrices()
+        {
+            Matrix4 orthoMtx = Matrix4.CreateOrthographic(256 * _navDrawZoom, 192 / 256f * 256 * _navDrawZoom, -400, 400);
+            (Vector3 cameraPos, Vector3 cameraTarget) = GetPauseMapLookVectors();
             Matrix4 viewMtx = Matrix4.LookAt(cameraPos, cameraTarget, Vector3.UnitY);
             return (viewMtx, orthoMtx);
         }
@@ -1552,9 +1558,10 @@ namespace MphRead.Entities
             {
                 doorHeightFactor = 1.305f;
             }
-            // todo-pause: need the lighting to appear as it does in-game with the vectors set to zero (still changes with camera angle?)
-            // --> why isn't this an issue (or at least not the same issue) with the map model?
-            var lightInfo = new LightInfo(Vector3.UnitX, Vector3.One, -Vector3.UnitX, Vector3.One);
+            // hack(?) to make the door lighting appear as it does in game where the light vectors are all zeroes
+            (Vector3 cameraPos, Vector3 cameraTarget) = GetPauseMapLookVectors();
+            Vector3 lightVec = (cameraTarget - cameraPos).Normalized();
+            var lightInfo = new LightInfo(lightVec, Vector3.One, Vector3.Zero, Vector3.Zero);
             foreach (DoorEntity door in _scene.GetDoorEntities())
             {
                 if (door.ConnectorDoor != null)
