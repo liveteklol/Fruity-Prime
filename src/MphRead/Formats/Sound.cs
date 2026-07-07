@@ -938,7 +938,7 @@ namespace MphRead.Formats.Sound
         {
             Id = id;
             Offset = offset;
-            SampleRate = header.SampleRate;
+            SampleRate = (ushort)header.SampleRate;
             if (header.Format == 4)
             {
                 Format = WaveFormat.ADPCM;
