@@ -2438,6 +2438,7 @@ namespace MphRead
             (MusicType.Music,  (int)MusicId.SEQ_PEPPER_M45,       "Arcterra VS. (Node)"), // *
             (MusicType.Seq,    (int)SeqId.NEW_GAME,               "Story"), // *
             (MusicType.Seq,    (int)SeqId.SHIP,                   "Tetra Galaxy"), // *
+            (MusicType.Seq,    (int)SeqId.FLY_IN_2,               "Landing (Celestial Archives)"),
             (MusicType.Seq,    (int)SeqId.SHIP_LAND2,             "Ship Cockpit (Celestial Archives)"),
             (MusicType.Music,  (int)MusicId.SEQ_GREY_M17,         "Shadows"), // *
             //(MusicType.Music,  (int)MusicId.SEQ_GREY_M52,       "Shadows (Unused)"), // identical to previous
@@ -2455,17 +2456,20 @@ namespace MphRead
             (MusicType.Music,  (int)MusicId.SEQ_OREGANO_M56,      "Escape (Alarm)"), // *
             //(MusicType.Music, (int)MusicId.SEQ_ENERGY_TIMER_M51, "Fuel Stack (Race)"), // identical to VDO VS.
             //(MusicType.Music, (int)MusicId.SEQ_ENERGY_TIMER_M57, "Fuel Stack (Failure"), // silent
+            (MusicType.Seq,    (int)SeqId.FLY_IN_1,               "Landing (Alinos)"),
             (MusicType.Seq,    (int)SeqId.SHIP_LAND1,             "Ship Cockpit (Alinos)"),
             (MusicType.Music,  (int)MusicId.SEQ_RED_M13,          "Alinos"),
-            (MusicType.Music,  (int)MusicId.SEQ_INTRO_SPIRE_M9,   "Spire Intro"), // *
+            //(MusicType.Music,  (int)MusicId.SEQ_INTRO_SPIRE_M9, "Spire Intro"), // identical to Kanden intro (Pursuit)
             (MusicType.Music,  (int)MusicId.SEQ_GUMBO_M37,        "Spire"),
             (MusicType.Music,  (int)MusicId.SEQ_SAFFRON_M29,      "Slench"),
             (MusicType.Music,  (int)MusicId.SEQ_GUMBO_M10,        "Weavel"),
+            (MusicType.Seq,    (int)SeqId.FLY_IN_3,               "Landing (VDO)"),
             (MusicType.Seq,    (int)SeqId.SHIP_LAND3,             "Ship Cockpit (VDO)"),
             (MusicType.Music,  (int)MusicId.SEQ_GREEN_M19,        "The Outpost"),
             (MusicType.Music,  (int)MusicId.SEQ_GREEN_M50,        "The Outpost (Race)"), // *
             (MusicType.Music,  (int)MusicId.SEQ_GUARDIAN_M18,     "Guardians"),
             (MusicType.Music,  (int)MusicId.SEQ_GUMBO_M39,        "Sylux"),
+            (MusicType.Seq,    (int)SeqId.FLY_IN_4,               "Landing (Arcterra)"),
             (MusicType.Seq,    (int)SeqId.SHIP_LAND4,             "Ship Cockpit (Arcterra)"),
             (MusicType.Music,  (int)MusicId.SEQ_WHITE_M48,        "Desolation"),
             (MusicType.Music,  (int)MusicId.SEQ_WHITE_M54,        "Desolation (Maze)"), // *
@@ -2483,6 +2487,7 @@ namespace MphRead
             (MusicType.Music,  (int)MusicId.SEQ_INDIGO_M59,       "Space Decay"),
             (MusicType.Music,  (int)MusicId.SEQ_BLACK_M53,        "Watching"),
             //(MusicType.Music,  (int)MusicId.SEQ_BLACK_M64,      "Watching (Unused)"), // identical to previous
+            (MusicType.Seq,    (int)SeqId.FLY_IN_GOREA,           "Landing (Oubliette)"),
             (MusicType.Music,  (int)MusicId.SEQ_GOREA_1_M20,      "Gorea"),
             (MusicType.Music,  (int)MusicId.SEQ_GOREA_1_M22,      "Gorea (Battlehammer)"),
             (MusicType.Music,  (int)MusicId.SEQ_GOREA_1_M26,      "Gorea (Volt Driver)"),
