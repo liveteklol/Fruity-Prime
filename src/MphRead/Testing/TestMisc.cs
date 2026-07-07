@@ -119,7 +119,26 @@ namespace MphRead.Testing
             -0xF00, 0xF00, 0x2D00, 0x4AFF, 0x68FF, -0x6FFF, -0x4FFF, -0x3000, -0x1000, 0x1000, 0x3000, 0x4FFF, 0x6FFF
         ];
 
-        public static void TestFV(string? path = null)
+        public static void VerifyFV()
+        {
+            // skhere: regression test -- create output folder with golden output, generate each frame and compare to the output
+            TestFV(@"C:\Users\auser\Home\MPH\_FS\amfe\data\movies\opening-15fps-up-left.avi.fv", verify: true);
+            TestFV(@"C:\Users\auser\Home\MPH\_FS\amfe\data\movies\opening-15fps-down-right.avi.fv", verify: true);
+            TestFV(@"C:\Users\auser\Home\MPH\_FS\amfe\data\movies\spawn_yellow-15fps-up-left.avi.fv", verify: true);
+            TestFV(@"C:\Users\auser\Home\MPH\_FS\amfe\data\movies\spawn_yellow-15fps-down-right.avi.fv", verify: true);
+            TestFV(@"C:\Users\auser\Home\MPH\_FS\amfe\data\movies\spawn_green-15fps-up-left.avi.fv", verify: true);
+            TestFV(@"C:\Users\auser\Home\MPH\_FS\amfe\data\movies\spawn_green-15fps-down-right.avi.fv", verify: true);
+            TestFV(@"C:\Users\auser\Home\MPH\_FS\amfe\data\movies\spawn_blue-15fps-up-left.avi.fv", verify: true);
+            TestFV(@"C:\Users\auser\Home\MPH\_FS\amfe\data\movies\spawn_blue-15fps-down-right.avi.fv", verify: true);
+            TestFV(@"C:\Users\auser\Home\MPH\_FS\amfe\data\movies\spawn_white-15fps-up-left.avi.fv", verify: true);
+            TestFV(@"C:\Users\auser\Home\MPH\_FS\amfe\data\movies\spawn_white-15fps-down-right.avi.fv", verify: true);
+            TestFV(@"C:\Users\auser\Home\MPH\_FS\amfe\data\movies\death-15fps-up-left.avi.fv", verify: true);
+            TestFV(@"C:\Users\auser\Home\MPH\_FS\amfe\data\movies\death-15fps-down-right.avi.fv", verify: true);
+            TestFV(@"C:\Users\auser\Home\MPH\_FS\amfe\data\movies\teaser-15fps-up-left.avi.fv", verify: true);
+            TestFV(@"C:\Users\auser\Home\MPH\_FS\amfe\data\movies\teaser-15fps-down-right.avi.fv", verify: true);
+        }
+
+        public static void TestFV(string? path = null, bool verify = false)
         {
             if (path == null)
             {
@@ -137,6 +156,11 @@ namespace MphRead.Testing
                 //path = @"C:\Users\auser\Home\MPH\_FS\amfe\data\movies\opening-15fps-down-right.avi.fv";
                 //path = @"C:\Users\auser\Home\MPH\_FS\amfe\data\movies\opening-15fps-up-left.avi.fv";
                 //path = @"C:\Users\auser\Home\MPH\_FS\amfe\data\movies\spawn_blue-15fps-down-right.avi.fv";
+            }
+            string movieName = Path.GetFileNameWithoutExtension(path);
+            if (verify)
+            {
+                Debug.WriteLine($"Verifying {path}.fv...");
             }
             ReadOnlySpan<byte> fileBytes = File.ReadAllBytes(path);
             using FileStream fileStream = File.OpenRead(path);
@@ -243,11 +267,23 @@ namespace MphRead.Testing
                     // intermediate image outputs + images that show pixels as changed vs. unchanged at each step
                     p += 3;
                 }
-                string outputPath = $@"C:\Users\auser\Home\MPH\Data\_Export\_FV\{Path.GetFileNameWithoutExtension(path)}\"
-                    + $@"{frameIndex.ToString().PadLeft(3, '0')}.png";
-                Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
-                using FileStream fs = File.Create(outputPath);
-                StbImage.WritePng<byte>(imageOutput, 256, 192, StbiImageFormat.Rgb, fs);
+                string imageFilename = $"{frameIndex.ToString().PadLeft(3, '0')}.png";
+                if (verify)
+                {
+                    using FileStream fs = File.OpenRead($@"C:\Users\auser\Home\MPH\Data\_Export\_FV\_golden\{movieName}\{imageFilename}");
+                    StbImage image = StbImage.Load(fs, StbiImageFormat.Rgb);
+                    if (!MemoryExtensions.SequenceEqual(imageOutput, image.AsSpan<byte>()))
+                    {
+                        Debugger.Break();
+                    }
+                }
+                else
+                {
+                    string outputPath = $@"C:\Users\auser\Home\MPH\Data\_Export\_FV\{movieName}\{imageFilename}";
+                    Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
+                    using FileStream fs = File.Create(outputPath);
+                    StbImage.WritePng<byte>(imageOutput, 256, 192, StbiImageFormat.Rgb, fs);
+                }
                 // audio
                 int audioFrameCount = audioSize / 40;
                 audioFrameTotal += audioFrameCount;
@@ -352,16 +388,19 @@ namespace MphRead.Testing
             int lastFrameValue3 = reader.ReadInt32();
             Debug.Assert(lastFrameValue3 == 0);
             Debug.Assert(reader.BaseStream.Position == fileBytes.Length);
-            string audioOutput = $@"C:\Users\auser\Home\MPH\Data\_Export\_FV\{Path.GetFileNameWithoutExtension(path)}\audio.wav";
-            Directory.CreateDirectory(Path.GetDirectoryName(audioOutput)!);
-            using var output = File.Create(audioOutput);
-            using var writer = new BinaryWriter(output);
-            SoundRead.WriteWavHeader(writer, (uint)audioFrameTotal * 256, (ushort)audioSampleRate, WaveFormat.PCM16);
-            foreach (short sample in samples)
+            if (!verify)
             {
-                ushort data = (ushort)sample;
-                writer.Write((byte)(data & 0xFF));
-                writer.Write((byte)((data >> 8) & 0xFF));
+                string audioOutput = $@"C:\Users\auser\Home\MPH\Data\_Export\_FV\{movieName}\audio.wav";
+                Directory.CreateDirectory(Path.GetDirectoryName(audioOutput)!);
+                using var output = File.Create(audioOutput);
+                using var writer = new BinaryWriter(output);
+                SoundRead.WriteWavHeader(writer, (uint)audioFrameTotal * 256, (ushort)audioSampleRate, WaveFormat.PCM16);
+                foreach (short sample in samples)
+                {
+                    ushort data = (ushort)sample;
+                    writer.Write((byte)(data & 0xFF));
+                    writer.Write((byte)((data >> 8) & 0xFF));
+                }
             }
             Nop();
             Nop();
