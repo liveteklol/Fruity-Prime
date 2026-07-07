@@ -667,17 +667,14 @@ namespace MphRead
                 if ((tracks & (1 << i)) != 0)
                 {
                     TrackFader trackFader = _trackFaders[i];
-                    if ((_fadingTracks & (1 << i)) != 0)
+                    NCSFCommon.Track? track = MusicPlayer.GetTrack(i);
+                    if (track != null)
                     {
-                        NCSFCommon.Track? track = MusicPlayer.GetTrack(i);
-                        if (track != null)
-                        {
-                            trackFader.Start = track.Volume;
-                        }
+                        trackFader.Start = track.Volume;
                     }
                     trackFader.Target = target;
                     trackFader.TimeMs = time * 1000;
-                    trackFader.Timer.Reset();
+                    trackFader.Timer.Restart();
                 }
             }
             _fadingTracks |= tracks;
@@ -770,7 +767,19 @@ namespace MphRead
                     // todo: should look at allocations (including recreating these objects, but especially the byte and float lists internal to NCSF)
                     _stream = new NCSFPlayerStream(path, (uint)_sampleRate, Interpolation.None, skipSilenceOnStartSec: 5,
                         defaultLengthInMS: 115000, defaultFadeInMS: 5000, NCSF123.VolumeType.ReplayGainAlbum, PeakType.ReplayGainTrack,
-                        playForever: true, volume, channelMutes: 0, (ushort)(tracks ^ UInt16.MaxValue), ignoreVolume: false);
+                        playForever: true, volume, channelMutes: 0, trackMutes: 0, ignoreVolume: false);
+                    // use volume instead of trackMutes to make it easy to potentially fade them in later
+                    for (int i = 0; i < 16; i++)
+                    {
+                        if ((tracks & (1 << i)) == 0)
+                        {
+                            NCSFCommon.Track? track = MusicPlayer.GetTrack(i);
+                            if (track != null)
+                            {
+                                track.Volume = 0;
+                            }
+                        }
+                    }
                     if (StopLoading)
                     {
                         return;
