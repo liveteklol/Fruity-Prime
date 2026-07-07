@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 using MphRead.Entities;
 using MphRead.Formats;
@@ -119,9 +120,19 @@ namespace MphRead.Testing
             -0xF00, 0xF00, 0x2D00, 0x4AFF, 0x68FF, -0x6FFF, -0x4FFF, -0x3000, -0x1000, 0x1000, 0x3000, 0x4FFF, 0x6FFF
         ];
 
+        private static readonly List<double> _allDecodeTimes = new List<double>();
+        private static readonly List<double> _individualDecodeAvgs = new List<double>();
+        private static readonly List<double> _currentDecodeTimes = new List<double>();
+        private static double _maxDecodeTime = 0;
+        private static double _totalDecodeTime = 0;
+
         public static void VerifyFV()
         {
-            // skhere: regression test -- create output folder with golden output, generate each frame and compare to the output
+            _allDecodeTimes.Clear();
+            _currentDecodeTimes.Clear();
+            _individualDecodeAvgs.Clear();
+            _maxDecodeTime = 0;
+            _totalDecodeTime = 0;
             TestFV(@"C:\Users\auser\Home\MPH\_FS\amfe\data\movies\opening-15fps-up-left.avi.fv", verify: true);
             TestFV(@"C:\Users\auser\Home\MPH\_FS\amfe\data\movies\opening-15fps-down-right.avi.fv", verify: true);
             TestFV(@"C:\Users\auser\Home\MPH\_FS\amfe\data\movies\spawn_yellow-15fps-up-left.avi.fv", verify: true);
@@ -136,6 +147,12 @@ namespace MphRead.Testing
             TestFV(@"C:\Users\auser\Home\MPH\_FS\amfe\data\movies\death-15fps-down-right.avi.fv", verify: true);
             TestFV(@"C:\Users\auser\Home\MPH\_FS\amfe\data\movies\teaser-15fps-up-left.avi.fv", verify: true);
             TestFV(@"C:\Users\auser\Home\MPH\_FS\amfe\data\movies\teaser-15fps-down-right.avi.fv", verify: true);
+            Debug.WriteLine($"Averages   = {String.Join(", ", _individualDecodeAvgs.Order().Select(x => Math.Round(x, 3)))}");
+            Debug.WriteLine($"All avg    = {Math.Round(_allDecodeTimes.Average(), 3)}");
+            Debug.WriteLine($"Max time   = {Math.Round(_maxDecodeTime, 3)}");
+            Debug.WriteLine($"Total time = {Math.Round(_totalDecodeTime, 3)}");
+            _ = 5;
+            _ = 5;
         }
 
         public static void TestFV(string? path = null, bool verify = false)
@@ -161,6 +178,7 @@ namespace MphRead.Testing
             if (verify)
             {
                 Debug.WriteLine($"Verifying {path}.fv...");
+                _currentDecodeTimes.Clear();
             }
             ReadOnlySpan<byte> fileBytes = File.ReadAllBytes(path);
             using FileStream fileStream = File.OpenRead(path);
@@ -200,6 +218,8 @@ namespace MphRead.Testing
             var samples = new List<short>(); // todo: get rid of this once we're streaming/writing
             Span<short> sampleSpan = stackalloc short[256];
             ReadOnlySpan<short> table206C268 = _dword206C268.AsSpan();
+
+            var sw = new Stopwatch();
 
             byte[] imageOutput = new byte[256 * 192 * 3];
 
@@ -247,7 +267,11 @@ namespace MphRead.Testing
                     foundMaxSize = true;
                 }
                 // video
+                sw.Restart();
                 TestVideo(frameWidth, frameHeight, dataBuffer.Slice(0, videoSize), frameIndex);
+                sw.Stop();
+                _currentDecodeTimes.Add(sw.Elapsed.TotalMilliseconds);
+                _allDecodeTimes.Add(sw.Elapsed.TotalMilliseconds);
                 byte[] outputBuf = _outputBufferSwap ? _outputBuf1 : _outputBuf2;
                 int p = 0;
                 for (int j = 0; j < outputBuf.Length; j += 2)
@@ -388,7 +412,13 @@ namespace MphRead.Testing
             int lastFrameValue3 = reader.ReadInt32();
             Debug.Assert(lastFrameValue3 == 0);
             Debug.Assert(reader.BaseStream.Position == fileBytes.Length);
-            if (!verify)
+            if (verify)
+            {
+                _individualDecodeAvgs.Add(_currentDecodeTimes.Average());
+                _maxDecodeTime = Math.Max(_maxDecodeTime, _currentDecodeTimes.Max());
+                _totalDecodeTime += _currentDecodeTimes.Sum();
+            }
+            else
             {
                 string audioOutput = $@"C:\Users\auser\Home\MPH\Data\_Export\_FV\{movieName}\audio.wav";
                 Directory.CreateDirectory(Path.GetDirectoryName(audioOutput)!);
@@ -413,47 +443,47 @@ namespace MphRead.Testing
         private static readonly byte[] _outputBuf2 = new byte[256 * 192 * 2];
         private static bool _outputBufferSwap = true; // swapped to false when decoding the first frame
 
-        private static bool _log = false;
+        //private static bool _log = false;
 
-        private static void Log(string message)
-        {
-            if (_log)
-            {
-                Debug.Write(message);
-            }
-        }
+        //private static void Log(string message)
+        //{
+        //    if (_log)
+        //    {
+        //        Debug.Write(message);
+        //    }
+        //}
 
-        private static void LogLine(string message)
-        {
-            if (_log)
-            {
-                Debug.WriteLine(message);
-            }
-        }
+        //private static void LogLine(string message)
+        //{
+        //    if (_log)
+        //    {
+        //        Debug.WriteLine(message);
+        //    }
+        //}
 
-        private static void LogBlock(int block, bool current = true)
-        {
-            byte[] buffer = _outputBufferSwap || !current ? _outputBuf1 : _outputBuf2;
-            for (int h = 0; h < 8; h++)
-            {
-                for (int w = 0; w < 8; w++)
-                {
-                    //int p = (y * 512 * 8) + h * 512 + w * 2 + (x * 16);
-                    int p = (block / 32 * 512 * 8) + h * 512 + w * 2 + (block % 32) * 16;
-                    ushort color = (ushort)(buffer[p] | (buffer[p + 1] << 8));
-                    int r = color & 0x1F;
-                    int g = (color >> 5) & 0x1F;
-                    int b = (color >> 10) & 0x1F;
-                    Log($"{r * 8,3},{g * 8,3},{b * 8,3}");
-                    if (w < 7)
-                    {
-                        Log("  ");
-                    }
-                }
-                LogLine("");
-            }
-            LogLine("");
-        }
+        //private static void LogBlock(int block, bool current = true)
+        //{
+        //    byte[] buffer = _outputBufferSwap || !current ? _outputBuf1 : _outputBuf2;
+        //    for (int h = 0; h < 8; h++)
+        //    {
+        //        for (int w = 0; w < 8; w++)
+        //        {
+        //            //int p = (y * 512 * 8) + h * 512 + w * 2 + (x * 16);
+        //            int p = (block / 32 * 512 * 8) + h * 512 + w * 2 + (block % 32) * 16;
+        //            ushort color = (ushort)(buffer[p] | (buffer[p + 1] << 8));
+        //            int r = color & 0x1F;
+        //            int g = (color >> 5) & 0x1F;
+        //            int b = (color >> 10) & 0x1F;
+        //            Log($"{r * 8,3},{g * 8,3},{b * 8,3}");
+        //            if (w < 7)
+        //            {
+        //                Log("  ");
+        //            }
+        //        }
+        //        LogLine("");
+        //    }
+        //    LogLine("");
+        //}
 
         private static void TestVideo(int width, int height, Span<byte> videoData, int frameIndex)
         {
@@ -509,7 +539,7 @@ namespace MphRead.Testing
                         Debugger.Break();
                     }
 
-                    LogBlock(block);
+                    //LogBlock(block);
 
                     // advance by 16 bytes = 8 words/pixels to the next 8x8 block
                     outputPos += 16;
