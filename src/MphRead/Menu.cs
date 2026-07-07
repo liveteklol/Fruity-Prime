@@ -2423,7 +2423,6 @@ namespace MphRead
             (MusicType.Stream, (int)VoiceId.STRM_TITLE_SCREEN,    "Title"),
             (MusicType.Seq,    (int)SeqId.CHUTNEY,                "Menu"),
             (MusicType.Seq,    (int)SeqId.MENU1,                  "Menu (Unused)"),
-            (MusicType.Seq,    (int)SeqId.RESULTS,                "Results"),
             (MusicType.Music,  (int)MusicId.SEQ_MP2_M15,          "Celestial Archives VS."), // renamed from Celestial Gateway
             (MusicType.Music,  (int)MusicId.SEQ_MP2_M40,          "Celestial Archives VS. (Octolith)"), // *
             (MusicType.Music,  (int)MusicId.SEQ_MP2_M6,           "Celestial Archives VS. (Node)"), // *
@@ -2436,6 +2435,7 @@ namespace MphRead
             (MusicType.Music,  (int)MusicId.SEQ_PEPPER_M36,       "Arcterra VS."), // renamed from Arcterra Gateway
             (MusicType.Music,  (int)MusicId.SEQ_PEPPER_M38,       "Arcterra VS. (Octolith)"), // *
             (MusicType.Music,  (int)MusicId.SEQ_PEPPER_M45,       "Arcterra VS. (Node)"), // *
+            (MusicType.Seq,    (int)SeqId.RESULTS,                "Results"),
             (MusicType.Seq,    (int)SeqId.NEW_GAME,               "Story"), // *
             (MusicType.Seq,    (int)SeqId.SHIP,                   "Tetra Galaxy"), // *
             (MusicType.Seq,    (int)SeqId.FLY_IN_2,               "Landing (Celestial Archives)"),
