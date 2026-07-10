@@ -150,7 +150,7 @@ namespace MphRead
             {
                 "Battle Teams", "Survival Teams", "Capture", "Bounty Teams", "Nodes Teams", "Defender Teams"
             };
-            var models = new List<(string Name, string Recolor)>();
+            var models = new List<(string Name, int Recolor, bool FirstHunt, MetaDir dir)>();
             var mphVersions = new List<string>() { Ver.A76E0, Ver.AMHE0, Ver.AMHE1,
                 Ver.AMHP0, Ver.AMHP1, Ver.AMHJ0, Ver.AMHJ1, Ver.AMHK0 };
             var fhVersions = new List<string>() { Ver.AMFE0, Ver.AMFP0 };
@@ -428,15 +428,26 @@ namespace MphRead
                     string[] split = input.Split(',');
                     for (int i = 0; i < split.Length; i++)
                     {
-                        string[] pair = split[i].Trim().Split(' ');
-                        if (Metadata.ModelMetadata.TryGetValue(pair[0], out ModelMetadata? meta))
+                        string[] parts = split[i].Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                        int recolor = 0;
+                        bool firstHunt = false;
+                        MetaDir dir = MetaDir.Models;
+                        foreach (string part in parts[1..])
                         {
-                            string recolor = "0";
-                            if (pair.Length > 1 && Int32.TryParse(pair[1], out int result))
+                            if (part.ToLower() == "fh")
                             {
-                                recolor = Math.Clamp(result, 0, meta.Recolors.Count - 1).ToString();
+                                firstHunt = true;
                             }
-                            models.Add((meta.Name, recolor));
+                            else if (!Int32.TryParse(part, out recolor)) // remains 0 if parsing fails
+                            {
+                                Enum.TryParse<MetaDir>(part, out dir); // remains MetaDir.Models (0) if parsing fails
+                            }
+                        }
+                        ModelMetadata? meta = firstHunt ? Metadata.GetFirstHuntModelByName(parts[0]) : Metadata.GetModelByName(parts[0], dir);
+                        if (meta != null)
+                        {
+                            recolor = Math.Clamp(recolor, 0, meta.Recolors.Count - 1);
+                            models.Add((meta.Name, recolor, firstHunt, dir));
                         }
                     }
                 }
@@ -957,7 +968,7 @@ namespace MphRead
                             {
                                 if (models.Count == 0)
                                 {
-                                    models.Add(("Crate01", "0"));
+                                    models.Add(("Crate01", 0, false, MetaDir.Models));
                                 }
                                 else
                                 {
@@ -969,7 +980,7 @@ namespace MphRead
                                         index = 0;
                                     }
                                     model = Metadata.ModelMetadata[Metadata.ModelMetadata.Keys.ElementAt(index)].Name;
-                                    models[0] = (model, models[0].Recolor);
+                                    models[0] = (model, models[0].Recolor, false, MetaDir.Models);
                                 }
                             }
                             else if (selection == 7)
@@ -1105,7 +1116,7 @@ namespace MphRead
                             {
                                 if (models.Count == 0)
                                 {
-                                    models.Add(("Crate01", "0"));
+                                    models.Add(("Crate01", 0, false, MetaDir.Models));
                                 }
                                 else
                                 {
@@ -1117,7 +1128,7 @@ namespace MphRead
                                         index = Metadata.ModelMetadata.Keys.Count() - 1;
                                     }
                                     model = Metadata.ModelMetadata[Metadata.ModelMetadata.Keys.ElementAt(index)].Name;
-                                    models[0] = (model, models[0].Recolor);
+                                    models[0] = (model, models[0].Recolor, false, MetaDir.Models);
                                 }
                             }
                             else if (selection == 7)
@@ -1289,8 +1300,8 @@ namespace MphRead
                 }
                 for (int i = 0; i < models.Count; i++)
                 {
-                    (string model, string recolor) = models[i];
-                    renderer.AddModel(model, Int32.Parse(recolor));
+                    (string model, int recolor, bool firstHunt, MetaDir dir) = models[i];
+                    renderer.AddModel(model, recolor, firstHunt, dir);
                 }
                 renderer.Run();
             }
