@@ -559,7 +559,7 @@ namespace MphRead.Entities
             {
                 return;
             }
-            SetNodeData(SceneSetup.LoadNodeData(roomMeta.NodePath, roomMeta.Id, GameState.Mode, entities));
+            SetNodeData(SceneSetup.LoadNodeData(roomMeta.NodePath, roomMeta.Id, GameState.Mode, entities, roomMeta.FirstHunt));
             PlayerEntity.PlayerAiData.InitializeGlobals();
             if (token.IsCancellationRequested)
             {
