@@ -116,7 +116,7 @@ namespace MphRead
         HealthSmall = 2,
         HealthBig = 3,
         DoubleDamage = 4,
-        PickMorphBall = 5,
+        PowerBeam = 5, // unused
         ElectroLob = 6,
         Missile = 7
     }
