@@ -416,6 +416,7 @@ namespace MphRead.Entities
                         _mapLegendInfo[5].Unlocked = _availableWeapons[BeamType.Magmaul];
                         int column = 0;
                         float posY = 65;
+                        Span<char> buffer = stackalloc char[128];
                         for (int i = 0; i < _mapLegendInfo.Length; i++)
                         {
                             MapLegendInfo info = _mapLegendInfo[i];
@@ -442,7 +443,7 @@ namespace MphRead.Entities
                             info.HudObject.SetIndex(info.ObjectIndex, _scene);
                             _scene.DrawHudObject(info.HudObject);
                             _textSpacingY = 8;
-                            Span<char> buffer = stackalloc char[128];
+                            buffer.Clear();
                             int lines = WrapText(text, 80, buffer);
                             DrawText2D(textX, posY + 1, column == 0 ? Align.Right : Align.Left, 0, buffer);
                             _textSpacingY = 0;
