@@ -2627,7 +2627,6 @@ namespace MphRead.Entities
         CanTouchBoost = 0x8000000,
         UsedJumpPad = 0x10000000,
         AltDirOverride = 0x20000000,
-        Bit30 = 0x40000000,
         DrawGunSmoke = 0x80000000
     }
 
@@ -2670,15 +2669,38 @@ namespace MphRead.Entities
     }
 
     [Flags]
-    public enum CrushFlags : byte
+    public enum FhPlayerFlags : uint
     {
         None = 0,
-        Bit0 = 1,
-        Bit1 = 2,
-        Bit2 = 4,
-        Bit3 = 8,
-        Bit4 = 0x10,
-        Bit5 = 0x20
+        Standing = 1,
+        StandingPrevious = 2,
+        CollidingLateral = 4,
+        UsedJump = 8,
+        AltForm = 0x10,
+        AltFormPrevious = 0x20,
+        FreeStrafe = 0x40,
+        LockedOn = 0x80,
+        AutoLockOn = 0x100,
+        FreeLook = 0x200,
+        FreeLookPrevious = 0x400,
+        ShotUncharged = 0x800,
+        ShotMissile = 0x1000,
+        ShotCharged = 0x2000,
+        GunOpenAnimation = 0x4000,
+        Grounded = 0x8000,
+        GroundedPrevious = 0x10000,
+        Walking = 0x20000,
+        MovingBiped = 0x40000,
+        NoAttack = 0x80000,
+        Boosting = 0x100000,
+        Targeted = 0x200000,
+        UsedJumpPad = 0x400000,
+        AltDirOverride = 0x800000,
+        CenterAltFormCamera = 0x1000000,
+        DrawGunSmoke = 0x2000000,
+        DrawMuzzleEffect = 0x4000000,
+        DrawBallDeath = 0x8000000,
+        HideModel = 0x10000000
     }
 
     public readonly struct PlayerValues

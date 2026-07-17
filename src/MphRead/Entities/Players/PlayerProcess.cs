@@ -1512,7 +1512,6 @@ namespace MphRead.Entities
 
             void AfterSwitch()
             {
-                Flags1 &= ~PlayerFlags1.Bit30;
                 UpdateZoom(false);
                 EquipInfo.ChargeLevel = 0;
                 EquipInfo.SmokeLevel = 0;
