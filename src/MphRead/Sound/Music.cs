@@ -709,6 +709,7 @@ namespace MphRead
                         {
                             UpdateTrackVolume((ushort)(1 << i), (byte)(trackFader.Start + (trackFader.Target - trackFader.Start) * pct));
                         }
+                        track.Mute = track.Volume == 0;
                     }
                 }
             }
@@ -768,7 +769,7 @@ namespace MphRead
                     _stream = new NCSFPlayerStream(path, (uint)_sampleRate, Interpolation.None, skipSilenceOnStartSec: 5,
                         defaultLengthInMS: 115000, defaultFadeInMS: 5000, NCSF123.VolumeType.ReplayGainAlbum, PeakType.ReplayGainTrack,
                         playForever: true, volume, channelMutes: 0, trackMutes: 0, ignoreVolume: false);
-                    // use volume instead of trackMutes to make it easy to potentially fade them in later
+                    // use volume and mute directly instead of trackMutes to make it easy to potentially fade them in later without the player interfering
                     for (int i = 0; i < 16; i++)
                     {
                         if ((tracks & (1 << i)) == 0)
@@ -777,6 +778,7 @@ namespace MphRead
                             if (track != null)
                             {
                                 track.Volume = 0;
+                                track.Mute = true;
                             }
                         }
                     }
@@ -855,25 +857,6 @@ namespace MphRead
                 if (_stream != null)
                 {
                     _stream.VolumeModification = Math.Clamp(value, 0, 1);
-                }
-            }
-        }
-
-        public static ushort Tracks
-        {
-            get
-            {
-                if (_stream != null)
-                {
-                    return (ushort)(_stream.Player.TrackMutes ^ UInt16.MaxValue);
-                }
-                return 0;
-            }
-            set
-            {
-                if (_stream != null)
-                {
-                    _stream.Player.TrackMutes = (ushort)(value ^ UInt16.MaxValue);
                 }
             }
         }
