@@ -305,7 +305,7 @@ namespace MphRead.Entities
                 float fovFactor = CameraInfo.Fov - Fixed.ToFloat(Values.NormalFov) * 2;
                 if (fovFactor != 0) // zero will occur when the camera info is overridden to normal FOV due to cam seq
                 {
-                    sensitivity /= -Fixed.ToFloat(Values.Field70) * fovFactor;
+                    sensitivity /= -Fixed.ToFloat(Values.ZoomSensitivityFactor) * fovFactor;
                 }
             }
             amount *= sensitivity;
@@ -348,7 +348,7 @@ namespace MphRead.Entities
                 float fovFactor = CameraInfo.Fov - Fixed.ToFloat(Values.NormalFov) * 2;
                 if (fovFactor != 0) // zero will occur when the camera info is overridden to normal FOV due to cam seq
                 {
-                    sensitivity /= -Fixed.ToFloat(Values.Field70) * fovFactor;
+                    sensitivity /= -Fixed.ToFloat(Values.ZoomSensitivityFactor) * fovFactor;
                 }
             }
             amount *= sensitivity;
@@ -580,8 +580,8 @@ namespace MphRead.Entities
                         }
                         if (!EquipInfo.Zoomed)
                         {
-                            _field684 += Fixed.ToFloat(Values.Field114) * sign / 2; // todo: FPS stuff
-                            _field684 = Math.Clamp(_field684, -180, 180);
+                            _viewTiltAngleH += Fixed.ToFloat(Values.ViewTiltIncrement) * sign / 2; // todo: FPS stuff
+                            _viewTiltAngleH = Math.Clamp(_viewTiltAngleH, -180, 180);
                         }
                     }
 
@@ -613,8 +613,8 @@ namespace MphRead.Entities
                         }
                         if (!EquipInfo.Zoomed)
                         {
-                            _field688 += Fixed.ToFloat(Values.Field114) * sign / 2; // todo: FPS stuff
-                            _field688 = Math.Clamp(_field688, -180, 180);
+                            _viewTiltAngleV += Fixed.ToFloat(Values.ViewTiltIncrement) * sign / 2; // todo: FPS stuff
+                            _viewTiltAngleV = Math.Clamp(_viewTiltAngleV, -180, 180);
                         }
                     }
 
@@ -626,13 +626,13 @@ namespace MphRead.Entities
                     {
                         MoveRightLeft(PlayerAnimation.WalkLeft, sign: -1);
                     }
-                    if (_field684 < Fixed.ToFloat(500) && _field684 > Fixed.ToFloat(-500))
+                    if (_viewTiltAngleH < Fixed.ToFloat(500) && _viewTiltAngleH > Fixed.ToFloat(-500))
                     {
-                        _field684 = 0;
+                        _viewTiltAngleH = 0;
                     }
                     else
                     {
-                        _field684 *= 0.9f; // sktodo: FPS stuff
+                        _viewTiltAngleH *= 0.9f; // sktodo: FPS stuff
                     }
                     if (Controls.MoveUp.IsDown)
                     {
@@ -642,13 +642,13 @@ namespace MphRead.Entities
                     {
                         MoveForwardBack(PlayerAnimation.WalkBackward, sign: -1);
                     }
-                    if (_field688 < Fixed.ToFloat(500) && _field688 > Fixed.ToFloat(-500))
+                    if (_viewTiltAngleV < Fixed.ToFloat(500) && _viewTiltAngleV > Fixed.ToFloat(-500))
                     {
-                        _field688 = 0;
+                        _viewTiltAngleV = 0;
                     }
                     else
                     {
-                        _field688 *= 0.9f; // sktodo: FPS stuff
+                        _viewTiltAngleV *= 0.9f; // sktodo: FPS stuff
                     }
                     if (Cheats.UnlimitedJumps)
                     {

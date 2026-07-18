@@ -312,8 +312,8 @@ namespace MphRead.Entities
         private byte _field551 = 0;
         private byte _field552 = 0;
         private byte _field553 = 0;
-        private float _field684 = 0;
-        private float _field688 = 0;
+        private float _viewTiltAngleH = 0;
+        private float _viewTiltAngleV = 0;
         private bool _field6D0 = false; //  todo: unused?
         public bool Field6D0 => _field6D0; //  todo: unused?
         private float _altRollFbX = 0; // set from other fields when entering alt form
@@ -788,8 +788,8 @@ namespace MphRead.Entities
             if (GameState.SinglePlayer && CameraSequence.Current != null)
             {
                 _camSwitchTimer = (ushort)(Values.CamSwitchTime * 2); // todo: FPS stuff
-                _field684 = 0;
-                _field688 = 0;
+                _viewTiltAngleH = 0;
+                _viewTiltAngleV = 0;
             }
             else
             {
@@ -805,8 +805,8 @@ namespace MphRead.Entities
                 CameraInfo.NodeRef = NodeRef;
                 SwitchCamera(CameraType.First, facing);
                 _camSwitchTimer = (ushort)(Values.CamSwitchTime * 2); // todo: FPS stuff
-                _field684 = 0;
-                _field688 = 0;
+                _viewTiltAngleH = 0;
+                _viewTiltAngleV = 0;
                 UpdateCameraFirst();
                 CameraInfo.Update();
             }
@@ -2736,7 +2736,7 @@ namespace MphRead.Entities
         public readonly ushort CamSwitchTime;
         public readonly ushort Padding6A;
         public readonly int NormalFov;
-        public readonly int Field70;
+        public readonly int ZoomSensitivityFactor;
         public readonly int AimYOffset;
         public readonly int Field78;
         public readonly int Field7C;
@@ -2748,9 +2748,9 @@ namespace MphRead.Entities
         public readonly int MinPickupHeight;
         public readonly int MaxPickupHeight;
         public readonly int BipedColRadius;
-        public readonly int FieldA0;
-        public readonly int FieldA4;
-        public readonly int FieldA8;
+        public readonly int LockOnTolerance; // unused FH leftover
+        public readonly int LockOnMinDistance; // unused FH leftover
+        public readonly int LockOnMaxDistance; // unused FH leftover
         public readonly short DamageInvuln;
         public readonly ushort DamageFlashTime;
         public readonly int FieldB0;
@@ -2766,12 +2766,12 @@ namespace MphRead.Entities
         public readonly int BombRefillTime;
         public readonly short BombDamage;
         public readonly short BombEnemyDamage;
-        public readonly short FieldE0;
+        public readonly short LockOnSnapTime; // unused FH leftover
         public readonly short SpawnInvulnerability;
         public readonly ushort AimMinTouchTime;
         public readonly ushort PaddingE6;
-        public readonly int FieldE8;
-        public readonly int FieldEC;
+        public readonly int AutoAimFindTolerance; // unused FH leftover
+        public readonly int AutoAimHoldTolerance; // unused FH leftover
         public readonly int SwayStartTime;
         public readonly int SwayIncrement;
         public readonly int SwayLimit;
@@ -2780,14 +2780,14 @@ namespace MphRead.Entities
         public readonly byte AmmoRecharge;
         public readonly byte Padding103;
         public readonly ushort EnergyTank;
-        public readonly short Field106;
+        public readonly short AmmoTank; // unused FH leftover
         public readonly byte AltFormStrafe;
         public readonly byte Padding109;
         public readonly ushort Padding10A;
         public readonly int FallDamageSpeed;
         public readonly int FallDamageMax;
-        public readonly int Field114;
-        public readonly int Field118;
+        public readonly int ViewTiltIncrement;
+        public readonly int ViewTiltFactor;
         public readonly int JumpPadSlideFactor;
         public readonly int AltTiltAngleCap;
         public readonly int AltMinWobble;
@@ -2803,8 +2803,8 @@ namespace MphRead.Entities
         public readonly int AltAttackKnockbackAccel;
         public readonly short AltAttackKnockbackTime;
         public readonly ushort AltAttackStartup;
-        public readonly int Field154;
-        public readonly int Field158;
+        public readonly int Field154; // unused -- 409 (0.1f)
+        public readonly int Field158; // unused -- 1024 (0.25f)
         public readonly int LungeHSpeed;
         public readonly int LungeVSpeed;
         public readonly ushort AltAttackDamage;
@@ -2814,15 +2814,15 @@ namespace MphRead.Entities
             int altMinHSpeed, int boostSpeedCap, int bipedGravity, int altAirGravity, int altGroundGravity, int jumpSpeed, int walkSpeedFactor,
             int altGroundSpeedFactor, int strafeSpeedFactor, int airSpeedFactor, int standSpeedFactor, int rollAltTraction, int altColRadius,
             int altColYPos, ushort boostChargeMin, ushort boostChargeMax, int boostSpeedMin, int boostSpeedMax, int altHSpeedCapIncrement,
-            int field58, int field5C, int walkBobMax, int aimDistance, ushort camSwitchTime, ushort padding6A, int normalFov, int field70,
+            int field58, int field5C, int walkBobMax, int aimDistance, ushort camSwitchTime, ushort padding6A, int normalFov, int zoomSensitivityFactor,
             int aimYOffset, int field78, int field7C, int field80, int field84, int field88, int field8C, int field90, int minPickupHeight,
-            int maxPickupHeight, int bipedColRadius, int fieldA0, int fieldA4, int fieldA8, short damageInvuln, ushort damageFlashTime,
+            int maxPickupHeight, int bipedColRadius, int lockOnTolerance, int lockOnMinDistance, int lockOnMaxDistance, short damageInvuln, ushort damageFlashTime,
             int fieldB0, int fieldB4, int fieldB8, int muzzleOffset, int bombCooldown, int bombSelfRadius, int bombSelfRadiusSquared,
             int bombRadius, int bombRadiusSquared, int bombJumpSpeed, int bombRefillTime, short bombDamage, short bombEnemyDamage,
-            short fieldE0, short spawnInvulnerability, ushort aimMinTouchTime, ushort paddingE6, int fieldE8, int fieldEC, int swayStartTime,
+            short lockOnSnapTime, short spawnInvulnerability, ushort aimMinTouchTime, ushort paddingE6, int autoAimFindTolerance, int autoAimHoldTolerance, int swayStartTime,
             int swayIncrement, int swayLimit, int gunIdleTime, short mpAmmoCap, byte ammoRecharge, byte padding103, ushort energyTank,
-            short field106, byte altFormStrafe, byte padding109, ushort padding10A, int fallDamageSpeed, int fallDamageMax, int field114,
-            int field118, int jumpPadSlideFactor, int altTiltAngleCap, int altMinWobble, int altMaxWobble, int altMinSpinAccel, int altMaxSpinAccel,
+            short ammoTank, byte altFormStrafe, byte padding109, ushort padding10A, int fallDamageSpeed, int fallDamageMax, int viewTiltIncrement,
+            int viewTiltFactor, int jumpPadSlideFactor, int altTiltAngleCap, int altMinWobble, int altMaxWobble, int altMinSpinAccel, int altMaxSpinAccel,
             int altMinSpinSpeed, int altMaxSpinSpeed, int altTiltAngleMax, int altBounceWobble, int altBounceTilt, int altBounceSpin,
             int altAttackKnockbackAccel, short altAttackKnockbackTime, ushort altAttackStartup, int field154, int field158, int lungeHSpeed,
             int lungeVSpeed, ushort altAttackDamage, short altAttackCooldown)
@@ -2858,7 +2858,7 @@ namespace MphRead.Entities
             CamSwitchTime = camSwitchTime;
             Padding6A = padding6A;
             NormalFov = normalFov;
-            Field70 = field70;
+            ZoomSensitivityFactor = zoomSensitivityFactor;
             AimYOffset = aimYOffset;
             Field78 = field78;
             Field7C = field7C;
@@ -2870,9 +2870,9 @@ namespace MphRead.Entities
             MinPickupHeight = minPickupHeight;
             MaxPickupHeight = maxPickupHeight;
             BipedColRadius = bipedColRadius;
-            FieldA0 = fieldA0;
-            FieldA4 = fieldA4;
-            FieldA8 = fieldA8;
+            LockOnTolerance = lockOnTolerance;
+            LockOnMinDistance = lockOnMinDistance;
+            LockOnMaxDistance = lockOnMaxDistance;
             DamageInvuln = damageInvuln;
             DamageFlashTime = damageFlashTime;
             FieldB0 = fieldB0;
@@ -2888,12 +2888,12 @@ namespace MphRead.Entities
             BombRefillTime = bombRefillTime;
             BombDamage = bombDamage;
             BombEnemyDamage = bombEnemyDamage;
-            FieldE0 = fieldE0;
+            LockOnSnapTime = lockOnSnapTime;
             SpawnInvulnerability = spawnInvulnerability;
             AimMinTouchTime = aimMinTouchTime;
             PaddingE6 = paddingE6;
-            FieldE8 = fieldE8;
-            FieldEC = fieldEC;
+            AutoAimFindTolerance = autoAimFindTolerance;
+            AutoAimHoldTolerance = autoAimHoldTolerance;
             SwayStartTime = swayStartTime;
             SwayIncrement = swayIncrement;
             SwayLimit = swayLimit;
@@ -2902,14 +2902,14 @@ namespace MphRead.Entities
             AmmoRecharge = ammoRecharge;
             Padding103 = padding103;
             EnergyTank = energyTank;
-            Field106 = field106;
+            AmmoTank = ammoTank;
             AltFormStrafe = altFormStrafe;
             Padding109 = padding109;
             Padding10A = padding10A;
             FallDamageSpeed = fallDamageSpeed;
             FallDamageMax = fallDamageMax;
-            Field114 = field114;
-            Field118 = field118;
+            ViewTiltIncrement = viewTiltIncrement;
+            ViewTiltFactor = viewTiltFactor;
             JumpPadSlideFactor = jumpPadSlideFactor;
             AltTiltAngleCap = altTiltAngleCap;
             AltMinWobble = altMinWobble;

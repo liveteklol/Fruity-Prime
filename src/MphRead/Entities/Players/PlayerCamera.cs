@@ -110,12 +110,12 @@ namespace MphRead.Entities
                 CameraInfo.Position = position;
                 CameraInfo.Target = CameraInfo.Position + _facingVector;
             }
-            CameraInfo.Target.Y += Fixed.ToFloat(Values.Field118) * MathF.Sin(MathHelper.DegreesToRadians(_field688));
-            if (MathF.Abs(_field684) >= 1 / 4096f)
+            CameraInfo.Target.Y += Fixed.ToFloat(Values.ViewTiltFactor) * MathF.Sin(MathHelper.DegreesToRadians(_viewTiltAngleV));
+            if (MathF.Abs(_viewTiltAngleH) >= 1 / 4096f)
             {
                 Vector3 toTarget = CameraInfo.Target - CameraInfo.Position;
                 Vector3 upVec = new Vector3(-toTarget.Z, 0, toTarget.X).Normalized();
-                float factor = Fixed.ToFloat(Values.Field118) * MathF.Sin(MathHelper.DegreesToRadians(_field684));
+                float factor = Fixed.ToFloat(Values.ViewTiltFactor) * MathF.Sin(MathHelper.DegreesToRadians(_viewTiltAngleH));
                 CameraInfo.UpVector = new Vector3(upVec.X * factor, 1, upVec.Z * factor);
             }
             else
@@ -345,7 +345,7 @@ namespace MphRead.Entities
                         {
                             _field558 = 0;
                         }
-                        _field554 -= Fixed.ToFloat(Values.Field88) * speedMagSqr / max / 2; // todO: FPS stuff
+                        _field554 -= Fixed.ToFloat(Values.Field88) * speedMagSqr / max / 2; // todo: FPS stuff
                         if (_field554 < -Fixed.ToFloat(Values.Field8C))
                         {
                             _field554 = -Fixed.ToFloat(Values.Field8C);
