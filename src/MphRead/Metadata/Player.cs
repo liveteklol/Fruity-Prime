@@ -964,7 +964,7 @@ namespace MphRead
                 strafeSpeedFactor: 3604,
                 airSpeedFactor: 3481,
                 standSpeedFactor: 2785,
-                rollAltTraction: 122,
+                rollAltTraction: 122, // old FH value (Samus was updated to 139 in MPH)
                 altColRadius: 2048,
                 altColYPos: 0,
                 boostChargeMin: 5,
