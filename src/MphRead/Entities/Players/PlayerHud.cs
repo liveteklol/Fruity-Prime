@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Linq;
+using System.Runtime.InteropServices;
 using MphRead.Entities.Enemies;
 using MphRead.Formats;
 using MphRead.Hud;
@@ -55,6 +57,17 @@ namespace MphRead.Entities
         private HudObjectInstance _dialogPickupInst = null!;
         private HudObjectInstance _dialogFrameInst = null!;
 
+        private HudObjectInstance _mapTeleporterInst = null!;
+        private readonly HudObjectInstance[] _mapOctolithInsts = new HudObjectInstance[8];
+        private HudObjectInstance _mapLostOctolithInst = null!;
+        private readonly HudObjectInstance[] _mapArtifactDotInsts = new HudObjectInstance[8];
+        private HudObjectInstance _mapLegendDoorInst = null!;
+        private HudObjectInstance _mapLegendOtherInst = null!;
+        private HudObjectInstance _mapQuitInst = null!;
+        private ModelInstance _navPlayerPosModel = null!;
+        private ModelInstance _navDoorModel = null!;
+        private readonly ModelInstance?[] _navMapModels = new ModelInstance?[8];
+
         private ModelInstance _filterModel = null!;
         private bool _showScoreboard = false;
         private int _iceLayerBindingId = -1;
@@ -62,6 +75,7 @@ namespace MphRead.Entities
         private int _helmetDropBindingId = -1;
         private int _visorBindingId = -1;
         private int _scanBindingId = -1;
+        private int _pauseBindingId = -1;
         private readonly int[] _dialogBindingIds = new int[5] { -1, -1, -1, -1, -1 };
 
         private IReadOnlyList<ColorRgba> _textPaletteData = null!;
@@ -80,6 +94,8 @@ namespace MphRead.Entities
                 visorPal = null;
             }
             (_scanBindingId, _) = HudInfo.CharMapToTexture(_hudObjects.ScanVisor, startX: 0, startY: 96,
+                tilesX: 0, tilesY: 32, _scene, visorPal);
+            (_pauseBindingId, _) = HudInfo.CharMapToTexture(_hudObjects.ScanVisor, startX: 0, startY: 64,
                 tilesX: 0, tilesY: 32, _scene, visorPal);
             // todo: only load what needs to be loaded for the mode
             _filterModel = Read.GetModelInstance("filter");
@@ -191,6 +207,96 @@ namespace MphRead.Entities
                 _enemyHealthMeter.BarInst.SetCharacterData(samusSubBar.CharacterData, _scene);
                 _enemyHealthMeter.BarInst.SetPaletteData(healthbarSub.PaletteData, _scene);
                 _enemyHealthMeter.BarInst.Enabled = true;
+                HudObject teleporter = HudInfo.GetHudObject(HudElements.MapPortal);
+                _mapTeleporterInst = new HudObjectInstance(teleporter.Width, teleporter.Height);
+                _mapTeleporterInst.SetCharacterData(teleporter.CharacterData, _scene);
+                _mapTeleporterInst.SetPaletteData(teleporter.PaletteData, _scene);
+                _mapTeleporterInst.Enabled = true;
+                HudObject mapOctolith = HudInfo.GetHudObject(HudElements.MapOctolith);
+                for (int i = 0; i < 8; i++)
+                {
+                    HudObject dot = HudInfo.GetHudObject(HudElements.MapDots[i]);
+                    var dotInst = new HudObjectInstance(dot.Width, dot.Height);
+                    dotInst.SetCharacterData(dot.CharacterData, _scene);
+                    dotInst.SetPaletteData(dot.PaletteData, _scene);
+                    dotInst.Enabled = true;
+                    _mapArtifactDotInsts[i] = dotInst;
+                    var mapOctolithInst = new HudObjectInstance(mapOctolith.Width, mapOctolith.Height);
+                    mapOctolithInst.SetCharacterData(mapOctolith.CharacterData, _scene);
+                    mapOctolithInst.SetPaletteData(mapOctolith.PaletteData, _scene);
+                    mapOctolithInst.SetAnimationFrames(mapOctolith.AnimParams);
+                    mapOctolithInst.Enabled = true;
+                    _mapOctolithInsts[i] = mapOctolithInst;
+                }
+                HudObject lostOctolith = HudInfo.GetHudObject(HudElements.MapLostOctolith);
+                _mapLostOctolithInst = new HudObjectInstance(lostOctolith.Width, lostOctolith.Height);
+                _mapLostOctolithInst.SetCharacterData(lostOctolith.CharacterData, _scene);
+                _mapLostOctolithInst.SetPaletteData(lostOctolith.PaletteData, _scene);
+                _mapLostOctolithInst.SetAnimationFrames(lostOctolith.AnimParams);
+                _mapLostOctolithInst.Enabled = true;
+                HudObject legendDoor = HudInfo.GetHudObject(HudElements.MapLegendDoors);
+                _mapLegendDoorInst = new HudObjectInstance(legendDoor.Width, legendDoor.Height);
+                _mapLegendDoorInst.SetCharacterData(legendDoor.CharacterData, _scene);
+                _mapLegendDoorInst.SetPaletteData(legendDoor.PaletteData, _scene);
+                _mapLegendDoorInst.Enabled = true;
+                HudObject legendOther = HudInfo.GetHudObject(HudElements.MapLegendOther);
+                _mapLegendOtherInst = new HudObjectInstance(legendOther.Width, legendOther.Height);
+                _mapLegendOtherInst.SetCharacterData(legendOther.CharacterData, _scene);
+                _mapLegendOtherInst.SetPaletteData(legendOther.PaletteData, _scene);
+                _mapLegendOtherInst.Enabled = true;
+                // todo?: could also show Omega Cannon doors here
+                _mapLegendInfo = ImmutableCollectionsMarshal.AsImmutableArray(new MapLegendInfo[10]
+                {
+                    new MapLegendInfo(unlocked: false, messageId: 4, offsetX: 0, offsetY: 0, _mapLegendDoorInst, objectIndex: 4),   // BATTLEHAMMER
+                    new MapLegendInfo(unlocked: false, messageId: 2, offsetX: 0, offsetY: 0, _mapLegendDoorInst, objectIndex: 5),   // VOLT DRIVER
+                    new MapLegendInfo(unlocked: false, messageId: 8, offsetX: 0, offsetY: 0, _mapLegendDoorInst, objectIndex: 1),   // SHOCK COIL
+                    new MapLegendInfo(unlocked: false, messageId: 5, offsetX: 0, offsetY: 0, _mapLegendDoorInst, objectIndex: 0),   // IMPERIALIST
+                    new MapLegendInfo(unlocked: false, messageId: 6, offsetX: 0, offsetY: 0, _mapLegendDoorInst, objectIndex: 3),   // JUDICATOR
+                    new MapLegendInfo(unlocked: false, messageId: 7, offsetX: 0, offsetY: 0, _mapLegendDoorInst, objectIndex: 2),   // MAGMAUL
+                    new MapLegendInfo(unlocked: true, messageId: 1, offsetX: 0, offsetY: 0, _mapLegendDoorInst, objectIndex: 7),    // ANY BEAM
+                    new MapLegendInfo(unlocked: true, messageId: 3, offsetX: 0, offsetY: 0, _mapLegendDoorInst, objectIndex: 8),    // MISSILE
+                    new MapLegendInfo(unlocked: true, messageId: 2, offsetX: -3, offsetY: -4, _mapLegendOtherInst, objectIndex: 0), // PORTAL
+                    new MapLegendInfo(unlocked: true, messageId: 4, offsetX: -3, offsetY: -4, _mapLegendOtherInst, objectIndex: 1)  // BOSS PORTAL
+                });
+                HudObject quit = HudInfo.GetHudObject(HudElements.MapQuit);
+                _mapQuitInst = new HudObjectInstance(quit.Width, quit.Height);
+                _mapQuitInst.SetCharacterData(quit.CharacterData, _scene);
+                _mapQuitInst.SetPaletteData(quit.PaletteData, _scene);
+                _mapQuitInst.Enabled = true;
+                _navPlayerPosModel = Read.GetModelInstance("PlayerPos_NAV", dir: MetaDir.Hud);
+                _scene.LoadModel(_navPlayerPosModel.Model);
+                _navPlayerPosModel.SetAnimation(0, AnimFlags.None);
+                _navDoorModel = Read.GetModelInstance("Door_NAV", dir: MetaDir.Hud);
+                _scene.LoadModel(_navDoorModel.Model);
+                for (int i = 0; i < 7; i++)
+                {
+                    ModelInstance mapModel = Read.GetModelInstance(Metadata.NavMapModelNames[i], dir: MetaDir.Hud, noCache: true);
+                    for (int j = 0; j < mapModel.Model.Materials.Count; j++)
+                    {
+                        Material material = mapModel.Model.Materials[j];
+                        if (material.Culling == CullingMode.Front)
+                        {
+                            material.Culling = CullingMode.Back;
+                        }
+                        else
+                        {
+                            material.Culling = CullingMode.Front;
+                        }
+                        material.Wireframe = 0;
+                        material.Lighting = 1;
+                        material.Ambient = new ColorRgb(8, 8, 8);
+                    }
+                    for (int j = 0; j < mapModel.Model.Nodes.Count; j++)
+                    {
+                        Node node = mapModel.Model.Nodes[j];
+                        if (node.Name.StartsWith("cent"))
+                        {
+                            node.Enabled = false;
+                        }
+                    }
+                    _scene.LoadModel(mapModel.Model);
+                    _navMapModels[i] = mapModel;
+                }
             }
             if (GameState.SinglePlayer && _hudObjects.EnergyTanks != null)
             {
@@ -467,8 +573,44 @@ namespace MphRead.Entities
         private bool _hudWeaponMenuOpen = false;
         public bool ScanVisor { get; private set; }
 
+        private void InitHudState()
+        {
+            _targetCircleInst.Enabled = false;
+            _ammoBarMeter.BarInst.Enabled = false;
+            _weaponIconInst.Enabled = false;
+            _damageIndicator.Active = false;
+            _scene.Layer1Info.BindingId = -1;
+            _scene.Layer2Info.BindingId = -1;
+            _scene.Layer3Info.BindingId = -1;
+            _scene.Layer4Info.BindingId = -1;
+            _scene.Layer5Info.BindingId = -1;
+        }
+
         public void UpdateHud()
         {
+            if (GameState.MenuPause)
+            {
+                InitHudState();
+                // although we don't set HUD shift back to what it was before pausing, if the camera was moving, then it may have some
+                // momentum left after unpausing and may cause the HUD to shift. the game has a different behavior (bug) where HUD shift
+                // from before the pause reappears after unpausing, now stuck in place and not updating until the camera is moved.
+                // use visor layer for the pause bg
+                _scene.Layer1Info.BindingId = _pauseBindingId;
+                _scene.Layer1Info.Alpha = 0.75f;
+                _scene.Layer1Info.ShiftX = 0;
+                _scene.Layer1Info.ShiftY = -1 / 3f;
+                _scene.Layer1Info.MaskId = -1;
+                // continue to draw the helmet front
+                _scene.Layer2Info.BindingId = _pausedPrevBindingId2;
+                _scene.Layer2Info.Alpha = 1;
+                _scene.Layer2Info.ShiftX = 0;
+                _scene.Layer2Info.ShiftY = 0;
+                return;
+            }
+            if (GameState.DialogPause)
+            {
+                return;
+            }
             UpdateScanState();
             if (GameState.SinglePlayer)
             {
@@ -507,15 +649,7 @@ namespace MphRead.Entities
             {
                 UpdateScanHud();
             }
-            _targetCircleInst.Enabled = false;
-            _ammoBarMeter.BarInst.Enabled = false;
-            _weaponIconInst.Enabled = false;
-            _damageIndicator.Active = false;
-            _scene.Layer1Info.BindingId = -1;
-            _scene.Layer2Info.BindingId = -1;
-            _scene.Layer3Info.BindingId = -1;
-            _scene.Layer4Info.BindingId = -1;
-            _scene.Layer5Info.BindingId = -1;
+            InitHudState();
             _scene.Layer1Info.ShiftX = 0;
             _scene.Layer1Info.ShiftY = 0;
             _scene.Layer2Info.ShiftX = 0;
@@ -1017,6 +1151,14 @@ namespace MphRead.Entities
 
         public void DrawHudObjects()
         {
+            if (Mods.ThumbnailMode.Active)
+            {
+                return;
+            }
+            if (GameState.MenuPause)
+            {
+                return;
+            }
             if (GameState.MatchState == MatchState.GameOver)
             {
                 string text = Strings.GetHudMessage(219); // GAME OVER
@@ -1095,6 +1237,10 @@ namespace MphRead.Entities
 
         public void DrawHudModels()
         {
+            if (Mods.ThumbnailMode.Active)
+            {
+                return;
+            }
             if (CameraSequence.Current?.IsIntro == true)
             {
                 _scene.DrawHudFilterModel(_filterModel, alpha: 15 / 31f);
@@ -1283,9 +1429,40 @@ namespace MphRead.Entities
         private const float _scoreTeamHeaderSpace = 4;
         private const float _scoreTeamLineSpace = 18;
         private const float _scorePlayerSpace = 28;
+        /// <summary>Tightest a row can get before the hunter icons collide.</summary>
+        private const float _scoreMinPlayerSpace = 19;
+
+        /// <summary>
+        /// Vertical space per scoreboard row.
+        ///
+        /// The stock 28 fits the four players a DS match could hold. With
+        /// more, the list runs off both ends of a 192-pixel screen -- the
+        /// first rows above it and the last below -- so it tightens up to
+        /// whatever fits instead. A row still has to hold a hunter icon, so
+        /// it stops tightening at that.
+        /// </summary>
+        private float GetScoreboardRowSpace()
+        {
+            int rows = GameState.ActivePlayers;
+            if (rows <= 4)
+            {
+                return _scorePlayerSpace;
+            }
+            float available = 168 - _scoreStartSpace;
+            if (GameState.MatchState == MatchState.Ending)
+            {
+                available -= _scoreStartSpace;
+            }
+            if (GameState.Teams)
+            {
+                available -= 2 * _scoreTeamLineSpace;
+            }
+            return Math.Clamp(available / rows, _scoreMinPlayerSpace, _scorePlayerSpace);
+        }
 
         private float GetScoreboardHeight()
         {
+            float rowSpace = GetScoreboardRowSpace();
             float height = _scoreStartSpace;
             if (GameState.MatchState == MatchState.Ending)
             {
@@ -1308,7 +1485,7 @@ namespace MphRead.Entities
                     height += _scoreTeamLineSpace;
                     curTeam = player.TeamIndex;
                 }
-                height += _scorePlayerSpace;
+                height += rowSpace;
             }
             return height;
         }
@@ -1321,6 +1498,7 @@ namespace MphRead.Entities
         private void DrawScoreboard()
         {
             GameMode mode = GameState.Mode;
+            float rowSpace = GetScoreboardRowSpace();
             float posY = 104 - GetScoreboardHeight() / 2;
             if (GameState.MatchState == MatchState.Ending)
             {
@@ -1352,8 +1530,9 @@ namespace MphRead.Entities
             {
                 header2 = Strings.GetHudMessage(220); // kills
             }
-            DrawText2D(160, posY, Align.Center, 0, header1, new ColorRgba(0x3FEF), fontSpacing: 8);
-            DrawText2D(215, posY, Align.Center, 0, header2, new ColorRgba(0x3FEF), fontSpacing: 8);
+            DrawText2D(ModScoreColumn1, posY, Align.Center, 0, header1, new ColorRgba(0x3FEF), fontSpacing: 8);
+            DrawText2D(ModScoreColumn2, posY, Align.Center, 0, header2, new ColorRgba(0x3FEF), fontSpacing: 8);
+            ModDrawPingHeader(posY);
             posY += _scoreStartSpace;
             string maxText = Strings.GetHudMessage(256); // MAX
 
@@ -1402,8 +1581,8 @@ namespace MphRead.Entities
                     var teamColor = new ColorRgba(player.Team == Team.Orange ? 0x23Fu : 0x2BEAu);
                     string teamName = $"{teamText} {player.TeamIndex + 1}";
                     DrawText2D(42, posY, Align.Center, 0, teamName, teamColor, fontSpacing: 8);
-                    DrawText2D(160, posY, Align.Center, 0, teamValue1, teamColor, fontSpacing: 8);
-                    DrawText2D(215, posY, Align.Center, 0, teamValue2, teamColor, fontSpacing: 8);
+                    DrawText2D(ModScoreColumn1, posY, Align.Center, 0, teamValue1, teamColor, fontSpacing: 8);
+                    DrawText2D(ModScoreColumn2, posY, Align.Center, 0, teamValue2, teamColor, fontSpacing: 8);
                     posY += _scoreTeamLineSpace;
                 }
                 string value1 = ChooseValue1(GameState.Time[slot], GameState.Points[slot]);
@@ -1424,9 +1603,10 @@ namespace MphRead.Entities
                     color = new ColorRgba((byte)(rg * 255), (byte)(rg * 255), 255, 255);
                 }
                 DrawScoreboardPlayer(60, posY, color, _hunterInsts[(int)player.Hunter], slot);
-                DrawText2D(160, posY, Align.Center, 0, value1, color, fontSpacing: 8);
-                DrawText2D(215, posY, Align.Center, 0, value2, color, fontSpacing: 8);
-                posY += _scorePlayerSpace;
+                DrawText2D(ModScoreColumn1, posY, Align.Center, 0, value1, color, fontSpacing: 8);
+                DrawText2D(ModScoreColumn2, posY, Align.Center, 0, value2, color, fontSpacing: 8);
+                ModDrawPingRow(posY, color, slot);
+                posY += rowSpace;
             }
         }
 
@@ -2506,7 +2686,7 @@ namespace MphRead.Entities
             DrawText2D(posX + 5, posY + 14, Align.Left, 0, score);
         }
 
-        private int _prevIntroChars = 0;
+        private int _prevScrollingChars = 0;
 
         private void DrawModeRules()
         {
@@ -2533,11 +2713,12 @@ namespace MphRead.Entities
                 posY += 13 + _rulesLengths[i].Newlines * 8;
             }
             // todo?: ideally this should be in a process method, not draw
-            if (totalCharacters > _prevIntroChars && totalCharacters > _rulesLengths[0].Length
+            if (totalCharacters > _prevScrollingChars && totalCharacters > _rulesLengths[0].Length
                 && totalCharacters <= _rulesLengths[_rulesInfo.Count - 1].Length)
             {
+                _soundSource.StopFreeSfx(SfxId.LETTER_BLIP);
                 _soundSource.PlayFreeSfx(SfxId.LETTER_BLIP);
-                _prevIntroChars = totalCharacters;
+                _prevScrollingChars = totalCharacters;
             }
             _textSpacingY = 0;
         }
@@ -2717,7 +2898,9 @@ namespace MphRead.Entities
                         int index = ch - font.MinCharacter;
                         width += font.Widths[index];
                     }
-                    x = startX - width / 2;
+                    // character widths include their rightmost empty pixel, leading to a slight overestimation of the total width before the line break,
+                    // making the text shift to the left instead of being centered. fix by flooring (which the game does implicitly with integer division).
+                    x = startX - MathF.Floor(width / 2);
                     for (int i = start; i < end; i++)
                     {
                         int ch = text[i];
@@ -2835,7 +3018,12 @@ namespace MphRead.Entities
             message.DialogHide = dialogHide;
         }
 
-        private int WrapText(string text, int maxWidth, char[] dest, int maxTiles = 0)
+        private int WrapText(string text, int maxWidth, Span<char> dest, int maxTiles = 0)
+        {
+            return WrapText(text.AsSpan(), maxWidth, dest, maxTiles);
+        }
+
+        private int WrapText(ReadOnlySpan<char> text, int maxWidth, Span<char> dest, int maxTiles = 0)
         {
             int lines = 1;
             if (maxWidth <= 0)
@@ -2972,16 +3160,19 @@ namespace MphRead.Entities
 
         private void DrawQueuedHudMessages()
         {
-            for (int i = 0; i < _hudMessageQueue.Count; i++)
+            if (!GameState.MenuPause)
             {
-                HudMessage message = _hudMessageQueue[i];
-                if (message.Lifetime > 0
-                    && ((message.Category & 1) == 0 || (_scene.FrameCount & (7 * 2)) <= 3 * 2) // todo: FPS stuff
-                    && (!GameState.DialogPause || !message.DialogHide))
+                for (int i = 0; i < _hudMessageQueue.Count; i++)
                 {
-                    // todo: support font size
-                    DrawText2D(message.Position.X, message.Position.Y, message.Align, palette: 0,
-                        message.Text, message.Color, message.Alpha, fontSpacing: message.FontSize);
+                    HudMessage message = _hudMessageQueue[i];
+                    if (message.Lifetime > 0
+                        && ((message.Category & 1) == 0 || (_scene.FrameCount & (7 * 2)) <= 3 * 2) // todo: FPS stuff
+                        && (!GameState.DialogPause || !message.DialogHide))
+                    {
+                        // todo: support font size
+                        DrawText2D(message.Position.X, message.Position.Y, message.Align, palette: 0,
+                            message.Text, message.Color, message.Alpha, fontSpacing: message.FontSize);
+                    }
                 }
             }
         }

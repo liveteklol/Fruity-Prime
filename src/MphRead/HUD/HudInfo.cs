@@ -67,6 +67,13 @@ namespace MphRead.Hud
         }
     }
 
+    public enum HudObjectLoopType
+    {
+        None,
+        Start,
+        Offset
+    }
+
     public class HudObjectInstance
     {
         public bool Enabled;
@@ -91,7 +98,7 @@ namespace MphRead.Hud
         public int TargetFrame;
         public float Timer = -1;
         public float Time = -1;
-        public bool Loop = false;
+        public HudObjectLoopType Loop = HudObjectLoopType.None;
         public int AfterAnimFrame = -1;
 
         public HudObjectInstance(int width, int height)
@@ -280,15 +287,20 @@ namespace MphRead.Hud
             else
             {
                 // no need to update textures since ProcessAnimation will do it
-                CurrentFrame = start;
+                // don't set the start frame as current, since it's not always where we currently are
                 StartFrame = start;
                 TargetFrame = target;
                 Timer = Time = frames * (1 / 30f);
-                Loop = loop;
+                Loop = loop ? HudObjectLoopType.Start : HudObjectLoopType.None;
             }
         }
 
         public void SetAnimation(int start, int target, int frames, int afterAnim, bool loop = false)
+        {
+            SetAnimation(start, target, frames, afterAnim, loop ? HudObjectLoopType.Start : HudObjectLoopType.None);
+        }
+
+        public void SetAnimation(int start, int target, int frames, int afterAnim, HudObjectLoopType loopType)
         {
             Debug.Assert(AnimFrames != null);
             if (start == target)
@@ -297,12 +309,13 @@ namespace MphRead.Hud
             }
             else
             {
+                // no need to update textures since ProcessAnimation will do it
                 // don't set the start frame as current, since it's not always where we currently are
                 StartFrame = start;
                 TargetFrame = target;
                 Timer = Time = frames * (1 / 30f);
-                AfterAnimFrame = AnimFrames[afterAnim];
-                Loop = loop;
+                AfterAnimFrame = loopType == HudObjectLoopType.Offset ? afterAnim : AnimFrames[afterAnim];
+                Loop = loopType;
             }
         }
 
@@ -314,15 +327,30 @@ namespace MphRead.Hud
                 Timer -= scene.FrameTime;
                 if (Timer <= 0)
                 {
-                    if (Loop)
+                    if (Loop == HudObjectLoopType.Start)
                     {
                         CurrentFrame = StartFrame;
+                        Timer = Time;
+                    }
+                    else if (Loop == HudObjectLoopType.Offset)
+                    {
+                        StartFrame = AfterAnimFrame;
                         Timer = Time;
                     }
                     else
                     {
                         CurrentFrame = AnimFrames == null ? TargetFrame : AfterAnimFrame;
                     }
+                }
+                else if (Loop == HudObjectLoopType.Offset)
+                {
+                    // another half-modification of this system to make it closer to the game's, where the frame index can be
+                    // "out of bounds" and stays at zero until the timer makes it loop -- used for the map Octolith's flashing
+                    float elapsedTime = Time - Timer;
+                    int elapsedFrames = (int)MathF.Round(elapsedTime * 30);
+                    int frame = StartFrame + elapsedFrames;
+                    Debug.Assert(AnimFrames != null);
+                    CurrentFrame = frame >= AnimFrames.Count ? 0 : AnimFrames[frame];
                 }
                 else
                 {
@@ -1399,6 +1427,12 @@ namespace MphRead.Hud
         public static readonly string DialogCrystal = @"_archives\spSamus\message_crystalpickup.bin";
         public static readonly string DialogPickup = @"_archives\spSamus\message_pickups.bin";
         public static readonly string DialogFrame = @"_archives\spSamus\message_pickupframe.bin";
+        public static readonly string MapPortal = @"_archives\spSamus\map_portal.bin";
+        public static readonly string MapOctolith = @"_archives\spSamus\map_crystalbig.bin";
+        public static readonly string MapLostOctolith = @"_archives\spSamus\map_crystalred.bin";
+        public static readonly string MapLegendDoors = @"_archives\spSamus\map_legendDoors.bin";
+        public static readonly string MapLegendOther = @"_archives\spSamus\map_legendOthers.bin";
+        public static readonly string MapQuit = @"_archives\spSamus\map_quit.bin";
 
         public static readonly IReadOnlyList<string> Hunters = new string[8]
         {
@@ -1410,6 +1444,18 @@ namespace MphRead.Hud
             @"_archives\common\enemy_spyre.bin",
             @"_archives\common\enemy_weavel.bin",
             @"_archives\common\enemy_samus.bin" // todo: Guardian portrait
+        };
+
+        public static readonly IReadOnlyList<string> MapDots = new string[8]
+        {
+            @"_archives\spSamus\map_art_1.bin",
+            @"_archives\spSamus\map_art_2.bin",
+            @"_archives\spSamus\map_art_3.bin",
+            @"_archives\spSamus\map_art_4.bin",
+            @"_archives\spSamus\map_art_5.bin",
+            @"_archives\spSamus\map_art_6.bin",
+            @"_archives\spSamus\map_art_7.bin",
+            @"_archives\spSamus\map_art_8.bin"
         };
 
         public static IReadOnlyList<RulesInfo> RulesInfo = new RulesInfo[7]

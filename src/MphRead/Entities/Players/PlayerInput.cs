@@ -130,7 +130,7 @@ namespace MphRead.Entities
             bool selected = false;
             if (!Controls.WeaponMenu.IsDown)
             {
-                EndWeaponMenu(ref selected);
+                selected = EndWeaponMenu();
             }
             if (!selected)
             {
@@ -259,8 +259,9 @@ namespace MphRead.Entities
             }
         }
 
-        private void EndWeaponMenu(ref bool selected)
+        private bool EndWeaponMenu()
         {
+            bool selected = false;
             if (WeaponSelection != BeamType.None)
             {
                 if (WeaponSelection != CurrentWeapon)
@@ -276,6 +277,7 @@ namespace MphRead.Entities
             }
             Flags1 &= ~PlayerFlags1.NoAimInput;
             Flags1 &= ~PlayerFlags1.WeaponMenuOpen;
+            return selected;
         }
 
         private void UpdateAimFacing()
@@ -303,7 +305,7 @@ namespace MphRead.Entities
                 float fovFactor = CameraInfo.Fov - Fixed.ToFloat(Values.NormalFov) * 2;
                 if (fovFactor != 0) // zero will occur when the camera info is overridden to normal FOV due to cam seq
                 {
-                    sensitivity /= -Fixed.ToFloat(Values.Field70) * fovFactor;
+                    sensitivity /= -Fixed.ToFloat(Values.ZoomSensitivityFactor) * fovFactor;
                 }
             }
             amount *= sensitivity;
@@ -346,7 +348,7 @@ namespace MphRead.Entities
                 float fovFactor = CameraInfo.Fov - Fixed.ToFloat(Values.NormalFov) * 2;
                 if (fovFactor != 0) // zero will occur when the camera info is overridden to normal FOV due to cam seq
                 {
-                    sensitivity /= -Fixed.ToFloat(Values.Field70) * fovFactor;
+                    sensitivity /= -Fixed.ToFloat(Values.ZoomSensitivityFactor) * fovFactor;
                 }
             }
             amount *= sensitivity;
@@ -475,10 +477,15 @@ namespace MphRead.Entities
                     }
                     Biped2Flags |= AnimFlags.NoLoop;
                 }
+                ApplyModAim();
                 if (Controls.MouseAim && !Flags1.TestFlag(PlayerFlags1.NoAimInput) && !IsBot)
                 {
-                    float aimY = -Input.MouseDeltaY / 4f; // itodo: x and y sensitivity
-                    float aimX = -Input.MouseDeltaX / 4f;
+                    // The 1/4 was the whole of the sensitivity setting; it is
+                    // now the point where one lives (1.0 = this exact feel).
+                    float aimY = -Input.MouseDeltaY / 4f * Mods.InputSettings.MouseSensitivity
+                        * (Mods.InputSettings.InvertMouseY ? -1 : 1);
+                    float aimX = -Input.MouseDeltaX / 4f * Mods.InputSettings.MouseSensitivity
+                        * (Mods.InputSettings.InvertMouseX ? -1 : 1);
                     if (CameraSequence.Current?.Flags.TestFlag(CamSeqFlags.BlockInput) == true
                         || _scene.FrameAdvance || _scene.FrameAdvanceLastFrame) // skdebug
                     {
@@ -578,8 +585,8 @@ namespace MphRead.Entities
                         }
                         if (!EquipInfo.Zoomed)
                         {
-                            _field684 += Fixed.ToFloat(Values.Field114) * sign / 2; // todo: FPS stuff
-                            _field684 = Math.Clamp(_field684, -180, 180);
+                            _viewTiltAngleH += Fixed.ToFloat(Values.ViewTiltIncrement) * sign / 2; // todo: FPS stuff
+                            _viewTiltAngleH = Math.Clamp(_viewTiltAngleH, -180, 180);
                         }
                     }
 
@@ -611,8 +618,8 @@ namespace MphRead.Entities
                         }
                         if (!EquipInfo.Zoomed)
                         {
-                            _field688 += Fixed.ToFloat(Values.Field114) * sign / 2; // todo: FPS stuff
-                            _field688 = Math.Clamp(_field688, -180, 180);
+                            _viewTiltAngleV += Fixed.ToFloat(Values.ViewTiltIncrement) * sign / 2; // todo: FPS stuff
+                            _viewTiltAngleV = Math.Clamp(_viewTiltAngleV, -180, 180);
                         }
                     }
 
@@ -624,13 +631,13 @@ namespace MphRead.Entities
                     {
                         MoveRightLeft(PlayerAnimation.WalkLeft, sign: -1);
                     }
-                    if (_field684 < Fixed.ToFloat(500) && _field684 > Fixed.ToFloat(-500))
+                    if (_viewTiltAngleH < Fixed.ToFloat(500) && _viewTiltAngleH > Fixed.ToFloat(-500))
                     {
-                        _field684 = 0;
+                        _viewTiltAngleH = 0;
                     }
                     else
                     {
-                        _field684 *= 0.9f; // sktodo: FPS stuff
+                        _viewTiltAngleH *= 0.9f; // sktodo: FPS stuff
                     }
                     if (Controls.MoveUp.IsDown)
                     {
@@ -640,13 +647,13 @@ namespace MphRead.Entities
                     {
                         MoveForwardBack(PlayerAnimation.WalkBackward, sign: -1);
                     }
-                    if (_field688 < Fixed.ToFloat(500) && _field688 > Fixed.ToFloat(-500))
+                    if (_viewTiltAngleV < Fixed.ToFloat(500) && _viewTiltAngleV > Fixed.ToFloat(-500))
                     {
-                        _field688 = 0;
+                        _viewTiltAngleV = 0;
                     }
                     else
                     {
-                        _field688 *= 0.9f; // sktodo: FPS stuff
+                        _viewTiltAngleV *= 0.9f; // sktodo: FPS stuff
                     }
                     if (Cheats.UnlimitedJumps)
                     {
@@ -1224,8 +1231,10 @@ namespace MphRead.Entities
                     // Trace, Sylux, Weavel
                     if (Controls.MouseAim && !Flags1.TestFlag(PlayerFlags1.NoAimInput) && !IsBot)
                     {
-                        float aimY = -Input.MouseDeltaY / 4f; // itodo: x and y sensitivity
-                        float aimX = -Input.MouseDeltaX / 4f;
+                        float aimY = -Input.MouseDeltaY / 4f * Mods.InputSettings.MouseSensitivity
+                            * (Mods.InputSettings.InvertMouseY ? -1 : 1);
+                        float aimX = -Input.MouseDeltaX / 4f * Mods.InputSettings.MouseSensitivity
+                            * (Mods.InputSettings.InvertMouseX ? -1 : 1);
                         if (CameraSequence.Current?.Flags.TestFlag(CamSeqFlags.BlockInput) == true
                             || _scene.FrameAdvance || _scene.FrameAdvanceLastFrame) // skdebug
                         {
@@ -2074,6 +2083,9 @@ namespace MphRead.Entities
             }
         }
 
+        private static bool _isScrollingUp = false;
+        private static bool _isScrollingDown = false;
+
         public static void ProcessInput(KeyboardState keyboardState, MouseState mouseState, bool noPlayerInput)
         {
             KeyboardState keyboardSnap = keyboardState.GetSnapshot();
@@ -2089,7 +2101,11 @@ namespace MphRead.Entities
                     }
                     continue;
                 }
-                if (noPlayerInput || i != 0) // todo: multiple input?
+                if (Mods.Network.NetHooks.TryApplyRemoteInput(player, i))
+                {
+                    continue;
+                }
+                if (noPlayerInput || i != Mods.Network.NetHooks.LocalSlot) // todo: multiple input?
                 {
                     continue;
                 }
@@ -2100,6 +2116,19 @@ namespace MphRead.Entities
                 player.Input.PrevMouseState = prevMouseSnap;
                 player.Input.KeyboardState = keyboardSnap;
                 player.Input.MouseState = mouseSnap;
+                _isScrollingUp = false;
+                _isScrollingDown = false;
+                // todo?: deal with overflow or whatever
+                float curScrollY = mouseSnap.Scroll.Y;
+                float prevScrollY = prevMouseSnap?.Scroll.Y ?? 0;
+                if (curScrollY > prevScrollY)
+                {
+                    _isScrollingUp = true;
+                }
+                else if (curScrollY < prevScrollY)
+                {
+                    _isScrollingDown = true;
+                }
                 if (player.LoadFlags.TestFlag(LoadFlags.Active))
                 {
                     for (int j = 0; j < player.Controls.All.Length; j++)
@@ -2151,11 +2180,8 @@ namespace MphRead.Entities
                         }
                         else
                         {
-                            // todo?: deal with overflow or whatever
-                            float curScrollY = mouseSnap.Scroll.Y;
-                            float prevScrollY = prevMouseSnap?.Scroll.Y ?? 0;
-                            control.IsDown = control.Type == ButtonType.ScrollUp && curScrollY > prevScrollY
-                                || control.Type == ButtonType.ScrollDown && curScrollY < prevScrollY;
+                            control.IsDown = control.Type == ButtonType.ScrollUp && _isScrollingUp
+                                || control.Type == ButtonType.ScrollDown && _isScrollingDown;
                             control.IsPressed = control.IsDown;
                             control.IsReleased = false;
                             if (control.IsDown)
@@ -2202,11 +2228,8 @@ namespace MphRead.Entities
                     }
                     else
                     {
-                        // todo?: deal with overflow or whatever
-                        float curScrollY = mouseSnap.Scroll.Y;
-                        float prevScrollY = prevMouseSnap?.Scroll.Y ?? 0;
-                        bool isDown = skipControl.Type == ButtonType.ScrollUp && curScrollY > prevScrollY
-                            || skipControl.Type == ButtonType.ScrollDown && curScrollY < prevScrollY;
+                        bool isDown = skipControl.Type == ButtonType.ScrollUp && _isScrollingUp
+                            || skipControl.Type == ButtonType.ScrollDown && _isScrollingDown;
                         skipMovie = isDown;
                     }
                     if (skipMovie)
@@ -2335,6 +2358,7 @@ namespace MphRead.Entities
         public Keybind OmegaCannon { get; }
         public Keybind AffinitySlot { get; }
         public Keybind Pause { get; }
+        public Keybind HudOverlay { get; }
 
         public bool InvertAimY { get; }
         public bool InvertAimX { get; }
@@ -2346,7 +2370,8 @@ namespace MphRead.Entities
             Keybind rollUp, Keybind rollDown, Keybind aimLeft, Keybind aimRight, Keybind aimUp, Keybind aimDown, Keybind shoot, Keybind zoom,
             Keybind jump, Keybind morph, Keybind boost, Keybind altAttack, Keybind scanVisor, Keybind scan, Keybind nextWeapon,
             Keybind prevWeapon, Keybind weaponMenu, Keybind powerBeam, Keybind missile, Keybind voltDriver, Keybind battlehammer,
-            Keybind imperialist, Keybind judicator, Keybind magmaul, Keybind shockCoil, Keybind omegaCannon, Keybind affinitySlot, Keybind pause)
+            Keybind imperialist, Keybind judicator, Keybind magmaul, Keybind shockCoil, Keybind omegaCannon, Keybind affinitySlot,
+            Keybind pause, Keybind hudOverlay)
         {
             MouseAim = true;
             KeyboardAim = true;
@@ -2385,11 +2410,13 @@ namespace MphRead.Entities
             OmegaCannon = omegaCannon;
             AffinitySlot = affinitySlot;
             Pause = pause;
+            HudOverlay = hudOverlay;
             All = new[]
             {
                 moveLeft, moveRight, moveUp, moveDown, rollLeft, rollRight, rollUp, rollDown, aimLeft, aimRight, aimUp, aimDown,
                 shoot, zoom, jump, morph, boost, altAttack, scanVisor, scan, nextWeapon, prevWeapon, weaponMenu, powerBeam,
-                missile, voltDriver, battlehammer, imperialist, judicator, magmaul, shockCoil, omegaCannon, affinitySlot, pause
+                missile, voltDriver, battlehammer, imperialist, judicator, magmaul, shockCoil, omegaCannon, affinitySlot,
+                pause, hudOverlay
             };
         }
 
@@ -2412,6 +2439,15 @@ namespace MphRead.Entities
         }
 
         public static PlayerControls GetDefault()
+        {
+            PlayerControls controls = CreateDefault();
+            // Whatever the player has bound, applied to every set of controls
+            // the game creates. Mods.InputSettings holds the canonical one.
+            Mods.InputSettings.Apply(controls);
+            return controls;
+        }
+
+        private static PlayerControls CreateDefault()
         {
             return new PlayerControls(
                 moveLeft: new Keybind(Keys.A),
@@ -2447,7 +2483,8 @@ namespace MphRead.Entities
                 shockCoil: new Keybind(Keys.D8),
                 omegaCannon: new Keybind(Keys.D9),
                 affinitySlot: new Keybind(Keys.Unknown),
-                pause: new Keybind(Keys.Tab)
+                pause: new Keybind(Keys.Tab),
+                hudOverlay: new Keybind(Keys.LeftShift)
             );
         }
     }

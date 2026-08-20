@@ -19,6 +19,9 @@ namespace MphRead.Entities
 
         public NodeData3? ClosestNode { get; set; } = null;
 
+        /// <summary>The volume a player has to be inside, for the map audit.</summary>
+        internal CollisionVolume ModVolume => _volume;
+
         public JumpPadEntity(JumpPadEntityData data, string nodeName, Scene scene)
             : base(EntityType.JumpPad, nodeName, scene)
         {
@@ -106,6 +109,7 @@ namespace MphRead.Entities
                     if (_volume.TestPoint(position))
                     {
                         player.ActivateJumpPad(this, _beamVector, _data.ControlLockTime);
+                        Mods.WorldEvents.NoteJumpPad(player, Id);
                         _cooldownTimer = (ushort)(_data.CooldownTime * 2); // todo: FPS stuff
                     }
                 }

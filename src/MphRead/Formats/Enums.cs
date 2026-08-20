@@ -116,7 +116,7 @@ namespace MphRead
         HealthSmall = 2,
         HealthBig = 3,
         DoubleDamage = 4,
-        PickMorphBall = 5,
+        PowerBeam = 5, // unused
         ElectroLob = 6,
         Missile = 7
     }
@@ -311,7 +311,7 @@ namespace MphRead
         Palette2Bit = 0, // RGB4
         Palette4Bit = 1, // RGB16
         Palette8Bit = 2, // RGB256
-        PaletteA5I3 = 4, // A5I3 
+        PaletteA5I3 = 4, // A5I3
         DirectRgb = 5,   // RGB
         PaletteA3I5 = 6  // A3I5
     }

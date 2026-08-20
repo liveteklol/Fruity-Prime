@@ -1,0 +1,105 @@
+# Package a tagged commit for people who just want to play.
+#
+#   git tag v0.9.0 && git push origin v0.9.0
+#
+# Produces one archive per target, each holding binaries and a note, and
+# nothing else: the game's own files are unpacked from the player's cartridge
+# dump by the launcher, on their machine, and are never part of a release.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to build and release
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: nothing from the game is tracked
+        run: tools/check-no-game-assets.sh
+
+      - name: name this release
+        id: name
+        run: echo "tag=${GITHUB_REF_NAME:-${{ github.event.inputs.tag }}}" >> "$GITHUB_OUTPUT"
+
+      - name: publish every target
+        run: |
+          set -euo pipefail
+          for rid in win-x64 linux-x64 linux-arm64; do
+            dotnet publish src/MphRead/MphRead.csproj -c Release -r "$rid" \
+              --self-contained true -p:PublishSingleFile=true -o "publish/$rid"
+          done
+
+      - name: nothing from the game is in the output
+        run: tools/check-no-game-assets.sh publish/win-x64 publish/linux-x64 publish/linux-arm64
+
+      # Nothing gets tagged as a release until a server out of it has actually
+      # started, registered with a directory and answered a query.
+      - name: the dedicated server runs
+        run: tools/check-dedicated-server.sh publish/linux-x64
+
+      - name: package
+        env:
+          TAG: ${{ steps.name.outputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp LICENSE publish/win-x64/ 2>/dev/null || true
+          cat > publish/win-x64/README.txt <<'NOTE'
+          MphRead -- Metroid Prime Hunters, on a PC, with multiplayer.
+
+          Double-click MphRead.exe. The first thing it asks for is your own
+          Metroid Prime Hunters cartridge dump (.nds); it unpacks what it needs
+          next to this program and leaves the file alone. No game data is
+          included in this download, and none is downloaded.
+
+          Play online joins a server. Play offline is a match against bots.
+          Host a game runs a server on this machine for your friends.
+          F11 or Alt+Enter switches to fullscreen, Escape leaves it.
+          NOTE
+          ( cd publish/win-x64 && zip -qr "../../dist/MphRead-$TAG-win-x64.zip" . )
+          ( cd publish/linux-x64 && tar czf "../../dist/MphRead-$TAG-linux-x64.tar.gz" . )
+          cat > publish/linux-arm64/SERVER.txt <<'NOTE'
+          MphRead dedicated server.
+
+            ./MphRead -server -port 27888 -players 8 -servername "My server"
+
+          It needs no game files. Maps come from maprotation.txt, written
+          beside the binary on first run.
+
+          The server lists itself on net.livetek.fr so that players can find it
+          in the launcher's server browser. Pass -nomaster to stay private, or
+          -master HOST to use a different directory.
+
+          To run a directory of your own:
+
+            ./MphRead -masterserver -port 27889
+          NOTE
+          ( cd publish/linux-arm64 && tar czf "../../dist/MphRead-$TAG-server-linux-arm64.tar.gz" . )
+          ls -la dist
+
+      - name: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.name.outputs.tag }}
+        run: |
+          gh release create "$TAG" dist/* \
+            --title "MphRead $TAG" \
+            --notes "Built from ${{ github.sha }}. No game data is included: the launcher unpacks it from your own cartridge dump on first run." \
+            --verify-tag || gh release upload "$TAG" dist/* --clobber

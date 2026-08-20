@@ -320,6 +320,14 @@ namespace MphRead.Entities
                     Debug.Assert(_scene.Room != null);
                     _scene.Room.ActivateConnector(this);
                 }
+                if (_data.ConnectorId != 255)
+                {
+                    Span<char> roomName = _data.RoomName.AsSpan();
+                    if (roomName.StartsWith("Con") && Int32.TryParse(roomName.Slice(3, 2), out int id) && id >= 1)
+                    {
+                        GameState.StorySave.SetVisitedConnector(id - 1, _scene.AreaId);
+                    }
+                }
                 // todo: FPS stuff
                 if (AnimInfo.Frame[0] > AnimInfo.FrameCount[0] / 2)
                 {

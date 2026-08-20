@@ -174,10 +174,10 @@ namespace MphRead
         public string Name { get; }
         public byte Lighting { get; set; }
         public byte InitLighting { get; }
-        public CullingMode Culling { get; }
+        public CullingMode Culling { get; set; } // todo: yep
         public byte Alpha { get; set; } // todo: yep
         public float CurrentAlpha { get; set; }
-        public byte Wireframe { get; }
+        public byte Wireframe { get; set; } // todo: yep
         public int TextureId { get; }
         public int PaletteId { get; }
         public int TextureBindingId { get; set; }
@@ -1632,6 +1632,25 @@ namespace MphRead
         public static ReadOnlySpan<T> Slice<T>(this ReadOnlySpan<T> source, long start, uint length)
         {
             return source.Slice((int)start, (int)length);
+        }
+
+        public static Span<T> Slice<T>(this Span<T> source, long start)
+        {
+            return source.Slice((int)start);
+        }
+
+        public static T Consume<T>(this ref Span<T> span)
+        {
+            T value = span[0];
+            span = span.Slice(1);
+            return value;
+        }
+
+        public static T Consume<T>(this ref ReadOnlySpan<T> span)
+        {
+            T value = span[0];
+            span = span.Slice(1);
+            return value;
         }
 
         public static int IndexOf<TSource>(this IEnumerable<TSource> source, Func<TSource, bool> predicate)

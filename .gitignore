@@ -340,3 +340,9 @@ ASALocalRun/
 
 # BeatPulse healthcheck temp database
 healthchecksdb
+# Mods/: map previews rendered locally from the user's own extracted
+# game files. Never commit these -- they are derived Nintendo assets.
+thumbnails/
+
+# Server deploy staging (built artifacts, never committed).
+publish/

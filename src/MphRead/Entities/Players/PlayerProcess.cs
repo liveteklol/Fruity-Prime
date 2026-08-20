@@ -30,7 +30,14 @@ namespace MphRead.Entities
             {
                 if (GameState.Multiplayer)
                 {
-                    return false;
+                    // Returning false here makes Scene.UpdateScene destroy the
+                    // entity and drop it from the entity list, and AddPlayer is
+                    // inert once the room has loaded -- so a slot vacated (or
+                    // never occupied) at load time could never be filled again.
+                    // That is why a peer who joined afterwards existed on the
+                    // roster, went active, and still never spawned: nothing was
+                    // calling Process on it any more.
+                    return Mods.Network.NetHooks.KeepSlotAlive(this);
                 }
                 return LoadFlags.TestFlag(LoadFlags.SlotActive);
             }
@@ -203,7 +210,8 @@ namespace MphRead.Entities
                                 }
                             }
                         }
-                        if (GameState.SinglePlayer || Controls.Shoot.IsDown || time <= 0 || IsBot) // todo: or forced
+                        if (GameState.SinglePlayer || Controls.Shoot.IsDown || time <= 0 || IsBot
+                            || Mods.Network.NetHooks.ForceSpawn(this)) // todo: or forced
                         {
                             // todo?: something with wi-fi
                             // else...
@@ -1512,7 +1520,6 @@ namespace MphRead.Entities
 
             void AfterSwitch()
             {
-                Flags1 &= ~PlayerFlags1.Bit30;
                 UpdateZoom(false);
                 EquipInfo.ChargeLevel = 0;
                 EquipInfo.SmokeLevel = 0;
@@ -2063,6 +2070,23 @@ namespace MphRead.Entities
             else
             {
                 chosenSpawn = bestAvailable;
+            }
+            if (chosenSpawn == null)
+            {
+                // Maps were drawn for four players and their spawn points are
+                // spaced for four. With more than that, every point can be on
+                // cooldown or crowded at the same moment, and returning null
+                // leaves the player waiting at the origin -- invisible to
+                // everyone, for as long as the crowd lasts. A busy spawn is a
+                // worse spawn, not a reason not to spawn.
+                foreach (PlayerSpawnEntity fallback in _scene.GetPlayerSpawnEntities())
+                {
+                    if (fallback.IsActive)
+                    {
+                        chosenSpawn = fallback;
+                        break;
+                    }
+                }
             }
             if (chosenSpawn != null)
             {

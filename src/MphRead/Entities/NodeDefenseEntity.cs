@@ -17,7 +17,7 @@ namespace MphRead.Entities
 
         private int _currentTeam = 4;
         private int _occupyingTeam = 4;
-        private readonly bool[] _occupiedBy = new bool[4];
+        private readonly bool[] _occupiedBy = new bool[PlayerEntity.SlotCapacity];
         private float _blinkTimer = 0;
         private PlayerEntity? _capturedPlayer = null;
         public PlayerEntity? CapturedPlayer => _capturedPlayer;
@@ -125,7 +125,7 @@ namespace MphRead.Entities
         {
             int value1 = 0;
             int value2 = 0;
-            bool[] prevOccupiedBy = new bool[4];
+            bool[] prevOccupiedBy = new bool[PlayerEntity.SlotCapacity];
             for (int i = 0; i < 4; i++)
             {
                 prevOccupiedBy[i] = _occupiedBy[i];

@@ -829,6 +829,21 @@ namespace MphRead.Formats
                                 CollisionEntry entry = info.Entries[entryIndex++];
                                 if (entry.DataCount > 0)
                                 {
+                                    // The pool is finite (2048). Draining it
+                                    // means this query spans an implausible
+                                    // grid range, which in practice means a
+                                    // caller passed a position far outside
+                                    // the room. Report the range instead of
+                                    // throwing an opaque "Queue empty".
+                                    if (_inactiveItems.Count == 0)
+                                    {
+                                        Mods.Network.NetLog.Event(
+                                            $"collision pool exhausted: x={minXPart}..{maxXPart} "
+                                            + $"y={minYPart}..{maxYPart} z={minZPart}..{maxZPart} "
+                                            + $"limits=({limitMin.X:0.0},{limitMin.Y:0.0},{limitMin.Z:0.0})"
+                                            + $"..({limitMax.X:0.0},{limitMax.Y:0.0},{limitMax.Z:0.0})");
+                                        return;
+                                    }
                                     CollisionCandidate item = _inactiveItems.Dequeue();
                                     item.Collision = inst;
                                     item.Entry = entry;

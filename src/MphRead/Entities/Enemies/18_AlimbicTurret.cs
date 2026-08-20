@@ -25,7 +25,7 @@ namespace MphRead.Entities.Enemies
         private float _angleIncXSign = 1;
         private float _angleY = 0;
         private float _angleX = 0;
-        // for aiming at target 
+        // for aiming at target
         private Vector3 _targetVec;
         private Vector3 _crossVec;
         private float _aimAngleStep = 0;

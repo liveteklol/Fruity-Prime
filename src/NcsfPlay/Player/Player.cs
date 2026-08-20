@@ -61,8 +61,7 @@ public class Player : NCSFCommon.Player
             var track = this.GetTrack(i);
             if (track is not null && track.CurrentPos != -1)
             {
-                // ncsf-change: mask used to be 1 << track.Id, but we want the seq's defined track ID, not the stripped mapping
-                track.Mute = (this.TrackMutes & (1 << i)) != 0;
+                // ncsf-change: removed usage of TrackMutes
                 if (!track.StepTicks())
                     this.StopTrack(i);
             }

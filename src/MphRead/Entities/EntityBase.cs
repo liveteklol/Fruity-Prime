@@ -378,7 +378,7 @@ namespace MphRead.Entities
             _scene.UpdateMaterials(model, recolor);
         }
 
-        protected void GetDrawItems(ModelInstance inst, int i)
+        protected void GetDrawItems(ModelInstance inst, int i, LightInfo? lightInfo = null)
         {
             int polygonId = _scene.GetNextPolygonId();
             GetItems(inst, i, inst.Model.Nodes[0], polygonId);
@@ -402,7 +402,7 @@ namespace MphRead.Entities
                         Vector4? color = inst.IsPlaceholder ? GetOverrideColor(inst, index) : null;
                         SelectionType selectionType = Selection.CheckSelection(this, inst, node, mesh);
                         int? bindingOverride = GetBindingOverride(inst, material, mesh.MaterialId);
-                        _scene.AddRenderItem(material, polygonId, Alpha, emission, GetLightInfo(), texcoordMatrix,
+                        _scene.AddRenderItem(material, polygonId, Alpha, emission, lightInfo ?? GetLightInfo(), texcoordMatrix,
                             node.Animation, mesh.ListId, model.NodeMatrixIds.Count, model.MatrixStackValues, color,
                             PaletteOverride, selectionType, node.BillboardMode, _drawScale, bindingOverride);
                     }

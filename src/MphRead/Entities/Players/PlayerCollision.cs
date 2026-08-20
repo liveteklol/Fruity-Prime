@@ -67,7 +67,7 @@ namespace MphRead.Entities
                     continue;
                 }
                 Vector3 between = _volume.SpherePosition - other.Volume.SpherePosition;
-                float distSqr = between.LengthFast;
+                float distSqr = between.LengthSquared;
                 if (distSqr == 0)
                 {
                     between = Vector3.UnitX;
@@ -339,7 +339,7 @@ namespace MphRead.Entities
             if ((Hunter == Hunter.Trace || Hunter == Hunter.Weavel) && Flags2.TestFlag(PlayerFlags2.AltAttack))
             {
                 Vector3 between = _volume.SpherePosition - target.HurtVolume.SpherePosition;
-                float distSqr = between.LengthFast;
+                float distSqr = between.LengthSquared;
                 if (distSqr == 0)
                 {
                     between = Vector3.UnitX;
@@ -361,7 +361,8 @@ namespace MphRead.Entities
         private void AltAttackHitDoor(DoorEntity door)
         {
             if ((Hunter == Hunter.Spire || Hunter == Hunter.Trace || Hunter == Hunter.Weavel) && Flags2.TestFlag(PlayerFlags2.AltAttack)
-                || Hunter == Hunter.Noxus && _altAttackTime >= Values.AltAttackStartup * 2) // todo: FPS stuff
+                || Hunter == Hunter.Noxus && _altAttackTime >= Values.AltAttackStartup * 2 // todo: FPS stuff
+                || Features.BoostOpensDoors && Hunter == Hunter.Samus && Flags1.TestFlag(PlayerFlags1.Boosting))
             {
                 if (door.Flags.TestFlag(DoorFlags.Locked) && door.Data.PaletteId == 8)
                 {

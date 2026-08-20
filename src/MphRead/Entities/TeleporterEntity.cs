@@ -19,7 +19,17 @@ namespace MphRead.Entities
         public new bool Active { get; set; }
         private bool _bool3 = false; // todo: names
         private bool _bool4 = false;
-        private readonly bool[] _triggeredSlots = new bool[4] { true, true, true, true };
+        // One entry per possible player, all set: a slot only becomes
+        // eligible once it has left the pad, so starting "already triggered"
+        // stops a player being teleported the instant it spawns on one.
+        private readonly bool[] _triggeredSlots = CreateTriggeredSlots();
+
+        private static bool[] CreateTriggeredSlots()
+        {
+            var slots = new bool[PlayerEntity.SlotCapacity];
+            Array.Fill(slots, true);
+            return slots;
+        }
         private readonly int _targetRoomId = -1;
         private NodeRef _targetNodeRef = NodeRef.None;
 
@@ -216,6 +226,7 @@ namespace MphRead.Entities
                                     GameState.TransitionAltForm = PlayerEntity.Main.IsAltForm;
                                     GameState.TransitionRoomId = _targetRoomId;
                                     _scene.Room.LoadEntityId = _data.TargetIndex;
+                                    GameState.PausePrevented = true;
                                     _scene.SetFade(FadeType.FadeOutBlack, length: 10 / 30f, overwrite: true, AfterFade.LoadRoom);
                                 }
                                 player.Speed = new Vector3(0, player.Speed.Y, 0);
@@ -224,6 +235,7 @@ namespace MphRead.Entities
                                     player.AiData.Field118 = 148 * 2; // todo-ai: FPS stuff
                                 }
                                 _triggeredSlots[player.SlotIndex] = true;
+                                Mods.WorldEvents.NoteTeleport(player, Id);
                             }
                         }
                     }

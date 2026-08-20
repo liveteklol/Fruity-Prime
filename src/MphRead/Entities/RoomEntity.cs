@@ -123,14 +123,14 @@ namespace MphRead.Entities
                         {
                             Debug.Assert(node.RoomPartId >= 0);
                             Debug.Assert(node.ChildIndex != -1);
-                            portal.NodeRef1 = new NodeRef(node.RoomPartId, node.ChildIndex, modelIndex: 0);
+                            portal.NodeRef1 = new NodeRef(meta.Name, node.RoomPartId, node.ChildIndex, modelIndex: 0);
                             _portalSides[node.RoomPartId].Add((portal, false));
                         }
                         if (node.Name == portal.NodeName2)
                         {
                             Debug.Assert(node.RoomPartId >= 0);
                             Debug.Assert(node.ChildIndex != -1);
-                            portal.NodeRef2 = new NodeRef(node.RoomPartId, node.ChildIndex, modelIndex: 0);
+                            portal.NodeRef2 = new NodeRef(meta.Name, node.RoomPartId, node.ChildIndex, modelIndex: 0);
                             _portalSides[node.RoomPartId].Add((portal, true));
                         }
                     }
@@ -242,6 +242,7 @@ namespace MphRead.Entities
             Debug.Assert(meta != null);
             ModelInstance conInst = Read.GetRoomModelInstance(meta.Name); // cached
             IReadOnlyList<Node> conNodes = conInst.Model.Nodes;
+            string connectorName = door.Data.RoomName.MarshalString();
             for (int i = 0; i < conNodes.Count; i++)
             {
                 Node node = conNodes[i];
@@ -250,8 +251,8 @@ namespace MphRead.Entities
                     node.RoomPartId = _nextRoomPartId++;
                     var sides = new List<(Portal, bool)>();
                     Portal portal = door.SetUpPort(roomNodeName, node.Name);
-                    portal.NodeRef1 = new NodeRef(roomPartId, roomNodeIndex, modelIndex: 0);
-                    portal.NodeRef2 = new NodeRef(node.RoomPartId, node.ChildIndex, modelIndex: _doorPortalCount);
+                    portal.NodeRef1 = new NodeRef(Meta.Name, roomPartId, roomNodeIndex, modelIndex: 0);
+                    portal.NodeRef2 = new NodeRef(connectorName, node.RoomPartId, node.ChildIndex, modelIndex: _doorPortalCount);
                     if (_portalSides.Count == 0)
                     {
                         Debug.Assert(roomPartId == 0);
@@ -267,8 +268,8 @@ namespace MphRead.Entities
             return NodeRef.None;
         }
 
-        private static readonly IReadOnlyList<Vector3> _connectorSizes = new Vector3[27]
-        {
+        private static readonly ImmutableArray<Vector3> _connectorSizes =
+        [
             new Vector3(10, 0, 0),
             new Vector3(10, 0, 0),
             new Vector3(0, 0, 10),
@@ -296,12 +297,12 @@ namespace MphRead.Entities
             new Vector3(0, 0, 20),
             new Vector3(0, 0, 10),
             new Vector3(0, 0, 10)
-        };
+        ];
 
         public void AddConnector(DoorEntity door)
         {
             int connectorId = (int)door.Data.ConnectorId;
-            Debug.Assert(connectorId >= 0 && connectorId < _connectorSizes.Count);
+            Debug.Assert(connectorId >= 0 && connectorId < _connectorSizes.Length);
             Vector3 size = _connectorSizes[connectorId];
             Vector3 doorFacing = door.FacingVector;
             if (doorFacing.X > Fixed.ToFloat(2896) || doorFacing.Z > Fixed.ToFloat(2896))
@@ -314,6 +315,7 @@ namespace MphRead.Entities
             _scene.LoadModel(conInst.Model);
             _connectorModels.Add(conInst);
             CollisionInstance collision = Collision.GetCollision(meta, roomLayerMask: -1);
+            collision.ConnectorName = door.Data.RoomName.MarshalString();
             collision.Translation = door.Position + size / 2;
             _roomCollision.Add(collision);
             conInst.Active = false;
@@ -421,16 +423,28 @@ namespace MphRead.Entities
             {
                 PlayerEntity.Reset();
                 PlayerEntity.Construct(_scene);
-                player = PlayerEntity.Create(hunter, recolor);
-                Debug.Assert(player != null);
-                // todo: revisit flags
-                player.LoadFlags |= LoadFlags.SlotActive;
-                player.LoadFlags |= LoadFlags.Active;
-                player.LoadFlags |= LoadFlags.Initial;
-                PlayerEntity.PlayerCount++;
+                if (Mods.Network.NetRoomChange.Rebuilding)
+                {
+                    // A networked match needs every slot rebuilt, not just
+                    // this machine's: Scene.AddPlayer is inert once a room has
+                    // loaded, so a slot missing here could never be filled for
+                    // the rest of the map.
+                    player = Mods.Network.NetRoomChange.RebuildPlayers(_scene, hunter, recolor);
+                }
+                else
+                {
+                    player = PlayerEntity.Create(hunter, recolor);
+                    Debug.Assert(player != null);
+                    // todo: revisit flags
+                    player.LoadFlags |= LoadFlags.SlotActive;
+                    player.LoadFlags |= LoadFlags.Active;
+                    player.LoadFlags |= LoadFlags.Initial;
+                    PlayerEntity.PlayerCount++;
+                }
             }
             ProcessTransition(CancellationToken.None);
             EndTransition();
+            GameState.PausePrevented = false;
             Music.TryPlayRoomMusic(_scene.RoomId, GameState.SinglePlayer && (((int)GameState.StorySave.BossFlags >> (2 * _scene.AreaId)) & 3) != 0 ? 1 : 0);
             if (!resume)
             {
@@ -442,6 +456,10 @@ namespace MphRead.Entities
             {
                 _scene.InitEntity(player);
                 _scene.InitEntity(player.Halfturret);
+                if (Mods.Network.NetRoomChange.Rebuilding)
+                {
+                    Mods.Network.NetRoomChange.AfterRebuild(_scene);
+                }
             }
         }
 
@@ -540,13 +558,22 @@ namespace MphRead.Entities
             {
                 Rng.SetRng2(Rng.Rng2StartValue);
             }
-            (_, IReadOnlyList<EntityBase> entities) = SceneSetup.SetUpRoom(GameState.Mode, playerCount: 0,
+            (_, IReadOnlyList<EntityBase> entities) = SceneSetup.SetUpRoom(GameState.Mode,
+                Mods.Network.NetRoomChange.RoomPlayerCount,
                 BossFlags.Unspecified, nodeLayerMask: 0, entityLayer, roomMeta, room: this, _scene, isRoomTransition: true);
             if (token.IsCancellationRequested)
             {
                 return;
             }
-            SceneSetup.InitHunterSpawns(_scene, entities, initialize: true); // see: "probably revisit this"
+            if (GameState.SinglePlayer)
+            {
+                // Guarded the way the same call is at first load (SceneSetup.LoadGame).
+                // It is adventure mode's hunter-encounter setup: it clears Active
+                // and SlotActive on slots 1-3 and resets PlayersCreated to 1, which
+                // in a multiplayer room transition silently emptied every other
+                // player out of the scene for the rest of the map.
+                SceneSetup.InitHunterSpawns(_scene, entities, initialize: true); // see: "probably revisit this"
+            }
             if (token.IsCancellationRequested)
             {
                 return;
@@ -556,7 +583,7 @@ namespace MphRead.Entities
             {
                 return;
             }
-            SetNodeData(SceneSetup.LoadNodeData(roomMeta.NodePath, roomMeta.Id, GameState.Mode, entities));
+            SetNodeData(SceneSetup.LoadNodeData(roomMeta.NodePath, roomMeta.Id, GameState.Mode, entities, roomMeta.FirstHunt));
             PlayerEntity.PlayerAiData.InitializeGlobals();
             if (token.IsCancellationRequested)
             {
@@ -741,6 +768,7 @@ namespace MphRead.Entities
                         Vector3 newPosition = (targetDoor.Position + targetDoor.FacingVector * 0.75f)
                             .AddY(Fixed.ToFloat(-PlayerEntity.Main.Values.MinPickupHeight));
                         // todo?: faster loading makes this transition kind of abrupt
+                        GameState.PausePrevented = true;
                         _scene.StartMovie(movieId, FadeType.FadeOutInBlack, 0, FadeType.FadeOutInBlack, 5 / 30f, newPosition, targetDoor.FacingVector);
                     }
                     break;
@@ -1165,7 +1193,8 @@ namespace MphRead.Entities
                 {
                     Debug.Assert(node.RoomPartId >= 0);
                     Debug.Assert(node.ChildIndex != -1);
-                    return new NodeRef(node.RoomPartId, node.ChildIndex, modelIndex: 0);
+                    // for the purposes this node ref is returned for, we can assume it belongs to the actual room and not a connector
+                    return new NodeRef(Meta.Name, node.RoomPartId, node.ChildIndex, modelIndex: 0);
                 }
             }
             return NodeRef.None;

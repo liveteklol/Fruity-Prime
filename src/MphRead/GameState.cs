@@ -41,6 +41,7 @@ namespace MphRead
         public static bool SinglePlayer => Mode == GameMode.SinglePlayer;
         public static bool Multiplayer => Mode != GameMode.SinglePlayer;
         public static bool IsOctolithMode => Mode == GameMode.Capture || Mode == GameMode.Bounty || Mode == GameMode.BountyTeams;
+        public static bool PausePrevented { get; set; }
         public static bool MenuPause { get; private set; }
         public static bool DialogPause { get; private set; }
         public static MatchState MatchState { get; set; } = MatchState.InProgress;
@@ -49,16 +50,26 @@ namespace MphRead
         public static EscapeState EscapeState { get; set; } = EscapeState.None;
         public static float EscapeTimer { get; set; } = -1;
         public static bool EscapePaused { get; set; }
-        public static int[] EncounterState { get; } = new int[4];
+        private static string[] BuildDefaultNicknames()
+        {
+            string[] names = new string[PlayerEntity.SlotCapacity];
+            for (int i = 0; i < names.Length; i++)
+            {
+                names[i] = $"Player{i + 1}";
+            }
+            return names;
+        }
+
+        public static int[] EncounterState { get; } = new int[PlayerEntity.SlotCapacity];
         public static bool[] CompletedRandomEncounterRooms { get; } = new bool[66]; // only for the no repeat encounters feature
         public static int TransitionRoomId { get; set; } = -1;
         public static bool TransitionAltForm { get; set; }
         public static int ActivePlayers { get; set; } = 0;
-        public static string[] Nicknames { get; } = new string[4] { "Player1", "Player2", "Player3", "Player4" };
-        public static int[] Stars { get; } = new int[4];
-        public static int[] Standings { get; } = new int[4];
-        public static int[] TeamStandings { get; } = new int[4];
-        public static int[] ResultSlots { get; } = new int[4]; // ordered by team rank, then by player rank
+        public static string[] Nicknames { get; } = BuildDefaultNicknames();
+        public static int[] Stars { get; } = new int[PlayerEntity.SlotCapacity];
+        public static int[] Standings { get; } = new int[PlayerEntity.SlotCapacity];
+        public static int[] TeamStandings { get; } = new int[PlayerEntity.SlotCapacity];
+        public static int[] ResultSlots { get; } = new int[PlayerEntity.SlotCapacity]; // ordered by team rank, then by player rank
         public static int PrimeHunter { get; set; } = -1;
 
         public static bool Teams { get; set; } = false;
@@ -73,48 +84,49 @@ namespace MphRead
         public static float MatchTime { get; set; } = -1;
         public static bool ForceEndGame { get; set; } = false;
 
-        public static int[] Points { get; } = new int[4];
-        public static int[] TeamPoints { get; } = new int[4];
-        public static int[] Kills { get; } = new int[4];
-        public static int[] TeamKills { get; } = new int[4];
-        public static int[] Deaths { get; } = new int[4];
-        public static int[] TeamDeaths { get; } = new int[4];
-        public static float[] Time { get; } = new float[4]; // used for prime hunter time, player survival time
-        public static float[] TeamTime { get; } = new float[4]; // used for defense time, max team survival time
-        public static int[] BeamDamageMax { get; } = new int[4];
-        public static int[] BeamDamageDealt { get; } = new int[4];
-        public static int[] DamageCount { get; } = new int[4];
-        public static int[] AltDamageCount { get; } = new int[4];
-        public static int[] KillStreak { get; } = new int[4];
-        public static int[] Suicides { get; } = new int[4];
-        public static int[] FriendlyKills { get; } = new int[4];
-        public static int[] HeadshotKills { get; } = new int[4];
-        public static int[,] BeamKills { get; } = new int[4, 9];
+        public static int[] Points { get; } = new int[PlayerEntity.SlotCapacity];
+        public static int[] TeamPoints { get; } = new int[PlayerEntity.SlotCapacity];
+        public static int[] Kills { get; } = new int[PlayerEntity.SlotCapacity];
+        public static int[] TeamKills { get; } = new int[PlayerEntity.SlotCapacity];
+        public static int[] Deaths { get; } = new int[PlayerEntity.SlotCapacity];
+        public static int[] TeamDeaths { get; } = new int[PlayerEntity.SlotCapacity];
+        public static float[] Time { get; } = new float[PlayerEntity.SlotCapacity]; // used for prime hunter time, player survival time
+        public static float[] TeamTime { get; } = new float[PlayerEntity.SlotCapacity]; // used for defense time, max team survival time
+        public static int[] BeamDamageMax { get; } = new int[PlayerEntity.SlotCapacity];
+        public static int[] BeamDamageDealt { get; } = new int[PlayerEntity.SlotCapacity];
+        public static int[] DamageCount { get; } = new int[PlayerEntity.SlotCapacity];
+        public static int[] AltDamageCount { get; } = new int[PlayerEntity.SlotCapacity];
+        public static int[] KillStreak { get; } = new int[PlayerEntity.SlotCapacity];
+        public static int[] Suicides { get; } = new int[PlayerEntity.SlotCapacity];
+        public static int[] FriendlyKills { get; } = new int[PlayerEntity.SlotCapacity];
+        public static int[] HeadshotKills { get; } = new int[PlayerEntity.SlotCapacity];
+        public static int[,] BeamKills { get; } = new int[PlayerEntity.SlotCapacity, 9];
 
-        public static int[] OctolithScores { get; } = new int[4]; // field260 in-game
-        public static int[] OctolithDrops { get; } = new int[4]; // field268 in-game
-        public static int[] OctolithStops { get; } = new int[4]; // field270 in-game
+        public static int[] OctolithScores { get; } = new int[PlayerEntity.SlotCapacity]; // field260 in-game
+        public static int[] OctolithDrops { get; } = new int[PlayerEntity.SlotCapacity]; // field268 in-game
+        public static int[] OctolithStops { get; } = new int[PlayerEntity.SlotCapacity]; // field270 in-game
 
-        public static int[] NodesCaptured { get; } = new int[4]; // field260 in-game
-        public static int[] NodesLost { get; } = new int[4]; // field268 in-game
+        public static int[] NodesCaptured { get; } = new int[PlayerEntity.SlotCapacity]; // field260 in-game
+        public static int[] NodesLost { get; } = new int[PlayerEntity.SlotCapacity]; // field268 in-game
 
-        public static int[] KillsAsPrime { get; } = new int[4]; // field260 in-game
-        public static int[] PrimesKilled { get; } = new int[4]; // field268 in-game
+        public static int[] KillsAsPrime { get; } = new int[PlayerEntity.SlotCapacity]; // field260 in-game
+        public static int[] PrimesKilled { get; } = new int[PlayerEntity.SlotCapacity]; // field268 in-game
 
         public static Action<Scene> ModeState { get; private set; } = ModeStateAdventure;
         private static bool _pausingDialog = false;
         private static bool _unpausingDialog = false;
-        private static bool _pausingMenu = false;
-        private static bool _unpausingMenu = false;
 
         public static void PauseMenu()
         {
-            _pausingMenu = true;
+            MenuPause = true;
+            Sfx.Instance.StopAllSound();
+            Sfx.TimedSfxMute++;
         }
 
         public static void UnpauseMenu()
         {
-            _unpausingMenu = true;
+            MenuPause = false;
+            Sfx.TimedSfxMute--;
         }
 
         public static void PauseDialog()
@@ -141,18 +153,8 @@ namespace MphRead
             {
                 DialogPause = false;
             }
-            if (_pausingMenu)
-            {
-                MenuPause = true;
-            }
-            if (_unpausingMenu)
-            {
-                MenuPause = false;
-            }
             _pausingDialog = false;
             _unpausingDialog = false;
-            _pausingMenu = false;
-            _unpausingMenu = false;
         }
 
         public static void Setup(Scene scene)
@@ -161,7 +163,7 @@ namespace MphRead
                 || Mode == GameMode.BountyTeams || Mode == GameMode.NodesTeams || Mode == GameMode.DefenderTeams)
             {
                 Teams = true;
-                for (int i = 0; i < 4; i++)
+                for (int i = 0; i < PlayerEntity.SlotCapacity; i++)
                 {
                     PlayerEntity player = PlayerEntity.Players[i];
                     if (player.LoadFlags.TestFlag(LoadFlags.Active))
@@ -229,6 +231,27 @@ namespace MphRead
             _nextAlarmIndex = 0;
         }
 
+        /// <summary>
+        /// Put the per-match bookkeeping back to the start of a round.
+        ///
+        /// Setup() does this at the end of its work, but Setup only runs when
+        /// a room is added, not when one is loaded over another -- which is
+        /// what a server rotation does. Without it the second map of a
+        /// session kept the first one's "the tempo has already changed" and
+        /// "the results camera is already set up" flags, so the last minute
+        /// of every subsequent match was silent.
+        /// </summary>
+        public static void ResetMatchProgress()
+        {
+            MatchState = MatchState.InProgress;
+            ForceEndGame = false;
+            _tempoChanged = false;
+            _stateChanged = false;
+            _matchEndTime = 0;
+            _lastAlarmTime = 0;
+            _nextAlarmIndex = 0;
+        }
+
         public static void UpdateTime(Scene scene)
         {
             // todo: update license info etc.
@@ -257,7 +280,29 @@ namespace MphRead
             }
             if (MatchState == MatchState.InProgress)
             {
-                // todo: process dialogs or something for 1P
+                if (SinglePlayer && !PausePrevented && !scene.MoviePlaying)
+                {
+                    if (MenuPause && PlayerEntity.Main.Controls.Pause.IsPressed)
+                    {
+                        Sfx.Instance.PlayFreeSfx(SfxId.MENU_CANCEL);
+                        UnpauseMenu();
+                        PlayerEntity.Main.EndMenuPauseHud();
+                        PlayerEntity.Main.Controls.Pause.IsPressed = false;
+                        return;
+                    }
+                    if (!MenuPause && CameraSequence.Current?.BlockInput != true && PlayerEntity.Main.Controls.Pause.IsPressed)
+                    {
+                        PlayerEntity.Main.Controls.Pause.IsPressed = false;
+                        PauseMenu();
+                        PlayerEntity.Main.SetUpMenuPauseHud();
+                        Sfx.Instance.PlayFreeSfx(SfxId.MENU_CONFIRM);
+                    }
+                    if (MenuPause)
+                    {
+                        PlayerEntity.Main.ProcessPauseMenu();
+                        return;
+                    }
+                }
                 // todo: update SFX
                 for (int i = 0; i < scene.MessageQueue.Count; i++)
                 {
@@ -274,7 +319,7 @@ namespace MphRead
                     if (!invalid && Teams)
                     {
                         bool[] teams = new bool[2];
-                        for (int i = 0; i < 4; i++)
+                        for (int i = 0; i < PlayerEntity.SlotCapacity; i++)
                         {
                             PlayerEntity player = PlayerEntity.Players[i];
                             if (player.LoadFlags.TestFlag(LoadFlags.Active))
@@ -284,7 +329,7 @@ namespace MphRead
                         }
                         invalid = !teams[0] || !teams[1];
                     }
-                    if (invalid)
+                    if (invalid && !MenuPause)
                     {
                         MatchTime = 0;
                         CameraSequence.Current?.End();
@@ -360,7 +405,7 @@ namespace MphRead
                     PlayerEntity.Main.HudEndDisrupted();
                     if ((Mode == GameMode.Survival || Mode == GameMode.SurvivalTeams) && !ForceEndGame)
                     {
-                        for (int i = 0; i < 4; i++)
+                        for (int i = 0; i < PlayerEntity.SlotCapacity; i++)
                         {
                             PlayerEntity player = PlayerEntity.Players[i];
                             // the game also checks if the player's time is greater than or equal to the time goal,
@@ -421,7 +466,17 @@ namespace MphRead
                 if (MatchTime == 0)
                 {
                     MatchTime = -1;
-                    scene.SetFade(FadeType.FadeOutBlack, 20 / 30f, overwrite: true, AfterFade.Exit);
+                    if (Mods.Network.NetMatchEnd.ShouldLeaveAfterMatch)
+                    {
+                        scene.SetFade(FadeType.FadeOutBlack, 20 / 30f, overwrite: true, AfterFade.Exit);
+                    }
+                    // Connected, the match ending is not the session ending.
+                    // The server is running its intermission and is about to
+                    // say which map is next; NetRoomChange fades to black and
+                    // loads it, which is the fade the player sees. Quitting
+                    // here sent everybody back to their own launcher instead,
+                    // which is how a match that somebody won broke up the
+                    // group that was playing it.
                 }
             }
         }
@@ -471,6 +526,7 @@ namespace MphRead
                     {
                         if (StorySave.CurrentOctoliths == 0xFF)
                         {
+                            GameState.PausePrevented = true;
                             scene.StartMovie(Movie.OublietteUnlock, FadeType.FadeOutInWhite, 20 / 30f, FadeType.FadeOutInBlack, 5 / 30f);
                             GameState.QueuedOublietteUnlockMessage = true;
                         }
@@ -521,7 +577,7 @@ namespace MphRead
             {
                 return;
             }
-            for (int i = 0; i < 4; i++)
+            for (int i = 0; i < PlayerEntity.SlotCapacity; i++)
             {
                 PlayerEntity player = PlayerEntity.Players[i];
                 if (player.LoadFlags.TestFlag(LoadFlags.Active) && TeamPoints[player.TeamIndex] >= PointGoal)
@@ -545,7 +601,7 @@ namespace MphRead
             int playersAlive = 0;
             int botsAlive = 0;
             bool[] teamsAlive = new bool[2];
-            for (int i = 0; i < 4; i++)
+            for (int i = 0; i < PlayerEntity.SlotCapacity; i++)
             {
                 PlayerEntity player = PlayerEntity.Players[i];
                 if (player.LoadFlags.TestFlag(LoadFlags.Active)
@@ -570,7 +626,7 @@ namespace MphRead
             if (playersAlive == 0 || playersAlive + botsAlive < 2 || Teams && (!teamsAlive[0] || !teamsAlive[1]))
             {
                 MatchTime = 0;
-                for (int i = 0; i < 4; i++)
+                for (int i = 0; i < PlayerEntity.SlotCapacity; i++)
                 {
                     PlayerEntity player = PlayerEntity.Players[i];
                     if (player.LoadFlags.TestFlag(LoadFlags.Active)
@@ -598,7 +654,7 @@ namespace MphRead
 
         public static void ModeStateDefender(Scene scene)
         {
-            for (int i = 0; i < 4; i++)
+            for (int i = 0; i < PlayerEntity.SlotCapacity; i++)
             {
                 PlayerEntity player = PlayerEntity.Players[i];
                 if (player.LoadFlags.TestFlag(LoadFlags.Active) && TeamTime[player.TeamIndex] >= TimeGoal)
@@ -686,6 +742,7 @@ namespace MphRead
                         }
                         Music.Stop(fadeTime: 20 / 30f);
                         // todo: fade SFX
+                        GameState.PausePrevented = true;
                         Sfx.Instance.PlaySample((int)SfxId.RETURN_TO_SHIP_YES, source: null, loop: false,
                             noUpdate: false, recency: -1, sourceOnly: false, cancellable: false);
                     }
@@ -734,6 +791,7 @@ namespace MphRead
                         TransitionRoomId = StorySave.CheckpointRoomId;
                         Sfx.Instance.PlaySample((int)SfxId.MENU_CONFIRM, source: null, loop: false,
                             noUpdate: false, recency: -1, sourceOnly: false, cancellable: false);
+                        GameState.PausePrevented = true;
                         scene.SetFade(FadeType.FadeOutWhite, length: 10 / 30f, overwrite: true, AfterFade.LoadRoom);
                         UnpauseDialog();
                         PlayerEntity.Main.RestartLongSfx(force: true);
@@ -1006,9 +1064,9 @@ namespace MphRead
                 return;
             }
             IReadOnlyList<PlayerEntity> players = PlayerEntity.Players;
-            int[] prevTeamPoints = new int[4];
-            int[] prevTeamDeaths = new int[4];
-            for (int i = 0; i < 4; i++)
+            int[] prevTeamPoints = new int[PlayerEntity.SlotCapacity];
+            int[] prevTeamDeaths = new int[PlayerEntity.SlotCapacity];
+            for (int i = 0; i < PlayerEntity.SlotCapacity; i++)
             {
                 prevTeamPoints[i] = TeamPoints[i];
                 prevTeamDeaths[i] = TeamDeaths[i];
@@ -1020,7 +1078,7 @@ namespace MphRead
                     TeamTime[i] = 0;
                 }
             }
-            for (int i = 0; i < 4; i++)
+            for (int i = 0; i < PlayerEntity.SlotCapacity; i++)
             {
                 PlayerEntity player = players[i];
                 if (!player.LoadFlags.TestFlag(LoadFlags.Initial) || player.TeamIndex == -1)
@@ -1055,7 +1113,7 @@ namespace MphRead
             {
                 int opponents = 0;
                 int lastTeam = -1;
-                for (int i = 0; i < 4; i++)
+                for (int i = 0; i < PlayerEntity.SlotCapacity; i++)
                 {
                     PlayerEntity player = players[i];
                     if (!player.LoadFlags.TestAny(LoadFlags.Active))
@@ -1090,12 +1148,12 @@ namespace MphRead
                 int a = 0;
                 for (int t = 0; t < 2; t++)
                 {
-                    for (int p = 0; p < 4; p++)
+                    for (int p = 0; p < PlayerEntity.SlotCapacity; p++)
                     {
                         PlayerEntity player = players[p];
                         if (player.TeamIndex == t)
                         {
-                            Standings[p] = 3;
+                            Standings[p] = PlayerEntity.SlotCapacity - 1;
                             if (player.LoadFlags.TestFlag(LoadFlags.Active))
                             {
                                 ResultSlots[a++] = p;
@@ -1108,9 +1166,9 @@ namespace MphRead
             else
             {
                 int a = 0;
-                for (int p = 0; p < 4; p++)
+                for (int p = 0; p < PlayerEntity.SlotCapacity; p++)
                 {
-                    Standings[p] = 3;
+                    Standings[p] = PlayerEntity.SlotCapacity - 1;
                     if (players[p].LoadFlags.TestFlag(LoadFlags.Active))
                     {
                         ResultSlots[a++] = p;
@@ -1553,7 +1611,7 @@ namespace MphRead
             TransitionRoomId = -1;
             TransitionAltForm = false;
             ActivePlayers = 0;
-            for (int i = 0; i < 4; i++)
+            for (int i = 0; i < PlayerEntity.SlotCapacity; i++)
             {
                 Standings[i] = 0;
                 TeamStandings[i] = 0;
@@ -1603,8 +1661,7 @@ namespace MphRead
             DialogPause = false;
             _pausingDialog = false;
             _unpausingDialog = false;
-            _pausingMenu = false;
-            _unpausingMenu = false;
+            PausePrevented = false;
             EscapeState = EscapeState.None;
             EscapeTimer = -1;
             EscapePaused = false;
@@ -1618,6 +1675,7 @@ namespace MphRead
         // use jagged arrays since 2D arrays can't be serialized out of the box
         public byte[][] RoomState { get; init; } // 66 x 60
         public byte[] VisitedRooms { get; init; } = new byte[9];
+        public int[] VisitedConnectors { get; init; } = new int[9];
         public byte[] TriggerState { get; init; } = new byte[4];
         public byte[] Logbook { get; init; } = new byte[68];
         public byte[][] EnemyEncounters { get; init; } // 9 x 8
@@ -1763,6 +1821,37 @@ namespace MphRead
             roomId -= 27;
             (int byteIndex, int bitIndex) = Math.DivRem(roomId, 8);
             VisitedRooms[byteIndex] |= (byte)(1 << bitIndex);
+        }
+
+        public bool CheckVisitedConnector(int connectorId, int areaId)
+        {
+            if (connectorId < 0 || connectorId > 63)
+            {
+                return false;
+            }
+            // there are two ints per planet (plus one for Oubliette, which doesn't have any connectors),
+            // for 64 total connectors across both sub-areas, though the max number of connectors in any area is 15.
+            if (connectorId >= 32)
+            {
+                return ((VisitedConnectors[(areaId & ~1) + 1] >> (connectorId - 32)) & 1) != 0;
+            }
+            return ((VisitedConnectors[areaId & ~1] >> connectorId) & 1) != 0;
+        }
+
+        public void SetVisitedConnector(int connectorId, int areaId)
+        {
+            if (connectorId < 0 || connectorId > 63)
+            {
+                return;
+            }
+            if (connectorId >= 32)
+            {
+                VisitedConnectors[(areaId & ~1) + 1] |= 1 << (connectorId - 32);
+            }
+            else
+            {
+                VisitedConnectors[areaId & ~1] |= 1 << connectorId;
+            }
         }
 
         public bool CheckFoundOctolith(int areaId)
@@ -1932,6 +2021,7 @@ namespace MphRead
                 Array.Copy(source, other.EnemyEncounters[i], source.Length);
             }
             VisitedRooms.CopyTo(other.VisitedRooms, index: 0);
+            VisitedConnectors.CopyTo(other.VisitedConnectors, index: 0);
             TriggerState.CopyTo(other.TriggerState, index: 0);
             Logbook.CopyTo(other.Logbook, index: 0);
             other.ScanCount = ScanCount;

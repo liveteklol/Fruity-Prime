@@ -72,14 +72,16 @@ namespace MphRead
             {
                 UpdateAreaHunters();
                 InitHunterSpawns(scene, entities, initialize: false); // see: "probably revisit this"
+                scene.LoadMapSymbolEntities(scene.AreaId);
             }
             AiPersonality.LoadAll(mode);
-            room.SetNodeData(LoadNodeData(metadata.NodePath, room.RoomId, mode, entities));
+            room.SetNodeData(LoadNodeData(metadata.NodePath, room.RoomId, mode, entities, metadata.FirstHunt));
             GameState.StorySave.CheckpointRoomId = room.RoomId;
             return (room, metadata, collision, entities);
         }
 
-        public static NodeData? LoadNodeData(string? nodePath, int roomId, GameMode mode, IReadOnlyList<EntityBase> entities)
+        public static NodeData? LoadNodeData(string? nodePath, int roomId, GameMode mode,
+            IReadOnlyList<EntityBase> entities, bool firstHunt)
         {
             NodeData? nodeData = null;
             if (mode == GameMode.SinglePlayer)
@@ -112,7 +114,7 @@ namespace MphRead
             }
             if (nodePath != null)
             {
-                nodeData = ReadNodeData.ReadData(Paths.Combine(@"", nodePath));
+                nodeData = ReadNodeData.ReadData(Paths.Combine(@"", nodePath), firstHunt);
                 if (nodeData.Simple)
                 {
                     for (int i = 0; i < entities.Count; i++)

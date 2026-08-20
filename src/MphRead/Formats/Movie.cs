@@ -9,14 +9,14 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
+using MphRead.Entities;
 using MphRead.Formats;
 using MphRead.Formats.Sound;
 using MphRead.Sound;
 using OpenTK.Audio.OpenAL;
 using OpenTK.Graphics.OpenGL;
 using OpenTK.Mathematics;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
+using ReFuel.Stb;
 
 namespace MphRead
 {
@@ -74,6 +74,10 @@ namespace MphRead
             _movieSettings.AfterPosition = afterPosition;
             _movieSettings.AfterFacing = afterFacing;
             _movieSettings.AfterMovieAction = afterMovieAction;
+            if (GameState.MatchState == MatchState.InProgress && PlayerEntity.Main.Health > 0)
+            {
+                GameState.PausePrevented = true;
+            }
             SetFade(fadeToMovieType, fadeToMovieLength, overwrite: true, AfterFade.PlayMovie);
         }
 
@@ -650,8 +654,13 @@ namespace MphRead.Formats
             Array.Clear(_influenceBuffer);
             AudioFrame? prevAudioFrame = null;
             _audioFrameTotal = 0;
-            using Stream file = writeFiles && AudioStreamCount >= 1 ? File.OpenWrite(Paths.Combine(folder, "audio.wav")) : Stream.Null;
+            using Stream file = writeFiles && AudioStreamCount >= 1 ? File.Create(Paths.Combine(folder, "audio.wav")) : Stream.Null;
             using BinaryWriter writer = new BinaryWriter(file);
+            byte[] fileOutputBuffer = Array.Empty<byte>();
+            if (writeFiles)
+            {
+                fileOutputBuffer = new byte[FrameWidth * FrameHeight * 3];
+            }
             for (int i = 0; i < 11; i++)
             {
                 // dummy space for 44-byte WAV header will be overwritten later (contains sizes)
@@ -704,7 +713,7 @@ namespace MphRead.Formats
                 _prevVideoFrames[0] = vxFrame.VideoFrame;
                 if (writeFiles && UseStaticBuffers)
                 {
-                    WriteFile(vxFrame, folder, i);
+                    WriteFile(fileOutputBuffer, vxFrame, folder, i);
                 }
                 if (writeFiles && audioFrameCount > 0)
                 {
@@ -726,25 +735,26 @@ namespace MphRead.Formats
                 SoundRead.WriteWavHeader(writer, (uint)_audioFrameTotal * 128, (ushort)AudioSampleRate, WaveFormat.PCM16);
             }
 
-            void WriteFile(VxFrame vxFrame, string folder, int f)
+            void WriteFile(Span<byte> pixelBuffer, VxFrame vxFrame, string folder, int f)
             {
                 VideoFrame videoFrame = vxFrame.VideoFrame;
-                using var image = new Image<Rgb24>(FrameWidth, FrameHeight);
-                image.ProcessPixelRows(accessor =>
+                for (int y = 0; y < FrameHeight; y++)
                 {
-                    for (int y = 0; y < FrameHeight; y++)
+                    for (int x = 0; x < FrameWidth; x++)
                     {
-                        Span<Rgb24> row = accessor.GetRowSpan(y);
-                        for (int x = 0; x < FrameWidth; x++)
-                        {
-                            int cy = videoFrame.PlaneBufferY[y, x];
-                            int cu = videoFrame.PlaneBufferU[y / 2, x / 2];
-                            int cv = videoFrame.PlaneBufferV[y / 2, x / 2];
-                            row[x] = YuvToRgb(cy, cu, cv);
-                        }
+                        int cy = videoFrame.PlaneBufferY[y, x];
+                        int cu = videoFrame.PlaneBufferU[y / 2, x / 2];
+                        int cv = videoFrame.PlaneBufferV[y / 2, x / 2];
+                        ColorRgb rgb = YuvToRgb(cy, cu, cv);
+                        int index = (y * FrameWidth + x) * 3;
+                        pixelBuffer[index++] = rgb.Red;
+                        pixelBuffer[index++] = rgb.Green;
+                        pixelBuffer[index] = rgb.Blue;
                     }
-                });
-                image.SaveAsPng(Paths.Combine(folder, $"{f.ToString().PadLeft(4, '0')}.png"));
+                }
+                using FileStream fileStream = File.Create(Paths.Combine(folder, $"{f.ToString().PadLeft(4, '0')}.png"));
+                StbImage.FlipVerticallyOnSave = false;
+                StbImage.WritePng<byte>(pixelBuffer, FrameWidth, FrameHeight, StbiImageFormat.Rgb, fileStream);
             }
 
             if (writeFiles && !UseStaticBuffers)
@@ -752,7 +762,7 @@ namespace MphRead.Formats
                 int f = 0;
                 foreach (VxFrame vxFrame in _vxFrames)
                 {
-                    WriteFile(vxFrame, folder, f++);
+                    WriteFile(fileOutputBuffer, vxFrame, folder, f++);
                 }
             }
         }
@@ -779,10 +789,10 @@ namespace MphRead.Formats
                     int cy = vxFrame.VideoFrame.PlaneBufferY[y, x];
                     int cu = vxFrame.VideoFrame.PlaneBufferU[y / 2, x / 2];
                     int cv = vxFrame.VideoFrame.PlaneBufferV[y / 2, x / 2];
-                    Rgb24 rgb = YuvToRgb(cy, cu, cv);
-                    texture[y * 256 * 3 + x * 3] = rgb.R;
-                    texture[y * 256 * 3 + x * 3 + 1] = rgb.G;
-                    texture[y * 256 * 3 + x * 3 + 2] = rgb.B;
+                    ColorRgb rgb = YuvToRgb(cy, cu, cv);
+                    texture[y * 256 * 3 + x * 3] = rgb.Red;
+                    texture[y * 256 * 3 + x * 3 + 1] = rgb.Green;
+                    texture[y * 256 * 3 + x * 3 + 2] = rgb.Blue;
                 }
             }
             _framesQueued--;
@@ -860,14 +870,14 @@ namespace MphRead.Formats
         private readonly byte[,] _coeffBufferUV = new byte[_mphFrameH / 8 + 1, _mphFrameW / 8 + 1];
         private readonly Vector2ir[,] _vectors = new Vector2ir[_mphFrameH / 16 + 1, _mphFrameW / 16 + 2];
 
-        private static Rgb24 YuvToRgb(int y, int u, int v)
+        private static ColorRgb YuvToRgb(int y, int u, int v)
         {
             u -= 128;
             v -= 128;
             int r = y + 2 * v;
             int g = y - u / 2 - v;
             int b = y + 2 * u;
-            return new Rgb24((byte)Math.Clamp(r, 0, 255), (byte)Math.Clamp(g, 0, 255), (byte)Math.Clamp(b, 0, 255));
+            return new ColorRgb((byte)Math.Clamp(r, 0, 255), (byte)Math.Clamp(g, 0, 255), (byte)Math.Clamp(b, 0, 255));
         }
 
         private static void ClearArray<T>(T[,] array) where T : struct

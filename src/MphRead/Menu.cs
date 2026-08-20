@@ -150,7 +150,7 @@ namespace MphRead
             {
                 "Battle Teams", "Survival Teams", "Capture", "Bounty Teams", "Nodes Teams", "Defender Teams"
             };
-            var models = new List<(string Name, string Recolor)>();
+            var models = new List<(string Name, int Recolor, bool FirstHunt, MetaDir dir)>();
             var mphVersions = new List<string>() { Ver.A76E0, Ver.AMHE0, Ver.AMHE1,
                 Ver.AMHP0, Ver.AMHP1, Ver.AMHJ0, Ver.AMHJ1, Ver.AMHK0 };
             var fhVersions = new List<string>() { Ver.AMFE0, Ver.AMFP0 };
@@ -428,15 +428,26 @@ namespace MphRead
                     string[] split = input.Split(',');
                     for (int i = 0; i < split.Length; i++)
                     {
-                        string[] pair = split[i].Trim().Split(' ');
-                        if (Metadata.ModelMetadata.TryGetValue(pair[0], out ModelMetadata? meta))
+                        string[] parts = split[i].Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                        int recolor = 0;
+                        bool firstHunt = false;
+                        MetaDir dir = MetaDir.Models;
+                        foreach (string part in parts[1..])
                         {
-                            string recolor = "0";
-                            if (pair.Length > 1 && Int32.TryParse(pair[1], out int result))
+                            if (part.ToLower() == "fh")
                             {
-                                recolor = Math.Clamp(result, 0, meta.Recolors.Count - 1).ToString();
+                                firstHunt = true;
                             }
-                            models.Add((meta.Name, recolor));
+                            else if (!Int32.TryParse(part, out recolor)) // remains 0 if parsing fails
+                            {
+                                Enum.TryParse<MetaDir>(part, out dir); // remains MetaDir.Models (0) if parsing fails
+                            }
+                        }
+                        ModelMetadata? meta = firstHunt ? Metadata.GetFirstHuntModelByName(parts[0]) : Metadata.GetModelByName(parts[0], dir);
+                        if (meta != null)
+                        {
+                            recolor = Math.Clamp(recolor, 0, meta.Recolors.Count - 1);
+                            models.Add((meta.Name, recolor, firstHunt, dir));
                         }
                     }
                 }
@@ -957,7 +968,7 @@ namespace MphRead
                             {
                                 if (models.Count == 0)
                                 {
-                                    models.Add(("Crate01", "0"));
+                                    models.Add(("Crate01", 0, false, MetaDir.Models));
                                 }
                                 else
                                 {
@@ -969,7 +980,7 @@ namespace MphRead
                                         index = 0;
                                     }
                                     model = Metadata.ModelMetadata[Metadata.ModelMetadata.Keys.ElementAt(index)].Name;
-                                    models[0] = (model, models[0].Recolor);
+                                    models[0] = (model, models[0].Recolor, false, MetaDir.Models);
                                 }
                             }
                             else if (selection == 7)
@@ -1105,7 +1116,7 @@ namespace MphRead
                             {
                                 if (models.Count == 0)
                                 {
-                                    models.Add(("Crate01", "0"));
+                                    models.Add(("Crate01", 0, false, MetaDir.Models));
                                 }
                                 else
                                 {
@@ -1117,7 +1128,7 @@ namespace MphRead
                                         index = Metadata.ModelMetadata.Keys.Count() - 1;
                                     }
                                     model = Metadata.ModelMetadata[Metadata.ModelMetadata.Keys.ElementAt(index)].Name;
-                                    models[0] = (model, models[0].Recolor);
+                                    models[0] = (model, models[0].Recolor, false, MetaDir.Models);
                                 }
                             }
                             else if (selection == 7)
@@ -1289,8 +1300,8 @@ namespace MphRead
                 }
                 for (int i = 0; i < models.Count; i++)
                 {
-                    (string model, string recolor) = models[i];
-                    renderer.AddModel(model, Int32.Parse(recolor));
+                    (string model, int recolor, bool firstHunt, MetaDir dir) = models[i];
+                    renderer.AddModel(model, recolor, firstHunt, dir);
                 }
                 renderer.Run();
             }
@@ -1795,11 +1806,13 @@ namespace MphRead
                     Console.WriteLine($"{X(s++)} (F) Target Info Sway: {OnOff(Features.TargetInfoSway)}");
                     Console.WriteLine($"{X(s++)} (W) Delayed Idle Sway: {OnOff(Features.DelayedIdleSway)}");
                     Console.WriteLine($"{X(s++)} (N) No Idle Sway: {OnOff(Features.NoIdleSway)}");
+                    Console.WriteLine($"{X(s++)} (M) No Map Centering: {OnOff(Features.NoMapCentering)}");
                     Console.WriteLine($"{X(s++)} (R) Maximum Room Detail: {OnOff(Features.MaxRoomDetail)}");
                     Console.WriteLine($"{X(s++)} (P) Maximum Player Detail: {OnOff(Features.MaxPlayerDetail)}");
                     Console.WriteLine($"{X(s++)} (L) Logarithmic Spatial Audio: {OnOff(Features.LogSpatialAudio)}");
                     Console.WriteLine($"{X(s++)} (A) Consistent Alarm Interval: {OnOff(Features.HalfSecondAlarm)}");
                     Console.WriteLine($"{X(s++)} (G) Full Boost Charge: {OnOff(Features.FullBoostCharge)}");
+                    Console.WriteLine($"{X(s++)} (B) Boost Opens Doors: {OnOff(Features.BoostOpensDoors)}");
                     Console.WriteLine($"{X(s++)} (1) Update Adventure Mode For Other Hunters: {OnOff(Features.AlternateHunters1P)}");
                 }
                 else if (screen == 2)
@@ -2010,25 +2023,33 @@ namespace MphRead
                         }
                         else if (selection == 11)
                         {
-                            Features.MaxRoomDetail = false;
+                            Features.NoMapCentering = false;
                         }
                         else if (selection == 12)
                         {
-                            Features.MaxPlayerDetail = true;
+                            Features.MaxRoomDetail = false;
                         }
                         else if (selection == 13)
                         {
-                            Features.LogSpatialAudio = false;
+                            Features.MaxPlayerDetail = true;
                         }
                         else if (selection == 14)
                         {
-                            Features.HalfSecondAlarm = false;
+                            Features.LogSpatialAudio = false;
                         }
                         else if (selection == 15)
                         {
-                            Features.FullBoostCharge = false;
+                            Features.HalfSecondAlarm = false;
                         }
                         else if (selection == 16)
+                        {
+                            Features.FullBoostCharge = false;
+                        }
+                        else if (selection == 17)
+                        {
+                            Features.BoostOpensDoors = false;
+                        }
+                        else if (selection == 18)
                         {
                             Features.AlternateHunters1P = true;
                         }
@@ -2121,25 +2142,33 @@ namespace MphRead
                         }
                         else if (selection == 11)
                         {
-                            Features.MaxRoomDetail = !Features.MaxRoomDetail;
+                            Features.NoMapCentering = !Features.NoMapCentering;
                         }
                         else if (selection == 12)
                         {
-                            Features.MaxPlayerDetail = !Features.MaxPlayerDetail;
+                            Features.MaxRoomDetail = !Features.MaxRoomDetail;
                         }
                         else if (selection == 13)
                         {
-                            Features.LogSpatialAudio = !Features.LogSpatialAudio;
+                            Features.MaxPlayerDetail = !Features.MaxPlayerDetail;
                         }
                         else if (selection == 14)
                         {
-                            Features.HalfSecondAlarm = !Features.HalfSecondAlarm;
+                            Features.LogSpatialAudio = !Features.LogSpatialAudio;
                         }
                         else if (selection == 15)
                         {
-                            Features.FullBoostCharge = !Features.FullBoostCharge;
+                            Features.HalfSecondAlarm = !Features.HalfSecondAlarm;
                         }
                         else if (selection == 16)
+                        {
+                            Features.FullBoostCharge = !Features.FullBoostCharge;
+                        }
+                        else if (selection == 17)
+                        {
+                            Features.BoostOpensDoors = !Features.BoostOpensDoors;
+                        }
+                        else if (selection == 18)
                         {
                             Features.AlternateHunters1P = !Features.AlternateHunters1P;
                         }
@@ -2405,7 +2434,6 @@ namespace MphRead
             (MusicType.Stream, (int)VoiceId.STRM_TITLE_SCREEN,    "Title"),
             (MusicType.Seq,    (int)SeqId.CHUTNEY,                "Menu"),
             (MusicType.Seq,    (int)SeqId.MENU1,                  "Menu (Unused)"),
-            (MusicType.Seq,    (int)SeqId.RESULTS,                "Results"),
             (MusicType.Music,  (int)MusicId.SEQ_MP2_M15,          "Celestial Archives VS."), // renamed from Celestial Gateway
             (MusicType.Music,  (int)MusicId.SEQ_MP2_M40,          "Celestial Archives VS. (Octolith)"), // *
             (MusicType.Music,  (int)MusicId.SEQ_MP2_M6,           "Celestial Archives VS. (Node)"), // *
@@ -2418,8 +2446,10 @@ namespace MphRead
             (MusicType.Music,  (int)MusicId.SEQ_PEPPER_M36,       "Arcterra VS."), // renamed from Arcterra Gateway
             (MusicType.Music,  (int)MusicId.SEQ_PEPPER_M38,       "Arcterra VS. (Octolith)"), // *
             (MusicType.Music,  (int)MusicId.SEQ_PEPPER_M45,       "Arcterra VS. (Node)"), // *
+            (MusicType.Seq,    (int)SeqId.RESULTS,                "Results"),
             (MusicType.Seq,    (int)SeqId.NEW_GAME,               "Story"), // *
             (MusicType.Seq,    (int)SeqId.SHIP,                   "Tetra Galaxy"), // *
+            (MusicType.Seq,    (int)SeqId.FLY_IN_2,               "Landing (Celestial Archives)"),
             (MusicType.Seq,    (int)SeqId.SHIP_LAND2,             "Ship Cockpit (Celestial Archives)"),
             (MusicType.Music,  (int)MusicId.SEQ_GREY_M17,         "Shadows"), // *
             //(MusicType.Music,  (int)MusicId.SEQ_GREY_M52,       "Shadows (Unused)"), // identical to previous
@@ -2437,17 +2467,20 @@ namespace MphRead
             (MusicType.Music,  (int)MusicId.SEQ_OREGANO_M56,      "Escape (Alarm)"), // *
             //(MusicType.Music, (int)MusicId.SEQ_ENERGY_TIMER_M51, "Fuel Stack (Race)"), // identical to VDO VS.
             //(MusicType.Music, (int)MusicId.SEQ_ENERGY_TIMER_M57, "Fuel Stack (Failure"), // silent
+            (MusicType.Seq,    (int)SeqId.FLY_IN_1,               "Landing (Alinos)"),
             (MusicType.Seq,    (int)SeqId.SHIP_LAND1,             "Ship Cockpit (Alinos)"),
             (MusicType.Music,  (int)MusicId.SEQ_RED_M13,          "Alinos"),
-            (MusicType.Music,  (int)MusicId.SEQ_INTRO_SPIRE_M9,   "Spire Intro"), // *
+            //(MusicType.Music,  (int)MusicId.SEQ_INTRO_SPIRE_M9, "Spire Intro"), // identical to Kanden intro (Pursuit)
             (MusicType.Music,  (int)MusicId.SEQ_GUMBO_M37,        "Spire"),
             (MusicType.Music,  (int)MusicId.SEQ_SAFFRON_M29,      "Slench"),
             (MusicType.Music,  (int)MusicId.SEQ_GUMBO_M10,        "Weavel"),
+            (MusicType.Seq,    (int)SeqId.FLY_IN_3,               "Landing (VDO)"),
             (MusicType.Seq,    (int)SeqId.SHIP_LAND3,             "Ship Cockpit (VDO)"),
             (MusicType.Music,  (int)MusicId.SEQ_GREEN_M19,        "The Outpost"),
             (MusicType.Music,  (int)MusicId.SEQ_GREEN_M50,        "The Outpost (Race)"), // *
             (MusicType.Music,  (int)MusicId.SEQ_GUARDIAN_M18,     "Guardians"),
             (MusicType.Music,  (int)MusicId.SEQ_GUMBO_M39,        "Sylux"),
+            (MusicType.Seq,    (int)SeqId.FLY_IN_4,               "Landing (Arcterra)"),
             (MusicType.Seq,    (int)SeqId.SHIP_LAND4,             "Ship Cockpit (Arcterra)"),
             (MusicType.Music,  (int)MusicId.SEQ_WHITE_M48,        "Desolation"),
             (MusicType.Music,  (int)MusicId.SEQ_WHITE_M54,        "Desolation (Maze)"), // *
@@ -2465,6 +2498,7 @@ namespace MphRead
             (MusicType.Music,  (int)MusicId.SEQ_INDIGO_M59,       "Space Decay"),
             (MusicType.Music,  (int)MusicId.SEQ_BLACK_M53,        "Watching"),
             //(MusicType.Music,  (int)MusicId.SEQ_BLACK_M64,      "Watching (Unused)"), // identical to previous
+            (MusicType.Seq,    (int)SeqId.FLY_IN_GOREA,           "Landing (Oubliette)"),
             (MusicType.Music,  (int)MusicId.SEQ_GOREA_1_M20,      "Gorea"),
             (MusicType.Music,  (int)MusicId.SEQ_GOREA_1_M22,      "Gorea (Battlehammer)"),
             (MusicType.Music,  (int)MusicId.SEQ_GOREA_1_M26,      "Gorea (Volt Driver)"),
@@ -2980,11 +3014,13 @@ namespace MphRead
             Features.TargetInfoSway = false;
             Features.DelayedIdleSway = true;
             Features.NoIdleSway = false;
+            Features.NoMapCentering = false;
             Features.MaxRoomDetail = false;
             Features.MaxPlayerDetail = true;
             Features.LogSpatialAudio = false;
             Features.HalfSecondAlarm = false;
             Features.FullBoostCharge = false;
+            Features.BoostOpensDoors = false;
             Features.AlternateHunters1P = true;
             Cheats.FreeWeaponSelect = false;
             Cheats.UnlimitedJumps = false;
@@ -3753,10 +3789,6 @@ namespace MphRead
                         else if (selection == 17)
                         {
                             _octoliths[octolith] = (_octoliths[octolith] + 1) % 2;
-                        }
-                        else
-                        {
-                            prompt = selection + 1;
                         }
                     }
                     else if (keyInfo.Key == ConsoleKey.A)

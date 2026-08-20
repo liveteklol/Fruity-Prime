@@ -1,14 +1,32 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
-    <TargetFramework>net9.0</TargetFramework>
+    <!-- A console binary everywhere except the Windows build, which is a GUI
+         one: double-clicking it has to open the launcher and nothing else, and
+         a console subsystem process gets a terminal before Main can hide it.
+         Mods/ConsoleWindow attaches or allocates one for command-line runs. -->
+    <OutputType Condition="!$(RuntimeIdentifier.StartsWith('win'))">Exe</OutputType>
+    <OutputType Condition="$(RuntimeIdentifier.StartsWith('win'))">WinExe</OutputType>
+    <!-- Mods/Launcher is WinForms, which needs the Windows desktop target.
+         Non-Windows builds stay on plain net9.0 and exclude it. -->
+    <TargetFramework Condition="'$(RuntimeIdentifier)' == '' or !$(RuntimeIdentifier.StartsWith('win'))">net9.0</TargetFramework>
+    <TargetFramework Condition="$(RuntimeIdentifier.StartsWith('win'))">net9.0-windows</TargetFramework>
+    <UseWindowsForms Condition="$(RuntimeIdentifier.StartsWith('win'))">true</UseWindowsForms>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <DefineConstants Condition="'$(UseWindowsForms)' == 'true'">$(DefineConstants);MPHREAD_LAUNCHER</DefineConstants>
+    <!-- Without a DPI declaration Windows bitmap-stretches the window, which
+         is both blurry and lays controls out at the wrong size. -->
+    <ApplicationHighDpiMode Condition="'$(UseWindowsForms)' == 'true'">PerMonitorV2</ApplicationHighDpiMode>
     <PublishSingleFile>true</PublishSingleFile>
     <DebugType>embedded</DebugType>
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
     <ProduceReferenceAssembly>False</ProduceReferenceAssembly>
   </PropertyGroup>
+
+  <ItemGroup Condition="'$(UseWindowsForms)' != 'true'">
+    <Compile Remove="Mods\Launcher\**" />
+  </ItemGroup>
 
   <ItemGroup>
     <Compile Remove="Export\modules\__pycache__\**" />
@@ -18,7 +36,7 @@
 
   <ItemGroup>
     <PackageReference Include="OpenTK" Version="4.9.4" />
-    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.12" />
+    <PackageReference Include="ReFuel.StbImage" Version="2.1.1" />
   </ItemGroup>
 
   <ItemGroup>

@@ -250,6 +250,7 @@ namespace MphRead
             (RoomEntity room, RoomMetadata meta, CollisionInstance collision, IReadOnlyList<EntityBase> entities)
                 = SceneSetup.LoadGame(name, this, playerCount, bossFlags, nodeLayerMask, entityLayerId);
             GameState.StorySave.SetVisitedRoom(RoomId);
+            GameState.StorySave.Areas |= (ushort)(1 << AreaId);
             if (GameState.Mode == GameMode.None)
             {
                 GameState.Mode = meta.Multiplayer ? GameMode.Battle : GameMode.SinglePlayer;
@@ -278,6 +279,9 @@ namespace MphRead
             if (GameState.Multiplayer)
             {
                 Menu.ApplyMultiplayerSettings();
+                // The same job for the launcher's path, which never runs the
+                // console menu and so never had a set of rules to apply.
+                Mods.GameSettings.ApplyMatchRules();
             }
             SetRoomValues(meta);
             for (int i = 0; i < PlayerEntity.Players.Count; i++)
@@ -1143,7 +1147,7 @@ namespace MphRead
             if (ProcessFrame)
             {
                 _globalElapsedTime += _frameTime;
-                if (GameState.MatchState == MatchState.InProgress && !GameState.DialogPause)
+                if (GameState.MatchState == MatchState.InProgress && !GameState.DialogPause && !GameState.MenuPause)
                 {
                     _elapsedTime += _frameTime;
                 }
@@ -1151,7 +1155,10 @@ namespace MphRead
                 {
                     PlayerEntity.Main.Controls.ClearAll();
                 }
-                PlayerEntity.ProcessInput(_keyboardState, _mouseState, _inputMode == InputMode.CameraOnly);
+                Mods.Network.NetSession.Update(_globalElapsedTime);
+                PlayerEntity.ProcessInput(_keyboardState, _mouseState,
+                    _inputMode == InputMode.CameraOnly || Mods.PauseMenu.Open);
+                Mods.Network.NetHooks.AfterInput(this);
                 _room?.UpdateTransition();
             }
             OnKeyHeld();
@@ -1172,11 +1179,15 @@ namespace MphRead
             if (ProcessFrame && _room != null)
             {
                 GameState.ProcessFrame(this);
-                if (GameState.MatchState == MatchState.InProgress)
+                if (GameState.MatchState == MatchState.InProgress && !GameState.MenuPause)
                 {
                     UpdateScene();
                 }
-                Sound.Sfx.Update(_frameTime);
+                Mods.Network.NetHooks.AfterSimulation();
+                if (!GameState.MenuPause)
+                {
+                    Sound.Sfx.Update(_frameTime);
+                }
                 Music.UpdateMusic();
             }
             if (ProcessFrame || CameraMode != CameraMode.Player)
@@ -1185,19 +1196,19 @@ namespace MphRead
                 UpdateCameraPosition();
             }
             UpdateProjection();
-            if (ProcessFrame && PlayerEntity.Main.LoadFlags.TestFlag(LoadFlags.Active) && !GameState.DialogPause)
+            if (ProcessFrame && PlayerEntity.Main.LoadFlags.TestFlag(LoadFlags.Active))
             {
                 PlayerEntity.Main.UpdateHud();
             }
             GetDrawItems();
             if (ProcessFrame)
             {
-                if (GameState.MatchState == MatchState.InProgress && !GameState.DialogPause)
+                if (GameState.MatchState == MatchState.InProgress && !GameState.DialogPause && !GameState.MenuPause)
                 {
                     ProcessMessageQueue();
                     _liveFrames++;
                 }
-                if (!GameState.DialogPause)
+                if (!GameState.DialogPause && !GameState.MenuPause)
                 {
                     _frameCount++;
                 }
@@ -1296,6 +1307,33 @@ namespace MphRead
             };
         }
 
+        /// <summary>
+        /// Read back the offscreen target the 3D passes render into.
+        ///
+        /// Not the window's back buffer: a window that is never shown has no
+        /// usable one under Mesa, which is why every headless capture came
+        /// out black on Linux while the same code worked on Windows. This
+        /// target is a texture the scene owns, so it holds the frame whether
+        /// or not anything is on screen. It carries the world but not the HUD,
+        /// which is drawn straight to the window afterwards.
+        /// </summary>
+        public byte[]? ReadSceneTarget(out int width, out int height)
+        {
+            width = Size.X;
+            height = Size.Y;
+            if (_frameBuffer == 0)
+            {
+                return null;
+            }
+            byte[] buffer = new byte[width * height * 3];
+            GL.BindFramebuffer(FramebufferTarget.ReadFramebuffer, _frameBuffer);
+            GL.ReadBuffer(ReadBufferMode.ColorAttachment0);
+            GL.PixelStore(PixelStoreParameter.PackAlignment, 1);
+            GL.ReadPixels(0, 0, width, height, PixelFormat.Rgb, PixelType.UnsignedByte, buffer);
+            GL.BindFramebuffer(FramebufferTarget.ReadFramebuffer, 0);
+            return buffer;
+        }
+
         public void AfterRenderFrame()
         {
             if (_recording)
@@ -1312,6 +1350,7 @@ namespace MphRead
             GL.ClearStencil(0);
 
             UpdateUniforms();
+            SetPauseMenuUniforms();
             if (_exiting)
             {
                 return false;
@@ -1400,6 +1439,7 @@ namespace MphRead
                 UnsetHudLayerUniforms();
             }
 
+            GL.Disable(EnableCap.CullFace);
             GL.UseProgram(_rttShaderProgramId);
             GL.Uniform1(_shaderLocations.LayerAlpha, 1f);
             GL.Uniform4(_shaderLocations.FadeColor, Vector4.Zero);
@@ -1447,10 +1487,13 @@ namespace MphRead
             {
                 GL.UseProgram(_rttShaderProgramId);
             }
-            GL.Disable(EnableCap.CullFace);
             GL.Uniform4(_shaderLocations.FadeColor, _fadeColor, _fadeColor, _fadeColor, 0);
             if (PlayerEntity.Main.LoadFlags.TestFlag(LoadFlags.Active) && CameraMode == CameraMode.Player)
             {
+                if (GameState.MenuPause)
+                {
+                    PlayerEntity.Main.DrawPauseMenuBackground();
+                }
                 DrawHudLayer(Layer4Info); // ice layer
                 DrawHudLayer(Layer3Info); // helmet back
                 DrawHudLayer(Layer1Info); // visor
@@ -1471,6 +1514,10 @@ namespace MphRead
                     GL.ActiveTexture(TextureUnit.Texture1);
                     GL.BindTexture(TextureTarget.Texture2D, 0);
                     GL.ActiveTexture(TextureUnit.Texture0);
+                }
+                if (GameState.MenuPause)
+                {
+                    PlayerEntity.Main.DrawPauseMenuForeground();
                 }
             }
             if (_movieFrameIndex != -1)
@@ -2724,6 +2771,11 @@ namespace MphRead
 
         private void GetDrawItems()
         {
+            if (GameState.MenuPause)
+            {
+                PlayerEntity.Main.GetPauseMapRenderItems();
+                return;
+            }
             if (_room != null)
             {
                 _room.GetDrawInfo();
@@ -3368,6 +3420,16 @@ namespace MphRead
             }
         }
 
+        private void SetPauseMenuUniforms()
+        {
+            if (GameState.MenuPause && _cameraMode == CameraMode.Player)
+            {
+                (Matrix4 viewMtx, Matrix4 orthoMtx) = PlayerEntity.Main.GetPauseMapMatrices();
+                GL.UniformMatrix4(_shaderLocations.ViewMatrix, transpose: false, ref viewMtx);
+                GL.UniformMatrix4(_shaderLocations.ProjectionMatrix, transpose: false, ref orthoMtx);
+            }
+        }
+
         public LayerInfo Layer1Info { get; } = new LayerInfo();
         public LayerInfo Layer2Info { get; } = new LayerInfo();
         public LayerInfo Layer3Info { get; } = new LayerInfo();
@@ -3803,6 +3865,10 @@ namespace MphRead
             {
                 if (e.Control && e.Shift)
                 {
+                    if (_recording)
+                    {
+                        Images.StopRecording();
+                    }
                     _recording = !_recording;
                     _framesRecorded = 0;
                 }
@@ -4943,7 +5009,10 @@ namespace MphRead
 
         protected override void OnRenderFrame(FrameEventArgs args)
         {
-            CursorState = Scene.CameraMode == CameraMode.Player && !Scene.FrameAdvance && !Scene.ShowCursor && !GameState.DialogPause
+            // The pause menu wants the pointer back.
+            CursorState = Scene.CameraMode == CameraMode.Player && !Scene.FrameAdvance
+                && !Mods.PauseMenu.Open
+                && !Scene.ShowCursor && !GameState.DialogPause && !GameState.MenuPause
                 ? CursorState.Grabbed
                 : CursorState.Normal;
             GameState.ApplyPause();
@@ -4957,7 +5026,11 @@ namespace MphRead
             {
                 IsVisible = true;
                 _startedHidden = false;
+                Mods.WindowMode.ApplyStartup(this);
             }
+            // What the pause menu asked for, done on the thread that owns the
+            // window: closing it and changing its border belong here.
+            Mods.PauseMenu.Poll(this);
             Scene.AfterRenderFrame();
             base.OnRenderFrame(args);
         }
@@ -5002,6 +5075,22 @@ namespace MphRead
 
         protected override void OnKeyDown(KeyboardKeyEventArgs e)
         {
+            // F11 and Alt+Enter switch window modes.
+            if (Mods.WindowMode.HandleKey(this, e))
+            {
+                base.OnKeyDown(e);
+                return;
+            }
+            // Escape opens the pause menu while a player is being driven --
+            // the mouse comes back, the window can be resized, and the
+            // settings are reachable without leaving the match. Everywhere
+            // else it still means "close this".
+            if (e.Key == Keys.Escape && Scene.CameraMode == CameraMode.Player
+                && Mods.PauseMenu.HandleEscape(this))
+            {
+                base.OnKeyDown(e);
+                return;
+            }
             if (e.Key == Keys.Escape)
             {
                 Scene.DoCleanup();

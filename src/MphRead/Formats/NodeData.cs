@@ -16,21 +16,23 @@ namespace MphRead.Formats
             {
                 if (!path.EndsWith(@"levels\nodeData\unit2_Land_Node.bin")) // todo: version 4
                 {
-                    ReadData(Paths.Combine(@"levels\nodeData", Path.GetFileName(path)));
+                    ReadData(Paths.Combine(@"levels\nodeData", Path.GetFileName(path)), firstHunt: false);
                 }
             }
             Nop();
         }
 
-        public static NodeData ReadData(string path)
+        public static NodeData ReadData(string path, bool firstHunt)
         {
-            var bytes = new ReadOnlySpan<byte>(File.ReadAllBytes(Paths.Combine(Paths.FileSystem, path)));
+            var bytes = new ReadOnlySpan<byte>(File.ReadAllBytes(Paths.Combine(firstHunt ? Paths.FhFileSystem : Paths.FileSystem, path)));
             ushort version = Read.SpanReadUshort(bytes, 0);
+            if (firstHunt)
+            {
+                Debug.Assert(version == 0);
+            }
             if (version == 0)
             {
-                // todo: this
-                ReadFhNodeData(bytes);
-                return null!;
+                return ReadFhNodeData(bytes);
             }
             // todo: version 4 (unit2_Land_Node.bin)
             if (version != 6)
@@ -89,14 +91,18 @@ namespace MphRead.Formats
             return nodeData;
         }
 
-        private static void ReadFhNodeData(ReadOnlySpan<byte> bytes)
+        private static NodeData ReadFhNodeData(ReadOnlySpan<byte> bytes)
         {
             ushort count = Read.SpanReadUshort(bytes, 2);
             IReadOnlyList<FhNodeData> headers = Read.DoOffsets<FhNodeData>(bytes, 4, (uint)count);
-            if (headers.Any(h => h.Field0 == 1))
+            // todo: parse the rest of the structure
+            return new NodeData(default, new List<ushort>() { 0 }, new List<IReadOnlyList<IReadOnlyList<NodeData3>>>()
             {
-                Debugger.Break();
-            }
+                new List<IReadOnlyList<NodeData3>>()
+                {
+                    headers.Select(h => new NodeData3(h.Position)).ToList()
+                }
+            });
         }
 
         public static NodeData3? FindClosestNode(NodeData nodeData, Vector3 position, bool useMaxDist = false)
@@ -197,6 +203,14 @@ namespace MphRead.Formats
             Transform = Matrix4.CreateTranslation(Position);
             Color = _nodeDataColors[raw.NodeType];
         }
+
+        public NodeData3(Vector3Fx position)
+        {
+            Position = position.ToFloatVector();
+            Values = new List<ushort>();
+            Transform = Matrix4.CreateTranslation(Position);
+            Color = _nodeDataColors[0];
+        }
     }
 
     // size: 14
@@ -245,10 +259,8 @@ namespace MphRead.Formats
     {
         public readonly ushort Field0;
         public readonly ushort Field2;
-        public readonly uint Field4;
-        public readonly uint Field8;
-        public readonly uint FieldC;
-        public readonly uint Field10;
-        public readonly uint Field14;
+        public readonly Vector3Fx Position;
+        public readonly uint Offset1;
+        public readonly uint Offset2;
     }
 }

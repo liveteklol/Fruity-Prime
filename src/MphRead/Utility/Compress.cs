@@ -347,14 +347,14 @@ namespace MphRead
              * u24 compressedLength; // can be less than file size (w/o header). If so, the rest of the file is uncompressed.
              *                       // may also be the file size
              * u8[headerSize-8] padding; // 0xFF-s
-             * 
+             *
              * 0x10-like-compressed data follows (without the usual 4-byte header).
              * The only difference is that 2 should be added to the DISP value in compressed blocks
              * to get the proper value.
              * the u32 and u24 are read most significant byte first.
              * if extraSize is 0, there is no headerSize, decompressedLength or padding.
              * the data starts immediately, and is uncompressed.
-             * 
+             *
              * arm9.bin has 3 extra u32 values at the 'start' (ie: end of the file),
              * which may be ignored. (and are ignored here) These 12 bytes also should not
              * be included in the computation of the output size.
@@ -374,7 +374,7 @@ namespace MphRead
             }
             catch (EndOfStreamException)
             {
-                // since we're immediately checking the end of the stream, 
+                // since we're immediately checking the end of the stream,
                 // this is the only location where we have to check for an EOS to occur.
                 throw new ProgramException("Stream too short");
             }

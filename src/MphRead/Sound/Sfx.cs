@@ -50,7 +50,7 @@ namespace MphRead.Sound
 
         public int PlayFreeSfx(SfxId id)
         {
-            return PlayFreeSfx((int)id);
+            return Sfx.Instance.PlayFreeSfx(id);
         }
 
         public void PlaySfx(int id, bool loop = false, bool noUpdate = false,
@@ -76,19 +76,7 @@ namespace MphRead.Sound
 
         public int PlayFreeSfx(int id)
         {
-            if (id >= 0)
-            {
-                Debug.Assert((id & 0x8000) == 0);
-                if ((id & 0x4000) != 0)
-                {
-                    Sfx.Instance.PlayScript(id, source: null, noUpdate: false, recency: -1,
-                        sourceOnly: false, cancellable: false);
-                    return -1;
-                }
-                return Sfx.Instance.PlaySample(id, source: null, loop: null, noUpdate: false,
-                    recency: -1, sourceOnly: false, cancellable: false);
-            }
-            return -1;
+            return Sfx.Instance.PlayFreeSfx(id);
         }
 
         public void PlayEnvironmentSfx(int id)
@@ -507,6 +495,28 @@ namespace MphRead.Sound
                 return -1;
             }
             return inst.Handle;
+        }
+
+        public override int PlayFreeSfx(SfxId id)
+        {
+            return PlayFreeSfx((int)id);
+        }
+
+        public override int PlayFreeSfx(int id)
+        {
+            if (id >= 0)
+            {
+                Debug.Assert((id & 0x8000) == 0);
+                if ((id & 0x4000) != 0)
+                {
+                    Sfx.Instance.PlayScript(id, source: null, noUpdate: false, recency: -1,
+                        sourceOnly: false, cancellable: false);
+                    return -1;
+                }
+                return Sfx.Instance.PlaySample(id, source: null, loop: null, noUpdate: false,
+                    recency: -1, sourceOnly: false, cancellable: false);
+            }
+            return -1;
         }
 
         private SoundInstance? PlaySampleGetInst(int id, SoundSource? source, bool? loop, bool noUpdate,
@@ -1561,6 +1571,16 @@ namespace MphRead.Sound
 
         public virtual int PlaySample(int id, SoundSource? source, bool? loop, bool noUpdate,
             float recency, bool sourceOnly, bool cancellable)
+        {
+            return -1;
+        }
+
+        public virtual int PlayFreeSfx(SfxId id)
+        {
+            return -1;
+        }
+
+        public virtual int PlayFreeSfx(int id)
         {
             return -1;
         }

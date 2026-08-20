@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Diagnostics;
 using MphRead.Hud;
 using MphRead.Text;
+using static System.Net.Mime.MediaTypeNames;
 
 namespace MphRead.Entities
 {
@@ -251,7 +253,7 @@ namespace MphRead.Entities
             _overlayTextOffsetY = lineCount * 5;
             _overlayTimer = duration / 30f;
             _dialogCharTimer = 9999;
-            _prevIntroChars = 9999;
+            _prevScrollingChars = 9999;
             _dialogPalette = 2;
             _messageBoxInst.SetPalette(_dialogPalette, _scene);
             _messageSpacerInst.SetPalette(_dialogPalette, _scene);
@@ -267,8 +269,7 @@ namespace MphRead.Entities
                 return;
             }
             StopLongSfx();
-            bool discard = false;
-            EndWeaponMenu(ref discard);
+            EndWeaponMenu();
             if (entry.Prefix == 'G') // gunship
             {
                 _soundSource.PlayFreeSfx(SfxId.GUNSHIP_TRANSMISSION);
@@ -306,8 +307,7 @@ namespace MphRead.Entities
         private void ShowDialogScan()
         {
             StopLongSfx();
-            bool discard = false;
-            EndWeaponMenu(ref discard);
+            EndWeaponMenu();
             GameState.PauseDialog();
             _dialogCharTimer = 0;
             _dialogPalette = 0;
@@ -325,8 +325,8 @@ namespace MphRead.Entities
                 return;
             }
             StopLongSfx();
-            bool discard = false;
-            EndWeaponMenu(ref discard);
+            EndWeaponMenu();
+            GameState.PausePrevented = true;
             GameState.PauseDialog();
             _eventType = eventType;
             _overlayMessage1 = entry.Value1;
@@ -495,6 +495,7 @@ namespace MphRead.Entities
                                 Music.FadeVolume(1, 5 / 30f);
                             }
                             RestartLongSfx();
+                            GameState.PausePrevented = false;
                         }
                         else if (GameState.DialogPause)
                         {
@@ -622,9 +623,11 @@ namespace MphRead.Entities
                         _overlayBuffer1, maxLength: characters);
                     _textInst.SetPaletteData(_textPaletteData, _scene);
                     _textSpacingY = 0;
+                    // todo?: the game tracks the blips by the draw position x/y, but even empty spaces advance that, so I think this is equivalent?
                     if (characters > _prevOverlayCharacters
                         && characters <= _overlayMessage1.Length)
                     {
+                        _soundSource.StopFreeSfx(SfxId.LETTER_BLIP);
                         _soundSource.PlayFreeSfx(SfxId.LETTER_BLIP);
                         _prevOverlayCharacters = characters;
                     }
@@ -721,32 +724,37 @@ namespace MphRead.Entities
                 }
                 if (_showDialogConfirm)
                 {
-                    float posX = 112;
-                    float posY = 174;
-                    if (DialogType == DialogType.YesNo)
-                    {
-                        _dialogButtonInst.PositionX = (posX - _dialogButtonInst.Width) / 256f;
-                        _dialogButtonInst.PositionY = posY / 192f;
-                        _scene.DrawHudObject(_dialogButtonInst);
-                        _dialogButtonInst.PositionX = (posX + _dialogButtonInst.Width) / 256f;
-                        _dialogButtonInst.PositionY = posY / 192f;
-                        _scene.DrawHudObject(_dialogButtonInst);
-                        text = Strings.GetHudMessage(105); // yes
-                        float textPosX = posX - _dialogButtonInst.Width / 2;
-                        DrawText2D(textPosX, posY + 5, Align.Center, palette: 0, text);
-                        text = Strings.GetHudMessage(106); // no
-                        textPosX = posX + _dialogButtonInst.Width * 1.5f + 1;
-                        DrawText2D(textPosX, posY + 5, Align.Center, palette: 0, text);
-                    }
-                    else
-                    {
-                        _dialogButtonInst.PositionX = posX / 256f;
-                        _dialogButtonInst.PositionY = posY / 192f;
-                        _scene.DrawHudObject(_dialogButtonInst);
-                        text = Strings.GetHudMessage(104); // ok
-                        DrawText2D(posX + _dialogButtonInst.Width / 2 + 1, posY + 5, Align.Center, palette: 0, text);
-                    }
+                    DrawDialogConfirmButtons(DialogType);
                 }
+            }
+        }
+
+        private void DrawDialogConfirmButtons(DialogType dialogType)
+        {
+            float posX = 112;
+            float posY = 174;
+            if (dialogType == DialogType.YesNo)
+            {
+                _dialogButtonInst.PositionX = (posX - _dialogButtonInst.Width) / 256f;
+                _dialogButtonInst.PositionY = posY / 192f;
+                _scene.DrawHudObject(_dialogButtonInst);
+                _dialogButtonInst.PositionX = (posX + _dialogButtonInst.Width) / 256f;
+                _dialogButtonInst.PositionY = posY / 192f;
+                _scene.DrawHudObject(_dialogButtonInst);
+                string text = Strings.GetHudMessage(105); // yes
+                float textPosX = posX - _dialogButtonInst.Width / 2;
+                DrawText2D(textPosX, posY + 5, Align.Center, palette: 0, text);
+                text = Strings.GetHudMessage(106); // no
+                textPosX = posX + _dialogButtonInst.Width * 1.5f + 1;
+                DrawText2D(textPosX, posY + 5, Align.Center, palette: 0, text);
+            }
+            else
+            {
+                _dialogButtonInst.PositionX = posX / 256f;
+                _dialogButtonInst.PositionY = posY / 192f;
+                _scene.DrawHudObject(_dialogButtonInst);
+                string text = Strings.GetHudMessage(104); // ok
+                DrawText2D(posX + _dialogButtonInst.Width / 2 + 1, posY + 5, Align.Center, palette: 0, text);
             }
         }
 
@@ -787,16 +795,18 @@ namespace MphRead.Entities
             Yes = 1,
             No = 2,
             Left = 3,
-            Right = 4
+            Right = 4,
+            Quit = 5
         }
 
-        private static readonly IReadOnlyList<ButtonInfo> _buttonInfo = new ButtonInfo[5]
-        {
+        private static readonly ImmutableArray<ButtonInfo> _buttonInfo =
+        [
             new ButtonInfo(left: 111, right: 145, top: 173, bottom: 191),
             new ButtonInfo(left: 79, right: 113, top: 173, bottom: 191),
             new ButtonInfo(left: 143, right: 177, top: 173, bottom: 191),
             new ButtonInfo(left: 55, right: 88, top: 172, bottom: 190),
-            new ButtonInfo(left: 168, right: 201, top: 172, bottom: 190)
-        };
+            new ButtonInfo(left: 168, right: 201, top: 172, bottom: 190),
+            new ButtonInfo(left: 3, right: 48, top: 157, bottom: 188)
+        ];
     }
 }

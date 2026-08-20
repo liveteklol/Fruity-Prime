@@ -87,8 +87,7 @@ namespace MphRead.Formats.Sound
     {
         public readonly uint DataSize;
         public readonly uint DataPointer; // always zero in the file
-        public readonly ushort SampleRate;
-        public readonly ushort FieldA; // probably padding
+        public readonly uint SampleRate;
         public readonly ushort Volume;
         public readonly byte FieldE; // padding padding
         public readonly byte Format;

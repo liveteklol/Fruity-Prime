@@ -9,6 +9,17 @@ namespace MphRead
         public static readonly ModelMetadata Ad2Dm2
             = new ModelMetadata("ad2_dm2", dir: MetaDir.Stage);
 
+        public static readonly ImmutableArray<string> NavMapModelNames =
+        [
+            "unit1_1nav",
+            "unit1_2nav",
+            "unit2_1nav",
+            "unit2_2nav",
+            "unit3_1nav",
+            "unit3_2nav",
+            "unit4_1nav"
+        ];
+
         public static readonly FrozenDictionary<string, ModelMetadata> HudModels
             = Frozen.Create<string, ModelMetadata>(
             [
