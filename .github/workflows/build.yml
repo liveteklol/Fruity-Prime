@@ -1,0 +1,74 @@
+# Build every target on every push, and refuse to publish anything that came
+# out of the cartridge.
+#
+# The guard runs twice on purpose: once over what git is tracking, and once
+# over what the build produced. The first catches a map preview committed by
+# accident, the second catches one that got swept into an artifact.
+name: build
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  assets:
+    name: no game assets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: nothing from the game is tracked
+        run: tools/check-no-game-assets.sh
+
+  build:
+    name: ${{ matrix.rid }}
+    needs: assets
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rid: win-x64
+            summary: the game and the launcher, for Windows
+          - rid: linux-x64
+            summary: the game and the dedicated server, for Linux
+          - rid: linux-arm64
+            summary: the dedicated server and the directory, for a Raspberry Pi
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      # The Windows build targets net9.0-windows for WinForms; the csproj sets
+      # EnableWindowsTargeting so that it can be produced from Linux like the
+      # rest, on one runner.
+      - name: publish ${{ matrix.summary }}
+        run: >
+          dotnet publish src/MphRead/MphRead.csproj
+          -c Release -r ${{ matrix.rid }}
+          --self-contained true -p:PublishSingleFile=true
+          -o publish/${{ matrix.rid }}
+
+      - name: nothing from the game is in the output
+        run: tools/check-no-game-assets.sh publish/${{ matrix.rid }}
+
+      # The Linux builds exist to be servers, so the build is not finished
+      # until one has been started. It needs no game files, no display and no
+      # sound device, which is what makes this runnable here -- and is also
+      # exactly the claim worth checking, since the server is reached through a
+      # code path that runs before the game-file check.
+      - name: the dedicated server runs
+        if: matrix.rid == 'linux-x64'
+        run: tools/check-dedicated-server.sh publish/${{ matrix.rid }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MphRead-${{ matrix.rid }}
+          path: publish/${{ matrix.rid }}
+          if-no-files-found: error

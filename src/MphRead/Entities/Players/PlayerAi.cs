@@ -37,8 +37,8 @@ namespace MphRead.Entities
             // todo: member name -- set by teleporter
             public int Field118 { get; set; }
 
-            private readonly int[] _slotHits = new int[4];
-            private readonly int[] _slotDamage = new int[4];
+            private readonly int[] _slotHits = new int[PlayerEntity.SlotCapacity];
+            private readonly int[] _slotDamage = new int[PlayerEntity.SlotCapacity];
 
             // todo: member names
             private NodeData3? _node3C = null;
@@ -178,11 +178,27 @@ namespace MphRead.Entities
             // todo: member names -- and is the first set even used?
             private static int _globalField0 = 0;
             private static int _globalField2 = 0;
-            private static readonly AiGlobals[] _globalObjs =
-            [
-                new AiGlobals(), new AiGlobals(), new AiGlobals(), new AiGlobals()
-            ];
-            private static readonly bool[,] _playerVisibility = new bool[4, 4];
+            // One per bot that has picked a destination, filled in order and
+            // searched by player. Four of them was the DS's player cap; with
+            // seven bots the fifth one to want an entry wrote past the end.
+            private static readonly AiGlobals[] _globalObjs = CreateGlobals();
+
+            private static AiGlobals[] CreateGlobals()
+            {
+                var objs = new AiGlobals[PlayerEntity.SlotCapacity];
+                for (int i = 0; i < objs.Length; i++)
+                {
+                    objs[i] = new AiGlobals();
+                }
+                return objs;
+            }
+            // One entry per pair of slots. Sized from SlotCapacity rather
+            // than from the four a DS match could hold: the bots index this
+            // by SlotIndex, so a fifth player made the first bot that looked
+            // at it throw -- which is every bot, on the frame it first tries
+            // to pick a target.
+            private static readonly bool[,] _playerVisibility =
+                new bool[PlayerEntity.SlotCapacity, PlayerEntity.SlotCapacity];
             private static byte _visIndex1 = 0;
             private static byte _visIndex2 = 0;
 
@@ -206,9 +222,9 @@ namespace MphRead.Entities
                     globals.NodeDataIndex = 0;
                     globals.NodeData = null!;
                 }
-                for (int i = 0; i < 4; i++)
+                for (int i = 0; i < PlayerEntity.SlotCapacity; i++)
                 {
-                    for (int j = 0; j < 4; j++)
+                    for (int j = 0; j < PlayerEntity.SlotCapacity; j++)
                     {
                         _playerVisibility[i, j] = false;
                     }
@@ -252,9 +268,14 @@ namespace MphRead.Entities
                         _playerVisibility[_visIndex2, _visIndex1] = true;
                     }
                 }
-                if (++_visIndex1 >= 4)
+                // The same walk over every unordered pair, over however many
+                // slots this match has. Players is always SlotCapacity long,
+                // so visiting a slot nobody is in is safe and is what the
+                // original did with fewer than four players anyway.
+                int slots = Math.Clamp(PlayerEntity.MaxPlayers, 2, PlayerEntity.SlotCapacity);
+                if (++_visIndex1 >= slots)
                 {
-                    if (++_visIndex2 >= 3)
+                    if (++_visIndex2 >= slots - 1)
                     {
                         _visIndex2 = 0;
                     }
@@ -10593,7 +10614,7 @@ namespace MphRead.Entities
                 // among any tied opponents, and randomly return one of that opponent's nodes.
                 // if no nodes are captured by opponents, randomly return a non-captured node.
                 NodeDefenseEntity? firstResult = null;
-                int[] captureList = new int[4];
+                int[] captureList = new int[PlayerEntity.SlotCapacity];
                 int maxCaptureCount = 0;
                 int maxCaptureSlotIndex = 0;
                 foreach (NodeDefenseEntity defense in _scene.GetNodeDefenseEntities())

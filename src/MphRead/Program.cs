@@ -16,11 +16,29 @@ namespace MphRead
         private static void Main(string[] args)
         {
             ConsoleSetup.Run();
+            // A console only if this run is going to use one: the Windows
+            // build is a GUI binary, so double-clicking it opens the launcher
+            // with no terminal behind it.
+            if (OperatingSystem.IsWindows())
+            {
+                Mods.ConsoleWindow.Prepare(args);
+            }
+            // Before CheckSetup: the dedicated server relays packets and never
+            // loads a room, so it must not require paths.txt or extracted game
+            // files on the machine it runs on.
+            if (Mods.ModEntry.TryHandleHeadless(args))
+            {
+                return;
+            }
             if (CheckSetup(args))
             {
                 return;
             }
             IReadOnlyList<Argument> arguments = ParseArguments(args);
+            if (Mods.ModEntry.TryHandle(args))
+            {
+                return;
+            }
             if (arguments.Count == 0)
             {
                 //using var renderer = new RenderWindow();

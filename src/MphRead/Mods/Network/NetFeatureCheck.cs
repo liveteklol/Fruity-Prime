@@ -1,0 +1,611 @@
+using System;
+using System.Collections.Generic;
+using System.Text;
+using MphRead.Entities;
+using OpenTK.Mathematics;
+
+namespace MphRead.Mods.Network
+{
+    /// <summary>
+    /// Watches a networked match feature by feature and says which parts of a
+    /// player actually reach the other machines.
+    ///
+    /// The point of separating this from the movement check is that "they
+    /// moved" was passing while beams, morphing and bombs were not crossing at
+    /// all. A single verdict hides that; one per feature cannot.
+    ///
+    /// Every feature is recorded twice: what this client's own player did, and
+    /// what it saw the other player do. That is what makes a failure
+    /// attributable. "I never saw them fire" means nothing on its own -- if
+    /// they never fired either, the script is at fault and not the network,
+    /// and the report says so instead of blaming the wire.
+    /// </summary>
+    public sealed class NetFeatureCheck
+    {
+        private sealed class Record
+        {
+            public int SpawnedFrames;
+            public int MovedFrames;
+            public double Travelled;
+            public float MinY = Single.MaxValue;
+            public float MaxY = Single.MinValue;
+            public double FacingDegrees;
+            public int BeamFrames;
+            public int BombFrames;
+            public int HalfturretFrames;
+            public int AltFormFrames;
+            public int AltFormInMorphPhase;
+            public int BipedInUnmorphPhase;
+            public int WeaponChanges;
+            /// <summary>
+            /// Rising edges on the alt attack button. Comparable between the
+            /// player who pressed it and everyone who received the press,
+            /// which is what separates "the press never arrived" from "it
+            /// arrived and did nothing".
+            /// </summary>
+            public int AltAttackPresses;
+            public int DamageEvents;
+            public int DamageInAltForm;
+            public int Deaths;
+            public int ZoomFrames;
+            public int DoubleDamageFrames;
+            public Vector3 LastPosition;
+            /// <summary>Last frame's position, for snap detection, which is a
+            /// per-frame question rather than a per-sample one.</summary>
+            public Vector3 LastFramePosition;
+            public bool HaveFramePrevious;
+            public Vector3 LastFacing;
+            public bool HavePrevious;
+            public int LastHealth = -1;
+            public BeamType LastWeapon = BeamType.None;
+            public bool WasAlive;
+            public Hunter Hunter;
+            public int FormDisagreeFrames;
+            public int FormDisagreeRun;
+            public int WorstFormDisagreeRun;
+            public string WorstFormContext = "";
+            public double WorstPositionGap;
+            public double WorstStep;
+            public int Teleports;
+            public int FramesSinceRespawn;
+        }
+
+        /// <summary>
+        /// Ground a player can cover in one frame at full speed, with room to
+        /// spare. Roughly 0.35 units per frame walking, more when boosting.
+        /// </summary>
+        private const float TeleportStep = 9f;
+
+        private readonly Record[] _records = new Record[PlayerEntity.MaxPlayers];
+        private int _itemSamples;
+        private long _itemTotal;
+        private int _itemsNow;
+        private int _itemsPickedUp;
+        private int _lastItemCount = -1;
+        private readonly Dictionary<TestPhase, int> _phaseFrames = new();
+        private int _localSlot;
+
+        public NetFeatureCheck()
+        {
+            for (int i = 0; i < _records.Length; i++)
+            {
+                _records[i] = new Record();
+            }
+        }
+
+        public void Reset()
+        {
+            for (int i = 0; i < _records.Length; i++)
+            {
+                _records[i] = new Record();
+            }
+        }
+
+        public void Observe(Scene scene)
+        {
+            _localSlot = Math.Max(NetSession.LocalSlot, 0);
+            // Path metrics -- distance walked, degrees turned -- are sampled
+            // where the two sides can be compared: the local player at the
+            // instants it publishes an intent, every remote player every
+            // frame, because a remote's position and aim only change when one
+            // of those packets lands. Both sides then measure the same
+            // polyline and a shortfall means a packet went missing.
+            //
+            // Measuring the local player every frame instead compares a 60 Hz
+            // path against its 30 Hz reconstruction. With one opponent the
+            // aim moves slowly and the two agree; with seven it slews between
+            // targets several times a second, the reconstruction cuts every
+            // corner, and the observer reads about a third -- which is what
+            // "an observer sees half of a player's turn under load" was.
+            bool localSamplePath = NetSession.NetFrame % NetConfig.IntentSendInterval == 0;
+            TestPhase phase = NetTestScript.Phase;
+            _phaseFrames[phase] = _phaseFrames.GetValueOrDefault(phase) + 1;
+
+            // One sweep of the entity list per frame rather than one per
+            // player: beams and bombs are the only evidence that somebody
+            // else's weapon fired on this machine, and they are owned rather
+            // than indexed.
+            Span<int> beams = stackalloc int[PlayerEntity.MaxPlayers];
+            Span<int> bombs = stackalloc int[PlayerEntity.MaxPlayers];
+            Span<int> turrets = stackalloc int[PlayerEntity.MaxPlayers];
+            foreach (EntityBase entity in scene.Entities)
+            {
+                if (entity.Type == EntityType.BeamProjectile)
+                {
+                    Count(beams, (entity as BeamProjectileEntity)?.Owner);
+                }
+                else if (entity.Type == EntityType.Bomb)
+                {
+                    Count(bombs, (entity as BombEntity)?.Owner);
+                }
+                else if (entity.Type == EntityType.Halfturret)
+                {
+                    Count(turrets, (entity as HalfturretEntity)?.Owner);
+                }
+            }
+
+            // Items are spawned and taken by each client's own simulation.
+            // Nothing replicates them, so two clients holding different
+            // numbers of them is a real difference in the world -- and one
+            // that only shows up by counting.
+            _itemsNow = 0;
+            foreach (ItemInstanceEntity item in scene.GetItemInstanceEntities())
+            {
+                _itemsNow++;
+            }
+            if (_lastItemCount > _itemsNow)
+            {
+                _itemsPickedUp += _lastItemCount - _itemsNow;
+            }
+            _lastItemCount = _itemsNow;
+            _itemSamples++;
+            _itemTotal += _itemsNow;
+
+            for (int slot = 0; slot < PlayerEntity.MaxPlayers; slot++)
+            {
+                if (slot >= PlayerEntity.Players.Count)
+                {
+                    continue;
+                }
+                PlayerEntity player = PlayerEntity.Players[slot];
+                if (!player.LoadFlags.TestFlag(LoadFlags.Active))
+                {
+                    continue;
+                }
+                Record record = _records[slot];
+                record.Hunter = player.Hunter;
+                if (beams[slot] > 0)
+                {
+                    record.BeamFrames++;
+                }
+                if (bombs[slot] > 0)
+                {
+                    record.BombFrames++;
+                }
+                if (player.Controls.AltAttack.IsPressed)
+                {
+                    record.AltAttackPresses++;
+                }
+                if (turrets[slot] > 0)
+                {
+                    record.HalfturretFrames++;
+                }
+                if (!player.LoadFlags.TestFlag(LoadFlags.Spawned))
+                {
+                    continue;
+                }
+                record.SpawnedFrames++;
+                if (player.IsAltForm)
+                {
+                    record.AltFormFrames++;
+                    if (phase == TestPhase.MorphA || phase == TestPhase.AltAttackA
+                        || phase == TestPhase.MorphB || phase == TestPhase.AltAttackB)
+                    {
+                        record.AltFormInMorphPhase++;
+                    }
+                }
+                else if (phase == TestPhase.Zoom || phase == TestPhase.Duel)
+                {
+                    // Sampled after the unmorph phase has had time to run: a
+                    // player still in alt form here never came back out.
+                    record.BipedInUnmorphPhase++;
+                }
+                if (player.EquipInfo.Zoomed)
+                {
+                    record.ZoomFrames++;
+                }
+                if (player.DoubleDamage)
+                {
+                    record.DoubleDamageFrames++;
+                }
+                if (player.CurrentWeapon != record.LastWeapon)
+                {
+                    if (record.LastWeapon != BeamType.None)
+                    {
+                        record.WeaponChanges++;
+                    }
+                    record.LastWeapon = player.CurrentWeapon;
+                }
+                if (record.LastHealth > 0 && player.Health > 0 && player.Health < record.LastHealth)
+                {
+                    record.DamageEvents++;
+                    if (player.IsAltForm)
+                    {
+                        // The specific claim: a morphed player is still a
+                        // target. An alt form that cannot be hit is not a
+                        // smaller hitbox, it is an invulnerable one.
+                        record.DamageInAltForm++;
+                    }
+                }
+                if (record.WasAlive && player.Health == 0)
+                {
+                    record.Deaths++;
+                }
+                record.FramesSinceRespawn = player.Health > record.LastHealth || player.Health == 0
+                    ? 0
+                    : record.FramesSinceRespawn + 1;
+                record.LastHealth = player.Health;
+                record.WasAlive = player.Health > 0;
+                record.MinY = MathF.Min(record.MinY, player.Position.Y);
+                record.MaxY = MathF.Max(record.MaxY, player.Position.Y);
+                // Snaps are a per-frame question -- did this player's position
+                // jump between one frame and the next -- so they are measured
+                // every frame for every slot, unlike the path lengths below.
+                // Measuring them on the sampled cadence counted two frames of
+                // ordinary movement as one large step.
+                if (record.HaveFramePrevious)
+                {
+                    float frameStep = (player.Position - record.LastFramePosition).Length;
+                    if (frameStep > 0.01f)
+                    {
+                        record.MovedFrames++;
+                    }
+                    // A single frame can only carry a player so far. Anything
+                    // beyond that is the position being corrected rather than
+                    // walked -- which is what a teleport is, seen from
+                    // outside.
+                    // A respawn moves a player across the level legitimately,
+                    // and health and position arrive from different places, so
+                    // they can be a few frames out of step. Only count jumps
+                    // well clear of one.
+                    if (frameStep > TeleportStep && record.FramesSinceRespawn > 60)
+                    {
+                        record.Teleports++;
+                        record.WorstStep = Math.Max(record.WorstStep, frameStep);
+                    }
+                }
+                record.LastFramePosition = player.Position;
+                record.HaveFramePrevious = true;
+
+                bool samplePath = slot != _localSlot || localSamplePath;
+                if (samplePath && record.HavePrevious)
+                {
+                    float step = (player.Position - record.LastPosition).Length;
+                    if (step < 5)
+                    {
+                        record.Travelled += step;
+                    }
+                    // Accumulated degrees rather than frames that changed: a
+                    // biped turns its body in steps, so counting frames made a
+                    // player spinning on the spot look almost still.
+                    float dot = Math.Clamp(Vector3.Dot(player.ModGunVector, record.LastFacing), -1f, 1f);
+                    record.FacingDegrees += MathHelper.RadiansToDegrees(MathF.Acos(dot));
+                }
+                if (samplePath)
+                {
+                    record.LastPosition = player.Position;
+                    record.LastFacing = player.ModGunVector;
+                    record.HavePrevious = true;
+                }
+
+                if (slot == _localSlot || !NetSession.RemoteStateValid[slot])
+                {
+                    continue;
+                }
+                // What the authority last said about this player against what
+                // this client is drawing. The totals cannot separate "never
+                // arrived" from "arrived and was overridden"; this can.
+                PlayerState state = NetSession.RemoteStates[slot];
+                bool wantAlt = (state.Flags & PlayerState.FlagAltForm) != 0;
+                // Only while the player is actually on screen. A dead one is
+                // hidden (Spawn sets HideModel, death clears it again), so its
+                // form is not a thing anybody can see disagree -- and it keeps
+                // whatever form it died in until the respawn resets it.
+                bool visible = player.Health > 0
+                    && (state.Flags & PlayerState.FlagSpawned) != 0;
+                if (visible && wantAlt != player.IsAltForm)
+                {
+                    record.FormDisagreeFrames++;
+                    record.FormDisagreeRun++;
+                    if (record.FormDisagreeRun > record.WorstFormDisagreeRun)
+                    {
+                        record.WorstFormDisagreeRun = record.FormDisagreeRun;
+                        // Captured at the moment it is worst, because the
+                        // interesting question is what the puppet was doing
+                        // while it refused to change form.
+                        record.WorstFormContext = $"phase {phase}, authority wanted "
+                            + $"{(wantAlt ? "alt" : "biped")}, puppet {player.ModFormState()}, "
+                            + $"hp {player.Health}";
+                    }
+                }
+                else
+                {
+                    // The total counts every frame of every transition, which
+                    // a morph animation legitimately spends disagreeing. The
+                    // longest single run is what separates "the animation is
+                    // playing" from "this puppet is stuck in the wrong form".
+                    record.FormDisagreeRun = 0;
+                }
+                if (!visible)
+                {
+                    continue;
+                }
+                if ((state.Flags & PlayerState.FlagSpawned) != 0)
+                {
+                    double gap = (state.Position - player.Position).Length;
+                    record.WorstPositionGap = Math.Max(record.WorstPositionGap, gap);
+                }
+            }
+        }
+
+        private void Count(Span<int> counts, EntityBase? owner)
+        {
+            if (owner is PlayerEntity player && player.SlotIndex >= 0
+                && player.SlotIndex < counts.Length)
+            {
+                counts[player.SlotIndex]++;
+            }
+            else if (owner is HalfturretEntity turret && turret.Owner.SlotIndex >= 0
+                && turret.Owner.SlotIndex < counts.Length)
+            {
+                counts[turret.Owner.SlotIndex]++;
+            }
+        }
+
+        /// <summary>
+        /// One line per feature: what this client's own player did, what it
+        /// saw the other do, and a verdict. A feature nobody performed is
+        /// reported as untested rather than as a failure -- blaming the
+        /// network for a script that never pressed the button is exactly the
+        /// kind of wrong answer this harness exists to avoid.
+        /// </summary>
+        public bool Report(out int failures)
+        {
+            failures = 0;
+            Record mine = _records[_localSlot];
+            string me = GameState.Nicknames[_localSlot];
+            Console.WriteLine();
+            Console.WriteLine("  feature coverage (mine = what my player did, "
+                + "theirs = what I saw of them)");
+            int fails = 0;
+            bool anyRemote = false;
+
+            // A machine-readable copy of every number, because the strict
+            // check is not one this client can make: "I never saw them switch
+            // weapons" is a failure only if they switched, and only their own
+            // client knows that. compare-reports.py pairs these up.
+            void Emit(string kind, string subject, string feature, double value)
+            {
+                Console.WriteLine($"  netcheck {me} {kind} {subject} {feature} {value:0.##}");
+            }
+
+            foreach ((string feature, Func<Record, double> get) in _features)
+            {
+                Emit("mine", me, feature, get(mine));
+            }
+
+            for (int slot = 0; slot < _records.Length; slot++)
+            {
+                if (slot == _localSlot || _records[slot].SpawnedFrames == 0)
+                {
+                    continue;
+                }
+                anyRemote = true;
+                Record other = _records[slot];
+                string them = GameState.Nicknames[slot];
+                Console.WriteLine($"    --- as I saw {them} (slot {slot}, {other.Hunter}) ---");
+                foreach ((string feature, Func<Record, double> get) in _features)
+                {
+                    Emit("saw", them, feature, get(other));
+                }
+                fails += ReportOne(mine, other, them);
+            }
+            if (!anyRemote)
+            {
+                Console.WriteLine("    no other player was ever spawned in this scene -- nothing to compare");
+                failures = 1;
+                return false;
+            }
+            var invulnerable = new List<string>();
+            for (int slot = 0; slot < PlayerEntity.SlotCapacity && slot < PlayerEntity.Players.Count; slot++)
+            {
+                PlayerEntity player = PlayerEntity.Players[slot];
+                if (_records[slot].SpawnedFrames > 0 && player.LoadFlags.TestFlag(LoadFlags.Spawned)
+                    && !player.ModCanBeHurt())
+                {
+                    invulnerable.Add($"{GameState.Nicknames[slot]} (slot {slot})");
+                }
+            }
+            if (invulnerable.Count > 0)
+            {
+                Console.WriteLine("    FAIL: no beam can hurt these players at all: "
+                    + String.Join(", ", invulnerable));
+                fails++;
+            }
+            var untouched = new List<string>();
+            for (int slot = 0; slot < _records.Length; slot++)
+            {
+                // A player nobody could hurt for a whole match is not a good
+                // player, it is a player the damage path never reached.
+                if (_records[slot].SpawnedFrames > 600 && _records[slot].DamageEvents == 0)
+                {
+                    untouched.Add($"{GameState.Nicknames[slot]} (slot {slot})");
+                }
+            }
+            if (untouched.Count > 0)
+            {
+                Console.WriteLine("    FAIL: never took a single hit: " + String.Join(", ", untouched));
+                fails++;
+            }
+            if (_localSlot < PlayerEntity.Players.Count)
+            {
+                (int rows, float height) = PlayerEntity.Players[_localSlot].ModScoreboardSize();
+                bool fits = height <= 192;
+                Console.WriteLine($"    scoreboard: {rows} row(s), {height:0} px tall "
+                    + (fits ? "(fits)" : "(OVERFLOWS the screen)"));
+                if (!fits)
+                {
+                    fails++;
+                }
+            }
+            Console.WriteLine($"    items: {_itemsNow} on the map now, "
+                + $"{(_itemSamples > 0 ? _itemTotal / (double)_itemSamples : 0):0.0} on average, "
+                + $"{_itemsPickedUp} taken or expired");
+            var board = new StringBuilder("    scoreboard as I see it:");
+            for (int slot = 0; slot < PlayerEntity.MaxPlayers; slot++)
+            {
+                if (_records[slot].SpawnedFrames == 0)
+                {
+                    continue;
+                }
+                board.Append($" [{slot}] {GameState.Nicknames[slot]} "
+                    + $"{GameState.Kills[slot]}k/{GameState.Deaths[slot]}d/{GameState.Points[slot]}p");
+            }
+            Console.WriteLine(board.ToString());
+            var phases = new StringBuilder("    phases seen:");
+            foreach (KeyValuePair<TestPhase, int> pair in _phaseFrames)
+            {
+                phases.Append($" {pair.Key}={pair.Value}");
+            }
+            Console.WriteLine(phases.ToString());
+            var pipeline = new StringBuilder("    damage pipeline (resolved here / replayed here):");
+            for (int slot = 0; slot < PlayerEntity.SlotCapacity; slot++)
+            {
+                if (_records[slot].SpawnedFrames == 0)
+                {
+                    continue;
+                }
+                pipeline.Append($" [{slot}] {NetDamage.Resolved[slot]}/{NetDamage.Replayed[slot]}");
+            }
+            Console.WriteLine(pipeline.ToString());
+            Console.WriteLine($"    remote position snaps: {NetPlayerBridge.Snaps} "
+                + $"(worst {NetPlayerBridge.WorstSnap:0.0} units) -- these are the visible teleports");
+            if (NetPlayerBridge.RejectedUpdates > 0)
+            {
+                // Never silently: a rejected update means somebody produced a
+                // position or an aim that was not a number, and the numbers
+                // above are measurements of a match that was already sick.
+                Console.WriteLine($"    FAIL: {NetPlayerBridge.RejectedUpdates} "
+                    + "update(s) rejected for holding impossible values");
+                fails++;
+            }
+            failures = fails;
+            return fails == 0;
+        }
+
+        private static readonly (string Name, Func<Record, double> Get)[] _features =
+        {
+            ("spawn", r => r.SpawnedFrames),
+            ("movement", r => r.Travelled),
+            ("jump", Height),
+            ("facing", r => r.FacingDegrees),
+            ("shooting", r => r.BeamFrames),
+            ("weapon-switch", r => r.WeaponChanges),
+            ("alt-attack", r => r.AltAttackPresses),
+            ("alt-form", r => r.AltFormInMorphPhase),
+            // Phase-free as well: the phase-scoped count depends on both
+            // clients agreeing where a phase boundary falls, and a difference
+            // there looks exactly like a replication failure.
+            ("alt-form-total", r => r.AltFormFrames),
+            ("unmorph", r => r.BipedInUnmorphPhase),
+            ("bombs", r => r.BombFrames),
+            ("halfturret", r => r.HalfturretFrames),
+            ("zoom", r => r.ZoomFrames),
+            ("double-damage", r => r.DoubleDamageFrames),
+            ("damage-taken", r => r.DamageEvents),
+            ("hit-in-alt-form", r => r.DamageInAltForm),
+            ("deaths", r => r.Deaths),
+            ("teleports", r => r.Teleports)
+        };
+
+        /// <summary>
+        /// The checks one client can make on its own: that what it can see
+        /// happening is not obviously broken. Anything needing the other
+        /// side's account of itself is left to the cross-report comparison.
+        /// </summary>
+        private int ReportOne(Record mine, Record other, string them)
+        {
+            var report = new StringBuilder();
+            int fails = 0;
+
+            void Line(string feature, double self, double seen, double needed, string unit,
+                bool applicable = true, bool pairwise = false)
+            {
+                bool tested = applicable && (pairwise ? self + seen >= needed : self >= needed);
+                bool ok = seen >= needed;
+                string verdict = !applicable ? "n/a" : !tested ? "untested"
+                    : pairwise ? "ok" : ok ? "ok" : "FAIL";
+                if (tested && !pairwise && !ok)
+                {
+                    fails++;
+                }
+                report.AppendLine($"    {feature,-16} mine {self,7:0} {unit,-6} "
+                    + $"theirs {seen,7:0} {unit,-6} {verdict}");
+            }
+
+            Line("spawn", mine.SpawnedFrames, other.SpawnedFrames, 30, "frames");
+            Line("movement", mine.Travelled, other.Travelled, 5, "units");
+            Line("jump", Height(mine), Height(other), 1.5, "units");
+            Line("facing", mine.FacingDegrees, other.FacingDegrees, 180, "deg");
+            Line("shooting", mine.BeamFrames, other.BeamFrames, 10, "frames");
+            Line("weapon switch", mine.WeaponChanges, other.WeaponChanges, 2, "changes",
+                pairwise: true);
+            Line("alt attack", mine.AltAttackPresses, other.AltAttackPresses, 3, "presses",
+                pairwise: true);
+            Line("alt form", mine.AltFormInMorphPhase, other.AltFormInMorphPhase, 30, "frames");
+            Line("unmorph", mine.BipedInUnmorphPhase, other.BipedInUnmorphPhase, 30, "frames");
+            // Hunters differ: only three lay bombs and only Weavel leaves a
+            // halfturret. Judging one against another's abilities reported the
+            // network as broken for a bomb that was never laid.
+            Line("bombs", mine.BombFrames, other.BombFrames, 5, "frames",
+                applicable: LaysBombs(other.Hunter));
+            Line("halfturret", mine.HalfturretFrames, other.HalfturretFrames, 5, "frames",
+                applicable: other.Hunter == Hunter.Weavel);
+            Line("zoom", mine.ZoomFrames, other.ZoomFrames, 10, "frames");
+            Line("double damage", mine.DoubleDamageFrames, other.DoubleDamageFrames, 10, "frames");
+            Line("taking damage", mine.DamageEvents, other.DamageEvents, 1, "hits");
+            Line("hit in alt form", mine.DamageInAltForm, other.DamageInAltForm, 2, "hits",
+                pairwise: true);
+            Line("deaths", mine.Deaths, other.Deaths, 1, "deaths", pairwise: true);
+            Console.Write(report.ToString());
+            Console.WriteLine($"    {them}: {other.Teleports} teleport(s), worst jump "
+                + $"{other.WorstStep:0.0} units");
+            Console.WriteLine($"    {them}: form disagreed on {other.FormDisagreeFrames} frame(s) "
+                + $"(longest run {other.WorstFormDisagreeRun}), "
+                + $"worst position gap {other.WorstPositionGap:0.00} units");
+            if (other.WorstFormDisagreeRun > 60)
+            {
+                Console.WriteLine("    FAIL: their form stayed wrong for "
+                    + $"{other.WorstFormDisagreeRun} frames in a row "
+                    + $"-- {other.WorstFormContext}");
+                fails++;
+            }
+            if (other.WorstPositionGap > 8 || !Double.IsFinite(other.WorstPositionGap))
+            {
+                Console.WriteLine("    FAIL: their position drifted far from the authority's");
+                fails++;
+            }
+            return fails;
+        }
+
+        private static bool LaysBombs(Hunter hunter)
+        {
+            return hunter == Hunter.Samus || hunter == Hunter.Kanden || hunter == Hunter.Sylux;
+        }
+
+        private static double Height(Record record)
+        {
+            return record.MaxY > record.MinY ? record.MaxY - record.MinY : 0;
+        }
+    }
+}

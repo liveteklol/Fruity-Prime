@@ -1151,6 +1151,10 @@ namespace MphRead.Entities
 
         public void DrawHudObjects()
         {
+            if (Mods.ThumbnailMode.Active)
+            {
+                return;
+            }
             if (GameState.MenuPause)
             {
                 return;
@@ -1233,6 +1237,10 @@ namespace MphRead.Entities
 
         public void DrawHudModels()
         {
+            if (Mods.ThumbnailMode.Active)
+            {
+                return;
+            }
             if (CameraSequence.Current?.IsIntro == true)
             {
                 _scene.DrawHudFilterModel(_filterModel, alpha: 15 / 31f);
@@ -1421,9 +1429,40 @@ namespace MphRead.Entities
         private const float _scoreTeamHeaderSpace = 4;
         private const float _scoreTeamLineSpace = 18;
         private const float _scorePlayerSpace = 28;
+        /// <summary>Tightest a row can get before the hunter icons collide.</summary>
+        private const float _scoreMinPlayerSpace = 19;
+
+        /// <summary>
+        /// Vertical space per scoreboard row.
+        ///
+        /// The stock 28 fits the four players a DS match could hold. With
+        /// more, the list runs off both ends of a 192-pixel screen -- the
+        /// first rows above it and the last below -- so it tightens up to
+        /// whatever fits instead. A row still has to hold a hunter icon, so
+        /// it stops tightening at that.
+        /// </summary>
+        private float GetScoreboardRowSpace()
+        {
+            int rows = GameState.ActivePlayers;
+            if (rows <= 4)
+            {
+                return _scorePlayerSpace;
+            }
+            float available = 168 - _scoreStartSpace;
+            if (GameState.MatchState == MatchState.Ending)
+            {
+                available -= _scoreStartSpace;
+            }
+            if (GameState.Teams)
+            {
+                available -= 2 * _scoreTeamLineSpace;
+            }
+            return Math.Clamp(available / rows, _scoreMinPlayerSpace, _scorePlayerSpace);
+        }
 
         private float GetScoreboardHeight()
         {
+            float rowSpace = GetScoreboardRowSpace();
             float height = _scoreStartSpace;
             if (GameState.MatchState == MatchState.Ending)
             {
@@ -1446,7 +1485,7 @@ namespace MphRead.Entities
                     height += _scoreTeamLineSpace;
                     curTeam = player.TeamIndex;
                 }
-                height += _scorePlayerSpace;
+                height += rowSpace;
             }
             return height;
         }
@@ -1459,6 +1498,7 @@ namespace MphRead.Entities
         private void DrawScoreboard()
         {
             GameMode mode = GameState.Mode;
+            float rowSpace = GetScoreboardRowSpace();
             float posY = 104 - GetScoreboardHeight() / 2;
             if (GameState.MatchState == MatchState.Ending)
             {
@@ -1490,8 +1530,9 @@ namespace MphRead.Entities
             {
                 header2 = Strings.GetHudMessage(220); // kills
             }
-            DrawText2D(160, posY, Align.Center, 0, header1, new ColorRgba(0x3FEF), fontSpacing: 8);
-            DrawText2D(215, posY, Align.Center, 0, header2, new ColorRgba(0x3FEF), fontSpacing: 8);
+            DrawText2D(ModScoreColumn1, posY, Align.Center, 0, header1, new ColorRgba(0x3FEF), fontSpacing: 8);
+            DrawText2D(ModScoreColumn2, posY, Align.Center, 0, header2, new ColorRgba(0x3FEF), fontSpacing: 8);
+            ModDrawPingHeader(posY);
             posY += _scoreStartSpace;
             string maxText = Strings.GetHudMessage(256); // MAX
 
@@ -1540,8 +1581,8 @@ namespace MphRead.Entities
                     var teamColor = new ColorRgba(player.Team == Team.Orange ? 0x23Fu : 0x2BEAu);
                     string teamName = $"{teamText} {player.TeamIndex + 1}";
                     DrawText2D(42, posY, Align.Center, 0, teamName, teamColor, fontSpacing: 8);
-                    DrawText2D(160, posY, Align.Center, 0, teamValue1, teamColor, fontSpacing: 8);
-                    DrawText2D(215, posY, Align.Center, 0, teamValue2, teamColor, fontSpacing: 8);
+                    DrawText2D(ModScoreColumn1, posY, Align.Center, 0, teamValue1, teamColor, fontSpacing: 8);
+                    DrawText2D(ModScoreColumn2, posY, Align.Center, 0, teamValue2, teamColor, fontSpacing: 8);
                     posY += _scoreTeamLineSpace;
                 }
                 string value1 = ChooseValue1(GameState.Time[slot], GameState.Points[slot]);
@@ -1562,9 +1603,10 @@ namespace MphRead.Entities
                     color = new ColorRgba((byte)(rg * 255), (byte)(rg * 255), 255, 255);
                 }
                 DrawScoreboardPlayer(60, posY, color, _hunterInsts[(int)player.Hunter], slot);
-                DrawText2D(160, posY, Align.Center, 0, value1, color, fontSpacing: 8);
-                DrawText2D(215, posY, Align.Center, 0, value2, color, fontSpacing: 8);
-                posY += _scorePlayerSpace;
+                DrawText2D(ModScoreColumn1, posY, Align.Center, 0, value1, color, fontSpacing: 8);
+                DrawText2D(ModScoreColumn2, posY, Align.Center, 0, value2, color, fontSpacing: 8);
+                ModDrawPingRow(posY, color, slot);
+                posY += rowSpace;
             }
         }
 

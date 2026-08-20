@@ -19,6 +19,23 @@ namespace MphRead
     public static class Music
     {
         public static float UserVolume { get; set; } = 1;
+
+        /// <summary>
+        /// Set the player's own volume and push it to whatever is playing.
+        ///
+        /// Assigning UserVolume alone is not enough: the gain only reaches the
+        /// stream when a track starts (MusicPlayer.Play) or while a fade is
+        /// running, so a volume changed mid-match took effect at the next
+        /// track and looked like a setting that did nothing.
+        /// </summary>
+        public static void SetUserVolume(float volume)
+        {
+            UserVolume = Math.Clamp(volume, 0, 1);
+            if (MusicPlayer.State != PlaybackState.Stopped)
+            {
+                MusicPlayer.Volume = Volume;
+            }
+        }
         public static float MusicVolume { get; set; } = 1;
 
         public static float Volume => UserVolume * MusicVolume;
@@ -77,6 +94,10 @@ namespace MphRead
             for (int i = 0; i < _trackFaders.Length; i++)
             {
                 _trackFaders[i].Reset();
+            }
+            if (!MusicPlayer.Available)
+            {
+                return;
             }
             // play empty seq to ensure initialization
             MusicPlayer.Load(SeqId.WIN);
@@ -727,6 +748,16 @@ namespace MphRead
 
         private const int _sampleRate = 32728;
 
+        /// <summary>
+        /// False when no playback device could be opened. The game then runs
+        /// in silence instead of not running: a machine with no sound card,
+        /// an audio server that is not up yet, or a second copy of the game
+        /// holding the device would otherwise take the whole process down
+        /// with a TypeInitializationException from a static constructor,
+        /// before a single frame was drawn.
+        /// </summary>
+        public static bool Available { get; private set; }
+
         static MusicPlayer()
         {
             _format = new AudioFormat()
@@ -735,8 +766,19 @@ namespace MphRead
                 Channels = 2,
                 Format = SampleFormat.F32
             };
-            _audioEngine = new MiniAudioEngine();
-            _playbackDevice = _audioEngine.InitializePlaybackDevice(deviceInfo: null, _format);
+            try
+            {
+                _audioEngine = new MiniAudioEngine();
+                _playbackDevice = _audioEngine.InitializePlaybackDevice(deviceInfo: null, _format);
+                Available = true;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[sound] no audio device ({ex.Message}); continuing without sound");
+                _audioEngine = null!;
+                _playbackDevice = null!;
+                Available = false;
+            }
         }
 
         public static bool Loading { get; private set; }
@@ -744,6 +786,10 @@ namespace MphRead
 
         public static void Load(SeqId seqId, ushort tracks = UInt16.MaxValue, float volume = 1)
         {
+            if (!Available)
+            {
+                return;
+            }
             Loading = true;
             Stop();
             if (seqId == SeqId.None)
@@ -821,6 +867,10 @@ namespace MphRead
 
         public static void Play(float volume)
         {
+            if (!Available)
+            {
+                return;
+            }
             Volume = volume;
             _player?.Play();
         }
@@ -887,6 +937,10 @@ namespace MphRead
 
         public static void Stop()
         {
+            if (!Available)
+            {
+                return;
+            }
             if (_player != null)
             {
                 _player.Stop();

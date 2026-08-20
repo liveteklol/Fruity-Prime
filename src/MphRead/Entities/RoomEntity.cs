@@ -423,13 +423,24 @@ namespace MphRead.Entities
             {
                 PlayerEntity.Reset();
                 PlayerEntity.Construct(_scene);
-                player = PlayerEntity.Create(hunter, recolor);
-                Debug.Assert(player != null);
-                // todo: revisit flags
-                player.LoadFlags |= LoadFlags.SlotActive;
-                player.LoadFlags |= LoadFlags.Active;
-                player.LoadFlags |= LoadFlags.Initial;
-                PlayerEntity.PlayerCount++;
+                if (Mods.Network.NetRoomChange.Rebuilding)
+                {
+                    // A networked match needs every slot rebuilt, not just
+                    // this machine's: Scene.AddPlayer is inert once a room has
+                    // loaded, so a slot missing here could never be filled for
+                    // the rest of the map.
+                    player = Mods.Network.NetRoomChange.RebuildPlayers(_scene, hunter, recolor);
+                }
+                else
+                {
+                    player = PlayerEntity.Create(hunter, recolor);
+                    Debug.Assert(player != null);
+                    // todo: revisit flags
+                    player.LoadFlags |= LoadFlags.SlotActive;
+                    player.LoadFlags |= LoadFlags.Active;
+                    player.LoadFlags |= LoadFlags.Initial;
+                    PlayerEntity.PlayerCount++;
+                }
             }
             ProcessTransition(CancellationToken.None);
             EndTransition();
@@ -445,6 +456,10 @@ namespace MphRead.Entities
             {
                 _scene.InitEntity(player);
                 _scene.InitEntity(player.Halfturret);
+                if (Mods.Network.NetRoomChange.Rebuilding)
+                {
+                    Mods.Network.NetRoomChange.AfterRebuild(_scene);
+                }
             }
         }
 
@@ -543,13 +558,22 @@ namespace MphRead.Entities
             {
                 Rng.SetRng2(Rng.Rng2StartValue);
             }
-            (_, IReadOnlyList<EntityBase> entities) = SceneSetup.SetUpRoom(GameState.Mode, playerCount: 0,
+            (_, IReadOnlyList<EntityBase> entities) = SceneSetup.SetUpRoom(GameState.Mode,
+                Mods.Network.NetRoomChange.RoomPlayerCount,
                 BossFlags.Unspecified, nodeLayerMask: 0, entityLayer, roomMeta, room: this, _scene, isRoomTransition: true);
             if (token.IsCancellationRequested)
             {
                 return;
             }
-            SceneSetup.InitHunterSpawns(_scene, entities, initialize: true); // see: "probably revisit this"
+            if (GameState.SinglePlayer)
+            {
+                // Guarded the way the same call is at first load (SceneSetup.LoadGame).
+                // It is adventure mode's hunter-encounter setup: it clears Active
+                // and SlotActive on slots 1-3 and resets PlayersCreated to 1, which
+                // in a multiplayer room transition silently emptied every other
+                // player out of the scene for the rest of the map.
+                SceneSetup.InitHunterSpawns(_scene, entities, initialize: true); // see: "probably revisit this"
+            }
             if (token.IsCancellationRequested)
             {
                 return;

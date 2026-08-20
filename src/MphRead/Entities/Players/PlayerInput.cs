@@ -477,10 +477,15 @@ namespace MphRead.Entities
                     }
                     Biped2Flags |= AnimFlags.NoLoop;
                 }
+                ApplyModAim();
                 if (Controls.MouseAim && !Flags1.TestFlag(PlayerFlags1.NoAimInput) && !IsBot)
                 {
-                    float aimY = -Input.MouseDeltaY / 4f; // itodo: x and y sensitivity
-                    float aimX = -Input.MouseDeltaX / 4f;
+                    // The 1/4 was the whole of the sensitivity setting; it is
+                    // now the point where one lives (1.0 = this exact feel).
+                    float aimY = -Input.MouseDeltaY / 4f * Mods.InputSettings.MouseSensitivity
+                        * (Mods.InputSettings.InvertMouseY ? -1 : 1);
+                    float aimX = -Input.MouseDeltaX / 4f * Mods.InputSettings.MouseSensitivity
+                        * (Mods.InputSettings.InvertMouseX ? -1 : 1);
                     if (CameraSequence.Current?.Flags.TestFlag(CamSeqFlags.BlockInput) == true
                         || _scene.FrameAdvance || _scene.FrameAdvanceLastFrame) // skdebug
                     {
@@ -1226,8 +1231,10 @@ namespace MphRead.Entities
                     // Trace, Sylux, Weavel
                     if (Controls.MouseAim && !Flags1.TestFlag(PlayerFlags1.NoAimInput) && !IsBot)
                     {
-                        float aimY = -Input.MouseDeltaY / 4f; // itodo: x and y sensitivity
-                        float aimX = -Input.MouseDeltaX / 4f;
+                        float aimY = -Input.MouseDeltaY / 4f * Mods.InputSettings.MouseSensitivity
+                            * (Mods.InputSettings.InvertMouseY ? -1 : 1);
+                        float aimX = -Input.MouseDeltaX / 4f * Mods.InputSettings.MouseSensitivity
+                            * (Mods.InputSettings.InvertMouseX ? -1 : 1);
                         if (CameraSequence.Current?.Flags.TestFlag(CamSeqFlags.BlockInput) == true
                             || _scene.FrameAdvance || _scene.FrameAdvanceLastFrame) // skdebug
                         {
@@ -2094,7 +2101,11 @@ namespace MphRead.Entities
                     }
                     continue;
                 }
-                if (noPlayerInput || i != 0) // todo: multiple input?
+                if (Mods.Network.NetHooks.TryApplyRemoteInput(player, i))
+                {
+                    continue;
+                }
+                if (noPlayerInput || i != Mods.Network.NetHooks.LocalSlot) // todo: multiple input?
                 {
                     continue;
                 }
@@ -2428,6 +2439,15 @@ namespace MphRead.Entities
         }
 
         public static PlayerControls GetDefault()
+        {
+            PlayerControls controls = CreateDefault();
+            // Whatever the player has bound, applied to every set of controls
+            // the game creates. Mods.InputSettings holds the canonical one.
+            Mods.InputSettings.Apply(controls);
+            return controls;
+        }
+
+        private static PlayerControls CreateDefault()
         {
             return new PlayerControls(
                 moveLeft: new Keybind(Keys.A),

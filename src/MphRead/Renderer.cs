@@ -279,6 +279,9 @@ namespace MphRead
             if (GameState.Multiplayer)
             {
                 Menu.ApplyMultiplayerSettings();
+                // The same job for the launcher's path, which never runs the
+                // console menu and so never had a set of rules to apply.
+                Mods.GameSettings.ApplyMatchRules();
             }
             SetRoomValues(meta);
             for (int i = 0; i < PlayerEntity.Players.Count; i++)
@@ -1152,7 +1155,10 @@ namespace MphRead
                 {
                     PlayerEntity.Main.Controls.ClearAll();
                 }
-                PlayerEntity.ProcessInput(_keyboardState, _mouseState, _inputMode == InputMode.CameraOnly);
+                Mods.Network.NetSession.Update(_globalElapsedTime);
+                PlayerEntity.ProcessInput(_keyboardState, _mouseState,
+                    _inputMode == InputMode.CameraOnly || Mods.PauseMenu.Open);
+                Mods.Network.NetHooks.AfterInput(this);
                 _room?.UpdateTransition();
             }
             OnKeyHeld();
@@ -1177,6 +1183,7 @@ namespace MphRead
                 {
                     UpdateScene();
                 }
+                Mods.Network.NetHooks.AfterSimulation();
                 if (!GameState.MenuPause)
                 {
                     Sound.Sfx.Update(_frameTime);
@@ -1298,6 +1305,33 @@ namespace MphRead
                 ZIndex1 = zIndex1,
                 ZIndex2 = zIndex2
             };
+        }
+
+        /// <summary>
+        /// Read back the offscreen target the 3D passes render into.
+        ///
+        /// Not the window's back buffer: a window that is never shown has no
+        /// usable one under Mesa, which is why every headless capture came
+        /// out black on Linux while the same code worked on Windows. This
+        /// target is a texture the scene owns, so it holds the frame whether
+        /// or not anything is on screen. It carries the world but not the HUD,
+        /// which is drawn straight to the window afterwards.
+        /// </summary>
+        public byte[]? ReadSceneTarget(out int width, out int height)
+        {
+            width = Size.X;
+            height = Size.Y;
+            if (_frameBuffer == 0)
+            {
+                return null;
+            }
+            byte[] buffer = new byte[width * height * 3];
+            GL.BindFramebuffer(FramebufferTarget.ReadFramebuffer, _frameBuffer);
+            GL.ReadBuffer(ReadBufferMode.ColorAttachment0);
+            GL.PixelStore(PixelStoreParameter.PackAlignment, 1);
+            GL.ReadPixels(0, 0, width, height, PixelFormat.Rgb, PixelType.UnsignedByte, buffer);
+            GL.BindFramebuffer(FramebufferTarget.ReadFramebuffer, 0);
+            return buffer;
         }
 
         public void AfterRenderFrame()
@@ -4975,7 +5009,9 @@ namespace MphRead
 
         protected override void OnRenderFrame(FrameEventArgs args)
         {
+            // The pause menu wants the pointer back.
             CursorState = Scene.CameraMode == CameraMode.Player && !Scene.FrameAdvance
+                && !Mods.PauseMenu.Open
                 && !Scene.ShowCursor && !GameState.DialogPause && !GameState.MenuPause
                 ? CursorState.Grabbed
                 : CursorState.Normal;
@@ -4990,7 +5026,11 @@ namespace MphRead
             {
                 IsVisible = true;
                 _startedHidden = false;
+                Mods.WindowMode.ApplyStartup(this);
             }
+            // What the pause menu asked for, done on the thread that owns the
+            // window: closing it and changing its border belong here.
+            Mods.PauseMenu.Poll(this);
             Scene.AfterRenderFrame();
             base.OnRenderFrame(args);
         }
@@ -5035,6 +5075,22 @@ namespace MphRead
 
         protected override void OnKeyDown(KeyboardKeyEventArgs e)
         {
+            // F11 and Alt+Enter switch window modes.
+            if (Mods.WindowMode.HandleKey(this, e))
+            {
+                base.OnKeyDown(e);
+                return;
+            }
+            // Escape opens the pause menu while a player is being driven --
+            // the mouse comes back, the window can be resized, and the
+            // settings are reachable without leaving the match. Everywhere
+            // else it still means "close this".
+            if (e.Key == Keys.Escape && Scene.CameraMode == CameraMode.Player
+                && Mods.PauseMenu.HandleEscape(this))
+            {
+                base.OnKeyDown(e);
+                return;
+            }
             if (e.Key == Keys.Escape)
             {
                 Scene.DoCleanup();

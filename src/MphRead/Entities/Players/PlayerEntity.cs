@@ -203,10 +203,31 @@ namespace MphRead.Entities
         // todo: these settings can change
         public static int MainPlayerIndex { get; set; } = 0;
         public static int PlayerCount { get; set; } = 0;
+        /// <summary>
+        /// How many slots exist at all. Every per-slot array in the game is
+        /// this long, so raising it is what makes a match of more than four
+        /// possible; MaxPlayers is the limit actually in force, which a
+        /// networked session raises to whatever the server allows.
+        ///
+        /// A constant rather than a setting because the arrays are built
+        /// during static initialisation, long before anything could configure
+        /// it. Unused slots cost an entry each and are inert.
+        /// </summary>
+        /// <summary>
+        /// The most players any session can hold.
+        ///
+        /// Separate from MaxPlayers, which is how many this particular match
+        /// allows: every array indexed by slot is sized from this, so the
+        /// limit can be raised without each of them having to agree about it
+        /// separately. Four is what the DS supported; nothing in the
+        /// simulation needed that number, only the arrays did.
+        /// </summary>
+        public const int SlotCapacity = 8;
+
         public static int MaxPlayers { get; set; } = 4;
         public static int PlayersCreated { get; set; } = 0;
         public static PlayerEntity Main => Players[MainPlayerIndex];
-        public static readonly PlayerEntity[] _players = new PlayerEntity[4];
+        public static readonly PlayerEntity[] _players = new PlayerEntity[SlotCapacity];
         public static IReadOnlyList<PlayerEntity> Players => _players;
         public bool IsMainPlayer => this == Main && _scene.CameraMode == CameraMode.Player;
         private int _altScanId = 0;
@@ -263,9 +284,9 @@ namespace MphRead.Entities
         public bool IsPrimeHunter => SlotIndex == GameState.PrimeHunter;
 
         private const int _mbTrailSegments = 9 * 2;
-        private static readonly Matrix4[,] _mbTrailMatrices = new Matrix4[MaxPlayers, _mbTrailSegments];
-        private static readonly float[,] _mbTrailAlphas = new float[MaxPlayers, _mbTrailSegments];
-        private static readonly int[] _mbTrailIndices = new int[MaxPlayers];
+        private static readonly Matrix4[,] _mbTrailMatrices = new Matrix4[SlotCapacity, _mbTrailSegments];
+        private static readonly float[,] _mbTrailAlphas = new float[SlotCapacity, _mbTrailSegments];
+        private static readonly int[] _mbTrailIndices = new int[SlotCapacity];
         private Matrix4 _modelTransform = Matrix4.Identity;
 
         // todo: visualize
@@ -1624,6 +1645,10 @@ namespace MphRead.Entities
 
         public void TakeDamage(uint damage, DamageFlags flags, Vector3? direction, EntityBase? source)
         {
+            if (Mods.Network.NetDamage.Suppress(this))
+            {
+                return;
+            }
             if (_health == 0)
             {
                 return;
@@ -1778,6 +1803,7 @@ namespace MphRead.Entities
             }
             // todo?: something for wifi
             // else...
+            Mods.Network.NetDamage.Note(this, attacker, beam?.Beam ?? BeamType.None, flags, direction);
             bool dead = false;
             if (IsBot && GameState.SinglePlayer && AiData.Flags1 && _health <= AiData.HealthThreshold)
             {
@@ -1808,6 +1834,13 @@ namespace MphRead.Entities
                 if (beam != null)
                 {
                     beamType = beam.Beam;
+                }
+                else if (Mods.Network.NetDamage.ReplayBeam != BeamType.None)
+                {
+                    // Replaying a kill the authority resolved: the beam entity
+                    // only ever existed on its machine, so the weapon for the
+                    // banner comes over the wire instead of being guessed.
+                    beamType = Mods.Network.NetDamage.ReplayBeam;
                 }
                 if (source == attacker || fromHalfturret || bomb != null)
                 {

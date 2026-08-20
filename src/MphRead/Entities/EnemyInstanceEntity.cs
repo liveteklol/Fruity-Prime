@@ -35,7 +35,7 @@ namespace MphRead.Entities
         protected byte _state2 = 0;
         // some enemies needs to update this in between _state1 being set to _state2 and the subroutine being called
         protected byte _subId = 0;
-        public bool[] HitPlayers { get; } = new bool[4];
+        public bool[] HitPlayers { get; } = new bool[PlayerEntity.SlotCapacity];
         protected Vector3 _prevPos = Vector3.Zero;
         protected Vector3 _speed = Vector3.Zero;
         protected float _boundingRadius = 0;
