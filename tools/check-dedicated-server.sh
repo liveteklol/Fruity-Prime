@@ -23,16 +23,18 @@
 set -uo pipefail
 
 DIR="${1:-publish/linux-x64}"
-# MphReadServer first: on Windows the dedicated server is its own console
-# binary, and a publish directory may hold both.
+# The server binary first: on Windows the dedicated server is its own
+# console binary, and a publish directory may hold both. The old MphRead
+# names are still accepted so this can check a build from before the rename.
 BIN=""
-for candidate in MphReadServer.exe MphReadServer MphRead.exe MphRead; do
+for candidate in FruityPrimeServer.exe FruityPrimeServer FruityPrime.exe FruityPrime \
+                 MphReadServer.exe MphReadServer MphRead.exe MphRead; do
   if [ -x "$DIR/$candidate" ]; then
     BIN="$DIR/$candidate"
     break
   fi
 done
-[ -n "$BIN" ] || BIN="dotnet $DIR/MphRead.dll"
+[ -n "$BIN" ] || BIN="dotnet $DIR/FruityPrime.dll"
 
 PYTHON="python3"
 command -v "$PYTHON" >/dev/null 2>&1 || PYTHON="python"

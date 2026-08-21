@@ -631,7 +631,7 @@ namespace MphRead
                         while (input != ConsoleKey.Y && input != ConsoleKey.N && input != ConsoleKey.Escape)
                         {
                             Console.Clear();
-                            Console.WriteLine($"MphRead Version {Program.Version}");
+                            Console.WriteLine($"{Mods.Branding.Name} {Program.Version}");
                             Console.WriteLine();
                             Console.WriteLine($"Save game to slot {SaveSlot}? (y/n)");
                             input = Console.ReadKey().Key;
@@ -688,7 +688,7 @@ namespace MphRead
                     string languageString = Paths.MphKey == Ver.AMHK0 ? "Korean" : _language.ToString();
                     string movieString = _movieId == -1 ? "none" : Metadata.MovieDisplayInfo[_movieId];
                     Console.Clear();
-                    Console.WriteLine($"MphRead Version {Program.Version}");
+                    Console.WriteLine($"{Mods.Branding.Name} {Program.Version}");
                     Console.WriteLine();
                     Console.WriteLine("Choose an option using up/down or with the key indicated.");
                     Console.WriteLine("Press Space to specify, Backspace to clear, or left/right to advance the option.");
@@ -726,7 +726,7 @@ namespace MphRead
                             || keyInfo.Key == ConsoleKey.Spacebar && selection == s)
                         {
                             Console.Clear();
-                            Console.WriteLine($"MphRead Version {Program.Version}");
+                            Console.WriteLine($"{Mods.Branding.Name} {Program.Version}");
                             Console.WriteLine();
                             Console.WriteLine("Loading...");
                             CommitSettings();
@@ -1477,7 +1477,7 @@ namespace MphRead
                 }
                 string weaponsString = _affinityWeapons ? "Affinity Weapons" : "Default Weapons";
                 Console.Clear();
-                Console.WriteLine($"MphRead Version {Program.Version}");
+                Console.WriteLine($"{Mods.Branding.Name} {Program.Version}");
                 Console.WriteLine();
                 Console.WriteLine("Choose a setting using up/down or with the key indicated.");
                 Console.WriteLine("Press Space to specify, Backspace to clear, or left/right to advance the setting.");
@@ -1776,7 +1776,7 @@ namespace MphRead
             {
                 int s = 0;
                 Console.Clear();
-                Console.WriteLine($"MphRead Version {Program.Version}");
+                Console.WriteLine($"{Mods.Branding.Name} {Program.Version}");
                 Console.WriteLine();
                 Console.WriteLine("Choose a setting using up/down or with the key indicated.");
                 Console.WriteLine("Press Space to specify, Backspace to clear, or left/right to advance the setting.");
@@ -2730,7 +2730,7 @@ namespace MphRead
             {
                 int s = 0;
                 Console.Clear();
-                Console.WriteLine($"MphRead Version {Program.Version}");
+                Console.WriteLine($"{Mods.Branding.Name} {Program.Version}");
                 Console.WriteLine();
                 Console.WriteLine("Choose a setting using up/down or with the key indicated.");
                 Console.WriteLine("Press Space to specify, Backspace to clear, or left/right to advance the setting.");
@@ -3212,7 +3212,7 @@ namespace MphRead
                 }
 
                 Console.Clear();
-                Console.WriteLine($"MphRead Version {Program.Version}");
+                Console.WriteLine($"{Mods.Branding.Name} {Program.Version}");
                 Console.WriteLine();
                 if (category == -1)
                 {
@@ -3494,7 +3494,7 @@ namespace MphRead
                     $" Arcterra:{Octolith(6)}{Octolith(7)}";
                 int s = 0;
                 Console.Clear();
-                Console.WriteLine($"MphRead Version {Program.Version}");
+                Console.WriteLine($"{Mods.Branding.Name} {Program.Version}");
                 Console.WriteLine();
                 Console.WriteLine("Choose a setting using up/down or with the key indicated.");
                 Console.WriteLine("Press Space to specify, Backspace to clear, or left/right to advance the setting.");

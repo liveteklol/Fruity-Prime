@@ -82,7 +82,7 @@ namespace MphRead.Mods.Launcher
                     Console.WriteLine($"The game could not start: {ex.Message}");
                     Console.WriteLine(ex.StackTrace);
                     MessageBox.Show($"The game could not start:\n\n{ex.Message}",
-                        "MphRead", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        Mods.Branding.Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
                     return;
                 }
                 finally

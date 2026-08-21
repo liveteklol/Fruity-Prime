@@ -21,6 +21,12 @@ DEPLOY_MASTER="${MPH_DEPLOY_MASTER:-1}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT="$ROOT/src/MphRead"
 STAGE="$ROOT/publish/server-arm64"
+# The project used to be MphRead and the Pi has been running a binary of that
+# name under systemd since before the rename. Both names appear below: the new
+# one is what gets installed, the old one is what has to be cleaned up and what
+# the existing units still point at until they are rewritten.
+BINARY="FruityPrime"
+OLD_BINARY="MphRead"
 
 # sshpass is only used when a password is supplied; a key-based setup skips it.
 ssh_run() {
@@ -41,21 +47,29 @@ scp_put() {
 
 echo "==> building linux-arm64"
 # -p:MphReadServer=true: this box runs the server and the directory and nobody
-# plays on it, so the launcher and the UI toolkit behind it are left out. The
-# binary is still called MphRead -- the units below have been pointing at that
-# name since before the server package existed, and renaming it here would put
-# a second binary beside the one systemd starts.
+# plays on it, so the launcher and the UI toolkit behind it are left out.
 dotnet publish "$PROJECT" -c Release -r linux-arm64 -p:MphReadServer=true \
   --self-contained true -p:PublishSingleFile=true -o "$STAGE" \
   | grep -E "error|-> " || true
-test -f "$STAGE/MphRead" || { echo "build produced no binary" >&2; exit 1; }
+test -f "$STAGE/$BINARY" || { echo "build produced no $BINARY" >&2; exit 1; }
 
 # Install a unit the first time, and leave a hand-edited one alone after that:
 # an operator who changed the server name or the port on the box should not
 # have it overwritten by a deploy.
+#
+# The rename is the one exception. A unit that still starts the old binary
+# would keep starting it after this deploy -- the file would still be there,
+# one release behind, refusing every client at Hello -- so a unit whose
+# ExecStart names the old binary is rewritten in place. Only that line: an
+# edited port or server name is preserved by patching rather than replacing.
 install_unit() {
   local name="$1" template="$ROOT/tools/systemd/$1.service"
   if ssh_run "test -f /etc/systemd/system/$name.service"; then
+    if ssh_run "grep -q '$REMOTE_DIR/$OLD_BINARY ' /etc/systemd/system/$name.service"; then
+      echo "==> $name.service still starts $OLD_BINARY; pointing it at $BINARY"
+      ssh_run "sudo sed -i 's|$REMOTE_DIR/$OLD_BINARY |$REMOTE_DIR/$BINARY |' \
+        /etc/systemd/system/$name.service && sudo systemctl daemon-reload"
+    fi
     return 0
   fi
   echo "==> installing $name.service"
@@ -72,12 +86,21 @@ if [ "$DEPLOY_MASTER" = "1" ]; then
 fi
 
 echo "==> uploading"
-scp_put "$STAGE/MphRead" "$REMOTE_DIR/MphRead.new"
-ssh_run "chmod +x $REMOTE_DIR/MphRead.new && mv $REMOTE_DIR/MphRead.new $REMOTE_DIR/MphRead"
+scp_put "$STAGE/$BINARY" "$REMOTE_DIR/$BINARY.new"
+ssh_run "chmod +x $REMOTE_DIR/$BINARY.new && mv $REMOTE_DIR/$BINARY.new $REMOTE_DIR/$BINARY"
 
+# The units have to be pointing at the new binary before the old one is taken
+# away, or a deploy that stops half way leaves a box with neither.
 install_unit "$SERVICE"
 if [ "$DEPLOY_MASTER" = "1" ]; then
   install_unit "$MASTER_SERVICE"
+fi
+
+if [ "$BINARY" != "$OLD_BINARY" ]; then
+  if ssh_run "test -f $REMOTE_DIR/$OLD_BINARY"; then
+    echo "==> removing the old $OLD_BINARY binary"
+    ssh_run "rm -f $REMOTE_DIR/$OLD_BINARY"
+  fi
 fi
 
 echo "==> starting $SERVICE"

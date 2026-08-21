@@ -36,13 +36,23 @@ jobs:
 
       - name: name this release
         id: name
-        run: echo "tag=${GITHUB_REF_NAME:-${{ github.event.inputs.tag }}}" >> "$GITHUB_OUTPUT"
-
-      - name: publish every target
         run: |
           set -euo pipefail
+          TAG="${GITHUB_REF_NAME:-${{ github.event.inputs.tag }}}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          # The bare number, for -p:Version. The updater compares this against
+          # the tag on GitHub, so a build that is not stamped here is one that
+          # can never know it is out of date.
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: publish every target
+        env:
+          VERSION: ${{ steps.name.outputs.version }}
+        run: |
+          set -euo pipefail
+          stamp="-p:Version=$VERSION -p:InformationalVersion=$VERSION"
           for rid in win-x64 linux-x64; do
-            dotnet publish src/MphRead/MphRead.csproj -c Release -r "$rid" \
+            dotnet publish src/MphRead/MphRead.csproj -c Release -r "$rid" $stamp \
               --self-contained true -p:PublishSingleFile=true -o "publish/$rid"
           done
           # The two server packages. Same project, launcher left out, no UI
@@ -54,10 +64,10 @@ jobs:
           # because the Pi's systemd unit has been pointing at it since before
           # any of this and a rename would leave a second binary next to it.
           dotnet publish src/MphRead/MphRead.csproj -c Release -r win-x64 \
-            -p:MphReadServer=true --self-contained true \
+            -p:MphReadServer=true $stamp --self-contained true \
             -p:PublishSingleFile=true -o publish/win-x64-server
           dotnet publish src/MphRead/MphRead.csproj -c Release -r linux-arm64 \
-            -p:MphReadServer=true --self-contained true \
+            -p:MphReadServer=true $stamp --self-contained true \
             -p:PublishSingleFile=true -o publish/linux-arm64
 
       - name: nothing from the game is in the output
@@ -71,8 +81,8 @@ jobs:
       - name: each Windows binary is what it claims to be
         run: |
           set -euo pipefail
-          tools/check-subsystem.sh gui publish/win-x64/MphRead.exe
-          tools/check-subsystem.sh console publish/win-x64-server/MphReadServer.exe
+          tools/check-subsystem.sh gui publish/win-x64/FruityPrime.exe
+          tools/check-subsystem.sh console publish/win-x64-server/FruityPrimeServer.exe
 
       # Nothing gets tagged as a release until a server out of it has actually
       # started, registered with a directory and answered a query. This runner
@@ -89,9 +99,9 @@ jobs:
           mkdir -p dist
           cp LICENSE publish/win-x64/ 2>/dev/null || true
           cat > publish/win-x64/README.txt <<'NOTE'
-          MphRead -- Metroid Prime Hunters, on a PC, with multiplayer.
+          Fruity Prime -- Metroid Prime Hunters, on a PC, with multiplayer.
 
-          Double-click MphRead.exe. The first thing it asks for is your own
+          Double-click FruityPrime.exe. The first thing it asks for is your own
           Metroid Prime Hunters cartridge dump (.nds); it unpacks what it needs
           next to this program and leaves the file alone. No game data is
           included in this download, and none is downloaded.
@@ -104,17 +114,17 @@ jobs:
           download the server package instead -- it is a separate, smaller
           download that needs no game files at all.
           NOTE
-          ( cd publish/win-x64 && zip -qr "../../dist/MphRead-$TAG-win-x64.zip" . )
+          ( cd publish/win-x64 && zip -qr "../../dist/FruityPrime-$TAG-win-x64.zip" . )
 
           cp LICENSE publish/linux-x64/ 2>/dev/null || true
           cat > publish/linux-x64/README.txt <<'NOTE'
-          MphRead -- Metroid Prime Hunters, on a PC, with multiplayer.
+          Fruity Prime -- Metroid Prime Hunters, on a PC, with multiplayer.
 
           Set up with your own Metroid Prime Hunters cartridge dump (.nds).
           It is unpacked next to this program and the file is left alone. No
           game data is included in this download, and none is downloaded.
 
-            ./MphRead -launcher
+            ./FruityPrime -launcher
 
           opens the front screen: play online, play offline against bots, host
           a game, settings, and the game-files setup.
@@ -125,11 +135,11 @@ jobs:
 
           Everything it does also has a command of its own:
 
-            ./MphRead <path to rom.nds>     set up the game files
-            ./MphRead -servers              list the servers that are up
-            ./MphRead -connect HOST         join one
-            ./MphRead -hostgame "ROOM"      have a server run a match for you
-            ./MphRead -menu                 volumes, controls, match rules
+            ./FruityPrime <path to rom.nds>     set up the game files
+            ./FruityPrime -servers              list the servers that are up
+            ./FruityPrime -connect HOST         join one
+            ./FruityPrime -hostgame "ROOM"      have a server run a match for you
+            ./FruityPrime -menu                 volumes, controls, match rules
 
           This build can also run a dedicated server, with -server; it needs no
           game files to do it. The ARM64 server package is the same thing for a
@@ -137,11 +147,11 @@ jobs:
 
           F11 or Alt+Enter switches to fullscreen, Escape opens the pause menu.
           NOTE
-          ( cd publish/linux-x64 && tar czf "../../dist/MphRead-$TAG-linux-x64.tar.gz" . )
+          ( cd publish/linux-x64 && tar czf "../../dist/FruityPrime-$TAG-linux-x64.tar.gz" . )
           cat > publish/linux-arm64/SERVER.txt <<'NOTE'
-          MphRead dedicated server.
+          Fruity Prime dedicated server.
 
-            ./MphRead -server -port 27888 -players 8 -servername "My server"
+            ./FruityPrime -server -port 27888 -players 8 -servername "My server"
 
           It needs no game files. Maps come from maprotation.txt, written
           beside the binary on first run.
@@ -152,23 +162,23 @@ jobs:
 
           To run a directory of your own:
 
-            ./MphRead -masterserver -port 27889
+            ./FruityPrime -masterserver -port 27889
           NOTE
-          ( cd publish/linux-arm64 && tar czf "../../dist/MphRead-$TAG-server-linux-arm64.tar.gz" . )
+          ( cd publish/linux-arm64 && tar czf "../../dist/FruityPrime-$TAG-server-linux-arm64.tar.gz" . )
 
           cp LICENSE publish/win-x64-server/ 2>/dev/null || true
           cat > publish/win-x64-server/SERVER.txt <<'NOTE'
-          MphRead dedicated server, for Windows.
+          Fruity Prime dedicated server, for Windows.
 
           From a Command Prompt or PowerShell, in this folder:
 
-            MphReadServer.exe -server -port 27888 -players 8 -servername "My server"
+            FruityPrimeServer.exe -server -port 27888 -players 8 -servername "My server"
 
           It needs no game files, and no copy of the game on this machine.
           Maps come from maprotation.txt, written beside the binary on first
           run.
 
-          This is a console program, unlike MphRead.exe: the window stays until
+          This is a console program, unlike FruityPrime.exe: the window stays until
           the server stops, Ctrl+C shuts it down cleanly, and its exit code is
           reported, so it can be run under a service supervisor (NSSM, or
           sc.exe with a wrapper) the way the Linux build runs under systemd.
@@ -184,13 +194,13 @@ jobs:
 
           To run a directory of your own:
 
-            MphReadServer.exe -masterserver -port 27889
+            FruityPrimeServer.exe -masterserver -port 27889
 
           To see what is up right now:
 
-            MphReadServer.exe -servers
+            FruityPrimeServer.exe -servers
           NOTE
-          ( cd publish/win-x64-server && zip -qr "../../dist/MphRead-$TAG-server-win-x64.zip" . )
+          ( cd publish/win-x64-server && zip -qr "../../dist/FruityPrime-$TAG-server-win-x64.zip" . )
           ls -la dist
 
       - name: release
@@ -199,6 +209,6 @@ jobs:
           TAG: ${{ steps.name.outputs.tag }}
         run: |
           gh release create "$TAG" dist/* \
-            --title "MphRead $TAG" \
+            --title "Fruity Prime $TAG" \
             --notes "Built from ${{ github.sha }}. No game data is included: the launcher unpacks it from your own cartridge dump on first run." \
             --verify-tag || gh release upload "$TAG" dist/* --clobber

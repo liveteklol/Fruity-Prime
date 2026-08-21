@@ -39,7 +39,16 @@
          package holds exactly one binary, and renaming it would mean a Pi that
          has been running MphRead under systemd since before this change gets a
          second binary beside the one its unit still points at. -->
-    <AssemblyName Condition="'$(MphReadServer)' == 'true' and $(RuntimeIdentifier.StartsWith('win'))">MphReadServer</AssemblyName>
+    <!-- The project is Fruity Prime. The assembly, the namespace and this
+         file keep the name MphRead: upstream is NoneGiven/MphRead and every
+         pull from it stays a fast-forward only while the 221 files that
+         declare that namespace are untouched. What a player sees is the
+         product name, the binary name and the window title, and those are
+         here and in Mods/Branding.cs. -->
+    <AssemblyName>FruityPrime</AssemblyName>
+    <AssemblyName Condition="'$(MphReadServer)' == 'true' and $(RuntimeIdentifier.StartsWith('win'))">FruityPrimeServer</AssemblyName>
+    <Product>Fruity Prime</Product>
+    <RootNamespace>MphRead</RootNamespace>
     <DefineConstants Condition="'$(UseWindowsForms)' == 'true'">$(DefineConstants);MPHREAD_LAUNCHER</DefineConstants>
     <!-- Not the same question as "has no launcher": the Linux game build has
          no launcher either and is still a game. This one is shipped as the

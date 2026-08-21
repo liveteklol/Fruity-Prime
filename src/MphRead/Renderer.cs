@@ -4548,7 +4548,7 @@ namespace MphRead
             _sb.Clear();
             string recording = _recording ? " - Recording" : "";
             string frameAdvance = _frameAdvanceOn ? " - Frame Advance" : "";
-            _sb.AppendLine($"MphRead Version {Program.Version}{recording}{frameAdvance}");
+            _sb.AppendLine($"{Mods.Branding.Name} {Program.Version}{recording}{frameAdvance}");
             if (_showBotAiSlot >= 0 && _showBotAiSlot <= 3)
             {
                 OutputGetBotAi();
@@ -4940,7 +4940,7 @@ namespace MphRead
         private static readonly NativeWindowSettings _nativeWindowSettings = new NativeWindowSettings()
         {
             ClientSize = new Vector2i(1024, 768),
-            Title = "MphRead",
+            Title = Mods.Branding.Name,
             Profile = ContextProfile.Compatability,
             Flags = ContextFlags.Default,
             APIVersion = new Version(3, 2),

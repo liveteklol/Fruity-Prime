@@ -29,6 +29,11 @@ namespace MphRead.Mods.Launcher
     {
         public static void Run()
         {
+            LauncherPrefs.Load();
+            if (LauncherPrefs.AutoUpdate && UpdateNow())
+            {
+                return;
+            }
             if (GameFiles.Ready)
             {
                 // Upstream's CheckSetup does this before anything runs; the
@@ -89,9 +94,32 @@ namespace MphRead.Mods.Launcher
         }
 
         /// <summary>
-        /// The five entries. Returns false when the answer was "quit"; a true
-        /// with <see cref="LaunchKind.None"/> means "nothing to launch, show
-        /// the screen again", which is what Settings and Game files do.
+        /// Look for a new release and install it, before the screen is shown.
+        ///
+        /// Returns true when one was installed and this process should stop.
+        /// Here rather than behind an entry on the menu because a build one
+        /// release behind cannot join a server at all -- the protocol version
+        /// is checked at Hello -- so "there is an update" and "nothing works"
+        /// are the same news, and it is not news worth making somebody act on.
+        /// </summary>
+        private static bool UpdateNow()
+        {
+            string? installed = Update.Updater.CheckAndApply(
+                line => Console.WriteLine($"  {line}"));
+            if (installed == null)
+            {
+                return false;
+            }
+            Console.WriteLine();
+            Console.WriteLine($"  Updated. Start {Mods.Branding.Executable} again.");
+            Console.WriteLine();
+            return true;
+        }
+
+        /// <summary>
+        /// The entries. Returns false when the answer was "quit"; a true with
+        /// <see cref="LaunchKind.None"/> means "nothing to launch, show the
+        /// screen again", which is what Settings, Credits and Game files do.
         /// </summary>
         private static bool Home(MenuSettings settings, IReadOnlyList<string> rooms,
             out LaunchPlan plan)
@@ -101,7 +129,7 @@ namespace MphRead.Mods.Launcher
             while (true)
             {
                 Console.WriteLine();
-                Console.WriteLine("  MphRead");
+                Console.WriteLine($"  {Mods.Branding.NameAndVersion}");
                 Console.WriteLine("  --------------------------------------------");
                 Console.WriteLine($"  Game files : {GameFiles.Describe()}");
                 Console.WriteLine($"  Player     : {LauncherPrefs.PlayerName}"
@@ -121,6 +149,7 @@ namespace MphRead.Mods.Launcher
                 Console.WriteLine("  [3] Host a game      run a server and play on it");
                 Console.WriteLine("  [4] Settings         name, hunter, window, addresses");
                 Console.WriteLine("  [5] Game files       point this at your .nds dump");
+                Console.WriteLine("  [6] Credits          who this is built on");
                 Console.WriteLine("  [q] Quit");
                 Console.WriteLine();
                 string choice = Ask("  Choose", "1").ToLowerInvariant();
@@ -138,6 +167,11 @@ namespace MphRead.Mods.Launcher
                     SetUpGameFiles();
                     problem = GameFiles.Problem();
                     return true;
+                }
+                if (choice == "6")
+                {
+                    Mods.Credits.Print();
+                    continue;
                 }
                 if (problem != null)
                 {
@@ -404,7 +438,7 @@ namespace MphRead.Mods.Launcher
                     return false;
                 }
                 Console.WriteLine($"  Hosting on port {port}. Friends join with:");
-                Console.WriteLine($"    MphRead -connect <your address> -port {port}");
+                Console.WriteLine($"    {Mods.Branding.Executable} -connect <your address> -port {port}");
             }
             plan = new LaunchPlan
             {
@@ -463,7 +497,7 @@ namespace MphRead.Mods.Launcher
         private static void SetUpGameFiles()
         {
             Console.WriteLine();
-            Console.WriteLine("  MphRead needs your own Metroid Prime Hunters cartridge");
+            Console.WriteLine($"  {Mods.Branding.Name} needs your own Metroid Prime Hunters cartridge");
             Console.WriteLine("  dump. It unpacks what it needs next to this program and");
             Console.WriteLine("  leaves the file alone. No game data is included or");
             Console.WriteLine("  downloaded.");

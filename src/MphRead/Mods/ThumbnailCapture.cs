@@ -47,7 +47,7 @@ namespace MphRead.Mods
         private static NativeWindowSettings WindowSettings(int width, int height) => new()
         {
             ClientSize = new Vector2i(width, height),
-            Title = "MphRead thumbnails",
+            Title = $"{Branding.Name} thumbnails",
             Profile = ContextProfile.Compatability,
             APIVersion = new Version(3, 2),
             StartVisible = false

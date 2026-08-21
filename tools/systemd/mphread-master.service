@@ -9,7 +9,7 @@
 #
 # __USER__ and __DIR__ are placeholders; see mphread-server.service.
 [Unit]
-Description=MphRead server directory
+Description=Fruity Prime server directory
 After=network-online.target
 Wants=network-online.target
 
@@ -17,7 +17,7 @@ Wants=network-online.target
 Type=simple
 User=__USER__
 WorkingDirectory=__DIR__
-ExecStart=__DIR__/MphRead -masterserver -port 27889
+ExecStart=__DIR__/FruityPrime -masterserver -port 27889
 Restart=always
 RestartSec=5
 NoNewPrivileges=true

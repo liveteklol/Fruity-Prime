@@ -7,7 +7,7 @@
 #       tools/systemd/mphread-server.service | sudo tee /etc/systemd/system/mphread-server.service
 #   sudo systemctl enable --now mphread-server
 [Unit]
-Description=MphRead dedicated server
+Description=Fruity Prime dedicated server
 After=network-online.target
 Wants=network-online.target
 
@@ -18,7 +18,7 @@ WorkingDirectory=__DIR__
 # -servername is what players see in the launcher's server browser. The server
 # lists itself on net.livetek.fr so that it can be found there; add -nomaster
 # to keep it private, or -master HOST to use a different directory.
-ExecStart=__DIR__/MphRead -server -port 27888 -players 8 -servername "MphRead"
+ExecStart=__DIR__/FruityPrime -server -port 27888 -players 8 -servername "Fruity Prime"
 Restart=always
 RestartSec=5
 NoNewPrivileges=true

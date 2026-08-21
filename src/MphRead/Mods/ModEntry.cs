@@ -36,6 +36,31 @@ namespace MphRead.Mods
             // Keys and mouse feel, before anything creates a player. Called
             // here because this runs for every invocation, launcher or not.
             InputSettings.Load();
+            // Whatever the last update moved aside. Now, at the start, because
+            // this is the point where those files are certainly not open any
+            // more -- and until now they were the way back.
+            Update.UpdateInstall.CleanUp();
+            Update.Updater.Disabled = HasFlag(args, "noupdate");
+
+            if (HasFlag(args, "credits"))
+            {
+                Credits.Print();
+                return true;
+            }
+
+            // Check and install, then say what to run. Explicit, unlike the
+            // checks the launcher and the server do on their own, so there is
+            // always one command that answers "am I on the latest build".
+            if (HasFlag(args, "update"))
+            {
+                Update.Updater.Disabled = false;
+                string? installed = Update.Updater.CheckAndApply(Console.WriteLine);
+                if (installed != null)
+                {
+                    Console.WriteLine($"[update] installed. Start {Branding.Executable} again.");
+                }
+                return true;
+            }
             // Before the game-file check, not after: a fresh install has no
             // paths.txt, and the check exits with "press any key" on a console
             // nobody is looking at. The launcher is the screen that fixes
@@ -82,10 +107,23 @@ namespace MphRead.Mods
                 return true;
             }
 #endif
-            // The server directory: MphRead -masterserver. Same binary as the
-            // game server on purpose -- the machine that runs one usually runs
-            // the other, and a second thing to install is a second thing to
-            // forget to restart.
+            // Both servers update before they bind, and only then.
+            //
+            // A protocol change makes a server refuse every client on an older
+            // build at Hello, so a stale server is a server nobody can join --
+            // which is why this is worth doing unattended. It is also why it
+            // happens here and not later: replacing the binary under a match in
+            // progress would disconnect the people the feature exists for.
+            if ((HasFlag(args, "masterserver") || HasFlag(args, "server")
+                || HasFlag(args, "dedicated")) && Update.Updater.UpdatedBeforeStart())
+            {
+                return true;
+            }
+
+            // The server directory: -masterserver. Same binary as the game
+            // server on purpose -- the machine that runs one usually runs the
+            // other, and a second thing to install is a second thing to forget
+            // to restart.
             if (HasFlag(args, "masterserver"))
             {
                 int masterPort = NetMasterConfig.DefaultPort;
@@ -211,7 +249,7 @@ namespace MphRead.Mods
             string exe = System.IO.Path.GetFileNameWithoutExtension(
                 Environment.ProcessPath) ?? "MphReadServer";
             Console.WriteLine();
-            Console.WriteLine("MphRead dedicated server. It needs no game files.");
+            Console.WriteLine($"{Branding.Name} dedicated server. It needs no game files.");
             Console.WriteLine();
             Console.WriteLine($"  {exe} -server -port {NetConfig.DefaultPort} -players 8 "
                 + "-servername \"My server\"");

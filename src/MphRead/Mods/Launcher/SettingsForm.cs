@@ -68,7 +68,7 @@ namespace MphRead.Mods.Launcher
             _theme = theme ?? new LauncherTheme(DeviceDpi);
             _ownsTheme = theme == null;
 
-            Text = "MphRead settings";
+            Text = $"{Mods.Branding.Name} settings";
             FormBorderStyle = FormBorderStyle.None;
             AutoScaleMode = AutoScaleMode.None;
             StartPosition = FormStartPosition.CenterParent;

@@ -170,7 +170,8 @@ namespace MphRead.Mods.Launcher.Gui
                 new Point(cx, cy), 46, 46);
             context.DrawEllipse(GuiTheme.AccentBrush, null, new Point(cx, cy), 14, 14);
 
-            var title = new FormattedText("MPHREAD", CultureInfo.InvariantCulture,
+            var title = new FormattedText(Mods.Branding.Name.ToUpperInvariant(),
+                CultureInfo.InvariantCulture,
                 FlowDirection.LeftToRight, GuiTheme.Face(true), 30, GuiTheme.TextBrush);
             context.DrawText(title, new Point(cx - title.Width / 2, cy + 62));
             var sub = new FormattedText("Metroid Prime Hunters, with multiplayer",

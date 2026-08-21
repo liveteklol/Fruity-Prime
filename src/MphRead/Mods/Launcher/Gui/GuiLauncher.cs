@@ -74,6 +74,22 @@ namespace MphRead.Mods.Launcher.Gui
 
         private static void Run()
         {
+            LauncherPrefs.Load();
+            if (LauncherPrefs.AutoUpdate)
+            {
+                // Before the window, not behind a button on it. A build one
+                // release behind is refused by every server at Hello, so
+                // "an update is available" and "nothing you press will work"
+                // are the same news; and this is the moment nothing is running
+                // that replacing the binary would interrupt.
+                string? installed = Update.Updater.CheckAndApply(Console.WriteLine);
+                if (installed != null)
+                {
+                    Console.WriteLine("[update] installed; restarting");
+                    Update.UpdateInstall.Relaunch(installed);
+                    return;
+                }
+            }
             if (GameFiles.Ready)
             {
                 // Upstream's CheckSetup does this before anything runs; the

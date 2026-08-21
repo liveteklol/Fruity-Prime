@@ -314,7 +314,7 @@ namespace MphRead.Mods
             {
                 var lines = new List<string>
                 {
-                    "# MphRead controls. Delete a line to go back to the default.",
+                    $"# {Branding.Name} controls. Delete a line to go back to the default.",
                     $"sensitivity={MouseSensitivity.ToString("0.###", CultureInfo.InvariantCulture)}",
                     $"invert_y={InvertMouseY.ToString().ToLowerInvariant()}",
                     $"invert_x={InvertMouseX.ToString().ToLowerInvariant()}"

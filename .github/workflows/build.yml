@@ -70,7 +70,7 @@ jobs:
       # else in this workflow would notice it changing.
       - name: the game is a GUI binary
         if: matrix.rid == 'win-x64'
-        run: tools/check-subsystem.sh gui publish/${{ matrix.rid }}/MphRead.exe
+        run: tools/check-subsystem.sh gui publish/${{ matrix.rid }}/FruityPrime.exe
 
       # The Linux builds exist to be servers, so the build is not finished
       # until one has been started. It needs no game files, no display and no
@@ -83,7 +83,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: MphRead-${{ matrix.rid }}
+          name: FruityPrime-${{ matrix.rid }}
           path: publish/${{ matrix.rid }}
           if-no-files-found: error
 
@@ -116,7 +116,7 @@ jobs:
       # thing that makes it usable from a terminal or a service supervisor.
       - name: the server is a console binary
         shell: bash
-        run: tools/check-subsystem.sh console publish/win-x64-server/MphReadServer.exe
+        run: tools/check-subsystem.sh console publish/win-x64-server/FruityPrimeServer.exe
 
       - name: nothing from the game is in the output
         shell: bash
@@ -129,6 +129,6 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: MphRead-win-x64-server
+          name: FruityPrime-win-x64-server
           path: publish/win-x64-server
           if-no-files-found: error

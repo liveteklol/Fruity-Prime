@@ -81,7 +81,7 @@ namespace MphRead.Mods.Launcher.Gui
                 _playable.Add(room);
             }
 
-            Title = "MphRead";
+            Title = Mods.Branding.Name;
             Width = 940;
             Height = 560;
             MinWidth = 780;
@@ -182,15 +182,18 @@ namespace MphRead.Mods.Launcher.Gui
             settings.Click += (_, _) => ShowCard(BuildSettingsCard());
             _filesEntry = new MenuEntry("Game files", GameFiles.Describe());
             _filesEntry.Click += (_, _) => ShowCard(_setupCard);
+            var credits = new MenuEntry("Credits", "Who this is built on");
+            credits.Click += (_, _) => ShowCard(BuildCreditsCard());
             var quit = new MenuEntry("Quit");
             quit.Click += (_, _) => Close();
 
-            card.Children.Add(new Caption("MphRead"));
+            card.Children.Add(new Caption(Mods.Branding.NameAndVersion));
             card.Children.Add(_onlineEntry);
             card.Children.Add(_offlineEntry);
             card.Children.Add(_hostEntry);
             card.Children.Add(settings);
             card.Children.Add(_filesEntry);
+            card.Children.Add(credits);
             card.Children.Add(quit);
             return card;
         }
@@ -230,7 +233,7 @@ namespace MphRead.Mods.Launcher.Gui
 
             card.Children.Add(new Caption("Game files"));
             card.Children.Add(new Note(
-                "MphRead needs your own Metroid Prime Hunters cartridge dump. It "
+                Mods.Branding.Name + " needs your own Metroid Prime Hunters cartridge dump. It "
                 + "unpacks what it needs next to this program and leaves the file "
                 + "alone. No game data is included in this download, and none is "
                 + "downloaded."));
@@ -730,6 +733,47 @@ namespace MphRead.Mods.Launcher.Gui
             });
         }
 
+        // ------------------------------------------------------------- credits
+
+        /// <summary>
+        /// Who this is built on. The same list as -credits and as upstream's
+        /// README, in the program rather than only in a file on GitHub.
+        /// </summary>
+        private Control BuildCreditsCard()
+        {
+            var list = new StackPanel { Spacing = 2 };
+            list.Children.Add(new Note(Mods.Credits.Summary, GuiTheme.Text));
+            list.Children.Add(new Note("A significant portion of this project's code is "
+                + "based on the file format information or source code of these projects."));
+            foreach (Mods.Credits.Entry entry in Mods.Credits.Entries)
+            {
+                var item = new MenuEntry(entry.Who, entry.What, titleSize: 14)
+                {
+                    Accent = GuiTheme.TextDim
+                };
+                list.Children.Add(item);
+                if (entry.Where.Length > 0)
+                {
+                    list.Children.Add(new Note(entry.Where));
+                }
+            }
+            list.Children.Add(new Note("Metroid Prime Hunters is Nintendo's. No game data "
+                + "is included with this program: it is unpacked from your own cartridge "
+                + "dump."));
+
+            var card = Card();
+            card.Children.Add(new Caption("Credits"));
+            card.Children.Add(new ScrollViewer
+            {
+                Height = 400,
+                Content = list,
+                HorizontalScrollBarVisibility =
+                    Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled
+            });
+            card.Children.Add(Back(() => ShowCard(_homeCard)));
+            return card;
+        }
+
         // ------------------------------------------------------------ settings
 
         private Control BuildSettingsCard()
@@ -745,7 +789,7 @@ namespace MphRead.Mods.Launcher.Gui
             var master = new FieldRow("Server directory",
                 $"{LauncherPrefs.MasterHost}:{LauncherPrefs.MasterPort}", boxWidth: 190);
             var note = new Note("Volumes, controls, match rules and cheats are in the "
-                + "console menu: run MphRead -menu.");
+                + $"console menu: run {Mods.Branding.Executable} -menu.");
 
             var save = new MenuEntry("Save", titleSize: 16) { Primary = true, Height = 44 };
             save.Click += (_, _) =>

@@ -1,4 +1,18 @@
-# MphRead multiplayer — tools, design, and the mechanics catalogue
+# Fruity Prime — tools, design, and the mechanics catalogue
+
+**The project is Fruity Prime. The code is still `namespace MphRead`, and stays
+that way.** Upstream is NoneGiven/MphRead and every pull from it is a
+fast-forward only while the 221 files that declare that namespace and the 271
+that import it are untouched; renaming it would put a conflict in all of them
+for a string only a developer ever reads. The rename is the product, the
+binaries, the window title and the release artifacts. `Mods/Branding.cs` is
+where the name lives — nothing else should spell it out.
+
+| Build | Binary |
+|---|---|
+| Windows game | `FruityPrime.exe` |
+| Windows server | `FruityPrimeServer.exe` |
+| Linux game, Linux and ARM64 server | `FruityPrime` |
 
 This file exists so a fresh session can pick the work up without rediscovering
 the environment or the failure modes. Everything below has been used; nothing is
@@ -75,7 +89,10 @@ export ALSOFT_DRIVERS=null PULSE_SERVER=   # else ALSA retries stall frames
 | `MphRead` (no arguments, Windows) | the front screen. The Windows build is a GUI binary, so double-clicking it opens the launcher with no terminal behind it |
 | `MphRead -menu` | the console menu, for people who typed something |
 | `MphRead -launcher [-console]` | the front screen explicitly; `-console` also gives it a terminal. **Off Windows this opens the Avalonia front screen**, or the text one when there is no display. A bare `MphRead` off Windows still opens upstream's `-menu` prompts, unchanged |
-| `MphRead -launcher -text` | the text front screen on a machine that has a display. What an SSH session gets anyway |
+| `FruityPrime -launcher -text` | the text front screen on a machine that has a display. What an SSH session gets anyway |
+| `FruityPrime -update` | check GitHub for a newer release, install it, and say so. The one command that answers "am I on the latest build" |
+| `FruityPrime -noupdate` | do none of that, on any command that would have |
+| `FruityPrime -credits` | who this is built on, from `Mods/Credits.cs` |
 | `MphRead -fullscreen` / `-windowed` / `-nohelmet` | display choices for the paths that never open a launcher |
 
 ## The launcher (Windows)
@@ -479,6 +496,61 @@ Two things this needed underneath it:
   whole map skipped per rotation, visible in the server log as two `match over`
   lines in the same second.
 
+## Updating
+
+`Mods/Update/`. A release on GitHub is fetched and installed over the running
+build, on Linux and Windows alike.
+
+**Why it is automatic rather than offered.** `NetConfig.ProtocolVersion` makes a
+server refuse a client on a different build outright, at Hello. That is the
+right behaviour — the alternative is reading the right bytes at the wrong
+offsets — but it means a copy one release behind is not slightly worse, it is
+one that cannot join anything. "There is an update" and "nothing you press will
+work" are the same news, so acting on it is not left to the player.
+
+**How a running program replaces itself.** Neither OS will let a running
+executable be overwritten — Windows holds the image open, Linux answers
+ETXTBSY — but both will let it be *renamed*, because the name and the inode are
+different things and the process holds the second one. So every file in the
+package is moved aside to `*.old-update`, the new one is written to the name
+that just came free, and the aside copies are deleted on the next start, when
+nothing has them open. One code path for both platforms, and until that next
+start the previous build is still on disk to go back to. Verified end to end on
+Linux: rename, write, keep running, start the replacement, clean up.
+
+**What stops it going wrong:**
+
+- **A local build is never updated.** The release workflow stamps the tag it is
+  building into the assembly (`-p:Version=`); a build without that stamp reports
+  `a local build` and the updater stands down. Without this, a developer's own
+  binary would be replaced by a download whenever its version happened to
+  compare low. `BuildVersion` also refuses the `1.0.0` the SDK invents when
+  nothing was asked for, because it cannot be told from a real v1.0.0.
+- **The asset is matched, not reconstructed.** By runtime identifier and by
+  whether this is a server build, rather than by rebuilding the release
+  workflow's file name — which would have to be kept in step by hand, and whose
+  failure when it drifted would be a silent "no update available" forever. It is
+  also why a package still named `MphRead-…` would still be found.
+- **Only GitHub.** HTTPS, and a host allow-list. A truncated download is
+  detected by length and thrown away rather than unpacked.
+- **All or nothing.** If a file cannot be moved half way through, the ones
+  already moved are put back before anything is reported as installed.
+- There is **no signature check**. This trusts TLS and GitHub, which is the same
+  trust as downloading the release by hand, and no more.
+
+**When each thing checks.** The moment to replace a program is one where nothing
+depends on it staying up:
+
+| | When | What it does after |
+|---|---|---|
+| Launcher (both screens) | at startup, before the window | installs and relaunches |
+| Dedicated server and directory | at startup, before binding the socket | installs and exits, for systemd or NSSM to restart it |
+| `-update` | when asked | installs and says to start it again |
+
+A running server is left alone: replacing the binary under a match would
+disconnect exactly the people the feature exists for. `launcher.txt` carries
+`auto_update`, on by default.
+
 ## The test method
 
 The failure that matters here is invisible from one side: two clients can be
@@ -834,6 +906,16 @@ why its column is the weakest.
 - **The pause menu is still Windows-only.** `PauseMenuForm` is WinForms; off
   Windows, `Escape` in a match does what it did before. That is the one entry
   from the Windows launcher's list with no counterpart yet.
+- **The updater has never installed a real release.** There are none yet: the
+  repository has published nothing, so what is proven is the version logic, the
+  asset matching, the refusals, and the file-swap mechanism on Linux — each
+  tested on its own. The first tagged release is what tests the whole path, and
+  the honest order is to tag one, download it by hand, and only then trust the
+  automatic install. The Windows swap in particular has never run.
+- **The rename leaves a migration on the Pi.** `deploy-server.sh` rewrites an
+  `ExecStart` that still names `MphRead` and deletes the old binary, but that
+  code has not been run against the real box. Look at
+  `systemctl cat mphread-server` after the first deploy.
 - **The ARM64 server package has never been started by CI.** It is
   cross-compiled on an x64 runner, so `check-dedicated-server.sh` cannot run it
   there; the same build configuration is started on every push for linux-x64 and

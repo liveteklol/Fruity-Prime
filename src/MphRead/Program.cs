@@ -170,7 +170,7 @@ namespace MphRead
         {
             if (File.Exists("paths.txt") && !CheckVersion())
             {
-                Console.WriteLine("Your paths.txt file is not compatible with this version of MphRead and needs to be recreated.");
+                Console.WriteLine($"Your paths.txt file is not compatible with this version of {Mods.Branding.Name} and needs to be recreated.");
                 Console.WriteLine("It is recommended that you delete the file as well as any extracted game files, " +
                     "then perform setup again.");
                 Console.WriteLine();
@@ -186,7 +186,7 @@ namespace MphRead
             if (!File.Exists("paths.txt"))
             {
                 Console.WriteLine("Could not find the paths.txt file.");
-                Console.WriteLine("You may need to perform first-time setup by dragging a ROM onto the MphRead executable.");
+                Console.WriteLine($"You may need to perform first-time setup by dragging a ROM onto the {Mods.Branding.Executable} executable.");
                 Console.WriteLine();
                 Console.WriteLine("Press any key to exit...");
                 Console.ReadKey();
@@ -318,7 +318,7 @@ namespace MphRead
         private static void Exit()
         {
             Nop();
-            Console.WriteLine("MphRead usage:");
+            Console.WriteLine($"{Mods.Branding.Executable} usage:");
             Console.WriteLine("    -room <room_name -or- room_id>");
             Console.WriteLine("    -model <model_name> [recolor_index]");
             Console.WriteLine("At most one room may be specified. Any number of models may be specified.");

@@ -75,6 +75,17 @@ namespace MphRead.Mods.Launcher
         public static int LastKind { get; set; }
 
         /// <summary>
+        /// Whether the front screen looks for a new release and installs it.
+        ///
+        /// On by default, and the check runs while the launcher is on screen,
+        /// which is the one moment nothing is depending on this build staying
+        /// put. The reason it is on rather than offered: a server refuses a
+        /// client on a different protocol version outright, so an out-of-date
+        /// copy is not a slightly worse copy, it is one that cannot join.
+        /// </summary>
+        public static bool AutoUpdate { get; set; } = true;
+
+        /// <summary>
         /// How the game window opens. Kept here rather than in MenuSettings
         /// for the same reason as everything else in this file, and read by
         /// Mods.WindowMode, which is where the window itself lives.
@@ -181,6 +192,12 @@ namespace MphRead.Mods.Launcher
                         case "window_mode":
                             WindowMode = Mods.WindowMode.Parse(value, WindowMode);
                             break;
+                        case "auto_update":
+                            if (Boolean.TryParse(value, out bool autoUpdate))
+                            {
+                                AutoUpdate = autoUpdate;
+                            }
+                            break;
                         case "last_kind":
                             if (Int32.TryParse(value, NumberStyles.Integer,
                                 CultureInfo.InvariantCulture, out int kind))
@@ -204,7 +221,7 @@ namespace MphRead.Mods.Launcher
             {
                 File.WriteAllLines(Path, new[]
                 {
-                    "# MphRead launcher preferences.",
+                    $"# {Branding.Name} launcher preferences.",
                     $"server_address={ServerAddress}",
                     $"server_port={ServerPort.ToString(CultureInfo.InvariantCulture)}",
                     $"master_host={MasterHost}",
@@ -218,6 +235,7 @@ namespace MphRead.Mods.Launcher
                     $"list_hosted={ListHostedGame.ToString().ToLowerInvariant()}",
                     $"host_on_master={HostOnMaster.ToString().ToLowerInvariant()}",
                     $"last_kind={LastKind.ToString(CultureInfo.InvariantCulture)}",
+                    $"auto_update={AutoUpdate.ToString().ToLowerInvariant()}",
                     $"window_mode={(WindowMode == WindowStartMode.BorderlessFullscreen ? "borderless" : "windowed")}"
                 });
             }
