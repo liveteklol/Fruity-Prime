@@ -820,6 +820,28 @@ match uses. Thirty-three rooms, eight bots each: no crashes.
 | `.github/workflows/build.yml` | every push and pull request | publishes `win-x64`, `linux-x64`, `linux-x64-server` and `linux-arm64` on one Ubuntu runner — the csproj's `EnableWindowsTargeting` is what lets the WinForms build come from Linux — and uploads each as an artifact. A second job on a **Windows** runner builds the Windows dedicated server and starts it there |
 | `.github/workflows/release.yml` | a `v*` tag, or by hand | those four plus the Windows server: five packages, two zips and three tarballs, each with a short note, attached to a GitHub release |
 
+**A release needs a real, pushed tag before it needs anything else.**
+
+```
+git tag v0.36.0 && git push origin v0.36.0
+```
+
+triggers it directly. Running it by hand from the Actions tab instead needs the
+tag to already exist for the same reason: the workflow's first step now
+resolves and verifies it with `gh api .../git/ref/tags/$TAG` -- prefixing a
+bare number with `v` if it was typed without one, since every tag here follows
+that convention -- and fails with one clear line if nothing matches, rather
+than handing that straight to `actions/checkout`. It used to: typing `0.36.0`
+into the dispatch box for a tag that was never pushed produced three retries of
+`git fetch ... +refs/heads/0.36.0*:refs/remotes/origin/0.36.0* ...` and a bare
+`exit code 1`, with nothing in the log saying the tag simply did not exist.
+
+**The repository was renamed** from `liveteklol/MphRead` to
+`liveteklol/Fruity-Prime`, matching the project. `Mods/Branding.cs.Repository`
+is the current name -- GitHub's old-slug redirect covers `gh`/API calls made
+against the old one, but a redirect is not a guarantee, and the update checker
+should not depend on one lapsing exactly when it is least convenient.
+
 **Two Windows executables, and the difference is one field in the PE header.**
 `FruityPrime.exe` is `WinExe`, so double-clicking it opens the launcher with no
 terminal behind it. That same property makes it useless as a server: Windows

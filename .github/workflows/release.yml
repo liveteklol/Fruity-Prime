@@ -23,9 +23,38 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
+      # Resolved before anything is checked out, because gh api needs no local
+      # repo and this is what turns "typed without its v" or "that tag was
+      # never pushed" into one clear line instead of actions/checkout quietly
+      # retrying a fetch for a ref that was never going to exist -- which is
+      # exactly the failure a workflow_dispatch run with a typo produces.
+      - name: resolve and verify the tag
+        id: name
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME:-${{ github.event.inputs.tag }}}"
+          # This project's tags are always v-prefixed (push: tags: ["v*"]);
+          # a bare version number typed into workflow_dispatch is that tag,
+          # not a different one worth failing over.
+          if [[ "$TAG" != v* ]]; then
+            TAG="v$TAG"
+          fi
+          if ! gh api "repos/${{ github.repository }}/git/ref/tags/$TAG" >/dev/null 2>&1; then
+            echo "::error::No tag '$TAG' exists in ${{ github.repository }}. Push one first:"
+            echo "::error::  git tag $TAG && git push origin $TAG"
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          # The bare number, for -p:Version. The updater compares this against
+          # the tag on GitHub, so a build that is not stamped here is one that
+          # can never know it is out of date.
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          ref: refs/tags/${{ steps.name.outputs.tag }}
 
       - uses: actions/setup-dotnet@v4
         with:
@@ -33,17 +62,6 @@ jobs:
 
       - name: nothing from the game is tracked
         run: tools/check-no-game-assets.sh
-
-      - name: name this release
-        id: name
-        run: |
-          set -euo pipefail
-          TAG="${GITHUB_REF_NAME:-${{ github.event.inputs.tag }}}"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          # The bare number, for -p:Version. The updater compares this against
-          # the tag on GitHub, so a build that is not stamped here is one that
-          # can never know it is out of date.
-          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
 
       - name: publish every target
         env:
