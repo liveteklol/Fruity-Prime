@@ -241,11 +241,6 @@ namespace MphRead.Mods.Launcher
                 g.DrawImage(wordmark, x, y, w, h);
             }
 
-            Font hint = _theme.Body(_theme.S(12));
-            using var brush = new SolidBrush(LauncherTheme.TextDim);
-            g.DrawString("Map previews appear here once they are generated"
-                + "  (Settings -> Generate previews).", hint, brush,
-                _theme.S(36), body.Bottom - _theme.S(150));
         }
 
         private void DrawWordmark(Graphics g, Rectangle body)

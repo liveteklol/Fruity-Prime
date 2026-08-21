@@ -34,6 +34,16 @@ namespace MphRead.Mods.Launcher
                 return;
             }
             GameFiles.ApplyPaths();
+            if (plan.Kind == LaunchKind.Adventure)
+            {
+                LaunchAdventure(plan);
+                return;
+            }
+            // No slot means nothing can be written, which is what a match
+            // needs: leaving the story's slot selected would let a multiplayer
+            // session's exit commit whatever it had done to the shared
+            // StorySave over a real save file.
+            Menu.SaveSlot = 0;
             if (plan.Kind == LaunchKind.Online || plan.Kind == LaunchKind.Host)
             {
                 (string RoomKey, GameMode Mode)? room = NetLaunch.ServerRoom();
@@ -81,6 +91,63 @@ namespace MphRead.Mods.Launcher
                 ? NetLaunch.RoomPlayerCount
                 : 0);
             renderer.Run();
+        }
+
+        /// <summary>
+        /// The story, from a save slot.
+        ///
+        /// Nothing here is new engine work: adventure mode is what
+        /// <see cref="GameMode.SinglePlayer"/> has always meant, and the room
+        /// to open comes out of the slot's own checkpoint. The two things the
+        /// launcher has to get right are choosing the slot before the save is
+        /// read -- <see cref="GameState.CommitSave"/> writes nothing while
+        /// <see cref="Menu.SaveSlot"/> is 0 -- and asking for one player, since
+        /// the multiplayer path's bot filling has no meaning here.
+        /// </summary>
+        private static void LaunchAdventure(LaunchPlan plan)
+        {
+            string roomKey = AdventureSave.Begin(plan.SaveSlot, plan.NewGame);
+            if (roomKey.Length == 0)
+            {
+                Console.WriteLine("[launcher] no adventure room to load");
+                return;
+            }
+            GameState.Mode = GameMode.SinglePlayer;
+            using (var renderer = new RenderWindow())
+            {
+                // Back to the four a DS game had: a previous offline match in
+                // the same session may have raised this to eight, and the
+                // story's own setup counts on the retail number.
+                PlayerEntity.MaxPlayers = 4;
+                renderer.AddPlayer(plan.Hunter, recolor: 0, team: -1);
+                renderer.AddRoom(roomKey, GameMode.SinglePlayer);
+                renderer.Run();
+            }
+            CommitAdventureSave();
+        }
+
+        /// <summary>
+        /// Write the save the session asked for.
+        ///
+        /// The game does not write its own save: reaching the ship sets
+        /// <see cref="Menu.NeededSave"/> and something else is expected to act
+        /// on it once the window has closed. That something was the console
+        /// menu's loop, which a launcher-started session never returns
+        /// through -- so the story ran, asked to be saved, and lost everything
+        /// on exit. This is that step, on the path the launcher does take.
+        ///
+        /// A prompt is honoured as a yes. The front screens have no console to
+        /// ask on, and the two settings that reach here already carry the
+        /// answer that matters: leaving through the ship asks (so it saves),
+        /// and quitting outright defaults to Never (so it does not).
+        /// </summary>
+        private static void CommitAdventureSave()
+        {
+            if (Menu.NeededSave != SaveWhen.Never && Menu.SaveSlot != 0)
+            {
+                GameState.CommitSave();
+            }
+            Menu.NeededSave = SaveWhen.Never;
         }
 
         /// <summary>

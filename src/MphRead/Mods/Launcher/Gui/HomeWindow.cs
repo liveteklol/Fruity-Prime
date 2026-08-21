@@ -47,6 +47,7 @@ namespace MphRead.Mods.Launcher.Gui
         private Control _onlineCard = null!;
         private Control _matchCard = null!;
         private Control _browseCard = null!;
+        private Control _adventureCard = null!;
         private Control? _current;
         private Control? _browseReturn;
 
@@ -143,6 +144,7 @@ namespace MphRead.Mods.Launcher.Gui
             _onlineCard = BuildOnlineCard();
             _matchCard = BuildMatchCard();
             _browseCard = BuildBrowseCard();
+            _adventureCard = BuildAdventureCard();
 
             _setupBack.IsVisible = GameFiles.Ready;
             ShowCard(GameFiles.Ready ? _homeCard : _setupCard);
@@ -210,10 +212,18 @@ namespace MphRead.Mods.Launcher.Gui
         private MenuEntry _offlineEntry = null!;
         private MenuEntry _hostEntry = null!;
         private MenuEntry _filesEntry = null!;
+        private MenuEntry _adventureEntry = null!;
+        private ChoiceRow _adventureSlot = null!;
+        private ChoiceRow _adventureHunter = null!;
+        private Note _adventureNote = null!;
+        private MenuEntry _adventureStart = null!;
+        private MenuEntry _adventureNew = null!;
 
         private Control BuildHomeCard()
         {
             var card = Card();
+            _adventureEntry = new MenuEntry("Adventure", "The story, from a save slot");
+            _adventureEntry.Click += (_, _) => OpenAdventure();
             _onlineEntry = new MenuEntry("Play online", "Join a server");
             _onlineEntry.Click += (_, _) => ShowCard(_onlineCard);
             _offlineEntry = new MenuEntry("Play offline", "A match against bots");
@@ -228,6 +238,7 @@ namespace MphRead.Mods.Launcher.Gui
             quit.Click += (_, _) => Close();
 
             card.Children.Add(new Caption(Mods.Branding.NameAndVersion));
+            card.Children.Add(_adventureEntry);
             card.Children.Add(_onlineEntry);
             card.Children.Add(_offlineEntry);
             card.Children.Add(_hostEntry);
@@ -275,6 +286,7 @@ namespace MphRead.Mods.Launcher.Gui
             _onlineEntry.IsEnabled = ready;
             _offlineEntry.IsEnabled = ready;
             _hostEntry.IsEnabled = ready;
+            _adventureEntry.IsEnabled = ready;
             _filesEntry.Subtitle = GameFiles.Describe();
             _filesEntry.SubtitleColor = ready ? GuiTheme.Good : GuiTheme.Warm;
         }
@@ -617,6 +629,92 @@ namespace MphRead.Mods.Launcher.Gui
             card.Children.Add(_matchStart);
             card.Children.Add(Back(() => ShowCard(_homeCard)));
             return card;
+        }
+
+        // ----------------------------------------------------------- adventure
+
+        /// <summary>
+        /// The story: a slot, then continue it or start it over.
+        ///
+        /// Picking the slot is what makes saving work at all -- see
+        /// <see cref="AdventureSave"/>, and Menu.SaveSlot, which is 0 until
+        /// something sets it and writes nothing while it is.
+        /// </summary>
+        private Control BuildAdventureCard()
+        {
+            var card = Card();
+            var slots = new string[AdventureSave.SlotCount];
+            for (int i = 0; i < slots.Length; i++)
+            {
+                slots[i] = $"Slot {i + 1}";
+            }
+            _adventureSlot = new ChoiceRow("Save slot", slots);
+            _adventureSlot.Changed += (_, _) => RefreshAdventureCard();
+            _adventureHunter = new ChoiceRow("Hunter", _hunters,
+                Array.IndexOf(_hunters, LauncherPrefs.LastHunter.ToString()));
+            _adventureNote = new Note("");
+            _adventureStart = new MenuEntry("Continue", titleSize: 16)
+            {
+                Primary = true,
+                Height = 44
+            };
+            _adventureStart.Click += (_, _) => StartAdventure(newGame: false);
+            _adventureNew = new MenuEntry("New game");
+            _adventureNew.Click += (_, _) => StartAdventure(newGame: true);
+
+            card.Children.Add(new Caption("Adventure"));
+            card.Children.Add(_adventureSlot);
+            card.Children.Add(_adventureNote);
+            card.Children.Add(_adventureHunter);
+            card.Children.Add(_adventureStart);
+            card.Children.Add(_adventureNew);
+            card.Children.Add(Back(() => ShowCard(_homeCard)));
+            return card;
+        }
+
+        private void OpenAdventure()
+        {
+            RefreshAdventureCard();
+            ShowCard(_adventureCard);
+        }
+
+        private void RefreshAdventureCard()
+        {
+            AdventureSave.SlotInfo info = AdventureSave.Read(CurrentSlot());
+            _adventureNote.Text = info.Describe();
+            _adventureNote.IsVisible = true;
+            // Nothing to continue in an empty slot, so the only button that
+            // means anything there is the one that starts a game.
+            _adventureStart.Title = info.Used ? "Continue" : "Start a new game";
+            _adventureNew.IsVisible = info.Used;
+        }
+
+        private byte CurrentSlot()
+        {
+            return (byte)Math.Clamp(_adventureSlot.Index + 1, 1, AdventureSave.SlotCount);
+        }
+
+        private void StartAdventure(bool newGame)
+        {
+            byte slot = CurrentSlot();
+            if (!AdventureSave.Read(slot).Used)
+            {
+                newGame = true;
+            }
+            var hunter = (Hunter)Enum.Parse(typeof(Hunter), _adventureHunter.Value);
+            LauncherPrefs.LastHunter = hunter;
+            LauncherPrefs.LastKind = (int)LaunchKind.Adventure;
+            LauncherPrefs.Save();
+            Plan = new LaunchPlan
+            {
+                Kind = LaunchKind.Adventure,
+                Hunter = hunter,
+                PlayerName = LauncherPrefs.PlayerName,
+                RoomKey = "",
+                SaveSlot = slot,
+                NewGame = newGame
+            };
+            Close();
         }
 
         private void OpenMatch(LaunchKind kind)

@@ -5,7 +5,8 @@ namespace MphRead.Mods.Launcher
         None,
         Online,
         Offline,
-        Host
+        Host,
+        Adventure
     }
 
     /// <summary>
@@ -30,5 +31,11 @@ namespace MphRead.Mods.Launcher
         public int BotLevel { get; init; }
         public int Port { get; init; }
         public string PlayerName { get; init; }
+
+        /// <summary>Adventure only: which save slot, 1-based. 0 is no slot.</summary>
+        public byte SaveSlot { get; init; }
+
+        /// <summary>Adventure only: start over rather than resume the slot.</summary>
+        public bool NewGame { get; init; }
     }
 }

@@ -1479,6 +1479,17 @@ namespace MphRead
             StorySave = ReadSave();
         }
 
+        /// <summary>
+        /// Begin a new game in the current slot.
+        ///
+        /// Nothing is written until the game itself saves, so choosing "new
+        /// game" and then quitting leaves whatever was in the slot alone.
+        /// </summary>
+        public static void StartNewSave()
+        {
+            StorySave = new StorySave();
+        }
+
         public static StorySave ReadSave()
         {
             StorySave? save = null;
@@ -1491,6 +1502,40 @@ namespace MphRead
                 }
             }
             return save ?? new StorySave();
+        }
+
+        /// <summary>True when that slot has a game in it.</summary>
+        public static bool SaveExists(byte slot)
+        {
+            return slot != 0 && File.Exists(GetSavePath(slot));
+        }
+
+        /// <summary>
+        /// Read one slot without making it the current game.
+        ///
+        /// <see cref="ReadSave"/> reads whichever slot <see cref="Menu.SaveSlot"/>
+        /// points at, which is the wrong question for a menu listing every
+        /// slot at once: it would have to move the selection to read a slot
+        /// and move it back, and a throw in between would leave it moved.
+        /// Returns null when the slot is empty or the file cannot be read.
+        /// </summary>
+        public static StorySave? PeekSave(byte slot)
+        {
+            if (!SaveExists(slot))
+            {
+                return null;
+            }
+            try
+            {
+                return JsonSerializer.Deserialize<StorySave>(
+                    File.ReadAllText(GetSavePath(slot)), _jsonOpt);
+            }
+            catch (Exception)
+            {
+                // A save written by a different build, or half-written by a
+                // crash, must not stop the menu that offers the other slots.
+                return null;
+            }
         }
 
         public static void CommitSave()

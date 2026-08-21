@@ -45,9 +45,11 @@ namespace MphRead.Mods.Launcher
         private FlowLayoutPanel _onlineCard = null!;
         private FlowLayoutPanel _matchCard = null!;
         private FlowLayoutPanel _setupCard = null!;
+        private FlowLayoutPanel _adventureCard = null!;
         private Panel _homeSpacer = null!;
         private Panel _onlineSpacer = null!;
         private Panel _matchSpacer = null!;
+        private Panel _adventureSpacer = null!;
         /// <summary>
         /// Rows this screen has deliberately taken out of a card. Not read
         /// from Control.Visible: that reports the whole parent chain, so
@@ -60,6 +62,12 @@ namespace MphRead.Mods.Launcher
         private MenuButton _onlineButton = null!;
         private MenuButton _offlineButton = null!;
         private MenuButton _hostButton = null!;
+        private MenuButton _adventureButton = null!;
+        private ChoiceRow _slotRow = null!;
+        private Label _slotStatus = null!;
+        private HunterPicker _adventureHunter = null!;
+        private MenuButton _continueButton = null!;
+        private MenuButton _newGameButton = null!;
         private MenuButton _filesButton = null!;
         private MenuButton _setupButton = null!;
         private Label _setupStatus = null!;
@@ -183,6 +191,7 @@ namespace MphRead.Mods.Launcher
             BuildBrowseCard();
             BuildOnlineCard();
             BuildMatchCard();
+            BuildAdventureCard();
             BuildSetupCard();
             BuildWindowButtons();
             _built = true;
@@ -299,6 +308,10 @@ namespace MphRead.Mods.Launcher
             _homeSpacer = new Panel { Height = _theme.S(10), Margin = Padding.Empty };
             Add(_homeCard, _homeSpacer, gap: 0);
 
+            _adventureButton = Add(_homeCard, new MenuButton(_theme, "Adventure",
+                "The story, from a save slot"));
+            _adventureButton.Click += (_, _) => ShowAdventure();
+
             _onlineButton = Add(_homeCard, new MenuButton(_theme, "Play online",
                 "Looking for the server..."));
             _onlineButton.Click += (_, _) => ShowOnline();
@@ -352,6 +365,7 @@ namespace MphRead.Mods.Launcher
         private void LayoutCards()
         {
             LayoutSpacer(_homeCard, _homeSpacer, 0.5f);
+            LayoutSpacer(_adventureCard, _adventureSpacer, 1f);
             LayoutSpacer(_onlineCard, _onlineSpacer, 1f);
             LayoutSpacer(_matchCard, _matchSpacer, 1f);
             // The list takes whatever the fixed rows around it leave, which is
@@ -535,6 +549,7 @@ namespace MphRead.Mods.Launcher
             _onlineButton.Enabled = ready;
             _offlineButton.Enabled = ready;
             _hostButton.Enabled = ready;
+            _adventureButton.Enabled = ready;
             _filesButton.Subtitle = GameFiles.Describe();
             _filesButton.SubtitleColor = ready ? LauncherTheme.TextDim : LauncherTheme.Warm;
             if (!ready)
@@ -542,11 +557,13 @@ namespace MphRead.Mods.Launcher
                 _onlineButton.Subtitle = "Set up your game files first";
                 _offlineButton.Subtitle = "Set up your game files first";
                 _hostButton.Subtitle = "Set up your game files first";
+                _adventureButton.Subtitle = "Set up your game files first";
             }
             else
             {
                 _offlineButton.Subtitle = "A match against bots, on any map";
                 _hostButton.Subtitle = "Friends join this machine";
+                _adventureButton.Subtitle = "The story, from a save slot";
             }
         }
 
@@ -1025,6 +1042,105 @@ namespace MphRead.Mods.Launcher
             Collapse(_matchStatus, true);
         }
 
+        /// <summary>
+        /// The story: a slot, then continue it or start it over.
+        ///
+        /// The slot is the load-bearing choice, not a convenience. Saving is
+        /// gated on <see cref="Menu.SaveSlot"/>, which is 0 until something
+        /// sets it, and 0 means "no slot" -- a session started without one
+        /// plays perfectly and then leaves nothing behind. See
+        /// <see cref="AdventureSave"/>.
+        /// </summary>
+        private void BuildAdventureCard()
+        {
+            _adventureCard = NewCard();
+            AddBack(_adventureCard);
+            Add(_adventureCard, new Caption(_theme, "Adventure", 26,
+                LauncherTheme.Text, 1, display: true), gap: 14);
+
+            _slotRow = Add(_adventureCard, new ChoiceRow(_theme, "Save slot"), gap: 6);
+            var names = new List<string>();
+            for (int i = 1; i <= AdventureSave.SlotCount; i++)
+            {
+                names.Add($"Slot {i}");
+            }
+            _slotRow.SetItems(names, 0);
+            _slotRow.Changed += (_, _) => UpdateAdventureSlot();
+
+            _slotStatus = new Label
+            {
+                AutoSize = false,
+                Height = _theme.S(30),
+                ForeColor = LauncherTheme.TextDim,
+                BackColor = LauncherTheme.Panel,
+                Font = _theme.Body(_theme.S(12), FontStyle.Bold),
+                Text = ""
+            };
+            Add(_adventureCard, _slotStatus, gap: 4);
+
+            Add(_adventureCard, new Caption(_theme, "Choose your hunter", 11,
+                LauncherTheme.TextDim, 1, display: false), gap: 6);
+            _adventureHunter = Add(_adventureCard, new HunterPicker(_theme), gap: 4);
+            _adventureHunter.Selected = LauncherPrefs.LastHunter;
+
+            _adventureSpacer = Add(_adventureCard, new Panel { Height = _theme.S(10) }, gap: 0);
+            _continueButton = Add(_adventureCard, new MenuButton(_theme, "Continue",
+                titleSize: 18));
+            _continueButton.Primary = true;
+            _continueButton.Height = _theme.S(46);
+            _continueButton.Click += (_, _) => StartAdventure(newGame: false);
+
+            _newGameButton = Add(_adventureCard, new MenuButton(_theme, "New game",
+                titleSize: 13));
+            _newGameButton.Height = _theme.S(30);
+            _newGameButton.Accent = LauncherTheme.TextDim;
+            _newGameButton.Click += (_, _) => StartAdventure(newGame: true);
+        }
+
+        private void ShowAdventure()
+        {
+            UpdateAdventureSlot();
+            ShowCard(_adventureCard);
+            LayoutCards();
+        }
+
+        /// <summary>Say what is in the chosen slot, and offer what it allows.</summary>
+        private void UpdateAdventureSlot()
+        {
+            var slot = (byte)Math.Clamp(_slotRow.Index + 1, 1, AdventureSave.SlotCount);
+            AdventureSave.SlotInfo info = AdventureSave.Read(slot);
+            _slotStatus.Text = info.Describe();
+            _slotStatus.ForeColor = info.Used ? LauncherTheme.Good : LauncherTheme.TextDim;
+            // An empty slot has nothing to continue, so the one button that
+            // means anything there is the one that starts a game.
+            _continueButton.Text = info.Used ? "Continue" : "Start a new game";
+            Collapse(_newGameButton, !info.Used);
+            LayoutCards();
+        }
+
+        private void StartAdventure(bool newGame)
+        {
+            var slot = (byte)Math.Clamp(_slotRow.Index + 1, 1, AdventureSave.SlotCount);
+            if (!AdventureSave.Read(slot).Used)
+            {
+                // "Continue" on an empty slot is a new game; it is labelled
+                // that way, and this is the same button.
+                newGame = true;
+            }
+            LauncherPrefs.LastHunter = Resolve(_adventureHunter.Selected);
+            LauncherPrefs.LastKind = (int)LaunchKind.Adventure;
+            Plan = new LaunchPlan
+            {
+                Kind = LaunchKind.Adventure,
+                Hunter = Resolve(_adventureHunter.Selected),
+                RoomKey = "",
+                PlayerName = LauncherPrefs.PlayerName,
+                SaveSlot = slot,
+                NewGame = newGame
+            };
+            Finish();
+        }
+
         private void AddBack(FlowLayoutPanel card)
         {
             var back = new MenuButton(_theme, "Back", titleSize: 13)
@@ -1063,6 +1179,7 @@ namespace MphRead.Mods.Launcher
             _onlineCard.Visible = card == _onlineCard;
             _matchCard.Visible = card == _matchCard;
             _setupCard.Visible = card == _setupCard;
+            _adventureCard.Visible = card == _adventureCard;
             if (card == _homeCard || card == _browseCard)
             {
                 _splash.ShowRoom(null);
@@ -1601,7 +1718,10 @@ namespace MphRead.Mods.Launcher
         private void Finish()
         {
             _statusTimer.Stop();
-            if (Plan.Kind != LaunchKind.Online)
+            // Adventure carries no map choice: its room comes out of the save
+            // slot, and writing its empty RoomKey here would wipe the
+            // multiplayer map this player last chose.
+            if (Plan.Kind != LaunchKind.Online && Plan.Kind != LaunchKind.Adventure)
             {
                 _settings.RoomKey = Plan.RoomKey;
                 _settings.Mode = Plan.Mode == GameMode.None

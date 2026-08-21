@@ -130,6 +130,37 @@
     <PackageReference Include="ReFuel.StbImage" Version="2.1.1" />
   </ItemGroup>
 
+  <!-- OpenAL Soft, for the sound effects.
+
+       OpenTK ships the bindings only: opentk.audio.openal has no runtimes/
+       folder and no native library at all. With nothing beside the exe and
+       no system-wide OpenAL (the normal state of a Windows machine, since
+       nothing installs oalinst.exe any more), ALC.OpenDevice fails and every
+       sound effect silently does nothing, while the music keeps playing:
+       that goes through SoundFlow, which ships its own miniaudio.dll.
+       "Music works, no SFX" is exactly that split.
+
+       The package is a file source, not a dependency (ExcludeAssets=all).
+       Its own names are soft_oal.dll and libopenal.so, while OpenTK probes
+       for openal32.dll and libopenal.so.1, so each is copied under the name
+       the loader actually looks for. A server build has no audio at all. -->
+  <ItemGroup Condition="'$(MphReadServer)' != 'true'">
+    <PackageReference Include="Silk.NET.OpenAL.Soft.Native" Version="1.23.1"
+                      GeneratePathProperty="true" ExcludeAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(MphReadServer)' != 'true' and $(RuntimeIdentifier.StartsWith('win'))">
+    <None Include="$(PkgSilk_NET_OpenAL_Soft_Native)\runtimes\win-x64\native\soft_oal.dll"
+          Link="openal32.dll" CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" Visible="false" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(MphReadServer)' != 'true' and ('$(RuntimeIdentifier)' == 'linux-x64' or ('$(RuntimeIdentifier)' == '' and $([MSBuild]::IsOSPlatform('Linux'))))">
+    <None Include="$(PkgSilk_NET_OpenAL_Soft_Native)\runtimes\linux-x64\native\libopenal.so"
+          Link="libopenal.so.1" CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" Visible="false" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\NcsfPlay\NcsfPlay.csproj" />
   </ItemGroup>
