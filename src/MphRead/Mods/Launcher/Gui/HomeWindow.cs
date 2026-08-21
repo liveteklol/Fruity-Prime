@@ -121,9 +121,16 @@ namespace MphRead.Mods.Launcher.Gui
             {
                 ColumnDefinitions = new ColumnDefinitions("*,Auto")
             };
+            _updateBadge.Click += (_, _) => UpdateNow();
+            _updateBadge.HorizontalAlignment = HorizontalAlignment.Left;
+            _updateBadge.VerticalAlignment = VerticalAlignment.Bottom;
+            _updateBadge.Margin = new Thickness(24, 0, 24, 22);
             Grid.SetColumn(_splash, 0);
+            Grid.SetColumn(_updateBadge, 0);
             Grid.SetColumn(panel, 1);
             grid.Children.Add(_splash);
+            // After the splash and in the same cell, so it draws on top of it.
+            grid.Children.Add(_updateBadge);
             grid.Children.Add(panel);
             Content = grid;
 
@@ -193,7 +200,7 @@ namespace MphRead.Mods.Launcher.Gui
 
         // ---------------------------------------------------------------- home
 
-        private MenuEntry _updateEntry = null!;
+        private readonly UpdateBadge _updateBadge = new();
         private MenuEntry _onlineEntry = null!;
         private MenuEntry _offlineEntry = null!;
         private MenuEntry _hostEntry = null!;
@@ -202,16 +209,6 @@ namespace MphRead.Mods.Launcher.Gui
         private Control BuildHomeCard()
         {
             var card = Card();
-            // Hidden until a check finds a release. It is the first thing on
-            // the screen when it appears, because a build one release behind is
-            // refused by every server at Hello: this is not a nicety, it is the
-            // reason nothing else on the card will work.
-            _updateEntry = new MenuEntry("Update now", "", titleSize: 17)
-            {
-                Accent = GuiTheme.Warm,
-                IsVisible = false
-            };
-            _updateEntry.Click += (_, _) => UpdateNow();
             _onlineEntry = new MenuEntry("Play online", "Join a server");
             _onlineEntry.Click += (_, _) => ShowCard(_onlineCard);
             _offlineEntry = new MenuEntry("Play offline", "A match against bots");
@@ -226,7 +223,6 @@ namespace MphRead.Mods.Launcher.Gui
             quit.Click += (_, _) => Close();
 
             card.Children.Add(new Caption(Mods.Branding.NameAndVersion));
-            card.Children.Add(_updateEntry);
             card.Children.Add(_onlineEntry);
             card.Children.Add(_offlineEntry);
             card.Children.Add(_hostEntry);
@@ -238,11 +234,11 @@ namespace MphRead.Mods.Launcher.Gui
 
         private void ShowUpdate(UpdateInfo update)
         {
-            _updateEntry.Subtitle = update.AssetName.Length > 0
+            _updateBadge.Show(update.AssetName.Length > 0
                 ? $"{update.Tag} is out -- get {update.AssetName}"
-                : $"{update.Tag} is out";
-            _updateEntry.SubtitleColor = GuiTheme.Warm;
-            _updateEntry.IsVisible = true;
+                : $"{update.Tag} is out");
+            // The picture's own caption moves up out of the way.
+            _splash.BottomInset = _updateBadge.DesiredSize.Height + 22;
         }
 
         /// <summary>
@@ -259,9 +255,8 @@ namespace MphRead.Mods.Launcher.Gui
             if (!Update.Updater.OpenPage(update.Value))
             {
                 // No browser to open, or it refused. Putting the address on the
-                // card beats a button that appears to do nothing.
-                _updateEntry.Subtitle = update.Value.PageUrl;
-                _updateEntry.SubtitleColor = GuiTheme.Text;
+                // badge beats a button that appears to do nothing.
+                _updateBadge.Say(update.Value.PageUrl);
             }
         }
 

@@ -24,6 +24,24 @@ namespace MphRead.Mods.Launcher.Gui
         private Bitmap? _image;
         private string _caption = "";
         private string _note = "";
+        private double _bottomInset;
+
+        /// <summary>
+        /// How much of the bottom of the picture is spoken for by something
+        /// drawn over it. The caption sits above it rather than underneath.
+        /// </summary>
+        public double BottomInset
+        {
+            get => _bottomInset;
+            set
+            {
+                if (Math.Abs(_bottomInset - value) > 0.5)
+                {
+                    _bottomInset = value;
+                    InvalidateVisual();
+                }
+            }
+        }
 
         public SplashView()
         {
@@ -107,19 +125,19 @@ namespace MphRead.Mods.Launcher.Gui
                     new GradientStop(Color.FromArgb(220, 10, 12, 16), 0),
                     new GradientStop(Color.FromArgb(0, 10, 12, 16), 1)
                 }
-            }, new Rect(0, body.Height - 90, body.Width, 90));
+            }, new Rect(0, body.Height - 90 - _bottomInset, body.Width, 90 + _bottomInset));
 
             if (_caption.Length > 0)
             {
                 var caption = new FormattedText(_caption, CultureInfo.InvariantCulture,
                     FlowDirection.LeftToRight, GuiTheme.Face(true), 20, GuiTheme.TextBrush);
-                context.DrawText(caption, new Point(24, body.Height - 58));
+                context.DrawText(caption, new Point(24, body.Height - 58 - _bottomInset));
             }
             if (_note.Length > 0)
             {
                 var note = new FormattedText(_note, CultureInfo.InvariantCulture,
                     FlowDirection.LeftToRight, GuiTheme.Face(false), 13, GuiTheme.TextDimBrush);
-                context.DrawText(note, new Point(24, body.Height - 32));
+                context.DrawText(note, new Point(24, body.Height - 32 - _bottomInset));
             }
         }
 

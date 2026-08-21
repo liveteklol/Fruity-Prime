@@ -177,16 +177,16 @@ namespace MphRead.Mods.Launcher.Gui
 
             double textLeft = bar + 14;
             Color titleColor = !IsEnabled ? GuiTheme.TextDim : lit ? Accent : GuiTheme.Text;
-            FormattedText probe = Text("X", _titleSize, bold: true, titleColor);
-            double top = Subtitle.Length > 0 ? 8 : (body.Height - probe.Height) / 2;
-            DrawTracked(context, Title.ToUpperInvariant(), _titleSize, titleColor,
-                textLeft, top, tracking: 1);
+            double lineHeight = TrackedText.LineHeight(_titleSize);
+            double top = Subtitle.Length > 0 ? 8 : (body.Height - lineHeight) / 2;
+            TrackedText.Draw(context, Title.ToUpperInvariant(), _titleSize,
+                new SolidColorBrush(titleColor), textLeft, top, tracking: 1);
 
             if (Subtitle.Length > 0)
             {
-                FormattedText sub = Text(Subtitle, 12, bold: false,
-                    IsEnabled ? SubtitleColor : GuiTheme.TextDim);
-                context.DrawText(sub, new Point(textLeft - 1, top + probe.Height + 1));
+                FormattedText sub = TrackedText.Make(Subtitle, 12, bold: false,
+                    new SolidColorBrush(IsEnabled ? SubtitleColor : GuiTheme.TextDim));
+                context.DrawText(sub, new Point(textLeft - 1, top + lineHeight + 1));
             }
         }
 
@@ -201,68 +201,11 @@ namespace MphRead.Mods.Launcher.Gui
             string text = Title.ToUpperInvariant();
             Color ink = IsEnabled ? Color.FromRgb(8, 12, 18) : GuiTheme.TextDim;
             const double tracking = 2;
-            double width = MeasureTracked(text, _titleSize, tracking) - tracking;
-            FormattedText probe = Text("X", _titleSize, bold: true, ink);
-            DrawTracked(context, text, _titleSize, ink,
-                (body.Width - width) / 2, (body.Height - probe.Height) / 2, tracking);
+            double width = TrackedText.Measure(text, _titleSize, tracking) - tracking;
+            TrackedText.Draw(context, text, _titleSize, new SolidColorBrush(ink),
+                (body.Width - width) / 2,
+                (body.Height - TrackedText.LineHeight(_titleSize)) / 2, tracking);
         }
 
-        private static FormattedText Text(string text, double size, bool bold, Color color)
-            => new(text, CultureInfo.InvariantCulture, FlowDirection.LeftToRight,
-                GuiTheme.Face(bold), size, new SolidColorBrush(color));
-
-        /// <summary>
-        /// Draw text with extra space between letters.
-        ///
-        /// Avalonia has no letter-spacing any more than GDI+ does, and the
-        /// small upper-case labels this screen uses are unreadable without it.
-        /// Glyph by glyph is fine for the handful of short strings involved;
-        /// do not use it for running text.
-        /// </summary>
-        private static void DrawTracked(DrawingContext context, string text, double size,
-            Color color, double x, double y, double tracking)
-        {
-            double space = SpaceWidth(size);
-            double pen = x;
-            foreach (char c in text)
-            {
-                if (c == ' ')
-                {
-                    pen += space + tracking;
-                    continue;
-                }
-                FormattedText glyph = Text(c.ToString(), size, bold: true, color);
-                context.DrawText(glyph, new Point(pen, y));
-                pen += glyph.Width + tracking;
-            }
-        }
-
-        private static double MeasureTracked(string text, double size, double tracking)
-        {
-            double space = SpaceWidth(size);
-            double width = 0;
-            foreach (char c in text)
-            {
-                width += (c == ' '
-                    ? space
-                    : Text(c.ToString(), size, bold: true, GuiTheme.Text).Width) + tracking;
-            }
-            return width;
-        }
-
-        /// <summary>
-        /// How wide a space is in this font.
-        ///
-        /// Measured as the difference between two strings rather than directly,
-        /// the same way the WinForms theme does it and for the same reason: a
-        /// lone space measures as very nearly nothing, and a title drawn glyph
-        /// by glyph off that number comes out as PLAYONLINE.
-        /// </summary>
-        private static double SpaceWidth(double size)
-        {
-            double pair = Text("nn", size, bold: true, GuiTheme.Text).Width;
-            double spaced = Text("n n", size, bold: true, GuiTheme.Text).Width;
-            return Math.Max(spaced - pair, size * 0.22);
-        }
     }
 }

@@ -533,10 +533,18 @@ Not doing it is better than doing it carefully.
 
 | | When it checks | What "update now" does |
 |---|---|---|
-| Launcher window | in the background once the window is up | opens the release page; if there is no browser, puts the address on the card |
+| Launcher window | in the background once the window is up | opens the release page; if there is no browser, puts the address on the badge |
 | Text launcher | at startup, waiting up to 2 s | prints the address, and opens a browser if there is one |
 | `-update` | when asked | prints the address and opens it |
 | Server and directory | at startup, before binding | nothing -- it logs one line saying it is behind and keeps running |
+
+In the window it is a badge in the bottom-left corner of the picture
+(`UpdateBadge`), not an entry in the menu. Updating is not one of the things you
+opened the launcher to do, so it does not belong in the list of them -- and the
+menu is a card that gets swapped out, which meant a fresh install, sitting on
+the game-files card where an out-of-date copy is most likely to be, never saw
+the notice at all. The picture is behind every card. `SplashView.BottomInset`
+is how the map caption moves up out of its way.
 
 The text launcher waits because it prints its menu once and then blocks on a
 keypress: a check that lands afterwards has no line to appear on until the menu
