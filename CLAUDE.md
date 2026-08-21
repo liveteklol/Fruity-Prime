@@ -836,6 +836,15 @@ into the dispatch box for a tag that was never pushed produced three retries of
 `git fetch ... +refs/heads/0.36.0*:refs/remotes/origin/0.36.0* ...` and a bare
 `exit code 1`, with nothing in the log saying the tag simply did not exist.
 
+The tag comes from `github.event.inputs.tag || github.ref_name`, an
+expressions-engine `||` evaluated before bash ever runs — not a bash
+`${GITHUB_REF_NAME:-...}` fallback. `GITHUB_REF_NAME` is *always* set, and for
+a dispatch run it is whichever branch was picked to run the workflow from
+("master", almost always), not the typed tag; a bash fallback on it never
+reaches the input at all, and silently rebuilds whatever branch the dropdown
+defaulted to instead of failing loudly. Hit once already: a run dispatched
+with nothing typed resolved to `vmaster` and correctly refused to find it.
+
 **The repository was renamed** from `liveteklol/MphRead` to
 `liveteklol/Fruity-Prime`, matching the project. `Mods/Branding.cs.Repository`
 is the current name -- GitHub's old-slug redirect covers `gh`/API calls made

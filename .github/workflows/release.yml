@@ -32,9 +32,17 @@ jobs:
         id: name
         env:
           GH_TOKEN: ${{ github.token }}
+          # Evaluated by the expressions engine, not by bash: inputs.tag wins
+          # whenever it is set, ref_name only as the fallback. GITHUB_REF_NAME
+          # is *always* set -- for workflow_dispatch it is whichever branch was
+          # picked to run the workflow from, "master" more often than not --
+          # so a bash ${GITHUB_REF_NAME:-...} fallback never reaches the input
+          # at all and silently rebuilds the wrong thing. This is what the
+          # original checkout step did correctly before this step existed.
+          RAW_TAG: ${{ github.event.inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
-          TAG="${GITHUB_REF_NAME:-${{ github.event.inputs.tag }}}"
+          TAG="$RAW_TAG"
           # This project's tags are always v-prefixed (push: tags: ["v*"]);
           # a bare version number typed into workflow_dispatch is that tag,
           # not a different one worth failing over.
