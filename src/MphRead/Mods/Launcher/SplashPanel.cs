@@ -44,7 +44,7 @@ namespace MphRead.Mods.Launcher
         });
 
         private readonly LauncherTheme _theme;
-        private readonly Image? _brandImage;
+        private Image? _brandImage;
         private Image? _image;
         private bool _ownsImage;
         private string _caption = "";
@@ -57,6 +57,29 @@ namespace MphRead.Mods.Launcher
                 | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
             _brandImage = LoadBrandImage(rooms);
             _image = _brandImage;
+        }
+
+        /// <summary>
+        /// Recompute the home picture from the current set of rooms.
+        ///
+        /// Needed after a fresh extraction: the panel was built before any
+        /// thumbnail existed, so its home picture came up empty and nothing
+        /// short of reopening the launcher used to fix that.
+        /// </summary>
+        public void RefreshBrandImage(IReadOnlyList<string> rooms)
+        {
+            Image? next = LoadBrandImage(rooms);
+            if (_ownsImage)
+            {
+                // A map is on screen right now (e.g. mid-match card); only the
+                // fallback picture underneath it changes, not what is visible.
+                _brandImage = next;
+                return;
+            }
+            _image?.Dispose();
+            _brandImage = next;
+            _image = next;
+            Invalidate();
         }
 
         /// <summary>Show a map, or pass null to go back to the home picture.</summary>
@@ -254,21 +277,8 @@ namespace MphRead.Mods.Launcher
                     float noteHeight = note.GetHeight(g);
                     LauncherTheme.DrawTracked(g, _captionNote.ToUpperInvariant(), note,
                         LauncherTheme.Accent, left, bottom - noteHeight, _theme.S(2));
-                    bottom -= (int)noteHeight + _theme.S(6);
                 }
-                bottom -= _theme.S(10);
             }
-
-            Font sub = _theme.Body(_theme.S(12), FontStyle.Bold);
-            float subHeight = sub.GetHeight(g);
-            LauncherTheme.DrawTracked(g, "METROID PRIME HUNTERS", sub,
-                Color.FromArgb(210, 226, 232, 242), left, bottom - subHeight, _theme.S(3));
-            bottom -= (int)subHeight + _theme.S(4);
-
-            Font mark = _theme.Display(_theme.S(52));
-            float markHeight = mark.GetHeight(g);
-            LauncherTheme.DrawTracked(g, Mods.Branding.Name.ToUpperInvariant(), mark,
-                LauncherTheme.Text, left - _theme.S(3), bottom - markHeight, _theme.S(2));
         }
 
         protected override void Dispose(bool disposing)

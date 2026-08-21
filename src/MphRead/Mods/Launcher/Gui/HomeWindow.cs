@@ -376,6 +376,10 @@ namespace MphRead.Mods.Launcher.Gui
             button.Title = "Choose your .nds file";
             log.Text = Tail(log.Text, ok ? "Ready to play." : "Setup did not finish.");
             RefreshGameFilesState();
+            if (ok)
+            {
+                RefreshRooms();
+            }
             RefreshSplash();
             if (ok)
             {
@@ -899,6 +903,26 @@ namespace MphRead.Mods.Launcher.Gui
             RefreshGameFilesState();
             string? room = _playable.Count > 0 && _matchMap != null ? _matchMap.Value : null;
             _splash.ShowRoom(room, room != null ? "Ready" : "");
+        }
+
+        /// <summary>
+        /// Pick up rooms that did not exist when this window was built -- a
+        /// fresh install opens with no game files, so the room list came up
+        /// empty. First-time setup is the only path that changes it while
+        /// this window is open.
+        /// </summary>
+        private void RefreshRooms()
+        {
+            _playable.Clear();
+            foreach (string room in ThumbnailGenerator.MultiplayerRooms())
+            {
+                _playable.Add(room);
+            }
+            if (_matchMap != null)
+            {
+                int index = Math.Max(0, _playable.IndexOf(_settings.RoomKey));
+                _matchMap.SetItems(_playable, index);
+            }
         }
 
         /// <summary>host, or host:port. Leaves both alone on anything else, so a

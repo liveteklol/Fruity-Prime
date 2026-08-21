@@ -44,7 +44,7 @@ namespace MphRead.Mods.Launcher.Gui
     internal sealed class ChoiceRow : Control
     {
         private readonly string _label;
-        private readonly IReadOnlyList<string> _options;
+        private IReadOnlyList<string> _options;
         private int _index;
         private bool _leftHot;
         private bool _rightHot;
@@ -76,6 +76,14 @@ namespace MphRead.Mods.Launcher.Gui
             Height = 34;
             Focusable = true;
             Cursor = new Cursor(StandardCursorType.Hand);
+        }
+
+        /// <summary>Replace the options in place, e.g. after a room list changes.</summary>
+        public void SetItems(IReadOnlyList<string> options, int index = 0)
+        {
+            _options = options;
+            _index = options.Count == 0 ? 0 : Math.Clamp(index, 0, options.Count - 1);
+            InvalidateVisual();
         }
 
         private Rect LeftArrow => new(Bounds.Width - 150, 0, 28, Bounds.Height);

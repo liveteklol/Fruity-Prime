@@ -235,8 +235,16 @@ namespace MphRead.Sound
             {
                 Instance.Load(scene);
             }
-            catch (DllNotFoundException)
+            catch (Exception ex)
             {
+                // Anything OpenAL/ALC can throw when there is no usable audio
+                // device -- not just a missing native library -- must fall
+                // back to a silent stub the same way Sound.Music does,
+                // instead of taking the scene load down with it. The failed
+                // instance is not shut down: Load can throw before _device,
+                // _context or the buffer/source arrays are assigned, and
+                // ShutDown assumes they are.
+                Console.WriteLine($"[sound] SFX device unavailable ({ex.Message}); continuing without SFX");
                 Instance = new SfxInstanceBase();
             }
             SfxMute = false;

@@ -489,6 +489,7 @@ namespace MphRead.Mods.Launcher
                     }));
                 ApplyOnUi(() =>
                 {
+                    RefreshRooms();
                     _settingUp = false;
                     _setupButton.Enabled = true;
                     _setupButton.Text = "Choose a different file";
@@ -498,6 +499,33 @@ namespace MphRead.Mods.Launcher
                     ShowCard(_homeCard);
                 });
             }, TaskScheduler.Default);
+        }
+
+        /// <summary>
+        /// Pick up rooms and previews that did not exist when this window was
+        /// built -- a fresh install opens with no game files, so the room
+        /// list and every home-screen picture came up empty. First-time setup
+        /// is the only path that changes either while this window is open.
+        /// </summary>
+        private void RefreshRooms()
+        {
+            _playable.Clear();
+            foreach (string room in ThumbnailGenerator.MultiplayerRooms())
+            {
+                if (Playable(room))
+                {
+                    _playable.Add(room);
+                }
+            }
+            var mapNames = new List<string>();
+            foreach (string room in _playable)
+            {
+                (RoomMetadata? meta, _) = Metadata.GetRoomByName(room);
+                mapNames.Add(meta?.InGameName ?? room);
+            }
+            int startIndex = Math.Max(0, _playable.IndexOf(_settings.RoomKey));
+            _mapRow.SetItems(mapNames, startIndex);
+            _splash.RefreshBrandImage(_playable);
         }
 
         /// <summary>Enable or grey out everything that needs the game's files.</summary>
