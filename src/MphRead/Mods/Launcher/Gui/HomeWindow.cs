@@ -85,6 +85,7 @@ namespace MphRead.Mods.Launcher.Gui
             }
 
             Title = Mods.Branding.Name;
+            Icon = GuiTheme.AppIcon.Value;
             Width = 940;
             Height = 560;
             MinWidth = 780;

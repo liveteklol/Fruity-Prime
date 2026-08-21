@@ -1,3 +1,9 @@
+<img src="src/MphRead/Assets/fruity-prime-logo.png" alt="Fruity Prime" width="520">
+
+**Fruity Prime** is a fork of [NoneGiven/MphRead](https://github.com/NoneGiven/MphRead) that adds a multiplayer client and dedicated server, a graphical launcher on Windows and Linux, and self-update checks. Everything below the fork-specific notes is upstream's own README, describing the model viewer and renderer this is built on.
+
+Playing needs your own Metroid Prime Hunters cartridge dump; no game data is included with or downloaded by this project. See [`CLAUDE.md`](CLAUDE.md) for how the multiplayer, the launchers and the dedicated server fit together.
+
 # MphRead
 This project is a reverse engineering and game recreation effort comprising a model viewer, scene renderer, and general parser for file formats used in the Nintendo DS game Metroid Prime Hunters. The renderer is implemented using OpenGL via the [OpenTK](https://github.com/opentk/opentk) library with audio through [OpenAL Soft](https://github.com/kcat/openal-soft) and [SoundFlow](https://github.com/LSXPrime/SoundFlow). Documentation of various game features can be found in the [wiki](https://github.com/NoneGiven/MphRead/wiki).
 

@@ -5,6 +5,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
+using Avalonia.Platform;
 
 namespace MphRead.Mods.Launcher.Gui
 {
@@ -21,6 +22,28 @@ namespace MphRead.Mods.Launcher.Gui
     /// </summary>
     internal sealed class SplashView : Control
     {
+        /// <summary>
+        /// The wordmark, loaded once from what the csproj embeds as an
+        /// Avalonia resource. Static and lazy so that opening the launcher
+        /// twice in one process -- the loop in <c>GuiLauncher</c> -- decodes
+        /// it once, and a missing asset (it cannot happen in a build this
+        /// project makes, but nothing stops a stripped-down one) falls back to
+        /// no picture rather than a crash on the first screen.
+        /// </summary>
+        private static readonly Lazy<Bitmap?> _brand = new(() =>
+        {
+            try
+            {
+                using Stream stream = AssetLoader.Open(
+                    new Uri("avares://FruityPrime/Assets/fruity-prime-logo.png"));
+                return new Bitmap(stream);
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        });
+
         private Bitmap? _image;
         private string _caption = "";
         private string _note = "";
@@ -154,48 +177,41 @@ namespace MphRead.Mods.Launcher.Gui
         }
 
         /// <summary>
-        /// What a fresh install sees. Drawn rather than shipped as an image,
-        /// because a logo in the repository is one more file the asset guard
-        /// has to be told about and one more thing to keep in two places.
+        /// What a fresh install sees, before there is a map to show: the
+        /// picture the game-files card is answered by, which is the whole
+        /// reason the wordmark has to appear here rather than only in the
+        /// corner of a screen with a room already loaded.
         /// </summary>
         private static void DrawTitleCard(DrawingContext context, Rect body)
         {
-            context.FillRectangle(new LinearGradientBrush
-            {
-                StartPoint = new RelativePoint(0, 0, RelativeUnit.Relative),
-                EndPoint = new RelativePoint(1, 1, RelativeUnit.Relative),
-                GradientStops =
-                {
-                    new GradientStop(Color.FromRgb(16, 22, 34), 0),
-                    new GradientStop(Color.FromRgb(9, 11, 15), 1)
-                }
-            }, body);
-
-            // A faint grid, so the panel reads as deliberate rather than empty.
-            var pen = new Pen(new SolidColorBrush(Color.FromArgb(18, 41, 197, 255)), 1);
-            for (double x = 0; x < body.Width; x += 32)
-            {
-                context.DrawLine(pen, new Point(x, 0), new Point(x, body.Height));
-            }
-            for (double y = 0; y < body.Height; y += 32)
-            {
-                context.DrawLine(pen, new Point(0, y), new Point(body.Width, y));
-            }
-
+            // Plain black: Render already filled the panel with GuiTheme.Ink
+            // before calling here, and the logo's own background was cut
+            // transparent to exactly that colour story, so nothing further is
+            // painted underneath it. A gradient or a grid behind a piece of
+            // real artwork reads as a placeholder competing with the thing it
+            // is a placeholder for.
             double cx = body.Width / 2;
             double cy = body.Height / 2 - 20;
-            context.DrawEllipse(null, new Pen(GuiTheme.AccentBrush, 2),
-                new Point(cx, cy), 46, 46);
-            context.DrawEllipse(GuiTheme.AccentBrush, null, new Point(cx, cy), 14, 14);
-
+            Bitmap? brand = _brand.Value;
+            if (brand != null)
+            {
+                // Fit within a band of the panel's width, never upscaled past
+                // its own resolution -- a wordmark blown up past its source
+                // pixels looks soft in a way a stray dropped frame does not.
+                double maxWidth = Math.Min(body.Width * 0.72, brand.Size.Width);
+                double scale = maxWidth / brand.Size.Width;
+                double w = brand.Size.Width * scale;
+                double h = brand.Size.Height * scale;
+                var dest = new Rect(cx - w / 2, cy - h / 2, w, h);
+                context.DrawImage(brand, new Rect(brand.Size), dest);
+                return;
+            }
+            // Only reachable if the embedded asset failed to decode -- the
+            // build always carries it. A word is still a screen.
             var title = new FormattedText(Mods.Branding.Name.ToUpperInvariant(),
                 CultureInfo.InvariantCulture,
                 FlowDirection.LeftToRight, GuiTheme.Face(true), 30, GuiTheme.TextBrush);
-            context.DrawText(title, new Point(cx - title.Width / 2, cy + 62));
-            var sub = new FormattedText("Metroid Prime Hunters, with multiplayer",
-                CultureInfo.InvariantCulture, FlowDirection.LeftToRight,
-                GuiTheme.Face(false), 13, GuiTheme.TextDimBrush);
-            context.DrawText(sub, new Point(cx - sub.Width / 2, cy + 100));
+            context.DrawText(title, new Point(cx - title.Width / 2, cy));
         }
     }
 }

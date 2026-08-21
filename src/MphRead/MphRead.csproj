@@ -64,6 +64,13 @@
     <!-- Without a DPI declaration Windows bitmap-stretches the window, which
          is both blurry and lays controls out at the wrong size. -->
     <ApplicationHighDpiMode Condition="'$(UseWindowsForms)' == 'true'">PerMonitorV2</ApplicationHighDpiMode>
+    <!-- The exe's own icon: Explorer, the taskbar, a pinned shortcut. Two
+         variants of the same mark, because the game and the server are two
+         different things to have pinned next to each other, and the server's
+         carries a small badge so the two are not the same picture at a
+         glance. Windows only; the property does nothing on the Linux TFM. -->
+    <ApplicationIcon Condition="$(RuntimeIdentifier.StartsWith('win')) and '$(MphReadServer)' != 'true'">Assets\fruity-prime.ico</ApplicationIcon>
+    <ApplicationIcon Condition="$(RuntimeIdentifier.StartsWith('win')) and '$(MphReadServer)' == 'true'">Assets\fruity-prime-server.ico</ApplicationIcon>
     <PublishSingleFile>true</PublishSingleFile>
     <DebugType>embedded</DebugType>
     <Nullable>enable</Nullable>
@@ -95,6 +102,21 @@
     <PackageReference Include="Avalonia.Desktop" Version="11.2.3" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="11.2.3" />
     <PackageReference Include="Avalonia.Fonts.Inter" Version="11.2.3" />
+    <!-- Loaded at runtime through avares://, Avalonia's own asset scheme: a
+         plain EmbeddedResource is not visible to AssetLoader. The wordmark
+         is the splash screen's default picture; the mark is the window icon. -->
+    <AvaloniaResource Include="Assets\fruity-prime-logo.png" />
+    <AvaloniaResource Include="Assets\fruity-prime-mark.png" />
+  </ItemGroup>
+
+  <!-- The wordmark for the WinForms splash panel, which reads it as a plain
+       embedded resource (System.Resources, not Avalonia's scheme) since this
+       is the Windows game build. The server build has no splash panel and
+       does not need it. -->
+  <ItemGroup Condition="'$(UseWindowsForms)' == 'true'">
+    <EmbeddedResource Include="Assets\fruity-prime-logo.png">
+      <LogicalName>FruityPrime.Assets.fruity-prime-logo.png</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
 
   <ItemGroup>

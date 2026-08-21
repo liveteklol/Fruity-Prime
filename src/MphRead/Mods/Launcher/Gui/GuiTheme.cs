@@ -1,5 +1,9 @@
+using System;
+using System.IO;
 using Avalonia;
+using Avalonia.Controls;
 using Avalonia.Media;
+using Avalonia.Platform;
 
 namespace MphRead.Mods.Launcher.Gui
 {
@@ -53,6 +57,33 @@ namespace MphRead.Mods.Launcher.Gui
 
         public static Typeface Face(bool bold) => new(Display,
             FontStyle.Normal, bold ? FontWeight.SemiBold : FontWeight.Normal);
+
+        /// <summary>
+        /// The window's icon -- the cherry mark alone, not the wordmark: a
+        /// title bar, taskbar entry and alt-tab thumbnail are all small and
+        /// square, and the wide banner would either be squeezed unreadable or
+        /// cropped to nothing. Lazy for the same reason the splash's copy of
+        /// the wordmark is: decoded once, and a build missing the asset gets
+        /// no icon rather than a crash before the window exists.
+        ///
+        /// Named AppIcon rather than WindowIcon: this is a
+        /// <c>Lazy&lt;Avalonia.Controls.WindowIcon?&gt;</c>, and giving it the
+        /// same name as the type it holds is the kind of thing that reads fine
+        /// today and confuses whoever edits it next.
+        /// </summary>
+        public static readonly Lazy<WindowIcon?> AppIcon = new(() =>
+        {
+            try
+            {
+                using Stream stream = AssetLoader.Open(
+                    new Uri("avares://FruityPrime/Assets/fruity-prime-mark.png"));
+                return new WindowIcon(stream);
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        });
 
         /// <summary>Blend towards white or black, for hover and pressed states.</summary>
         public static Color Shade(Color color, double amount)

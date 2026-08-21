@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.IO;
+using System.Reflection;
 using System.Runtime.Versioning;
 using System.Windows.Forms;
 
@@ -22,6 +23,26 @@ namespace MphRead.Mods.Launcher
     [SupportedOSPlatform("windows")]
     public sealed class SplashPanel : Control
     {
+        /// <summary>
+        /// The wordmark, decoded once from the csproj's embedded resource.
+        /// Shown on the placeholder -- a fresh install, before there is a room
+        /// or a splash.png to show instead -- which is the one screen every
+        /// player sees regardless of what they end up doing.
+        /// </summary>
+        private static readonly Lazy<Image?> _wordmark = new(() =>
+        {
+            try
+            {
+                using Stream? stream = typeof(SplashPanel).Assembly.GetManifestResourceStream(
+                    "FruityPrime.Assets.fruity-prime-logo.png");
+                return stream != null ? Image.FromStream(stream) : null;
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        });
+
         private readonly LauncherTheme _theme;
         private readonly Image? _brandImage;
         private Image? _image;
@@ -181,6 +202,22 @@ namespace MphRead.Mods.Launcher
             {
                 g.DrawLine(pen, x, body.Bottom, x + body.Height, body.Top);
             }
+
+            Image? wordmark = _wordmark.Value;
+            if (wordmark != null)
+            {
+                // Fit within a band of the panel, never upscaled past its own
+                // resolution: a wordmark blown up past its source pixels looks
+                // soft in a way a stray dropped frame does not.
+                float maxWidth = Math.Min(body.Width * 0.72f, wordmark.Width);
+                float scale = maxWidth / wordmark.Width;
+                float w = wordmark.Width * scale;
+                float h = wordmark.Height * scale;
+                float x = body.X + (body.Width - w) / 2f;
+                float y = body.Y + body.Height * 0.36f - h / 2f;
+                g.DrawImage(wordmark, x, y, w, h);
+            }
+
             Font hint = _theme.Body(_theme.S(12));
             using var brush = new SolidBrush(LauncherTheme.TextDim);
             g.DrawString("Map previews appear here once they are generated"
@@ -230,8 +267,8 @@ namespace MphRead.Mods.Launcher
 
             Font mark = _theme.Display(_theme.S(52));
             float markHeight = mark.GetHeight(g);
-            LauncherTheme.DrawTracked(g, "MPHREAD", mark, LauncherTheme.Text,
-                left - _theme.S(3), bottom - markHeight, _theme.S(2));
+            LauncherTheme.DrawTracked(g, Mods.Branding.Name.ToUpperInvariant(), mark,
+                LauncherTheme.Text, left - _theme.S(3), bottom - markHeight, _theme.S(2));
         }
 
         protected override void Dispose(bool disposing)
