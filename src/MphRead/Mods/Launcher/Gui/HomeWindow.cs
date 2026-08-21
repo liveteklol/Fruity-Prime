@@ -13,6 +13,7 @@ using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using MphRead.Entities;
+using MphRead.Mods;
 using MphRead.Mods.Network;
 using MphRead.Mods.Update;
 
@@ -358,6 +359,17 @@ namespace MphRead.Mods.Launcher.Gui
                         _setupProgress.Set(progress.Fraction, progress.Stage);
                     }
                 })));
+            if (ok)
+            {
+                log.Text = Tail(log.Text, "Rendering map previews...");
+                IReadOnlyList<string> missing = ThumbnailGenerator.MissingThumbnails();
+                await Task.Run(() => ThumbnailBatch.Run(missing, ThumbnailBatch.DefaultParallelism,
+                    ThumbnailGenerator.ThumbnailWidth, ThumbnailGenerator.ThumbnailHeight,
+                    line => Dispatcher.UIThread.Post(() =>
+                    {
+                        log.Text = Tail(log.Text, line);
+                    })));
+            }
             progress.Finish(ok);
             _setupProgress.Set(progress.Fraction, progress.Stage);
             button.IsEnabled = true;

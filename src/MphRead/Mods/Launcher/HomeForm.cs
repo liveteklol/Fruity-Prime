@@ -9,6 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using MphRead.Entities;
+using MphRead.Mods;
 using MphRead.Mods.Network;
 
 namespace MphRead.Mods.Launcher
@@ -452,26 +453,49 @@ namespace MphRead.Mods.Launcher
             }))).ContinueWith(task =>
             {
                 bool ok = task.IsCompletedSuccessfully && task.Result;
+                if (ok)
+                {
+                    GameFiles.ApplyPaths();
+                }
                 ApplyOnUi(() =>
                 {
-                    _settingUp = false;
-                    _setupButton.Enabled = true;
-                    _setupButton.Text = ok ? "Choose a different file" : "Choose your .nds file";
-                    if (ok)
-                    {
-                        GameFiles.ApplyPaths();
-                        _setupLog.Text = "";
-                    }
-                    RefreshGameFiles();
                     _setupStatus.ForeColor = ok ? LauncherTheme.Good : LauncherTheme.Bad;
                     _setupStatus.Text = ok
-                        ? $"{GameFiles.Describe()} -- you can play now."
+                        ? "Rendering map previews..."
                         : "That file could not be used. It has to be a Metroid Prime "
                             + "Hunters or First Hunt cartridge dump.";
                     if (ok)
                     {
-                        ShowCard(_homeCard);
+                        _setupLog.Text = "";
                     }
+                    else
+                    {
+                        _settingUp = false;
+                        _setupButton.Enabled = true;
+                        _setupButton.Text = "Choose your .nds file";
+                    }
+                    RefreshGameFiles();
+                });
+                if (!ok)
+                {
+                    return;
+                }
+                IReadOnlyList<string> missing = ThumbnailGenerator.MissingThumbnails();
+                ThumbnailBatch.Run(missing, ThumbnailBatch.DefaultParallelism,
+                    ThumbnailGenerator.ThumbnailWidth, ThumbnailGenerator.ThumbnailHeight,
+                    line => ApplyOnUi(() =>
+                    {
+                        _setupLog.Text = line.Length > 120 ? line[..120] : line;
+                    }));
+                ApplyOnUi(() =>
+                {
+                    _settingUp = false;
+                    _setupButton.Enabled = true;
+                    _setupButton.Text = "Choose a different file";
+                    _setupLog.Text = "";
+                    _setupStatus.ForeColor = LauncherTheme.Good;
+                    _setupStatus.Text = $"{GameFiles.Describe()} -- you can play now.";
+                    ShowCard(_homeCard);
                 });
             }, TaskScheduler.Default);
         }

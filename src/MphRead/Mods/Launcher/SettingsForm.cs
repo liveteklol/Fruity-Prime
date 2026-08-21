@@ -53,7 +53,6 @@ namespace MphRead.Mods.Launcher
         private ToggleRow _radar = null!;
         private ToggleRow _affinity = null!;
         private readonly List<(PropertyInfo Property, ToggleRow Row)> _toggles = new();
-        private Label _previewStatus = null!;
         private Label _saveError = null!;
 
         private const int _railWidth = 216;
@@ -256,7 +255,6 @@ namespace MphRead.Mods.Launcher
             BuildToggles("Bugfixes", typeof(Bugfixes),
                 "Corrections to original-game bugs. Off restores what the retail "
                 + "game shipped with.");
-            BuildPreviews();
             BuildFooter();
         }
 
@@ -423,57 +421,6 @@ namespace MphRead.Mods.Launcher
                 var row = Add(page, new ToggleRow(_theme, Humanize(property.Name),
                     (bool)(property.GetValue(null) ?? false)), gap: 1);
                 _toggles.Add((property, row));
-            }
-        }
-
-        private void BuildPreviews()
-        {
-            FlowLayoutPanel page = AddSection("Map previews");
-            Heading(page, "Map previews");
-            Note(page, "The pictures beside the map on the front screen. They are rendered "
-                + "here, from your own files -- nothing is downloaded, and none of it is "
-                + "part of this program.", height: 52);
-            _previewStatus = Note(page, PreviewStatus(), height: 30);
-            var generate = new MenuButton(_theme, "Generate the missing ones", titleSize: 14)
-            {
-                Height = _theme.S(38)
-            };
-            generate.Click += (_, _) => GeneratePreviews(generate);
-            Add(page, generate, gap: 8);
-        }
-
-        private static string PreviewStatus()
-        {
-            int missing = ThumbnailGenerator.MissingThumbnails().Count;
-            return missing == 0
-                ? "Every map has one."
-                : $"{missing} map(s) have none yet.";
-        }
-
-        private void GeneratePreviews(MenuButton button)
-        {
-            // The batch spawns its own processes and takes a while; a player
-            // who pressed this has nothing else to do in this window.
-            button.Enabled = false;
-            button.Text = "Generating";
-            _previewStatus.Text = "Rendering... the game will open and close once per map.";
-            Application.DoEvents();
-            try
-            {
-                IReadOnlyList<string> missing = ThumbnailGenerator.MissingThumbnails();
-                if (missing.Count > 0)
-                {
-                    ThumbnailBatch.Run(missing, ThumbnailBatch.DefaultParallelism,
-                        ThumbnailGenerator.ThumbnailWidth, ThumbnailGenerator.ThumbnailHeight);
-                }
-                _previewStatus.Text = missing.Count == 0
-                    ? "Every map already had one."
-                    : $"Rendered {missing.Count}. Reopen the launcher to see them.";
-            }
-            finally
-            {
-                button.Enabled = true;
-                button.Text = "Generate the missing ones";
             }
         }
 

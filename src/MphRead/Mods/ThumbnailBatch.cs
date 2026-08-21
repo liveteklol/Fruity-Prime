@@ -20,7 +20,7 @@ namespace MphRead.Mods
         public const int DefaultParallelism = 10;
 
         public static int Run(IReadOnlyList<string> rooms, int parallelism,
-                              int width, int height)
+                              int width, int height, Action<string>? report = null)
         {
             if (rooms.Count == 0)
             {
@@ -31,7 +31,7 @@ namespace MphRead.Mods
             if (exePath == null)
             {
                 Console.WriteLine("[thumbnails] cannot locate this executable; running serially");
-                return RunSerial(rooms, width, height);
+                return RunSerial(rooms, width, height, report);
             }
 
             var queue = new Queue<string>(rooms);
@@ -67,8 +67,10 @@ namespace MphRead.Mods
                     {
                         written++;
                     }
-                    Console.WriteLine($"[thumbnails] {done}/{rooms.Count}  "
-                        + $"{(ok ? "ok" : "FAILED")}  {room}");
+                    string line = $"[thumbnails] {done}/{rooms.Count}  "
+                        + $"{(ok ? "ok" : "FAILED")}  {room}";
+                    Console.WriteLine(line);
+                    report?.Invoke(line);
                 }
                 if (running.Count > 0)
                 {
@@ -110,7 +112,8 @@ namespace MphRead.Mods
             }
         }
 
-        private static int RunSerial(IReadOnlyList<string> rooms, int width, int height)
+        private static int RunSerial(IReadOnlyList<string> rooms, int width, int height,
+                                      Action<string>? report)
         {
             int written = 0;
             for (int i = 0; i < rooms.Count; i++)
@@ -119,7 +122,9 @@ namespace MphRead.Mods
                 {
                     written++;
                 }
-                Console.WriteLine($"[thumbnails] {i + 1}/{rooms.Count}  {rooms[i]}");
+                string line = $"[thumbnails] {i + 1}/{rooms.Count}  {rooms[i]}";
+                Console.WriteLine(line);
+                report?.Invoke(line);
             }
             return written;
         }
