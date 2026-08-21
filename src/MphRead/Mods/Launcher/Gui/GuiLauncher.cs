@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.ExceptionServices;
 using System.Threading;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
@@ -156,7 +157,12 @@ namespace MphRead.Mods.Launcher.Gui
             thread.Join();
             if (failure != null)
             {
-                throw failure;
+                // Rethrown with its original stack. A plain `throw failure`
+                // resets it to this line, which turns every fault inside the
+                // window into "something went wrong somewhere in the launcher"
+                // -- and this is the path that decides whether to fall back to
+                // the text screen, so it is exactly where the reason matters.
+                ExceptionDispatchInfo.Capture(failure).Throw();
             }
             return plan;
         }

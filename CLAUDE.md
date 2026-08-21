@@ -210,6 +210,30 @@ Known limits, none of them hidden from the user:
   fallback is for, and it is not hypothetical -- the WSL box this was built on
   was missing both.
 
+### First run is the whole screen
+
+Until there is something to play, the launcher shows the game-files card and
+nothing else: no "Back", and the menu behind it is not reachable. That menu has
+no map previews to put on the left and four of its five entries refused, which
+is a worse first impression than one screen asking for the one thing it needs.
+`_setupBack` is hidden until `GameFiles.Ready`, and the text launcher offers a
+one-entry menu for the same reason. A successful extraction switches straight to
+the full screen, which by then has previews to show.
+
+**The progress bar is milestone-driven, and the total is not known.** Upstream's
+setup walks the ROM's tree and writes as it goes; nothing counts the files
+first, and a counting pass would mean reading the cartridge twice to draw a
+nicer bar. So `SetupProgress` classifies each line the child prints into a phase
+-- writing files, unpacking archives, converting music, decompressing code --
+and creeps asymptotically towards that phase's ceiling. It never goes backwards,
+never sits at 100% while work continues, and the *rate* inside a band means
+nothing: a nearly-full band only means that phase has printed a lot of lines.
+What it is good for is the thing somebody actually wants during a five-minute
+extraction, which is knowing it is alive.
+
+The console draws it over itself with a carriage return, but only when stdout is
+a terminal -- into a pipe or a log, that just makes an unreadable file.
+
 ### The settings window
 
 A rail of sections down the left -- Display, Audio, Controls, Match rules,

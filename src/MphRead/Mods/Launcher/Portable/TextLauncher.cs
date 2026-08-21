@@ -139,14 +139,33 @@ namespace MphRead.Mods.Launcher
                 Console.WriteLine($"  Player     : {LauncherPrefs.PlayerName}"
                     + $" as {LauncherPrefs.LastHunter}");
                 Console.WriteLine();
-                // Everything but "game files" is greyed out on the window when
-                // there is nothing set up; here it says so instead, because a
-                // menu that silently refuses four of its five entries is worse
-                // than one that explains why.
+                // Before there is anything to play, the setup is the whole
+                // screen. A menu that offers five things and refuses four of
+                // them is a worse first impression than one that asks for the
+                // one thing it needs.
                 if (problem != null)
                 {
-                    Console.WriteLine($"  {problem} -- only [5] can be used until that is fixed.");
+                    Console.WriteLine($"  {problem}.");
                     Console.WriteLine();
+                    Console.WriteLine("  [1] Game files       point this at your .nds dump");
+                    Console.WriteLine("  [q] Quit");
+                    Console.WriteLine();
+                    Console.WriteLine($"  {Mods.Credits.Summary}");
+                    Console.WriteLine();
+                    string only = Ask("  Choose", "1").ToLowerInvariant();
+                    if (only == "q" || only == "quit")
+                    {
+                        return false;
+                    }
+                    SetUpGameFiles();
+                    problem = GameFiles.Problem();
+                    if (problem == null)
+                    {
+                        // Straight into the launcher proper: there are map
+                        // previews to show now, and every entry works.
+                        return true;
+                    }
+                    continue;
                 }
                 if (Update.Updater.Available != null)
                 {
@@ -530,7 +549,33 @@ namespace MphRead.Mods.Launcher
                 return;
             }
             Console.WriteLine();
-            bool ok = GameFiles.RunSetup(path, line => Console.WriteLine($"  {line}"));
+            var progress = new SetupProgress();
+            bool redraw = !Console.IsOutputRedirected;
+            bool ok = GameFiles.RunSetup(path, line =>
+            {
+                if (!progress.Observe(line))
+                {
+                    return;
+                }
+                if (redraw)
+                {
+                    // Over the top of itself, so a five-minute extraction is
+                    // one line rather than a thousand. Only when the output is
+                    // a terminal: into a pipe or a log, carriage returns just
+                    // make an unreadable file.
+                    Console.Write($"\r  {progress.Bar()}  {progress.Stage,-22}");
+                }
+                else
+                {
+                    Console.WriteLine($"  {progress.Bar()}  {progress.Stage}");
+                }
+            });
+            progress.Finish(ok);
+            if (redraw)
+            {
+                Console.Write($"\r  {progress.Bar()}  {progress.Stage,-22}");
+            }
+            Console.WriteLine();
             Console.WriteLine();
             Console.WriteLine(ok ? "  Ready to play." : "  Setup did not finish.");
         }

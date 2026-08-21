@@ -39,6 +39,8 @@ namespace MphRead.Mods.Launcher.Gui
         private readonly SplashView _splash = new();
         private readonly Panel _cards = new();
 
+        private readonly ProgressRow _setupProgress = new();
+        private MenuEntry _setupBack = null!;
         private Control _homeCard = null!;
         private Control _setupCard = null!;
         private Control _onlineCard = null!;
@@ -140,6 +142,7 @@ namespace MphRead.Mods.Launcher.Gui
             _matchCard = BuildMatchCard();
             _browseCard = BuildBrowseCard();
 
+            _setupBack.IsVisible = GameFiles.Ready;
             ShowCard(GameFiles.Ready ? _homeCard : _setupCard);
             RefreshSplash();
 
@@ -300,9 +303,16 @@ namespace MphRead.Mods.Launcher.Gui
                 + "alone. No game data is included in this download, and none is "
                 + "downloaded."));
             card.Children.Add(choose);
+            card.Children.Add(_setupProgress);
             card.Children.Add(scroll);
-            var back = Back(() => ShowCard(_homeCard));
-            card.Children.Add(back);
+            // Hidden until there is something to go back to. Before the game
+            // files are set up this card is the whole launcher: the menu behind
+            // it has no map previews to show on the left and four of its five
+            // entries refused, which is a worse first impression than one
+            // screen asking for the one thing it needs.
+            _setupBack = Back(() => ShowCard(_homeCard));
+            _setupBack.IsVisible = false;
+            card.Children.Add(_setupBack);
             return card;
         }
 
@@ -332,12 +342,23 @@ namespace MphRead.Mods.Launcher.Gui
             button.IsEnabled = false;
             button.Title = "Working...";
             log.Text = "";
+            var progress = new SetupProgress();
+            _setupProgress.Set(0, "Starting");
             // Extraction is upstream's own, in a child process, and takes
             // minutes. Off the UI thread, or the window stops answering and
             // looks like it has crashed at the exact moment it is doing the one
             // thing a fresh install needs.
             bool ok = await Task.Run(() => GameFiles.RunSetup(path, line =>
-                Dispatcher.UIThread.Post(() => log.Text = Tail(log.Text, line))));
+                Dispatcher.UIThread.Post(() =>
+                {
+                    log.Text = Tail(log.Text, line);
+                    if (progress.Observe(line))
+                    {
+                        _setupProgress.Set(progress.Fraction, progress.Stage);
+                    }
+                })));
+            progress.Finish(ok);
+            _setupProgress.Set(progress.Fraction, progress.Stage);
             button.IsEnabled = true;
             button.Title = "Choose your .nds file";
             log.Text = Tail(log.Text, ok ? "Ready to play." : "Setup did not finish.");
@@ -345,6 +366,10 @@ namespace MphRead.Mods.Launcher.Gui
             RefreshSplash();
             if (ok)
             {
+                // The launcher proper, now that there is something behind it:
+                // map previews to show on the left, and every entry usable.
+                _setupBack.IsVisible = true;
+                _setupProgress.IsVisible = false;
                 ShowCard(_homeCard);
             }
         }
