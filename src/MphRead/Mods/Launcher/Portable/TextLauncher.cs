@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Linq;
 using MphRead.Entities;
 using MphRead.Mods.Network;
+using MphRead.Mods.Update;
 
 namespace MphRead.Mods.Launcher
 {
@@ -30,9 +31,14 @@ namespace MphRead.Mods.Launcher
         public static void Run()
         {
             LauncherPrefs.Load();
-            if (LauncherPrefs.AutoUpdate && UpdateNow())
+            if (LauncherPrefs.AutoUpdate)
             {
-                return;
+                // Started in the background and then waited on briefly. This
+                // screen is printed once and then blocks on a keypress, so a
+                // check that lands afterwards has no line to appear on until
+                // the menu is drawn again.
+                Update.Updater.CheckInBackground(_ => { });
+                Update.Updater.WaitForCheck(TimeSpan.FromSeconds(2));
             }
             if (GameFiles.Ready)
             {
@@ -94,26 +100,24 @@ namespace MphRead.Mods.Launcher
         }
 
         /// <summary>
-        /// Look for a new release and install it, before the screen is shown.
+        /// "Update now": open the release page and say what to fetch.
         ///
-        /// Returns true when one was installed and this process should stop.
-        /// Here rather than behind an entry on the menu because a build one
-        /// release behind cannot join a server at all -- the protocol version
-        /// is checked at Hello -- so "there is an update" and "nothing works"
-        /// are the same news, and it is not news worth making somebody act on.
+        /// The program does not install it. On a machine with no desktop --
+        /// which is most of the ones that get this screen -- there is no
+        /// browser to open either, so the address is printed and that is the
+        /// whole of it.
         /// </summary>
-        private static bool UpdateNow()
+        private static void UpdateNow(UpdateInfo update)
         {
-            string? installed = Update.Updater.CheckAndApply(
-                line => Console.WriteLine($"  {line}"));
-            if (installed == null)
+            Console.WriteLine();
+            Console.WriteLine($"  {Update.Updater.Describe(update)}");
+            Console.WriteLine($"  {update.PageUrl}");
+            if (Update.Updater.OpenPage(update))
             {
-                return false;
+                Console.WriteLine("  Opened in your browser.");
             }
+            Console.WriteLine("  Download it there and unpack it over this one.");
             Console.WriteLine();
-            Console.WriteLine($"  Updated. Start {Mods.Branding.Executable} again.");
-            Console.WriteLine();
-            return true;
         }
 
         /// <summary>
@@ -144,13 +148,23 @@ namespace MphRead.Mods.Launcher
                     Console.WriteLine($"  {problem} -- only [5] can be used until that is fixed.");
                     Console.WriteLine();
                 }
+                if (Update.Updater.Available != null)
+                {
+                    Console.WriteLine($"  {Update.Updater.Describe(Update.Updater.Available.Value)}");
+                    Console.WriteLine();
+                }
                 Console.WriteLine("  [1] Play online      join a server");
                 Console.WriteLine("  [2] Play offline     a match against bots");
                 Console.WriteLine("  [3] Host a game      run a server and play on it");
                 Console.WriteLine("  [4] Settings         name, hunter, window, addresses");
                 Console.WriteLine("  [5] Game files       point this at your .nds dump");
-                Console.WriteLine("  [6] Credits          who this is built on");
+                if (Update.Updater.Available != null)
+                {
+                    Console.WriteLine("  [u] Update now       open the download page");
+                }
                 Console.WriteLine("  [q] Quit");
+                Console.WriteLine();
+                Console.WriteLine($"  {Mods.Credits.Summary} -credits for the full list.");
                 Console.WriteLine();
                 string choice = Ask("  Choose", "1").ToLowerInvariant();
                 if (choice == "q" || choice == "quit")
@@ -168,9 +182,9 @@ namespace MphRead.Mods.Launcher
                     problem = GameFiles.Problem();
                     return true;
                 }
-                if (choice == "6")
+                if (choice == "u" && Update.Updater.Available != null)
                 {
-                    Mods.Credits.Print();
+                    UpdateNow(Update.Updater.Available.Value);
                     continue;
                 }
                 if (problem != null)

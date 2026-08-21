@@ -36,10 +36,6 @@ namespace MphRead.Mods
             // Keys and mouse feel, before anything creates a player. Called
             // here because this runs for every invocation, launcher or not.
             InputSettings.Load();
-            // Whatever the last update moved aside. Now, at the start, because
-            // this is the point where those files are certainly not open any
-            // more -- and until now they were the way back.
-            Update.UpdateInstall.CleanUp();
             Update.Updater.Disabled = HasFlag(args, "noupdate");
 
             if (HasFlag(args, "credits"))
@@ -48,17 +44,22 @@ namespace MphRead.Mods
                 return true;
             }
 
-            // Check and install, then say what to run. Explicit, unlike the
-            // checks the launcher and the server do on their own, so there is
-            // always one command that answers "am I on the latest build".
+            // The explicit check, so there is always one command that answers
+            // "am I on the latest build". Nothing is downloaded here either:
+            // it prints the release page and opens it if there is a desktop to
+            // open it on.
             if (HasFlag(args, "update"))
             {
                 Update.Updater.Disabled = false;
-                string? installed = Update.Updater.CheckAndApply(Console.WriteLine);
-                if (installed != null)
+                Update.UpdateInfo? update = Update.Updater.Check();
+                if (update == null)
                 {
-                    Console.WriteLine($"[update] installed. Start {Branding.Executable} again.");
+                    Console.WriteLine($"[update] {Update.UpdateCheck.LastReason}");
+                    return true;
                 }
+                Console.WriteLine($"[update] {Update.Updater.Describe(update.Value)}");
+                Console.WriteLine($"[update] {update.Value.PageUrl}");
+                Update.Updater.OpenPage(update.Value);
                 return true;
             }
             // Before the game-file check, not after: a fresh install has no
@@ -107,17 +108,27 @@ namespace MphRead.Mods
                 return true;
             }
 #endif
-            // Both servers update before they bind, and only then.
+            // Both servers say so at startup if they are behind, and then get
+            // on with it.
             //
             // A protocol change makes a server refuse every client on an older
-            // build at Hello, so a stale server is a server nobody can join --
-            // which is why this is worth doing unattended. It is also why it
-            // happens here and not later: replacing the binary under a match in
-            // progress would disconnect the people the feature exists for.
-            if ((HasFlag(args, "masterserver") || HasFlag(args, "server")
-                || HasFlag(args, "dedicated")) && Update.Updater.UpdatedBeforeStart())
+            // build at Hello, so a stale server is a server nobody can join,
+            // and that is worth one line in the journal where an operator will
+            // find it. It is a line and not an install: nothing here has a
+            // person at the keyboard to decide, and a server that replaced its
+            // own binary and restarted would drop whoever was playing.
+            if (HasFlag(args, "masterserver") || HasFlag(args, "server")
+                || HasFlag(args, "dedicated"))
             {
-                return true;
+                Update.UpdateInfo? update = Update.Updater.Check();
+                if (update != null)
+                {
+                    Console.WriteLine($"[update] {Update.Updater.Describe(update.Value)}");
+                    Console.WriteLine($"[update] {update.Value.PageUrl}");
+                    Console.WriteLine("[update] this server keeps running on "
+                        + $"{Update.BuildVersion.Display}; clients on the new build "
+                        + "will be refused until it is updated by hand");
+                }
             }
 
             // The server directory: -masterserver. Same binary as the game

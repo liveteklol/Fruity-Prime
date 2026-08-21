@@ -75,13 +75,14 @@ namespace MphRead.Mods.Launcher
         public static int LastKind { get; set; }
 
         /// <summary>
-        /// Whether the front screen looks for a new release and installs it.
+        /// Whether the front screen looks for a new release.
         ///
-        /// On by default, and the check runs while the launcher is on screen,
-        /// which is the one moment nothing is depending on this build staying
-        /// put. The reason it is on rather than offered: a server refuses a
-        /// client on a different protocol version outright, so an out-of-date
-        /// copy is not a slightly worse copy, it is one that cannot join.
+        /// Looks only. Finding one puts "Update now" on the screen, and that
+        /// opens the release page in a browser; the download and the unpacking
+        /// are the player's. On by default because a server refuses a client on
+        /// a different protocol version outright, so an out-of-date copy is not
+        /// a slightly worse copy, it is one that cannot join anything -- and
+        /// nobody should have to work that out from a failed connection.
         /// </summary>
         public static bool AutoUpdate { get; set; } = true;
 

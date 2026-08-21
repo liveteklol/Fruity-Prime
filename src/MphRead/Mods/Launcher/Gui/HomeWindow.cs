@@ -14,6 +14,7 @@ using Avalonia.Threading;
 using Avalonia.VisualTree;
 using MphRead.Entities;
 using MphRead.Mods.Network;
+using MphRead.Mods.Update;
 
 namespace MphRead.Mods.Launcher.Gui
 {
@@ -90,12 +91,31 @@ namespace MphRead.Mods.Launcher.Gui
             Background = GuiTheme.PanelBrush;
             RequestedThemeVariant = Avalonia.Styling.ThemeVariant.Dark;
 
+            // Small, dim, and in the corner: an acknowledgement, not a
+            // feature. The full list is -credits.
+            var credits = new TextBlock
+            {
+                Text = Mods.Credits.Compact,
+                FontFamily = GuiTheme.Display,
+                FontSize = 10,
+                Foreground = new SolidColorBrush(Color.FromRgb(78, 86, 102)),
+                TextWrapping = TextWrapping.Wrap,
+                TextAlignment = TextAlignment.Right,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                VerticalAlignment = VerticalAlignment.Bottom,
+                Margin = new Thickness(0, 14, 0, 0)
+            };
+            var stack = new Grid { RowDefinitions = new RowDefinitions("*,Auto") };
+            Grid.SetRow(_cards, 0);
+            Grid.SetRow(credits, 1);
+            stack.Children.Add(_cards);
+            stack.Children.Add(credits);
             var panel = new Border
             {
                 Background = GuiTheme.PanelBrush,
-                Padding = new Thickness(22, 20, 22, 20),
+                Padding = new Thickness(22, 20, 22, 16),
                 Width = 400,
-                Child = _cards
+                Child = stack
             };
             var grid = new Grid
             {
@@ -115,6 +135,15 @@ namespace MphRead.Mods.Launcher.Gui
 
             ShowCard(GameFiles.Ready ? _homeCard : _setupCard);
             RefreshSplash();
+
+            if (LauncherPrefs.AutoUpdate)
+            {
+                // In the background, and never blocking the window: a launcher
+                // that will not draw until GitHub answers looks broken on a bad
+                // connection.
+                Update.Updater.CheckInBackground(update =>
+                    Dispatcher.UIThread.Post(() => ShowUpdate(update)));
+            }
         }
 
         protected override void OnKeyDown(KeyEventArgs e)
@@ -164,6 +193,7 @@ namespace MphRead.Mods.Launcher.Gui
 
         // ---------------------------------------------------------------- home
 
+        private MenuEntry _updateEntry = null!;
         private MenuEntry _onlineEntry = null!;
         private MenuEntry _offlineEntry = null!;
         private MenuEntry _hostEntry = null!;
@@ -172,6 +202,16 @@ namespace MphRead.Mods.Launcher.Gui
         private Control BuildHomeCard()
         {
             var card = Card();
+            // Hidden until a check finds a release. It is the first thing on
+            // the screen when it appears, because a build one release behind is
+            // refused by every server at Hello: this is not a nicety, it is the
+            // reason nothing else on the card will work.
+            _updateEntry = new MenuEntry("Update now", "", titleSize: 17)
+            {
+                Accent = GuiTheme.Warm,
+                IsVisible = false
+            };
+            _updateEntry.Click += (_, _) => UpdateNow();
             _onlineEntry = new MenuEntry("Play online", "Join a server");
             _onlineEntry.Click += (_, _) => ShowCard(_onlineCard);
             _offlineEntry = new MenuEntry("Play offline", "A match against bots");
@@ -182,20 +222,47 @@ namespace MphRead.Mods.Launcher.Gui
             settings.Click += (_, _) => ShowCard(BuildSettingsCard());
             _filesEntry = new MenuEntry("Game files", GameFiles.Describe());
             _filesEntry.Click += (_, _) => ShowCard(_setupCard);
-            var credits = new MenuEntry("Credits", "Who this is built on");
-            credits.Click += (_, _) => ShowCard(BuildCreditsCard());
             var quit = new MenuEntry("Quit");
             quit.Click += (_, _) => Close();
 
             card.Children.Add(new Caption(Mods.Branding.NameAndVersion));
+            card.Children.Add(_updateEntry);
             card.Children.Add(_onlineEntry);
             card.Children.Add(_offlineEntry);
             card.Children.Add(_hostEntry);
             card.Children.Add(settings);
             card.Children.Add(_filesEntry);
-            card.Children.Add(credits);
             card.Children.Add(quit);
             return card;
+        }
+
+        private void ShowUpdate(UpdateInfo update)
+        {
+            _updateEntry.Subtitle = update.AssetName.Length > 0
+                ? $"{update.Tag} is out -- get {update.AssetName}"
+                : $"{update.Tag} is out";
+            _updateEntry.SubtitleColor = GuiTheme.Warm;
+            _updateEntry.IsVisible = true;
+        }
+
+        /// <summary>
+        /// Open the release page. The program does not install anything: this
+        /// hands the person the page and they replace the files themselves.
+        /// </summary>
+        private void UpdateNow()
+        {
+            UpdateInfo? update = Update.Updater.Available;
+            if (update == null)
+            {
+                return;
+            }
+            if (!Update.Updater.OpenPage(update.Value))
+            {
+                // No browser to open, or it refused. Putting the address on the
+                // card beats a button that appears to do nothing.
+                _updateEntry.Subtitle = update.Value.PageUrl;
+                _updateEntry.SubtitleColor = GuiTheme.Text;
+            }
         }
 
         /// <summary>
@@ -731,47 +798,6 @@ namespace MphRead.Mods.Launcher.Gui
                     entry.SubtitleColor = status.Online ? GuiTheme.TextDim : GuiTheme.Warm;
                 });
             });
-        }
-
-        // ------------------------------------------------------------- credits
-
-        /// <summary>
-        /// Who this is built on. The same list as -credits and as upstream's
-        /// README, in the program rather than only in a file on GitHub.
-        /// </summary>
-        private Control BuildCreditsCard()
-        {
-            var list = new StackPanel { Spacing = 2 };
-            list.Children.Add(new Note(Mods.Credits.Summary, GuiTheme.Text));
-            list.Children.Add(new Note("A significant portion of this project's code is "
-                + "based on the file format information or source code of these projects."));
-            foreach (Mods.Credits.Entry entry in Mods.Credits.Entries)
-            {
-                var item = new MenuEntry(entry.Who, entry.What, titleSize: 14)
-                {
-                    Accent = GuiTheme.TextDim
-                };
-                list.Children.Add(item);
-                if (entry.Where.Length > 0)
-                {
-                    list.Children.Add(new Note(entry.Where));
-                }
-            }
-            list.Children.Add(new Note("Metroid Prime Hunters is Nintendo's. No game data "
-                + "is included with this program: it is unpacked from your own cartridge "
-                + "dump."));
-
-            var card = Card();
-            card.Children.Add(new Caption("Credits"));
-            card.Children.Add(new ScrollViewer
-            {
-                Height = 400,
-                Content = list,
-                HorizontalScrollBarVisibility =
-                    Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled
-            });
-            card.Children.Add(Back(() => ShowCard(_homeCard)));
-            return card;
         }
 
         // ------------------------------------------------------------ settings

@@ -90,7 +90,7 @@ export ALSOFT_DRIVERS=null PULSE_SERVER=   # else ALSA retries stall frames
 | `MphRead -menu` | the console menu, for people who typed something |
 | `MphRead -launcher [-console]` | the front screen explicitly; `-console` also gives it a terminal. **Off Windows this opens the Avalonia front screen**, or the text one when there is no display. A bare `MphRead` off Windows still opens upstream's `-menu` prompts, unchanged |
 | `FruityPrime -launcher -text` | the text front screen on a machine that has a display. What an SSH session gets anyway |
-| `FruityPrime -update` | check GitHub for a newer release, install it, and say so. The one command that answers "am I on the latest build" |
+| `FruityPrime -update` | check GitHub for a newer release and open its page. Installs nothing; the one command that answers "am I on the latest build" |
 | `FruityPrime -noupdate` | do none of that, on any command that would have |
 | `FruityPrime -credits` | who this is built on, from `Mods/Credits.cs` |
 | `MphRead -fullscreen` / `-windowed` / `-nohelmet` | display choices for the paths that never open a launcher |
@@ -498,58 +498,54 @@ Two things this needed underneath it:
 
 ## Updating
 
-`Mods/Update/`. A release on GitHub is fetched and installed over the running
-build, on Linux and Windows alike.
+`Mods/Update/`. The program checks GitHub for a newer release on its own, says
+so, and **installs nothing**. "Update now" opens the release page; the download
+and the unpacking are the player's.
 
-**Why it is automatic rather than offered.** `NetConfig.ProtocolVersion` makes a
-server refuse a client on a different build outright, at Hello. That is the
-right behaviour — the alternative is reading the right bytes at the wrong
-offsets — but it means a copy one release behind is not slightly worse, it is
-one that cannot join anything. "There is an update" and "nothing you press will
-work" are the same news, so acting on it is not left to the player.
+**Why it checks by itself but does not install.** `NetConfig.ProtocolVersion`
+makes a server refuse a client on a different build outright, at Hello. So a
+copy one release behind is not slightly worse, it is one that cannot join
+anything -- and working that out from a failed connection is a bad afternoon.
+That is the part worth automating, and it costs a read of one JSON document
+that cannot alter anything on disk. Installing automatically is the other half,
+and it means downloading a file and executing it: there is no signing here, so
+the guarantee would only ever have been "TLS, and GitHub was not compromised".
+Not doing it is better than doing it carefully.
 
-**How a running program replaces itself.** Neither OS will let a running
-executable be overwritten — Windows holds the image open, Linux answers
-ETXTBSY — but both will let it be *renamed*, because the name and the inode are
-different things and the process holds the second one. So every file in the
-package is moved aside to `*.old-update`, the new one is written to the name
-that just came free, and the aside copies are deleted on the next start, when
-nothing has them open. One code path for both platforms, and until that next
-start the previous build is still on disk to go back to. Verified end to end on
-Linux: rename, write, keep running, start the replacement, clean up.
+**What the check is:**
 
-**What stops it going wrong:**
+- **A local build is never told anything.** The release workflow stamps the tag
+  into the assembly (`-p:Version=`); a build without that stamp reports itself
+  `a local build` and the check stands down, because there is no way to tell
+  whether it is ahead of the release or behind it. `BuildVersion` also refuses
+  the `1.0.0` the SDK invents when nothing was asked for, since it cannot be
+  told from a real v1.0.0.
+- **The asset is a hint, not a fetch.** It is matched on runtime identifier and
+  on whether this is a server build, so the screen can say *which* of the four
+  files on the page is yours. A release whose names do not match is still
+  announced -- the person going to the page can see what is actually on it.
+- **404 is not an error.** A repository that has never published a release
+  answers that way, and it is reported as "no releases have been published yet"
+  rather than as a network problem; so is rate limiting, which anonymous calls
+  hit by IP.
 
-- **A local build is never updated.** The release workflow stamps the tag it is
-  building into the assembly (`-p:Version=`); a build without that stamp reports
-  `a local build` and the updater stands down. Without this, a developer's own
-  binary would be replaced by a download whenever its version happened to
-  compare low. `BuildVersion` also refuses the `1.0.0` the SDK invents when
-  nothing was asked for, because it cannot be told from a real v1.0.0.
-- **The asset is matched, not reconstructed.** By runtime identifier and by
-  whether this is a server build, rather than by rebuilding the release
-  workflow's file name — which would have to be kept in step by hand, and whose
-  failure when it drifted would be a silent "no update available" forever. It is
-  also why a package still named `MphRead-…` would still be found.
-- **Only GitHub.** HTTPS, and a host allow-list. A truncated download is
-  detected by length and thrown away rather than unpacked.
-- **All or nothing.** If a file cannot be moved half way through, the ones
-  already moved are put back before anything is reported as installed.
-- There is **no signature check**. This trusts TLS and GitHub, which is the same
-  trust as downloading the release by hand, and no more.
+**Where it appears:**
 
-**When each thing checks.** The moment to replace a program is one where nothing
-depends on it staying up:
-
-| | When | What it does after |
+| | When it checks | What "update now" does |
 |---|---|---|
-| Launcher (both screens) | at startup, before the window | installs and relaunches |
-| Dedicated server and directory | at startup, before binding the socket | installs and exits, for systemd or NSSM to restart it |
-| `-update` | when asked | installs and says to start it again |
+| Launcher window | in the background once the window is up | opens the release page; if there is no browser, puts the address on the card |
+| Text launcher | at startup, waiting up to 2 s | prints the address, and opens a browser if there is one |
+| `-update` | when asked | prints the address and opens it |
+| Server and directory | at startup, before binding | nothing -- it logs one line saying it is behind and keeps running |
 
-A running server is left alone: replacing the binary under a match would
-disconnect exactly the people the feature exists for. `launcher.txt` carries
-`auto_update`, on by default.
+The text launcher waits because it prints its menu once and then blocks on a
+keypress: a check that lands afterwards has no line to appear on until the menu
+is drawn again. The window has no such problem and never blocks on GitHub.
+
+A server is told, not acted on. Nothing there has a person at the keyboard to
+decide, and replacing a server's binary would drop whoever was playing --
+which is the audience the whole feature exists for. `launcher.txt` carries
+`auto_update`, on by default; `-noupdate` turns it off anywhere.
 
 ## The test method
 
@@ -906,12 +902,16 @@ why its column is the weakest.
 - **The pause menu is still Windows-only.** `PauseMenuForm` is WinForms; off
   Windows, `Escape` in a match does what it did before. That is the one entry
   from the Windows launcher's list with no counterpart yet.
-- **The updater has never installed a real release.** There are none yet: the
-  repository has published nothing, so what is proven is the version logic, the
-  asset matching, the refusals, and the file-swap mechanism on Linux — each
-  tested on its own. The first tagged release is what tests the whole path, and
-  the honest order is to tag one, download it by hand, and only then trust the
-  automatic install. The Windows swap in particular has never run.
+- **The update check has never seen a release of this repository.** There are
+  none yet, so it was tested against NoneGiven/MphRead, which has them: the
+  check, the version comparison, the "0.35.0.0 is available" line, the entry on
+  both front screens and the page URL were all exercised that way. What that run
+  did not cover is an asset name matching this project's, since upstream's do
+  not — the "no matching asset" path is the one that got tested, and the
+  matching one only by unit test.
+- **No browser has actually been opened.** `OpenPage` was only ever exercised
+  where it correctly declined: a headless run with no `DISPLAY`. `xdg-open` on a
+  real desktop, and `UseShellExecute` on Windows, are untried.
 - **The rename leaves a migration on the Pi.** `deploy-server.sh` rewrites an
   `ExecStart` that still names `MphRead` and deletes the old binary, but that
   code has not been run against the real box. Look at

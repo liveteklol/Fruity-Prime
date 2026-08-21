@@ -13,10 +13,14 @@ namespace MphRead.Mods.Update
         /// <summary>The release tag, e.g. v1.2.0.</summary>
         public string Tag { get; init; }
         public Version Version { get; init; }
-        /// <summary>The asset built for this exact package.</summary>
+        /// <summary>
+        /// The asset built for this exact package, or "" when the release has
+        /// none. A hint for the person doing the download -- which of the four
+        /// files on the page is theirs -- and not something this fetches.
+        /// </summary>
         public string AssetName { get; init; }
-        public string DownloadUrl { get; init; }
-        public long Size { get; init; }
+        /// <summary>The release's page on GitHub. Where "Update now" goes.</summary>
+        public string PageUrl { get; init; }
         public string Notes { get; init; }
     }
 
@@ -33,10 +37,7 @@ namespace MphRead.Mods.Update
     /// </summary>
     public static class UpdateCheck
     {
-        /// <summary>
-        /// The only host this will fetch metadata from. Assets are served from
-        /// a different one, checked in <see cref="UpdateInstall"/>.
-        /// </summary>
+        /// <summary>The only host this asks, and only ever for metadata.</summary>
         private const string _api =
             "https://api.github.com/repos/" + Mods.Branding.Repository + "/releases/latest";
 
@@ -134,7 +135,8 @@ namespace MphRead.Mods.Update
             }
             string tag;
             string notes;
-            var assets = new List<(string Name, string Url, long Size)>();
+            string page;
+            var assets = new List<string>();
             try
             {
                 using JsonDocument document = JsonDocument.Parse(json);
@@ -143,19 +145,17 @@ namespace MphRead.Mods.Update
                     ? t.GetString() ?? "" : "";
                 notes = root.TryGetProperty("body", out JsonElement b)
                     ? b.GetString() ?? "" : "";
+                page = root.TryGetProperty("html_url", out JsonElement h)
+                    ? h.GetString() ?? "" : "";
                 if (root.TryGetProperty("assets", out JsonElement list))
                 {
                     foreach (JsonElement asset in list.EnumerateArray())
                     {
                         string name = asset.TryGetProperty("name", out JsonElement n)
                             ? n.GetString() ?? "" : "";
-                        string url = asset.TryGetProperty("browser_download_url",
-                            out JsonElement u) ? u.GetString() ?? "" : "";
-                        long size = asset.TryGetProperty("size", out JsonElement s)
-                            ? s.GetInt64() : 0;
-                        if (name.Length > 0 && url.Length > 0)
+                        if (name.Length > 0)
                         {
-                            assets.Add((name, url, size));
+                            assets.Add(name);
                         }
                     }
                 }
@@ -179,39 +179,32 @@ namespace MphRead.Mods.Update
                 return null;
             }
 
-            (string Name, string Url, long Size)? picked = PickAsset(assets);
-            if (picked == null)
-            {
-                LastReason = $"{tag} has no package for {PackageSuffix()}";
-                return null;
-            }
+            // A release with no package for this platform is still announced.
+            // Nothing is fetched from here any more, so there is no reason to
+            // hide a release because its file names were not what was expected
+            // -- the person going to the page can see what is actually on it.
             return new UpdateInfo
             {
                 Tag = tag,
                 Version = published,
-                AssetName = picked.Value.Name,
-                DownloadUrl = picked.Value.Url,
-                Size = picked.Value.Size,
+                AssetName = PickAsset(assets) ?? "",
+                PageUrl = page.Length > 0 ? page : ReleasesPage,
                 Notes = notes
             };
         }
 
         /// <summary>
-        /// Which asset is this package's.
-        ///
-        /// Matched on the runtime identifier and on whether this is a server
-        /// build, rather than by rebuilding the file name the release workflow
-        /// used. The two would have to be kept in step by hand, and the failure
-        /// when they drifted would be a silent "no update available" forever.
+        /// Which of the files on the release page is this one's, so the screen
+        /// can name it. Matched on the runtime identifier and on whether this
+        /// is a server build; null when nothing matches, which is not a reason
+        /// to withhold the release.
         /// </summary>
-        private static (string Name, string Url, long Size)? PickAsset(
-            List<(string Name, string Url, long Size)> assets)
+        private static string? PickAsset(List<string> assets)
         {
             string rid = Rid();
-            bool server = IsServerBuild;
-            foreach ((string Name, string Url, long Size) asset in assets)
+            foreach (string asset in assets)
             {
-                string name = asset.Name.ToLowerInvariant();
+                string name = asset.ToLowerInvariant();
                 if (!name.Contains(rid))
                 {
                     continue;
@@ -219,7 +212,7 @@ namespace MphRead.Mods.Update
                 // "server" appears in the server packages' names and in no
                 // others, so it tells the two builds for one platform apart --
                 // which matters on Windows, where both exist for win-x64.
-                if (name.Contains("-server-") != server)
+                if (name.Contains("-server-") != IsServerBuild)
                 {
                     continue;
                 }
@@ -227,6 +220,10 @@ namespace MphRead.Mods.Update
             }
             return null;
         }
+
+        /// <summary>Where the releases live, when a specific one has no page.</summary>
+        public const string ReleasesPage =
+            "https://github.com/" + Mods.Branding.Repository + "/releases";
 
         public static bool IsServerBuild =>
 #if MPHREAD_SERVER

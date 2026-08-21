@@ -20,6 +20,37 @@ namespace MphRead.Mods
         public static string Summary =>
             $"{Branding.Name} is a fork of {Branding.Upstream} by NoneGiven.";
 
+        /// <summary>
+        /// The attribution as a corner of a screen can carry it: the fork, and
+        /// then everyone else on one line.
+        ///
+        /// The full list is <c>-credits</c>. This is not a shortened version of
+        /// it that could fall out of step -- the names come from the same array,
+        /// so adding an entry there puts it here too.
+        /// </summary>
+        public static string Compact =>
+            $"A fork of {Branding.Upstream} by NoneGiven"
+            + $"\n{Names}";
+
+        /// <summary>Everyone but upstream, separated for one line.</summary>
+        public static string Names
+        {
+            get
+            {
+                var names = new List<string>();
+                foreach (Entry entry in Entries)
+                {
+                    // NoneGiven is named on the line above rather than buried
+                    // in the middle of the list.
+                    if (entry.Who != "NoneGiven")
+                    {
+                        names.Add(entry.Who);
+                    }
+                }
+                return String.Join(" · ", names);
+            }
+        }
+
         public static IReadOnlyList<Entry> Entries { get; } = new[]
         {
             new Entry("NoneGiven", "MphRead: the model viewer, scene renderer, "
