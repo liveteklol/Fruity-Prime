@@ -41,16 +41,43 @@ jobs:
       - name: publish every target
         run: |
           set -euo pipefail
-          for rid in win-x64 linux-x64 linux-arm64; do
+          for rid in win-x64 linux-x64; do
             dotnet publish src/MphRead/MphRead.csproj -c Release -r "$rid" \
               --self-contained true -p:PublishSingleFile=true -o "publish/$rid"
           done
+          # The two server packages. Same project, launcher left out, no UI
+          # toolkit: neither machine has anybody sitting at it.
+          #
+          # The Windows one also gets a console-subsystem header and a name of
+          # its own, so that a terminal or a service supervisor can run it
+          # beside the game's exe. The ARM64 one keeps the name MphRead,
+          # because the Pi's systemd unit has been pointing at it since before
+          # any of this and a rename would leave a second binary next to it.
+          dotnet publish src/MphRead/MphRead.csproj -c Release -r win-x64 \
+            -p:MphReadServer=true --self-contained true \
+            -p:PublishSingleFile=true -o publish/win-x64-server
+          dotnet publish src/MphRead/MphRead.csproj -c Release -r linux-arm64 \
+            -p:MphReadServer=true --self-contained true \
+            -p:PublishSingleFile=true -o publish/linux-arm64
 
       - name: nothing from the game is in the output
-        run: tools/check-no-game-assets.sh publish/win-x64 publish/linux-x64 publish/linux-arm64
+        run: >
+          tools/check-no-game-assets.sh publish/win-x64 publish/linux-x64
+          publish/linux-arm64 publish/win-x64-server
+
+      # A GUI game and a console server, which is what makes one
+      # double-clickable and the other scriptable. Checked before a tag exists,
+      # because a release is where getting it wrong reaches players.
+      - name: each Windows binary is what it claims to be
+        run: |
+          set -euo pipefail
+          tools/check-subsystem.sh gui publish/win-x64/MphRead.exe
+          tools/check-subsystem.sh console publish/win-x64-server/MphReadServer.exe
 
       # Nothing gets tagged as a release until a server out of it has actually
-      # started, registered with a directory and answered a query.
+      # started, registered with a directory and answered a query. This runner
+      # is Linux, so it is the Linux build that is started; the Windows server
+      # gets the same check on a Windows runner in build.yml.
       - name: the dedicated server runs
         run: tools/check-dedicated-server.sh publish/linux-x64
 
@@ -72,8 +99,44 @@ jobs:
           Play online joins a server. Play offline is a match against bots.
           Host a game runs a server on this machine for your friends.
           F11 or Alt+Enter switches to fullscreen, Escape leaves it.
+
+          To run a server for other people without playing on it yourself,
+          download the server package instead -- it is a separate, smaller
+          download that needs no game files at all.
           NOTE
           ( cd publish/win-x64 && zip -qr "../../dist/MphRead-$TAG-win-x64.zip" . )
+
+          cp LICENSE publish/linux-x64/ 2>/dev/null || true
+          cat > publish/linux-x64/README.txt <<'NOTE'
+          MphRead -- Metroid Prime Hunters, on a PC, with multiplayer.
+
+          Set up with your own Metroid Prime Hunters cartridge dump (.nds).
+          It is unpacked next to this program and the file is left alone. No
+          game data is included in this download, and none is downloaded.
+
+            ./MphRead -launcher
+
+          opens the front screen: play online, play offline against bots, host
+          a game, settings, and the game-files setup.
+
+          Over SSH, or on a machine with no desktop, the same command gives you
+          the same five entries as text instead. -launcher -text asks for that
+          anywhere.
+
+          Everything it does also has a command of its own:
+
+            ./MphRead <path to rom.nds>     set up the game files
+            ./MphRead -servers              list the servers that are up
+            ./MphRead -connect HOST         join one
+            ./MphRead -hostgame "ROOM"      have a server run a match for you
+            ./MphRead -menu                 volumes, controls, match rules
+
+          This build can also run a dedicated server, with -server; it needs no
+          game files to do it. The ARM64 server package is the same thing for a
+          Raspberry Pi and is a much smaller download.
+
+          F11 or Alt+Enter switches to fullscreen, Escape opens the pause menu.
+          NOTE
           ( cd publish/linux-x64 && tar czf "../../dist/MphRead-$TAG-linux-x64.tar.gz" . )
           cat > publish/linux-arm64/SERVER.txt <<'NOTE'
           MphRead dedicated server.
@@ -92,6 +155,42 @@ jobs:
             ./MphRead -masterserver -port 27889
           NOTE
           ( cd publish/linux-arm64 && tar czf "../../dist/MphRead-$TAG-server-linux-arm64.tar.gz" . )
+
+          cp LICENSE publish/win-x64-server/ 2>/dev/null || true
+          cat > publish/win-x64-server/SERVER.txt <<'NOTE'
+          MphRead dedicated server, for Windows.
+
+          From a Command Prompt or PowerShell, in this folder:
+
+            MphReadServer.exe -server -port 27888 -players 8 -servername "My server"
+
+          It needs no game files, and no copy of the game on this machine.
+          Maps come from maprotation.txt, written beside the binary on first
+          run.
+
+          This is a console program, unlike MphRead.exe: the window stays until
+          the server stops, Ctrl+C shuts it down cleanly, and its exit code is
+          reported, so it can be run under a service supervisor (NSSM, or
+          sc.exe with a wrapper) the way the Linux build runs under systemd.
+          Double-clicking it works too and opens a window of its own.
+
+          Windows will ask once whether to allow it through the firewall.
+          Nobody outside this machine can reach the server until that is
+          allowed for UDP on the port above, and until the router forwards it.
+
+          The server lists itself on net.livetek.fr so that players can find it
+          in the launcher's server browser. Pass -nomaster to stay private, or
+          -master HOST to use a different directory.
+
+          To run a directory of your own:
+
+            MphReadServer.exe -masterserver -port 27889
+
+          To see what is up right now:
+
+            MphReadServer.exe -servers
+          NOTE
+          ( cd publish/win-x64-server && zip -qr "../../dist/MphRead-$TAG-server-win-x64.zip" . )
           ls -la dist
 
       - name: release

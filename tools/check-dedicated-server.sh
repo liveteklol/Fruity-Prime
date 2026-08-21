@@ -13,11 +13,39 @@
 # those is a thing a player depends on and none of them needs a cartridge.
 #
 #   tools/check-dedicated-server.sh publish/linux-x64
+#   tools/check-dedicated-server.sh publish/win-x64-server   # Git Bash
+#
+# The Windows server is the same claim and gets the same check, rather than a
+# PowerShell translation of it that would then have to be kept in step. What
+# differs there is spelled out where it is handled: the binary is called
+# MphReadServer.exe, python3 may only be `python`, and a path this script
+# makes has to be converted before it is handed to a .NET process.
 set -uo pipefail
 
 DIR="${1:-publish/linux-x64}"
-BIN="$DIR/MphRead"
-[ -x "$BIN" ] || BIN="dotnet $DIR/MphRead.dll"
+# MphReadServer first: on Windows the dedicated server is its own console
+# binary, and a publish directory may hold both.
+BIN=""
+for candidate in MphReadServer.exe MphReadServer MphRead.exe MphRead; do
+  if [ -x "$DIR/$candidate" ]; then
+    BIN="$DIR/$candidate"
+    break
+  fi
+done
+[ -n "$BIN" ] || BIN="dotnet $DIR/MphRead.dll"
+
+PYTHON="python3"
+command -v "$PYTHON" >/dev/null 2>&1 || PYTHON="python"
+
+# Git Bash hands out POSIX paths; a .NET process reads one as a path on the
+# current drive and writes the rotation somewhere that does not exist.
+topath() {
+  if command -v cygpath >/dev/null 2>&1; then
+    cygpath -w "$1"
+  else
+    printf '%s' "$1"
+  fi
+}
 
 WORK="$(mktemp -d)"
 SERVER_PORT=27888
@@ -42,7 +70,7 @@ MASTER_PID=$!
 $BIN -server -port "$SERVER_PORT" -players 8 \
      -servername "CI smoke test" \
      -master 127.0.0.1 -masterport "$MASTER_PORT" \
-     -rotation "$WORK/maprotation.txt" >"$WORK/server.log" 2>&1 &
+     -rotation "$(topath "$WORK/maprotation.txt")" >"$WORK/server.log" 2>&1 &
 SERVER_PID=$!
 
 # Both bind before they log, and the server's first heartbeat goes out on its
@@ -66,7 +94,7 @@ grep -q '^\[.*\] \[master\] + ' "$WORK/master.log" \
   && pass "the server registered with the directory" \
   || fail "the server never registered with the directory"
 
-python3 - "$SERVER_PORT" "$MASTER_PORT" <<'PY' || FAILED=1
+"$PYTHON" - "$SERVER_PORT" "$MASTER_PORT" <<'PY' || FAILED=1
 import socket, struct, sys
 server_port, master_port = int(sys.argv[1]), int(sys.argv[2])
 ok = True

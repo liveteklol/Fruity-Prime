@@ -13,27 +13,6 @@ using MphRead.Mods.Network;
 
 namespace MphRead.Mods.Launcher
 {
-    public enum LaunchKind
-    {
-        None,
-        Online,
-        Offline,
-        Host
-    }
-
-    /// <summary>What the front screen decided, carried back to LauncherEntry.</summary>
-    public readonly struct LaunchPlan
-    {
-        public LaunchKind Kind { get; init; }
-        public Hunter Hunter { get; init; }
-        public string RoomKey { get; init; }
-        public GameMode Mode { get; init; }
-        public int Bots { get; init; }
-        public int BotLevel { get; init; }
-        public int Port { get; init; }
-        public string PlayerName { get; init; }
-    }
-
     /// <summary>
     /// The front screen: a picture, four things you can do, and nothing to
     /// read before you can play.

@@ -1,0 +1,827 @@
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Input;
+using Avalonia.Layout;
+using Avalonia.Media;
+using Avalonia.Platform.Storage;
+using Avalonia.Threading;
+using Avalonia.VisualTree;
+using MphRead.Entities;
+using MphRead.Mods.Network;
+
+namespace MphRead.Mods.Launcher.Gui
+{
+    /// <summary>
+    /// The front screen: a picture, the things you can do, and nothing to read
+    /// before you can play. The Avalonia counterpart of <c>HomeForm</c>.
+    ///
+    /// Same five entries, same card-at-a-time shape, and -- the part that
+    /// matters -- the same <see cref="LauncherPrefs"/>, <see cref="GameFiles"/>
+    /// and <see cref="MatchStart"/> underneath, so the two screens cannot come
+    /// to disagree about what "host a game" does. What is deliberately not the
+    /// same is the window chrome: this one is an ordinary decorated window
+    /// rather than the WinForms one's borderless panel, because a window with
+    /// no frame that a Linux window manager will not let you move is a trap,
+    /// and there are many window managers.
+    /// </summary>
+    internal sealed class HomeWindow : Window
+    {
+        private readonly MenuSettings _settings;
+        private readonly IReadOnlyList<string> _rooms;
+        private readonly List<string> _playable = new();
+        private readonly SplashView _splash = new();
+        private readonly Panel _cards = new();
+
+        private Control _homeCard = null!;
+        private Control _setupCard = null!;
+        private Control _onlineCard = null!;
+        private Control _matchCard = null!;
+        private Control _browseCard = null!;
+        private Control? _current;
+        private Control? _browseReturn;
+
+        private DispatcherTimer? _statusTimer;
+        private CancellationTokenSource? _statusCancel;
+
+        /// <summary>What the screen decided. Kind None means it was closed.</summary>
+        public LaunchPlan Plan { get; private set; }
+
+        private static readonly (string Label, GameMode Mode)[] _modes =
+        {
+            ("Battle", GameMode.Battle),
+            ("Battle teams", GameMode.BattleTeams),
+            ("Survival", GameMode.Survival),
+            ("Survival teams", GameMode.SurvivalTeams),
+            ("Capture", GameMode.Capture),
+            ("Bounty", GameMode.Bounty),
+            ("Bounty teams", GameMode.BountyTeams),
+            ("Defender", GameMode.Defender),
+            ("Defender teams", GameMode.DefenderTeams),
+            ("Nodes", GameMode.Nodes),
+            ("Nodes teams", GameMode.NodesTeams),
+            ("Prime hunter", GameMode.PrimeHunter)
+        };
+
+        private static readonly string[] _hunters =
+            Enumerable.Range(0, 7).Select(i => ((Hunter)i).ToString())
+                .Append(Hunter.Random.ToString()).ToArray();
+
+        public HomeWindow(MenuSettings settings, IReadOnlyList<string> rooms)
+        {
+            _settings = settings;
+            _rooms = rooms;
+            foreach (string room in rooms)
+            {
+                _playable.Add(room);
+            }
+
+            Title = "MphRead";
+            Width = 940;
+            Height = 560;
+            MinWidth = 780;
+            MinHeight = 480;
+            WindowStartupLocation = WindowStartupLocation.CenterScreen;
+            Background = GuiTheme.PanelBrush;
+            RequestedThemeVariant = Avalonia.Styling.ThemeVariant.Dark;
+
+            var panel = new Border
+            {
+                Background = GuiTheme.PanelBrush,
+                Padding = new Thickness(22, 20, 22, 20),
+                Width = 400,
+                Child = _cards
+            };
+            var grid = new Grid
+            {
+                ColumnDefinitions = new ColumnDefinitions("*,Auto")
+            };
+            Grid.SetColumn(_splash, 0);
+            Grid.SetColumn(panel, 1);
+            grid.Children.Add(_splash);
+            grid.Children.Add(panel);
+            Content = grid;
+
+            _homeCard = BuildHomeCard();
+            _setupCard = BuildSetupCard();
+            _onlineCard = BuildOnlineCard();
+            _matchCard = BuildMatchCard();
+            _browseCard = BuildBrowseCard();
+
+            ShowCard(GameFiles.Ready ? _homeCard : _setupCard);
+            RefreshSplash();
+        }
+
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            if (e.Key == Key.Escape)
+            {
+                // Back one card, then out -- the same as the WinForms screen.
+                if (_current != _homeCard && GameFiles.Ready)
+                {
+                    ShowCard(_homeCard);
+                }
+                else
+                {
+                    Close();
+                }
+                e.Handled = true;
+                return;
+            }
+            base.OnKeyDown(e);
+        }
+
+        private void ShowCard(Control card)
+        {
+            StopStatusPolling();
+            _cards.Children.Clear();
+            _cards.Children.Add(card);
+            _current = card;
+            if (ReferenceEquals(card, _onlineCard))
+            {
+                StartStatusPolling();
+            }
+            // The first thing on the card takes the keyboard, so the screen can
+            // be used without touching the mouse.
+            Dispatcher.UIThread.Post(() => card.GetVisualDescendants()
+                .OfType<Control>().FirstOrDefault(c => c.Focusable)?.Focus(),
+                DispatcherPriority.Background);
+        }
+
+        private static StackPanel Card() => new() { Spacing = 2 };
+
+        private static MenuEntry Back(Action go)
+        {
+            var entry = new MenuEntry("Back", titleSize: 13) { Accent = GuiTheme.TextDim };
+            entry.Click += (_, _) => go();
+            return entry;
+        }
+
+        // ---------------------------------------------------------------- home
+
+        private MenuEntry _onlineEntry = null!;
+        private MenuEntry _offlineEntry = null!;
+        private MenuEntry _hostEntry = null!;
+        private MenuEntry _filesEntry = null!;
+
+        private Control BuildHomeCard()
+        {
+            var card = Card();
+            _onlineEntry = new MenuEntry("Play online", "Join a server");
+            _onlineEntry.Click += (_, _) => ShowCard(_onlineCard);
+            _offlineEntry = new MenuEntry("Play offline", "A match against bots");
+            _offlineEntry.Click += (_, _) => OpenMatch(LaunchKind.Offline);
+            _hostEntry = new MenuEntry("Host a game", "Run a server and play on it");
+            _hostEntry.Click += (_, _) => OpenMatch(LaunchKind.Host);
+            var settings = new MenuEntry("Settings", "Name, hunter, window, addresses");
+            settings.Click += (_, _) => ShowCard(BuildSettingsCard());
+            _filesEntry = new MenuEntry("Game files", GameFiles.Describe());
+            _filesEntry.Click += (_, _) => ShowCard(_setupCard);
+            var quit = new MenuEntry("Quit");
+            quit.Click += (_, _) => Close();
+
+            card.Children.Add(new Caption("MphRead"));
+            card.Children.Add(_onlineEntry);
+            card.Children.Add(_offlineEntry);
+            card.Children.Add(_hostEntry);
+            card.Children.Add(settings);
+            card.Children.Add(_filesEntry);
+            card.Children.Add(quit);
+            return card;
+        }
+
+        /// <summary>
+        /// Everything but "game files" is unusable until there is something to
+        /// load, and says so rather than failing when pressed.
+        /// </summary>
+        private void RefreshGameFilesState()
+        {
+            bool ready = GameFiles.Ready;
+            _onlineEntry.IsEnabled = ready;
+            _offlineEntry.IsEnabled = ready;
+            _hostEntry.IsEnabled = ready;
+            _filesEntry.Subtitle = GameFiles.Describe();
+            _filesEntry.SubtitleColor = ready ? GuiTheme.Good : GuiTheme.Warm;
+        }
+
+        // --------------------------------------------------------------- setup
+
+        private Control BuildSetupCard()
+        {
+            var card = Card();
+            var log = new Note("");
+            var scroll = new ScrollViewer
+            {
+                Height = 150,
+                Content = log,
+                HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled
+            };
+            var choose = new MenuEntry("Choose your .nds file", "", titleSize: 15)
+            {
+                Primary = true,
+                Height = 44
+            };
+            choose.Click += async (_, _) => await ChooseRom(choose, log);
+
+            card.Children.Add(new Caption("Game files"));
+            card.Children.Add(new Note(
+                "MphRead needs your own Metroid Prime Hunters cartridge dump. It "
+                + "unpacks what it needs next to this program and leaves the file "
+                + "alone. No game data is included in this download, and none is "
+                + "downloaded."));
+            card.Children.Add(choose);
+            card.Children.Add(scroll);
+            var back = Back(() => ShowCard(_homeCard));
+            card.Children.Add(back);
+            return card;
+        }
+
+        private async Task ChooseRom(MenuEntry button, Note log)
+        {
+            IReadOnlyList<IStorageFile> picked = await StorageProvider.OpenFilePickerAsync(
+                new FilePickerOpenOptions
+                {
+                    Title = "Your Metroid Prime Hunters cartridge dump",
+                    AllowMultiple = false,
+                    FileTypeFilter = new[]
+                    {
+                        new FilePickerFileType("Nintendo DS ROM") { Patterns = new[] { "*.nds" } },
+                        new FilePickerFileType("Every file") { Patterns = new[] { "*" } }
+                    }
+                });
+            if (picked.Count == 0)
+            {
+                return;
+            }
+            string? path = picked[0].TryGetLocalPath();
+            if (path == null)
+            {
+                log.Text = "That file is not on this machine.";
+                return;
+            }
+            button.IsEnabled = false;
+            button.Title = "Working...";
+            log.Text = "";
+            // Extraction is upstream's own, in a child process, and takes
+            // minutes. Off the UI thread, or the window stops answering and
+            // looks like it has crashed at the exact moment it is doing the one
+            // thing a fresh install needs.
+            bool ok = await Task.Run(() => GameFiles.RunSetup(path, line =>
+                Dispatcher.UIThread.Post(() => log.Text = Tail(log.Text, line))));
+            button.IsEnabled = true;
+            button.Title = "Choose your .nds file";
+            log.Text = Tail(log.Text, ok ? "Ready to play." : "Setup did not finish.");
+            RefreshGameFilesState();
+            RefreshSplash();
+            if (ok)
+            {
+                ShowCard(_homeCard);
+            }
+        }
+
+        /// <summary>Keep the last few lines; the extraction prints hundreds.</summary>
+        private static string Tail(string? existing, string line)
+        {
+            string[] lines = ((existing ?? "") + line + "\n")
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries);
+            return String.Join("\n", lines.Skip(Math.Max(0, lines.Length - 8)));
+        }
+
+        // -------------------------------------------------------------- online
+
+        private FieldRow _onlineName = null!;
+        private ChoiceRow _onlineHunter = null!;
+        private FieldRow _onlineAddress = null!;
+        private Note _onlineStatus = null!;
+        private MenuEntry _connect = null!;
+
+        private Control BuildOnlineCard()
+        {
+            var card = Card();
+            _onlineName = new FieldRow("Your name", LauncherPrefs.PlayerName);
+            _onlineHunter = new ChoiceRow("Hunter", _hunters,
+                Array.IndexOf(_hunters, LauncherPrefs.LastHunter.ToString()));
+            _onlineAddress = new FieldRow("Server",
+                $"{LauncherPrefs.ServerAddress}:{LauncherPrefs.ServerPort}", boxWidth: 190);
+            _onlineStatus = new Note("Checking...");
+            _onlineAddress.Box.LostFocus += (_, _) => QueryStatusSoon();
+
+            var find = new MenuEntry("Find a server", "See who is up right now", titleSize: 15);
+            find.Click += (_, _) =>
+            {
+                _browseReturn = _onlineCard;
+                ShowCard(_browseCard);
+                ReloadServers();
+            };
+            _connect = new MenuEntry("Connect", titleSize: 16) { Primary = true, Height = 44 };
+            _connect.Click += async (_, _) => await Connect();
+
+            card.Children.Add(new Caption("Play online"));
+            card.Children.Add(_onlineName);
+            card.Children.Add(_onlineHunter);
+            card.Children.Add(_onlineAddress);
+            card.Children.Add(_onlineStatus);
+            card.Children.Add(find);
+            card.Children.Add(_connect);
+            card.Children.Add(Back(() => ShowCard(_homeCard)));
+            return card;
+        }
+
+        private (string Host, int Port) OnlineEndpoint()
+        {
+            string host = LauncherPrefs.ServerAddress;
+            int port = LauncherPrefs.ServerPort;
+            ParseEndpoint(_onlineAddress.Value, ref host, ref port);
+            return (host, port);
+        }
+
+        /// <summary>
+        /// Poll what the server is running while somebody is reading the card.
+        ///
+        /// StatusQuery answers without claiming a slot, which is what makes
+        /// polling it reasonable; a server too old to know the packet is asked
+        /// once with a join probe and then left alone.
+        /// </summary>
+        private void StartStatusPolling()
+        {
+            QueryStatusSoon();
+            _statusTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(4) };
+            _statusTimer.Tick += (_, _) => QueryStatusSoon();
+            _statusTimer.Start();
+        }
+
+        private void StopStatusPolling()
+        {
+            _statusTimer?.Stop();
+            _statusTimer = null;
+            _statusCancel?.Cancel();
+            _statusCancel = null;
+        }
+
+        private void QueryStatusSoon()
+        {
+            _statusCancel?.Cancel();
+            var cancel = new CancellationTokenSource();
+            _statusCancel = cancel;
+            (string host, int port) = OnlineEndpoint();
+            Task.Run(() =>
+            {
+                ServerStatus status = NetStatus.Query(host, port, allowJoinProbe: true);
+                if (cancel.IsCancellationRequested)
+                {
+                    return;
+                }
+                Dispatcher.UIThread.Post(() =>
+                {
+                    if (cancel.IsCancellationRequested)
+                    {
+                        return;
+                    }
+                    if (status.Online)
+                    {
+                        _onlineStatus.Text = Describe(status);
+                        _onlineStatus.Foreground = GuiTheme.GoodBrush;
+                        _splash.ShowRoom(status.RoomKey, Describe(status));
+                    }
+                    else
+                    {
+                        _onlineStatus.Text = "No answer -- it may be off, or UDP may be blocked.";
+                        _onlineStatus.Foreground = GuiTheme.WarmBrush;
+                    }
+                });
+            });
+        }
+
+        private static string Describe(ServerStatus status)
+        {
+            string players = status.MaxPlayers > 0
+                ? $"{status.Players}/{status.MaxPlayers}"
+                : status.Players.ToString(CultureInfo.InvariantCulture);
+            string ping = status.Latency >= 0
+                ? $"{status.Latency.ToString(CultureInfo.InvariantCulture)} ms"
+                : "-- ms";
+            return $"{status.RoomKey} ({NetStatus.ModeName(status.Mode)}) "
+                + $"{players} players, {ping}";
+        }
+
+        private async Task Connect()
+        {
+            (string host, int port) = OnlineEndpoint();
+            string name = _onlineName.Value.Length > 0 ? _onlineName.Value : "Player";
+            var hunter = (Hunter)Enum.Parse(typeof(Hunter), _onlineHunter.Value);
+            StopStatusPolling();
+            _connect.IsEnabled = false;
+            _connect.Title = "Connecting";
+            _onlineStatus.Text = $"Connecting to {host}:{port}...";
+            _onlineStatus.Foreground = GuiTheme.TextDimBrush;
+
+            LauncherPrefs.PlayerName = name;
+            LauncherPrefs.LastHunter = hunter;
+            LauncherPrefs.ServerAddress = host;
+            LauncherPrefs.ServerPort = port;
+            LauncherPrefs.LastKind = (int)LaunchKind.Online;
+            LauncherPrefs.Save();
+
+            // Joining blocks for up to eight seconds while it retries; on the
+            // UI thread that is eight seconds of a window that does not redraw.
+            bool joined = await Task.Run(() => NetLaunch.Join(host, port, name, hunter));
+            _connect.IsEnabled = true;
+            _connect.Title = "Connect";
+            if (!joined)
+            {
+                NetSession.Stop();
+                _onlineStatus.Text = "Could not join. It may be off, full, or UDP may be blocked.";
+                _onlineStatus.Foreground = GuiTheme.BadBrush;
+                StartStatusPolling();
+                return;
+            }
+            Plan = new LaunchPlan
+            {
+                Kind = LaunchKind.Online,
+                Hunter = hunter,
+                PlayerName = name,
+                RoomKey = "",
+                Mode = GameMode.Battle,
+                Port = port
+            };
+            Close();
+        }
+
+        // --------------------------------------------------------- offline/host
+
+        private LaunchKind _matchKind = LaunchKind.Offline;
+        private Caption _matchCaption = null!;
+        private ChoiceRow _matchMap = null!;
+        private ChoiceRow _matchMode = null!;
+        private ChoiceRow _matchHunter = null!;
+        private ChoiceRow _matchBots = null!;
+        private ChoiceRow _matchSkill = null!;
+        private FieldRow _matchName = null!;
+        private FieldRow _matchPort = null!;
+        private ToggleRow _matchOnMaster = null!;
+        private ToggleRow _matchListed = null!;
+        private MenuEntry _matchStart = null!;
+        private Note _matchNote = null!;
+
+        private Control BuildMatchCard()
+        {
+            var card = Card();
+            _matchCaption = new Caption("Play offline");
+            _matchMap = new ChoiceRow("Map", _playable,
+                Math.Max(0, _playable.IndexOf(_settings.RoomKey)));
+            _matchMap.Changed += (_, _) => RefreshSplash();
+            _matchMode = new ChoiceRow("Mode", _modes.Select(m => m.Label).ToArray());
+            _matchHunter = new ChoiceRow("Hunter", _hunters,
+                Array.IndexOf(_hunters, LauncherPrefs.LastHunter.ToString()));
+            _matchBots = new ChoiceRow("Bots",
+                Enumerable.Range(0, PlayerEntity.SlotCapacity)
+                    .Select(i => i.ToString(CultureInfo.InvariantCulture)).ToArray(),
+                LauncherPrefs.Bots);
+            _matchSkill = new ChoiceRow("Bot skill", new[] { "Easy", "Normal", "Hard" },
+                LauncherPrefs.BotLevel);
+            _matchName = new FieldRow("Your name", LauncherPrefs.PlayerName);
+            _matchPort = new FieldRow("Port",
+                LauncherPrefs.HostPort.ToString(CultureInfo.InvariantCulture), boxWidth: 90);
+            _matchOnMaster = new ToggleRow("Let the directory run it",
+                LauncherPrefs.HostOnMaster);
+            _matchOnMaster.Changed += (_, _) => RefreshMatchCard();
+            _matchListed = new ToggleRow("List it so others can find it",
+                LauncherPrefs.ListHostedGame);
+            _matchNote = new Note("");
+            _matchStart = new MenuEntry("Start", titleSize: 16) { Primary = true, Height = 44 };
+            _matchStart.Click += async (_, _) => await StartMatch();
+
+            card.Children.Add(_matchCaption);
+            card.Children.Add(_matchMap);
+            card.Children.Add(_matchMode);
+            card.Children.Add(_matchHunter);
+            card.Children.Add(_matchBots);
+            card.Children.Add(_matchSkill);
+            card.Children.Add(_matchName);
+            card.Children.Add(_matchOnMaster);
+            card.Children.Add(_matchPort);
+            card.Children.Add(_matchListed);
+            card.Children.Add(_matchNote);
+            card.Children.Add(_matchStart);
+            card.Children.Add(Back(() => ShowCard(_homeCard)));
+            return card;
+        }
+
+        private void OpenMatch(LaunchKind kind)
+        {
+            _matchKind = kind;
+            RefreshMatchCard();
+            ShowCard(_matchCard);
+            RefreshSplash();
+        }
+
+        private void RefreshMatchCard()
+        {
+            bool host = _matchKind == LaunchKind.Host;
+            _matchCaption.IsVisible = true;
+            _matchBots.IsVisible = !host;
+            _matchSkill.IsVisible = !host;
+            _matchName.IsVisible = host;
+            _matchOnMaster.IsVisible = host;
+            // Only meaningful when this machine is the one running the server:
+            // a match the directory runs is on the directory's port, on the
+            // directory's machine, and neither is this screen's to choose.
+            _matchPort.IsVisible = host && !_matchOnMaster.On;
+            _matchListed.IsVisible = host && !_matchOnMaster.On;
+            _matchNote.Text = host
+                ? (_matchOnMaster.On
+                    ? "The directory runs the match, so nothing here needs a "
+                        + "forwarded port."
+                    : "Runs on this machine. Friends can only reach it if UDP on "
+                        + "this port is forwarded to you.")
+                : "";
+            _matchNote.IsVisible = _matchNote.Text.Length > 0;
+        }
+
+        private async Task StartMatch()
+        {
+            if (_playable.Count == 0)
+            {
+                _matchNote.Text = "No multiplayer rooms were found.";
+                _matchNote.IsVisible = true;
+                return;
+            }
+            string roomKey = _matchMap.Value;
+            GameMode mode = _modes[_matchMode.Index].Mode;
+            var hunter = (Hunter)Enum.Parse(typeof(Hunter), _matchHunter.Value);
+            _settings.RoomKey = roomKey;
+            LauncherPrefs.LastHunter = hunter;
+            LauncherPrefs.LastKind = (int)_matchKind;
+
+            if (_matchKind == LaunchKind.Offline)
+            {
+                LauncherPrefs.Bots = _matchBots.Index;
+                LauncherPrefs.BotLevel = _matchSkill.Index;
+                LauncherPrefs.Save();
+                Plan = new LaunchPlan
+                {
+                    Kind = LaunchKind.Offline,
+                    Hunter = hunter,
+                    PlayerName = LauncherPrefs.PlayerName,
+                    RoomKey = roomKey,
+                    Mode = mode,
+                    Bots = _matchBots.Index,
+                    BotLevel = _matchSkill.Index
+                };
+                Close();
+                return;
+            }
+
+            string name = _matchName.Value.Length > 0 ? _matchName.Value : "Player";
+            LauncherPrefs.PlayerName = name;
+            LauncherPrefs.HostOnMaster = _matchOnMaster.On;
+            LauncherPrefs.ListHostedGame = _matchListed.On;
+            if (Int32.TryParse(_matchPort.Value, NumberStyles.Integer,
+                CultureInfo.InvariantCulture, out int port) && port > 0 && port <= 65535)
+            {
+                LauncherPrefs.HostPort = port;
+            }
+            LauncherPrefs.Save();
+
+            _matchStart.IsEnabled = false;
+            _matchStart.Title = "Starting";
+            _matchNote.IsVisible = true;
+            bool ok;
+            if (_matchOnMaster.On)
+            {
+                _matchNote.Text = $"Asking {LauncherPrefs.MasterHost} to run {roomKey}...";
+                ok = await Task.Run(() =>
+                {
+                    HostedGame game = NetMasterClient.RequestGame(LauncherPrefs.MasterHost,
+                        LauncherPrefs.MasterPort, roomKey, mode, timeLimit: 7 * 60,
+                        pointGoal: 7, maxPlayers: PlayerEntity.SlotCapacity,
+                        serverName: $"{name}'s game");
+                    return game.Started
+                        && NetLaunch.Join(game.Host, game.Port, name, hunter);
+                });
+            }
+            else
+            {
+                _matchNote.Text = $"Starting a server on port {LauncherPrefs.HostPort}...";
+                ok = await Task.Run(() => NetHostSession.StartAndJoin(
+                    LauncherPrefs.HostPort, name, hunter, roomKey, mode,
+                    timeLimit: 7 * 60, pointGoal: 7,
+                    listing: _matchListed.On
+                        ? (LauncherPrefs.MasterHost, LauncherPrefs.MasterPort, $"{name}'s game")
+                        : null));
+            }
+            _matchStart.IsEnabled = true;
+            _matchStart.Title = "Start";
+            if (!ok)
+            {
+                NetSession.Stop();
+                NetHostSession.Stop();
+                _matchNote.Text = NetHostSession.LastError
+                    ?? "The game could not be started. The port may be in use, or the "
+                        + "directory may be down.";
+                _matchNote.Foreground = GuiTheme.BadBrush;
+                return;
+            }
+            Plan = new LaunchPlan
+            {
+                Kind = LaunchKind.Host,
+                Hunter = hunter,
+                PlayerName = name,
+                RoomKey = roomKey,
+                Mode = mode,
+                Port = LauncherPrefs.HostPort
+            };
+            Close();
+        }
+
+        // -------------------------------------------------------------- browse
+
+        private StackPanel _browseList = null!;
+        private Note _browseNote = null!;
+
+        private Control BuildBrowseCard()
+        {
+            var card = Card();
+            _browseList = new StackPanel { Spacing = 2 };
+            _browseNote = new Note("");
+            var refresh = new MenuEntry("Refresh", titleSize: 15);
+            refresh.Click += (_, _) => ReloadServers();
+
+            card.Children.Add(new Caption("Find a server"));
+            card.Children.Add(_browseNote);
+            card.Children.Add(new ScrollViewer
+            {
+                Height = 300,
+                Content = _browseList,
+                HorizontalScrollBarVisibility =
+                    Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled
+            });
+            card.Children.Add(refresh);
+            card.Children.Add(Back(() => ShowCard(_browseReturn ?? _homeCard)));
+            return card;
+        }
+
+        /// <summary>
+        /// Ask the directory who is up, then ask each of them directly.
+        ///
+        /// Directly, not through the directory: the round trip that matters is
+        /// this machine's, and an answer also proves the server is reachable
+        /// from here rather than only from there.
+        /// </summary>
+        private void ReloadServers()
+        {
+            _browseList.Children.Clear();
+            _browseNote.Text = $"Asking {LauncherPrefs.MasterHost}...";
+            _browseNote.Foreground = GuiTheme.TextDimBrush;
+            Task.Run(() =>
+            {
+                MasterListResult result = NetMasterClient.Query(LauncherPrefs.MasterHost,
+                    LauncherPrefs.MasterPort);
+                Dispatcher.UIThread.Post(() =>
+                {
+                    if (!result.Answered)
+                    {
+                        _browseNote.Text = "The directory did not answer. It may be down, "
+                            + "or UDP may not reach it.";
+                        _browseNote.Foreground = GuiTheme.WarmBrush;
+                        return;
+                    }
+                    if (result.Servers.Count == 0)
+                    {
+                        _browseNote.Text = "The directory is up and has nobody listed.";
+                        _browseNote.Foreground = GuiTheme.WarmBrush;
+                        return;
+                    }
+                    _browseNote.Text = $"{result.Servers.Count} listed.";
+                    foreach (MasterListing listing in result.Servers)
+                    {
+                        AddServerRow(listing);
+                    }
+                });
+            });
+        }
+
+        private void AddServerRow(MasterListing listing)
+        {
+            string name = listing.ServerName.Length > 0 ? listing.ServerName : listing.Endpoint;
+            var entry = new MenuEntry(name, listing.Endpoint, titleSize: 15);
+            entry.Click += (_, _) =>
+            {
+                _onlineAddress.Value = $"{listing.Address}:{listing.Port}";
+                ShowCard(_onlineCard);
+            };
+            _browseList.Children.Add(entry);
+            Task.Run(() =>
+            {
+                ServerStatus status = NetStatus.Query(listing.Address, listing.Port,
+                    allowJoinProbe: false);
+                Dispatcher.UIThread.Post(() =>
+                {
+                    entry.Subtitle = status.Online
+                        ? $"{listing.Endpoint} -- {Describe(status)}"
+                        : $"{listing.Endpoint} -- did not answer";
+                    entry.SubtitleColor = status.Online ? GuiTheme.TextDim : GuiTheme.Warm;
+                });
+            });
+        }
+
+        // ------------------------------------------------------------ settings
+
+        private Control BuildSettingsCard()
+        {
+            var card = Card();
+            var name = new FieldRow("Your name", LauncherPrefs.PlayerName);
+            var hunter = new ChoiceRow("Hunter", _hunters,
+                Array.IndexOf(_hunters, LauncherPrefs.LastHunter.ToString()));
+            var fullscreen = new ToggleRow("Start fullscreen",
+                LauncherPrefs.WindowMode == WindowStartMode.BorderlessFullscreen);
+            var server = new FieldRow("Default server",
+                $"{LauncherPrefs.ServerAddress}:{LauncherPrefs.ServerPort}", boxWidth: 190);
+            var master = new FieldRow("Server directory",
+                $"{LauncherPrefs.MasterHost}:{LauncherPrefs.MasterPort}", boxWidth: 190);
+            var note = new Note("Volumes, controls, match rules and cheats are in the "
+                + "console menu: run MphRead -menu.");
+
+            var save = new MenuEntry("Save", titleSize: 16) { Primary = true, Height = 44 };
+            save.Click += (_, _) =>
+            {
+                if (name.Value.Length > 0)
+                {
+                    LauncherPrefs.PlayerName = name.Value;
+                }
+                LauncherPrefs.LastHunter = (Hunter)Enum.Parse(typeof(Hunter), hunter.Value);
+                LauncherPrefs.WindowMode = fullscreen.On
+                    ? WindowStartMode.BorderlessFullscreen
+                    : WindowStartMode.Windowed;
+                Mods.WindowMode.Startup = LauncherPrefs.WindowMode;
+                string host = LauncherPrefs.ServerAddress;
+                int port = LauncherPrefs.ServerPort;
+                if (ParseEndpoint(server.Value, ref host, ref port))
+                {
+                    LauncherPrefs.ServerAddress = host;
+                    LauncherPrefs.ServerPort = port;
+                }
+                string masterHost = LauncherPrefs.MasterHost;
+                int masterPort = LauncherPrefs.MasterPort;
+                if (ParseEndpoint(master.Value, ref masterHost, ref masterPort))
+                {
+                    LauncherPrefs.MasterHost = masterHost;
+                    LauncherPrefs.MasterPort = masterPort;
+                }
+                LauncherPrefs.Save();
+                ShowCard(_homeCard);
+            };
+
+            card.Children.Add(new Caption("Settings"));
+            card.Children.Add(name);
+            card.Children.Add(hunter);
+            card.Children.Add(fullscreen);
+            card.Children.Add(server);
+            card.Children.Add(master);
+            card.Children.Add(note);
+            card.Children.Add(save);
+            card.Children.Add(Back(() => ShowCard(_homeCard)));
+            return card;
+        }
+
+        // --------------------------------------------------------------- shared
+
+        private void RefreshSplash()
+        {
+            RefreshGameFilesState();
+            string? room = _playable.Count > 0 && _matchMap != null ? _matchMap.Value : null;
+            _splash.ShowRoom(room, room != null ? "Ready" : "");
+        }
+
+        /// <summary>host, or host:port. Leaves both alone on anything else, so a
+        /// typo does not silently change the address.</summary>
+        private static bool ParseEndpoint(string text, ref string host, ref int port)
+        {
+            text = text.Trim();
+            if (text.Length == 0)
+            {
+                return false;
+            }
+            int colon = text.LastIndexOf(':');
+            if (colon <= 0)
+            {
+                host = text;
+                return true;
+            }
+            if (!Int32.TryParse(text[(colon + 1)..], NumberStyles.Integer,
+                CultureInfo.InvariantCulture, out int parsed)
+                || parsed < 1 || parsed > 65535)
+            {
+                return false;
+            }
+            host = text[..colon];
+            port = parsed;
+            return true;
+        }
+    }
+}

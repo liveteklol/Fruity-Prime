@@ -34,10 +34,17 @@ jobs:
         include:
           - rid: win-x64
             summary: the game and the launcher, for Windows
+            extra: ""
           - rid: linux-x64
-            summary: the game and the dedicated server, for Linux
+            summary: the game, the launcher and the dedicated server, for Linux
+            extra: ""
+          # Nobody plays on the Pi: this box runs the dedicated server and the
+          # directory and nothing else, so it is published as the server
+          # package. That drops the launcher and, with it, a desktop UI toolkit
+          # the machine would never open.
           - rid: linux-arm64
             summary: the dedicated server and the directory, for a Raspberry Pi
+            extra: "-p:MphReadServer=true"
     steps:
       - uses: actions/checkout@v4
 
@@ -51,12 +58,19 @@ jobs:
       - name: publish ${{ matrix.summary }}
         run: >
           dotnet publish src/MphRead/MphRead.csproj
-          -c Release -r ${{ matrix.rid }}
+          -c Release -r ${{ matrix.rid }} ${{ matrix.extra }}
           --self-contained true -p:PublishSingleFile=true
           -o publish/${{ matrix.rid }}
 
       - name: nothing from the game is in the output
         run: tools/check-no-game-assets.sh publish/${{ matrix.rid }}
+
+      # Double-clicking the game must not put a terminal behind it. That is one
+      # field in the PE header, it comes out of a csproj condition, and nothing
+      # else in this workflow would notice it changing.
+      - name: the game is a GUI binary
+        if: matrix.rid == 'win-x64'
+        run: tools/check-subsystem.sh gui publish/${{ matrix.rid }}/MphRead.exe
 
       # The Linux builds exist to be servers, so the build is not finished
       # until one has been started. It needs no game files, no display and no
@@ -71,4 +85,50 @@ jobs:
         with:
           name: MphRead-${{ matrix.rid }}
           path: publish/${{ matrix.rid }}
+          if-no-files-found: error
+
+  # The dedicated server for Windows.
+  #
+  # Its own job on a Windows runner, rather than another row in the matrix
+  # above, for the same reason the binary exists at all: what is worth proving
+  # is that a console-subsystem build really does hold a terminal and run a
+  # server on Windows, and cross-compiling it on Linux would demonstrate
+  # neither. The publish is the same project with the launcher left out.
+  windows-server:
+    name: win-x64 dedicated server
+    needs: assets
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: publish the dedicated server, for Windows
+        run: >
+          dotnet publish src/MphRead/MphRead.csproj
+          -c Release -r win-x64 -p:MphReadServer=true
+          --self-contained true -p:PublishSingleFile=true
+          -o publish/win-x64-server
+
+      # The whole difference between this binary and the game's, and the one
+      # thing that makes it usable from a terminal or a service supervisor.
+      - name: the server is a console binary
+        shell: bash
+        run: tools/check-subsystem.sh console publish/win-x64-server/MphReadServer.exe
+
+      - name: nothing from the game is in the output
+        shell: bash
+        run: tools/check-no-game-assets.sh publish/win-x64-server
+
+      # The same script the Linux job runs, on Windows.
+      - name: the dedicated server runs
+        shell: bash
+        run: tools/check-dedicated-server.sh publish/win-x64-server
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MphRead-win-x64-server
+          path: publish/win-x64-server
           if-no-files-found: error

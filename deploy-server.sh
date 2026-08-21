@@ -40,7 +40,12 @@ scp_put() {
 }
 
 echo "==> building linux-arm64"
-dotnet publish "$PROJECT" -c Release -r linux-arm64 \
+# -p:MphReadServer=true: this box runs the server and the directory and nobody
+# plays on it, so the launcher and the UI toolkit behind it are left out. The
+# binary is still called MphRead -- the units below have been pointing at that
+# name since before the server package existed, and renaming it here would put
+# a second binary beside the one systemd starts.
+dotnet publish "$PROJECT" -c Release -r linux-arm64 -p:MphReadServer=true \
   --self-contained true -p:PublishSingleFile=true -o "$STAGE" \
   | grep -E "error|-> " || true
 test -f "$STAGE/MphRead" || { echo "build produced no binary" >&2; exit 1; }

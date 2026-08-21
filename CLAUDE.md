@@ -25,6 +25,20 @@ export MESA_GL_VERSION_OVERRIDE=4.5COMPAT  # else Mesa hands out a Core profile
 export ALSOFT_DRIVERS=null PULSE_SERVER=   # else ALSA retries stall frames
 ```
 
+- If `~/.dotnet` is empty, the SDK is not installed at all:
+  `curl -sSL https://dot.net/v1/dotnet-install.sh | bash -s -- --channel 9.0`
+  puts it there.
+- The Avalonia launcher needs `libICE` and `libSM`, which the game itself does
+  not and a minimal WSL install does not have. Without them it falls back to the
+  text launcher rather than failing, so a window that never appears is this and
+  not a bug in the screen. `sudo apt install libice6 libsm6`.
+- `dotnet` aborting on startup with *"Couldn't find a valid ICU package"* is a
+  missing `libicu`, not a broken SDK. `sudo apt install libicu-dev` is the fix;
+  `export DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1` gets a build out of a box
+  with no root, at the cost of culture-aware string handling — fine for
+  building and for the server checks, not something to leave set while
+  testing anything that formats text for a player.
+
 - **`MESA_GL_VERSION_OVERRIDE=4.5COMPAT` is not optional.** Without it Mesa gives
   a Core profile despite the Compatability request, every `GL.Begin` fails
   silently with `InvalidOperation`, and every frame renders black. Nothing in
@@ -47,6 +61,7 @@ export ALSOFT_DRIVERS=null PULSE_SERVER=   # else ALSA retries stall frames
 | Command | Use |
 |---|---|
 | `MphRead -server -port N -players 8` | dedicated relay server; needs no game files. `-servername "NAME"` is what a browser shows; it announces itself to `net.livetek.fr` unless `-nomaster` is passed, and `-master HOST -masterport N` points it elsewhere |
+| `MphReadServer.exe -server ...` | the same server on Windows, as its own console binary. `MphRead.exe` can also do it, but it is a GUI binary: a shell will not wait for it and its exit code never reaches `%ERRORLEVEL%`. Run with no arguments it prints what it is for |
 | `MphRead -masterserver [-port N] [-public HOST] [-hostports A-B]` | the server directory the launcher's browser asks, and the machine that runs matches for players who cannot open a port. Same binary, no game files, keeps nothing on disk. `-public` is the address to publish for servers registering from this same machine, whose heartbeats arrive over the loopback |
 | `MphRead -hostgame "ROOM" [-mode M] [-master HOST]` | ask the directory to run a match and join it. No port forwarding anywhere; the only way to host from a machine with no launcher |
 | `MphRead -servers [-master HOST] [-masterport N]` | print the server list the launcher's browser would show, with each server's map, players and round trip |
@@ -59,7 +74,8 @@ export ALSOFT_DRIVERS=null PULSE_SERVER=   # else ALSA retries stall frames
 | `MphRead -mechanics` | print the catalogue below, generated from the game's own tables |
 | `MphRead` (no arguments, Windows) | the front screen. The Windows build is a GUI binary, so double-clicking it opens the launcher with no terminal behind it |
 | `MphRead -menu` | the console menu, for people who typed something |
-| `MphRead -launcher [-console]` | the front screen explicitly; `-console` also gives it a terminal |
+| `MphRead -launcher [-console]` | the front screen explicitly; `-console` also gives it a terminal. **Off Windows this opens the Avalonia front screen**, or the text one when there is no display. A bare `MphRead` off Windows still opens upstream's `-menu` prompts, unchanged |
+| `MphRead -launcher -text` | the text front screen on a machine that has a display. What an SSH session gets anyway |
 | `MphRead -fullscreen` / `-windowed` / `-nohelmet` | display choices for the paths that never open a launcher |
 
 ## The launcher (Windows)
@@ -111,6 +127,71 @@ is also what the pause menu opens mid-match.
 - The default server is an address, not a hostname. The hostname belongs to the
   people working on this; a copy of the launcher in somebody else's hands
   should not follow it wherever it points next.
+
+### The launcher on Linux
+
+`MphRead -launcher` opens a window off Windows too. There are two screens behind
+that one flag and the build picks between them:
+
+| | Where | What |
+|---|---|---|
+| `Mods/Launcher/` | Windows | the WinForms front screen. **Untouched by the Linux work** |
+| `Mods/Launcher/Gui/` | non-Windows game builds | the Avalonia front screen |
+| `Mods/Launcher/Portable/` | everywhere | preferences, game files, the launch plan, the launch itself, and the text screen |
+
+All three sit on the same `LauncherPrefs`, the same `GameFiles`, and the same
+`MatchStart`, so no two of them can come to disagree about what "host a game"
+does. `LaunchPlan`/`LaunchKind` moved out of `HomeForm` and
+`Launch`/`AddLocalPlayers` moved out of `LauncherEntry` into `MatchStart` for
+exactly that reason: they agree by sharing the code, not by each being kept
+correct. `GameFiles` lost a `[SupportedOSPlatform("windows")]` it never needed --
+it is files, a child process and upstream's `Paths`.
+
+**Windows keeps WinForms and never sees Avalonia.** The packages are referenced
+only when `MphReadAvalonia` is set, which is a game build that is not the
+WinForms one, so a Windows publish does not restore them and a server build does
+not carry them. Checked, not assumed: `MphRead.exe` contains 0 references to
+`Avalonia.Controls` and 642 to `System.Windows.Forms`; `MphRead` for linux-x64 is
+the other way round.
+
+**Three screens, one of which is text.** `-launcher` opens the window; with no
+`DISPLAY` and no `WAYLAND_DISPLAY` -- an SSH login, a container, a headless box
+-- it says so and opens `TextLauncher` instead, and `-launcher -text` asks for
+that on a machine that has both. The fallback is the point: a launcher that
+cannot open a window must not be a build that will not start.
+
+The Avalonia screen is a port of the design, not of the code. Same palette,
+value for value (`GuiTheme` repeats `LauncherTheme`'s numbers, because
+`LauncherTheme` is System.Drawing and does not compile here); same card-at-a-time
+shape; same painted menu entries with a marker bar and tracked capitals. Two
+things are deliberately different, both because Linux is not Windows:
+
+- **The window has a frame.** The WinForms one is borderless and dragged by the
+  picture. An undecorated window that a given window manager will not let you
+  move is a trap, and there are many window managers.
+- **Only the text boxes and scroll bars are stock controls**, under Fluent dark.
+  Everything else is drawn, for the same reason the WinForms screen draws its
+  own.
+
+The gap this closes is not that Linux could not play: `-connect`, `-servers`,
+`-hostgame` and `-menu` were all already there. It is that they are separate
+commands with addresses to copy between them, nothing remembered what you chose
+last time, and **an offline match against bots had no command-line spelling at
+all** -- `-room` is the viewer's room path with no bots and `-maptest` is the
+test harness driving them to a script.
+
+Known limits, none of them hidden from the user:
+
+- Play online, offline and host are unusable until game files are set up, and
+  both screens say so rather than failing when pressed.
+- Volumes, controls, match rules and cheats are still `-menu`. Neither new
+  screen reimplements the settings window; both say where it is.
+- There is no pause menu off Windows -- `PauseMenuForm` is WinForms. In a match,
+  `Escape` does what it did before.
+- Avalonia binds X11 client libraries the game itself does not: a system without
+  `libICE`/`libSM` gets the text launcher rather than a window. That is what the
+  fallback is for, and it is not hypothetical -- the WSL box this was built on
+  was missing both.
 
 ### The settings window
 
@@ -602,8 +683,45 @@ match uses. Thirty-three rooms, eight bots each: no crashes.
 
 | Workflow | When | What |
 |---|---|---|
-| `.github/workflows/build.yml` | every push and pull request | publishes `win-x64`, `linux-x64` and `linux-arm64` on one Ubuntu runner (the csproj's `EnableWindowsTargeting` is what lets the WinForms build come from Linux) and uploads each as an artifact |
-| `.github/workflows/release.yml` | a `v*` tag, or by hand | the same three, packaged into a zip and two tarballs with a short note, attached to a GitHub release |
+| `.github/workflows/build.yml` | every push and pull request | publishes `win-x64`, `linux-x64` and `linux-arm64` (that one as the server package) on one Ubuntu runner — the csproj's `EnableWindowsTargeting` is what lets the WinForms build come from Linux — and uploads each as an artifact. A second job on a **Windows** runner builds the Windows dedicated server and starts it there |
+| `.github/workflows/release.yml` | a `v*` tag, or by hand | those three plus the Windows server, packaged into two zips and two tarballs with a short note, attached to a GitHub release |
+
+**Two Windows executables, and the difference is one field in the PE header.**
+`MphRead.exe` is `WinExe`, so double-clicking it opens the launcher with no
+terminal behind it. That same property makes it useless as a server: Windows
+bakes the subsystem in at link time, so cmd and PowerShell do not wait for it,
+its exit code never reaches `%ERRORLEVEL%`, and a service supervisor cannot tell
+whether it is still up. `dotnet publish -r win-x64 -p:MphReadServer=true`
+publishes the same sources with the launcher left out and a console header, as
+`MphReadServer.exe` — which is exactly the Linux server build with a Windows RID
+on it. `tools/check-subsystem.sh gui|console <exe>` asserts each one, in both
+workflows, because it comes out of a csproj condition and nothing else would
+notice it changing.
+
+**`-p:MphReadServer=true` is the server package**, and both server targets are
+published with it: `win-x64-server` and `linux-arm64`. It leaves out the
+launcher of either kind and the UI toolkit behind it — nobody sits at either
+machine — and it defines `MPHREAD_SERVER`, which is a different question from
+"has no launcher": the Linux game build has no WinForms launcher either and is
+still a game. That define is what makes a bare invocation print what the binary
+is for, rather than falling through to upstream's setup check and answering a
+server that ships without game files with "could not find paths.txt, drag a ROM
+onto the executable". Double-clicked on Windows it waits for a key before the
+window closes; `ConsoleWindow.OwnsItsConsole` is how it tells that from a shell.
+
+**Only the Windows server is renamed.** The subsystem does not exist off
+Windows and those packages hold one binary, so the ARM64 server is still
+`MphRead` — `tools/systemd/*.service` and `deploy-server.sh` have pointed at
+that name since before the server package existed, and renaming it would put a
+second binary on the Pi beside the one systemd starts. Dropping the toolkit took
+the ARM64 download from 104 MB to 86 MB.
+
+`tools/check-dedicated-server.sh` runs on Windows too, in Git Bash, rather than
+being translated into PowerShell that would then have to be kept in step. Three
+things differ there and each is handled where it happens: the binary is
+`MphReadServer.exe`, `python3` may only be `python`, and a path the script makes
+has to go through `cygpath` before a .NET process reads it as anything but a path
+on the current drive.
 
 **The dedicated server is started, not just compiled.**
 `tools/check-no-game-assets.sh` proves what is *not* in a build; the linux-x64
@@ -644,6 +762,11 @@ MPH_SERVER_HOST=france-mining.com MPH_SERVER_USER=livetek \
 # Windows client
 dotnet publish src/MphRead/MphRead.csproj -c Release -r win-x64 \
   --self-contained true -p:PublishSingleFile=true -o publish/win-x64
+
+# Windows dedicated server (console subsystem, no launcher, no game files)
+dotnet publish src/MphRead/MphRead.csproj -c Release -r win-x64 \
+  -p:MphReadServer=true --self-contained true -p:PublishSingleFile=true \
+  -o publish/win-x64-server
 ```
 
 The exe is often locked by a running game: write `MphRead.new.exe`, then `mv`.
@@ -703,6 +826,24 @@ why its column is the weakest.
 
 ## Known gaps
 
+- **Two front screens now exist and only one of them has been used in anger.**
+  The Avalonia screen has been opened, navigated and read pixel by pixel on
+  WSLg; nobody has yet played a match from it on a real Linux desktop, and the
+  card that most needs that is "host a game", whose failure paths are the ones a
+  screenshot cannot show. The WinForms screen is unchanged and unaffected.
+- **The pause menu is still Windows-only.** `PauseMenuForm` is WinForms; off
+  Windows, `Escape` in a match does what it did before. That is the one entry
+  from the Windows launcher's list with no counterpart yet.
+- **The ARM64 server package has never been started by CI.** It is
+  cross-compiled on an x64 runner, so `check-dedicated-server.sh` cannot run it
+  there; the same build configuration is started on every push for linux-x64 and
+  win-x64, which is the nearest thing to a check it gets. The Pi is the real
+  test, through `deploy-server.sh`.
+- **The Windows dedicated server is started in CI, but only there.** The
+  `windows-server` job runs `check-dedicated-server.sh` on a Windows runner, so
+  the claim is checked on every push; nobody has yet run it on a Windows machine
+  behind a real firewall for a long session, which is the arrangement the Linux
+  server has had on the Pi and this one has not.
 - **Late joiners and bursty features.** The tour does its bombing and its
   unmorphing in particular phases, and clients start three seconds apart. A
   client that joined a phase late reports a fraction of what the subject did,

@@ -1,7 +1,6 @@
 using System;
 using System.Diagnostics;
 using System.IO;
-using System.Runtime.Versioning;
 using System.Text;
 
 namespace MphRead.Mods.Launcher
@@ -16,8 +15,12 @@ namespace MphRead.Mods.Launcher
     /// console, with `Console.ReadKey` waits that would hang a window with no
     /// console attached. A child process gets the prompts answered on stdin
     /// and its output back as text to put on screen.
+    ///
+    /// Nothing here is Windows-specific -- it is files, a child process and
+    /// upstream's own `Paths` -- so both front screens use it, and a first run
+    /// on Linux no longer means knowing that dragging a ROM onto the exe has a
+    /// command-line spelling.
     /// </summary>
-    [SupportedOSPlatform("windows")]
     public static class GameFiles
     {
         private static string PathsFile => Path.Combine(AppContext.BaseDirectory, "paths.txt");

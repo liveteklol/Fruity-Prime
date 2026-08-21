@@ -43,6 +43,38 @@ namespace MphRead.Mods
         [DllImport("user32.dll")]
         private static extern bool ShowWindow(IntPtr window, int command);
 
+        [DllImport("kernel32.dll")]
+        private static extern uint GetConsoleProcessList(uint[] processList, uint count);
+
+        /// <summary>
+        /// True when this process is the only one attached to its console.
+        ///
+        /// That means Windows created the console for it -- it was
+        /// double-clicked rather than started from a terminal -- and so the
+        /// window and everything printed to it disappear the instant the
+        /// process returns. Anything that only prints has to wait, and
+        /// anything run from a shell must not.
+        /// </summary>
+        public static bool OwnsItsConsole()
+        {
+            if (!OperatingSystem.IsWindows() || Console.IsOutputRedirected)
+            {
+                return false;
+            }
+            try
+            {
+                // Sized for the answer, not for the truth: any count above one
+                // means somebody else is attached, and which processes those
+                // are does not matter here.
+                var processes = new uint[4];
+                return GetConsoleProcessList(processes, (uint)processes.Length) == 1;
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
         /// <summary>
         /// Decide, once, whether this run needs a console. Called from Main
         /// before anything prints.

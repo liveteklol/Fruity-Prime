@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Runtime.Versioning;
 using System.Threading;
 using System.Windows.Forms;
-using MphRead.Entities;
 using MphRead.Mods.Network;
 
 namespace MphRead.Mods.Launcher
@@ -72,7 +71,7 @@ namespace MphRead.Mods.Launcher
                 }
                 try
                 {
-                    Launch(settings, plan);
+                    MatchStart.Launch(settings, plan);
                 }
                 catch (Exception ex)
                 {
@@ -126,105 +125,6 @@ namespace MphRead.Mods.Launcher
             thread.Start();
             thread.Join();
             return plan;
-        }
-
-        private static void Launch(MenuSettings settings, LaunchPlan plan)
-        {
-            if (!GameFiles.Ready)
-            {
-                Console.WriteLine("[launcher] no game files; nothing to load");
-                return;
-            }
-            GameFiles.ApplyPaths();
-            if (plan.Kind == LaunchKind.Online || plan.Kind == LaunchKind.Host)
-            {
-                // The front screen already joined -- hosting included, because
-                // a host runs the server in this process and joins it over the
-                // loopback like everybody else. That is where "connecting" and
-                // "the server did not answer" belong. All that is left here is
-                // to load what the server says is running.
-                (string RoomKey, GameMode Mode)? room = NetLaunch.ServerRoom();
-                if (room != null)
-                {
-                    settings.RoomKey = room.Value.RoomKey;
-                }
-                else
-                {
-                    Console.WriteLine("[net] no map reported by the server; "
-                        + "loading the selected map instead");
-                }
-            }
-
-            string roomKey = plan.Kind == LaunchKind.Offline
-                ? plan.RoomKey
-                : settings.RoomKey;
-            if (roomKey.Length == 0 || roomKey == "none")
-            {
-                return;
-            }
-
-            using var renderer = new RenderWindow();
-            bool teamPlay = settings.TeamPlay == "on"
-                || plan.Mode.ToString().EndsWith("Teams", StringComparison.Ordinal);
-            GameMode mode = plan.Mode;
-
-            if (NetSession.Active)
-            {
-                NetLaunch.BuildPlayers(renderer.Scene, plan.Hunter, localRecolor: 0,
-                    teamId: teamPlay ? 0 : -1);
-                // The server's rotation decides the mode as well as the map; a
-                // client that kept its own menu choice would score a different
-                // game from everyone else on the same level.
-                if (NetLaunch.ServerRoom() is var room && room != null)
-                {
-                    mode = room.Value.Mode;
-                }
-            }
-            else
-            {
-                AddLocalPlayers(renderer, plan, teamPlay);
-            }
-            renderer.AddRoom(roomKey, mode, playerCount: NetSession.Active
-                ? NetLaunch.RoomPlayerCount
-                : 0);
-            renderer.Run();
-        }
-
-        /// <summary>
-        /// One human and however many bots were asked for.
-        ///
-        /// Bots are ordinary players whose Controls are written by PlayerAi,
-        /// which is what Scene.AddPlayer already arranges for every player
-        /// after the first -- so the only work here is choosing who they are.
-        /// A different hunter each keeps a practice match from being a room
-        /// full of one's own reflection, and alternating teams is what makes
-        /// the Teams modes mean anything offline.
-        /// </summary>
-        private static void AddLocalPlayers(RenderWindow renderer, LaunchPlan plan,
-            bool teamPlay)
-        {
-            int bots = Math.Clamp(plan.Bots, 0, PlayerEntity.SlotCapacity - 1);
-            // PlayerEntity.Create refuses every slot past MaxPlayers, and the
-            // offline default is still the four a DS match could hold, so
-            // asking for seven opponents would silently produce three. Set
-            // rather than raise: the launcher comes back between matches now,
-            // and a seven-bot match must not leave the next one at eight.
-            PlayerEntity.MaxPlayers = Math.Max(4, bots + 1);
-            renderer.AddPlayer(plan.Hunter, recolor: 0, team: teamPlay ? 0 : -1);
-            for (int i = 1; i <= bots; i++)
-            {
-                var hunter = (Hunter)(((int)plan.Hunter + i) % 7);
-                renderer.AddPlayer(hunter, recolor: 0, team: teamPlay ? i % 2 : -1);
-            }
-            int level = Math.Clamp(plan.BotLevel, 0, 2);
-            for (int i = 0; i < PlayerEntity.Players.Count; i++)
-            {
-                PlayerEntity player = PlayerEntity.Players[i];
-                if (player.IsBot)
-                {
-                    player.BotLevel = level;
-                }
-            }
         }
     }
 }

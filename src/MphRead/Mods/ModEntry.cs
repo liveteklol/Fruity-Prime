@@ -36,11 +36,11 @@ namespace MphRead.Mods
             // Keys and mouse feel, before anything creates a player. Called
             // here because this runs for every invocation, launcher or not.
             InputSettings.Load();
-#if MPHREAD_LAUNCHER
             // Before the game-file check, not after: a fresh install has no
             // paths.txt, and the check exits with "press any key" on a console
             // nobody is looking at. The launcher is the screen that fixes
             // that, so it has to be reachable first.
+#if MPHREAD_LAUNCHER
             // No arguments means somebody double-clicked the exe, and that
             // has to be the launcher: the console menu behind it is for people
             // who typed something. -menu is how they still get it.
@@ -48,6 +48,37 @@ namespace MphRead.Mods
                 && !HasFlag(args, "menu") && OperatingSystem.IsWindows())
             {
                 Launcher.LauncherEntry.Run(keepConsole: HasFlag(args, "console"));
+                return true;
+            }
+#endif
+            // The launcher off Windows. The window first, the text screen when
+            // there is no display to put it on -- an SSH login, a container, a
+            // machine with no X or Wayland session. -text asks for the text one
+            // on a machine that has both.
+            //
+            // Only on -launcher: a bare `MphRead` on Linux has always opened
+            // upstream's console menu, and that is a different screen people
+            // are already using rather than an empty spot to fill.
+            if (HasFlag(args, "launcher") && !HasFlag(args, "menu"))
+            {
+#if MPHREAD_AVALONIA
+                if (!HasFlag(args, "text") && Launcher.Gui.GuiLauncher.TryRun())
+                {
+                    return true;
+                }
+#endif
+                Launcher.TextLauncher.Run();
+                return true;
+            }
+#if MPHREAD_SERVER
+            // The server package, run with nothing to do. Falling through to
+            // upstream's setup check would answer with "could not find
+            // paths.txt, drag a ROM onto the executable" -- true of this
+            // binary, and useless: it ships without game files because it
+            // needs none, and it cannot play a match even with them.
+            if (args.Length == 0)
+            {
+                ServerUsage();
                 return true;
             }
 #endif
@@ -169,6 +200,43 @@ namespace MphRead.Mods
             server.Run(cancel.Token);
             return true;
         }
+
+#if MPHREAD_SERVER
+        /// <summary>
+        /// What this binary is for, for somebody who started it with no
+        /// arguments -- which on Windows is anybody who double-clicked it.
+        /// </summary>
+        private static void ServerUsage()
+        {
+            string exe = System.IO.Path.GetFileNameWithoutExtension(
+                Environment.ProcessPath) ?? "MphReadServer";
+            Console.WriteLine();
+            Console.WriteLine("MphRead dedicated server. It needs no game files.");
+            Console.WriteLine();
+            Console.WriteLine($"  {exe} -server -port {NetConfig.DefaultPort} -players 8 "
+                + "-servername \"My server\"");
+            Console.WriteLine("      run a server. Maps come from maprotation.txt, written");
+            Console.WriteLine("      beside this program on first run.");
+            Console.WriteLine();
+            Console.WriteLine($"  {exe} -masterserver -port {NetMasterConfig.DefaultPort}");
+            Console.WriteLine("      run a server directory of your own.");
+            Console.WriteLine();
+            Console.WriteLine($"  {exe} -servers");
+            Console.WriteLine("      list the servers that are up right now.");
+            Console.WriteLine();
+            Console.WriteLine("A server lists itself on " + NetMasterConfig.DefaultHost
+                + " so players can find it;");
+            Console.WriteLine("-nomaster keeps it off every list. See SERVER.txt.");
+            Console.WriteLine();
+            // Double-clicked, so this window is about to close with everything
+            // above it still unread.
+            if (OperatingSystem.IsWindows() && ConsoleWindow.OwnsItsConsole())
+            {
+                Console.WriteLine("Press any key to close this window...");
+                Console.ReadKey();
+            }
+        }
+#endif
 
         private static void ListServers(string masterHost, string? portValue)
         {

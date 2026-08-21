@@ -1,19 +1,57 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <!-- A console binary everywhere except the Windows build, which is a GUI
-         one: double-clicking it has to open the launcher and nothing else, and
-         a console subsystem process gets a terminal before Main can hide it.
-         Mods/ConsoleWindow attaches or allocates one for command-line runs. -->
-    <OutputType Condition="!$(RuntimeIdentifier.StartsWith('win'))">Exe</OutputType>
-    <OutputType Condition="$(RuntimeIdentifier.StartsWith('win'))">WinExe</OutputType>
+    <!-- MphReadServer=true builds the dedicated-server package: no launcher of
+         either kind, no UI toolkit, and a bare invocation that says what the
+         binary is for instead of asking for game files it will never use. It is
+         what the Pi and the Windows server download are published with.
+
+         The WinForms launcher is built for a Windows RID and nothing else; a
+         server build opts back out of it. -->
+    <MphReadWindowsUi Condition="$(RuntimeIdentifier.StartsWith('win')) and '$(MphReadServer)' != 'true'">true</MphReadWindowsUi>
+    <!-- A console binary everywhere except the Windows launcher build, which
+         is a GUI one: double-clicking it has to open the launcher and nothing
+         else, and a console subsystem process gets a terminal before Main can
+         hide it. Mods/ConsoleWindow attaches or allocates one for
+         command-line runs. -->
+    <OutputType Condition="'$(MphReadWindowsUi)' != 'true'">Exe</OutputType>
+    <OutputType Condition="'$(MphReadWindowsUi)' == 'true'">WinExe</OutputType>
     <!-- Mods/Launcher is WinForms, which needs the Windows desktop target.
-         Non-Windows builds stay on plain net9.0 and exclude it. -->
-    <TargetFramework Condition="'$(RuntimeIdentifier)' == '' or !$(RuntimeIdentifier.StartsWith('win'))">net9.0</TargetFramework>
-    <TargetFramework Condition="$(RuntimeIdentifier.StartsWith('win'))">net9.0-windows</TargetFramework>
-    <UseWindowsForms Condition="$(RuntimeIdentifier.StartsWith('win'))">true</UseWindowsForms>
+         Every other build stays on plain net9.0 and excludes it. -->
+    <TargetFramework Condition="'$(MphReadWindowsUi)' != 'true'">net9.0</TargetFramework>
+    <TargetFramework Condition="'$(MphReadWindowsUi)' == 'true'">net9.0-windows</TargetFramework>
+    <UseWindowsForms Condition="'$(MphReadWindowsUi)' == 'true'">true</UseWindowsForms>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <!-- On Windows the server needs a second, differently named executable.
+
+         Windows bakes the subsystem into the PE header at link time, so a GUI
+         binary cannot be talked into behaving like a console one: cmd and
+         PowerShell do not wait for it, its exit code never reaches
+         %ERRORLEVEL%, and a service supervisor cannot tell whether it is
+         still up. Those are the three things a dedicated server is made of, so
+         it gets a binary whose header says console, and a name of its own so
+         that it can sit next to the game's in one folder.
+
+           dotnet publish -r win-x64 -p:MphReadServer=true
+             produces MphReadServer.exe
+
+         Only on Windows. Elsewhere the subsystem does not exist, the server
+         package holds exactly one binary, and renaming it would mean a Pi that
+         has been running MphRead under systemd since before this change gets a
+         second binary beside the one its unit still points at. -->
+    <AssemblyName Condition="'$(MphReadServer)' == 'true' and $(RuntimeIdentifier.StartsWith('win'))">MphReadServer</AssemblyName>
     <DefineConstants Condition="'$(UseWindowsForms)' == 'true'">$(DefineConstants);MPHREAD_LAUNCHER</DefineConstants>
+    <!-- Not the same question as "has no launcher": the Linux game build has
+         no launcher either and is still a game. This one is shipped as the
+         server package, with no game files and no way to get any, which is why
+         it answers a bare invocation differently. -->
+    <DefineConstants Condition="'$(MphReadServer)' == 'true'">$(DefineConstants);MPHREAD_SERVER</DefineConstants>
+    <!-- The graphical launcher off Windows, in Avalonia. A game build that is
+         not the WinForms one gets it; the server builds do not, because a
+         headless relay has no use for a UI toolkit and every megabyte of one
+         is a megabyte in the Pi's download. -->
+    <MphReadAvalonia Condition="'$(MphReadWindowsUi)' != 'true' and '$(MphReadServer)' != 'true'">true</MphReadAvalonia>
+    <DefineConstants Condition="'$(MphReadAvalonia)' == 'true'">$(DefineConstants);MPHREAD_AVALONIA</DefineConstants>
     <!-- Without a DPI declaration Windows bitmap-stretches the window, which
          is both blurry and lays controls out at the wrong size. -->
     <ApplicationHighDpiMode Condition="'$(UseWindowsForms)' == 'true'">PerMonitorV2</ApplicationHighDpiMode>
@@ -24,8 +62,30 @@
     <ProduceReferenceAssembly>False</ProduceReferenceAssembly>
   </PropertyGroup>
 
+  <!-- Mods\Launcher\ is the WinForms front screen and the painted controls it
+       is made of. Mods\Launcher\Portable\ is the half of the launcher that is
+       just logic: preferences, game-file setup, what a launch consists of, and
+       the text front screen that stands in for the window where there is no
+       WinForms. The split is the folder, so neither list has to be kept by
+       hand as files are added. -->
   <ItemGroup Condition="'$(UseWindowsForms)' != 'true'">
-    <Compile Remove="Mods\Launcher\**" />
+    <Compile Remove="Mods\Launcher\*.cs" />
+  </ItemGroup>
+
+  <!-- Mods\Launcher\Gui\ is the Avalonia front screen: the same five entries as
+       the WinForms one, over the same Portable\ logic, for the platforms
+       WinForms cannot reach. Only the builds that declared it get the packages,
+       so a Windows build never restores Avalonia and a server build never
+       carries it. -->
+  <ItemGroup Condition="'$(MphReadAvalonia)' != 'true'">
+    <Compile Remove="Mods\Launcher\Gui\**" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(MphReadAvalonia)' == 'true'">
+    <PackageReference Include="Avalonia" Version="11.2.3" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.2.3" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.2.3" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.2.3" />
   </ItemGroup>
 
   <ItemGroup>
