@@ -234,6 +234,40 @@ extraction, which is knowing it is alive.
 The console draws it over itself with a carriage return, but only when stdout is
 a terminal -- into a pipe or a log, that just makes an unreadable file.
 
+### The logo
+
+One source image, chroma-keyed and cropped into four files under
+`src/MphRead/Assets/`, all four allow-listed in `tools/asset-guard-allow.txt`
+(PNG and JPEG are otherwise banned extensions -- they are what a preview and a
+ROM asset are made of).
+
+| File | What | Used by |
+|---|---|---|
+| `fruity-prime-logo.png` | the wordmark, cherry and text together | the game-files card (`SplashView.DrawTitleCard`, `SplashPanel.DrawPlaceholder`) and the README |
+| `fruity-prime-mark.png` | the cherry alone, padded to a square | the Avalonia window icon (`GuiTheme.AppIcon`) |
+| `fruity-prime.ico`, `fruity-prime-server.ico` | the mark, and the mark with a small server badge, each as a 6-size ICO (256 down to 16) | `ApplicationIcon`, conditioned on `MphReadServer` -- the game exe and the server exe are not the same picture at a glance |
+
+The source was a JPEG with a black background and no alpha. The background is
+cut to transparent by how far each pixel's brightest channel is from black,
+ramped rather than thresholded so the anti-aliased edges around the cherry and
+the lettering stay smooth instead of jagged; pixels in that ramp are also
+**unpremultiplied** against black (divided by their own alpha) so they do not
+carry a dark fringe onto whatever they end up composited over. Skipping that
+step is the difference between a clean cutout and a faint black halo on a
+light background.
+
+**256×256 is not a choice, it is the ICO format's ceiling.** A classic ICO
+directory entry stores width and height in one byte each, with 0 meaning 256 --
+there is no way to name a larger frame, on any Windows version. The source crop
+carries real detail up to about 460 px, so the 256 px tile is a downsample, not
+an upscale: nothing here is limited by the year, only by the format.
+
+The game-files card fills its panel with plain black
+(`GuiTheme.Ink`) rather than the gradient-and-grid placeholder this used to
+draw by hand -- real artwork competing with a decorative backdrop reads as
+cluttered, and the logo's own cut background was keyed to exactly that colour
+so the two are seamless.
+
 ### The settings window
 
 A rail of sections down the left -- Display, Audio, Controls, Match rules,
@@ -783,38 +817,49 @@ match uses. Thirty-three rooms, eight bots each: no crashes.
 
 | Workflow | When | What |
 |---|---|---|
-| `.github/workflows/build.yml` | every push and pull request | publishes `win-x64`, `linux-x64` and `linux-arm64` (that one as the server package) on one Ubuntu runner — the csproj's `EnableWindowsTargeting` is what lets the WinForms build come from Linux — and uploads each as an artifact. A second job on a **Windows** runner builds the Windows dedicated server and starts it there |
-| `.github/workflows/release.yml` | a `v*` tag, or by hand | those three plus the Windows server, packaged into two zips and two tarballs with a short note, attached to a GitHub release |
+| `.github/workflows/build.yml` | every push and pull request | publishes `win-x64`, `linux-x64`, `linux-x64-server` and `linux-arm64` on one Ubuntu runner — the csproj's `EnableWindowsTargeting` is what lets the WinForms build come from Linux — and uploads each as an artifact. A second job on a **Windows** runner builds the Windows dedicated server and starts it there |
+| `.github/workflows/release.yml` | a `v*` tag, or by hand | those four plus the Windows server: five packages, two zips and three tarballs, each with a short note, attached to a GitHub release |
 
 **Two Windows executables, and the difference is one field in the PE header.**
-`MphRead.exe` is `WinExe`, so double-clicking it opens the launcher with no
+`FruityPrime.exe` is `WinExe`, so double-clicking it opens the launcher with no
 terminal behind it. That same property makes it useless as a server: Windows
 bakes the subsystem in at link time, so cmd and PowerShell do not wait for it,
 its exit code never reaches `%ERRORLEVEL%`, and a service supervisor cannot tell
 whether it is still up. `dotnet publish -r win-x64 -p:MphReadServer=true`
 publishes the same sources with the launcher left out and a console header, as
-`MphReadServer.exe` — which is exactly the Linux server build with a Windows RID
-on it. `tools/check-subsystem.sh gui|console <exe>` asserts each one, in both
-workflows, because it comes out of a csproj condition and nothing else would
-notice it changing.
+`FruityPrimeServer.exe` — which is exactly the Linux server build with a
+Windows RID on it. `tools/check-subsystem.sh gui|console <exe>` asserts each
+one, in both workflows, because it comes out of a csproj condition and nothing
+else would notice it changing.
 
-**`-p:MphReadServer=true` is the server package**, and both server targets are
-published with it: `win-x64-server` and `linux-arm64`. It leaves out the
-launcher of either kind and the UI toolkit behind it — nobody sits at either
-machine — and it defines `MPHREAD_SERVER`, which is a different question from
-"has no launcher": the Linux game build has no WinForms launcher either and is
-still a game. That define is what makes a bare invocation print what the binary
-is for, rather than falling through to upstream's setup check and answering a
-server that ships without game files with "could not find paths.txt, drag a ROM
-onto the executable". Double-clicked on Windows it waits for a key before the
-window closes; `ConsoleWindow.OwnsItsConsole` is how it tells that from a shell.
+**`-p:MphReadServer=true` is the server package**, and it is published three
+times: `win-x64-server`, `linux-x64-server` and `linux-arm64`. Every platform
+gets both a game build and a server build, the same way Windows always has —
+the Pi is a server-only machine and the plain x64 one exists for a VPS or a
+spare desktop nobody plays on. Each leaves out the launcher of either kind and
+the UI toolkit behind it, and defines `MPHREAD_SERVER`, which is a different
+question from "has no launcher": the Linux game build has no WinForms launcher
+either and is still a game. That define is what makes a bare invocation print
+what the binary is for, rather than falling through to upstream's setup check
+and answering a server that ships without game files with "could not find
+paths.txt, drag a ROM onto the executable". Double-clicked on Windows it waits
+for a key before the window closes; `ConsoleWindow.OwnsItsConsole` is how it
+tells that from a shell.
 
 **Only the Windows server is renamed.** The subsystem does not exist off
-Windows and those packages hold one binary, so the ARM64 server is still
-`MphRead` — `tools/systemd/*.service` and `deploy-server.sh` have pointed at
-that name since before the server package existed, and renaming it would put a
-second binary on the Pi beside the one systemd starts. Dropping the toolkit took
-the ARM64 download from 104 MB to 86 MB.
+Windows, and both Linux server packages hold exactly one binary each, so they
+keep the plain name `FruityPrime` — same as the game build. The Pi's own
+deploy path (`deploy-server.sh`, below) is a separate thing from what this
+workflow publishes: it also targets the name `FruityPrime` now, and carries a
+migration for a box whose systemd unit still points at the project's old name,
+`MphRead`. Dropping the toolkit took the ARM64 download from 104 MB to 86 MB.
+
+**Both x64 Linux builds are started on the release runner**, because it is x64
+and can actually run them: the game build's server capability and the
+standalone server package. The Windows server gets the same proof on a Windows
+runner. The ARM64 package is cross-compiled and never started by CI at all —
+the Pi itself, through `deploy-server.sh`, is the only thing that has ever run
+it.
 
 `tools/check-dedicated-server.sh` runs on Windows too, in Git Bash, rather than
 being translated into PowerShell that would then have to be kept in step. Three
@@ -950,9 +995,10 @@ why its column is the weakest.
   `systemctl cat mphread-server` after the first deploy.
 - **The ARM64 server package has never been started by CI.** It is
   cross-compiled on an x64 runner, so `check-dedicated-server.sh` cannot run it
-  there; the same build configuration is started on every push for linux-x64 and
-  win-x64, which is the nearest thing to a check it gets. The Pi is the real
-  test, through `deploy-server.sh`.
+  there. `linux-x64-server` is the same build configuration on a processor this
+  runner actually has, and build.yml starts it on every push — the nearest
+  thing to a check ARM64 gets. The Pi is the real test, through
+  `deploy-server.sh`.
 - **The Windows dedicated server is started in CI, but only there.** The
   `windows-server` job runs `check-dedicated-server.sh` on a Windows runner, so
   the claim is checked on every push; nobody has yet run it on a Windows machine

@@ -25,24 +25,35 @@ jobs:
         run: tools/check-no-game-assets.sh
 
   build:
-    name: ${{ matrix.rid }}
+    name: ${{ matrix.id }}
     needs: assets
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          - rid: win-x64
+          - id: win-x64
+            rid: win-x64
             summary: the game and the launcher, for Windows
             extra: ""
-          - rid: linux-x64
+          - id: linux-x64
+            rid: linux-x64
             summary: the game, the launcher and the dedicated server, for Linux
             extra: ""
+          # Every platform gets a server package alongside its game build, so
+          # this is the same RID a second time with the launcher and the UI
+          # toolkit left out -- a plain x64 box (a VPS, a spare desktop) that
+          # nobody is playing on, same as the two below it.
+          - id: linux-x64-server
+            rid: linux-x64
+            summary: the dedicated server and the directory, for a plain x64 Linux machine
+            extra: "-p:MphReadServer=true"
           # Nobody plays on the Pi: this box runs the dedicated server and the
           # directory and nothing else, so it is published as the server
           # package. That drops the launcher and, with it, a desktop UI toolkit
           # the machine would never open.
-          - rid: linux-arm64
+          - id: linux-arm64
+            rid: linux-arm64
             summary: the dedicated server and the directory, for a Raspberry Pi
             extra: "-p:MphReadServer=true"
     steps:
@@ -60,31 +71,32 @@ jobs:
           dotnet publish src/MphRead/MphRead.csproj
           -c Release -r ${{ matrix.rid }} ${{ matrix.extra }}
           --self-contained true -p:PublishSingleFile=true
-          -o publish/${{ matrix.rid }}
+          -o publish/${{ matrix.id }}
 
       - name: nothing from the game is in the output
-        run: tools/check-no-game-assets.sh publish/${{ matrix.rid }}
+        run: tools/check-no-game-assets.sh publish/${{ matrix.id }}
 
       # Double-clicking the game must not put a terminal behind it. That is one
       # field in the PE header, it comes out of a csproj condition, and nothing
       # else in this workflow would notice it changing.
       - name: the game is a GUI binary
-        if: matrix.rid == 'win-x64'
-        run: tools/check-subsystem.sh gui publish/${{ matrix.rid }}/FruityPrime.exe
+        if: matrix.id == 'win-x64'
+        run: tools/check-subsystem.sh gui publish/${{ matrix.id }}/FruityPrime.exe
 
-      # The Linux builds exist to be servers, so the build is not finished
-      # until one has been started. It needs no game files, no display and no
-      # sound device, which is what makes this runnable here -- and is also
-      # exactly the claim worth checking, since the server is reached through a
-      # code path that runs before the game-file check.
+      # Both x64 Linux builds exist to be servers -- one with a launcher
+      # attached, one without -- so neither is finished until it has actually
+      # started. Keyed on rid rather than id: it needs no game files, no
+      # display and no sound device, which is what makes it runnable on this
+      # x64 runner, and the ARM64 build cannot say the same being built for a
+      # processor this runner does not have.
       - name: the dedicated server runs
         if: matrix.rid == 'linux-x64'
-        run: tools/check-dedicated-server.sh publish/${{ matrix.rid }}
+        run: tools/check-dedicated-server.sh publish/${{ matrix.id }}
 
       - uses: actions/upload-artifact@v4
         with:
-          name: FruityPrime-${{ matrix.rid }}
-          path: publish/${{ matrix.rid }}
+          name: FruityPrime-${{ matrix.id }}
+          path: publish/${{ matrix.id }}
           if-no-files-found: error
 
   # The dedicated server for Windows.

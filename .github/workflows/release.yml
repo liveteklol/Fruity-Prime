@@ -55,17 +55,22 @@ jobs:
             dotnet publish src/MphRead/MphRead.csproj -c Release -r "$rid" $stamp \
               --self-contained true -p:PublishSingleFile=true -o "publish/$rid"
           done
-          # The two server packages. Same project, launcher left out, no UI
-          # toolkit: neither machine has anybody sitting at it.
+          # The three server packages: Windows, plain x64 Linux (a VPS, a
+          # spare desktop -- anything that is not the Pi) and ARM64 (the Pi).
+          # Same project each time, launcher left out, no UI toolkit: none of
+          # these machines has anybody sitting at it.
           #
-          # The Windows one also gets a console-subsystem header and a name of
-          # its own, so that a terminal or a service supervisor can run it
-          # beside the game's exe. The ARM64 one keeps the name MphRead,
-          # because the Pi's systemd unit has been pointing at it since before
-          # any of this and a rename would leave a second binary next to it.
+          # Only the Windows one gets a name of its own (FruityPrimeServer,
+          # from a console-subsystem header) so that it can sit in a folder
+          # beside the game's exe. Off Windows the subsystem split does not
+          # exist and every server package holds exactly one binary, so both
+          # keep the plain name FruityPrime.
           dotnet publish src/MphRead/MphRead.csproj -c Release -r win-x64 \
             -p:MphReadServer=true $stamp --self-contained true \
             -p:PublishSingleFile=true -o publish/win-x64-server
+          dotnet publish src/MphRead/MphRead.csproj -c Release -r linux-x64 \
+            -p:MphReadServer=true $stamp --self-contained true \
+            -p:PublishSingleFile=true -o publish/linux-x64-server
           dotnet publish src/MphRead/MphRead.csproj -c Release -r linux-arm64 \
             -p:MphReadServer=true $stamp --self-contained true \
             -p:PublishSingleFile=true -o publish/linux-arm64
@@ -73,7 +78,7 @@ jobs:
       - name: nothing from the game is in the output
         run: >
           tools/check-no-game-assets.sh publish/win-x64 publish/linux-x64
-          publish/linux-arm64 publish/win-x64-server
+          publish/linux-arm64 publish/win-x64-server publish/linux-x64-server
 
       # A GUI game and a console server, which is what makes one
       # double-clickable and the other scriptable. Checked before a tag exists,
@@ -86,10 +91,17 @@ jobs:
 
       # Nothing gets tagged as a release until a server out of it has actually
       # started, registered with a directory and answered a query. This runner
-      # is Linux, so it is the Linux build that is started; the Windows server
-      # gets the same check on a Windows runner in build.yml.
+      # is x64 Linux, so both x64 builds can be started here -- the game
+      # build's server capability and the standalone server package, which is
+      # otherwise the one server target nothing runs on a real machine before
+      # it reaches a player. The Windows server gets the same check on a
+      # Windows runner in build.yml; the ARM64 one cannot run on this runner
+      # at all, being cross-compiled for a different processor.
       - name: the dedicated server runs
-        run: tools/check-dedicated-server.sh publish/linux-x64
+        run: |
+          set -euo pipefail
+          tools/check-dedicated-server.sh publish/linux-x64
+          tools/check-dedicated-server.sh publish/linux-x64-server
 
       - name: package
         env:
@@ -142,8 +154,9 @@ jobs:
             ./FruityPrime -menu                 volumes, controls, match rules
 
           This build can also run a dedicated server, with -server; it needs no
-          game files to do it. The ARM64 server package is the same thing for a
-          Raspberry Pi and is a much smaller download.
+          game files to do it. If that is all a machine is for, the server
+          package is a smaller download with no launcher in it -- there is one
+          for plain x64 Linux and one for a Raspberry Pi.
 
           F11 or Alt+Enter switches to fullscreen, Escape opens the pause menu.
           NOTE
@@ -165,6 +178,31 @@ jobs:
             ./FruityPrime -masterserver -port 27889
           NOTE
           ( cd publish/linux-arm64 && tar czf "../../dist/FruityPrime-$TAG-server-linux-arm64.tar.gz" . )
+
+          cp LICENSE publish/linux-x64-server/ 2>/dev/null || true
+          cat > publish/linux-x64-server/SERVER.txt <<'NOTE'
+          Fruity Prime dedicated server, for a plain x64 Linux machine -- a
+          VPS, a spare desktop, anything that is not a Raspberry Pi (see the
+          ARM64 package for that) and that nobody is playing on.
+
+            ./FruityPrime -server -port 27888 -players 8 -servername "My server"
+
+          It needs no game files. Maps come from maprotation.txt, written
+          beside the binary on first run.
+
+          The server lists itself on net.livetek.fr so that players can find it
+          in the launcher's server browser. Pass -nomaster to stay private, or
+          -master HOST to use a different directory.
+
+          To run a directory of your own:
+
+            ./FruityPrime -masterserver -port 27889
+
+          tools/systemd/ in the source has unit files to run this under
+          systemd; deploy-server.sh automates that end to end for the ARM64
+          build, and the same units work here with the RID changed.
+          NOTE
+          ( cd publish/linux-x64-server && tar czf "../../dist/FruityPrime-$TAG-server-linux-x64.tar.gz" . )
 
           cp LICENSE publish/win-x64-server/ 2>/dev/null || true
           cat > publish/win-x64-server/SERVER.txt <<'NOTE'
