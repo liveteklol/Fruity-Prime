@@ -157,10 +157,27 @@ namespace MphRead
             _unpausingDialog = false;
         }
 
+        /// <summary>
+        /// Whether this mode splits the players into two teams.
+        ///
+        /// Capture is the one that catches callers out: it is a team mode
+        /// whose name does not end in "Teams", so anything that tested the
+        /// name alone -- as the launcher did -- decided Capture was a
+        /// free-for-all, handed every player and bot the same "no team", and
+        /// then left Setup below to sort them by a TeamIndex nobody had set.
+        /// One list, asked by everyone, is what keeps that from happening
+        /// again.
+        /// </summary>
+        public static bool IsTeamMode(GameMode mode)
+        {
+            return mode == GameMode.BattleTeams || mode == GameMode.SurvivalTeams
+                || mode == GameMode.Capture || mode == GameMode.BountyTeams
+                || mode == GameMode.NodesTeams || mode == GameMode.DefenderTeams;
+        }
+
         public static void Setup(Scene scene)
         {
-            if (Mode == GameMode.BattleTeams || Mode == GameMode.SurvivalTeams || Mode == GameMode.Capture
-                || Mode == GameMode.BountyTeams || Mode == GameMode.NodesTeams || Mode == GameMode.DefenderTeams)
+            if (IsTeamMode(Mode))
             {
                 Teams = true;
                 for (int i = 0; i < PlayerEntity.SlotCapacity; i++)

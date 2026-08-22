@@ -1727,7 +1727,7 @@ namespace MphRead.Mods.Launcher
                 _settings.Mode = Plan.Mode == GameMode.None
                     ? "auto-select"
                     : NetStatus.ModeName(Plan.Mode);
-                if (Plan.Mode.ToString().EndsWith("Teams", StringComparison.Ordinal))
+                if (GameState.IsTeamMode(Plan.Mode))
                 {
                     _settings.TeamPlay = "on";
                 }

@@ -21,6 +21,7 @@ namespace MphRead.Mods
         private static volatile bool _leave;
         private static volatile bool _quit;
         private static volatile bool _toggleFullscreen;
+        private static volatile bool _refocus;
 #if MPHREAD_LAUNCHER
         // The menu's own message loop. Windows-only, like the menu itself.
         private static Thread? _thread;
@@ -67,6 +68,28 @@ namespace MphRead.Mods
         /// <summary>Called once a frame by the game window.</summary>
         public static void Poll(GameWindow window)
         {
+            if (_refocus)
+            {
+                _refocus = false;
+                // Give the keyboard back to the game.
+                //
+                // The menu is a WinForms window on its own thread. Closing it
+                // does not reliably make the game window the foreground one
+                // again -- Windows restricts which thread may hand focus
+                // around -- and an unfocused GLFW window receives no keys and
+                // cannot grab the pointer. The game goes on simulating, so
+                // nothing looks crashed: the mouse still moves, the picture
+                // still draws, and nothing the player presses arrives. That
+                // reads as a freeze.
+                try
+                {
+                    window.Focus();
+                }
+                catch (Exception)
+                {
+                    // Not worth losing the match over.
+                }
+            }
             if (_toggleFullscreen)
             {
                 _toggleFullscreen = false;
@@ -103,7 +126,13 @@ namespace MphRead.Mods
 
         internal static void RequestFullscreenToggle() => _toggleFullscreen = true;
 
-        internal static void MarkClosed() => _open = false;
+        internal static void MarkClosed()
+        {
+            _open = false;
+            // Asked for here, done in Poll: the window belongs to the game's
+            // thread, and this runs on the menu's.
+            _refocus = true;
+        }
 
         private static void OpenMenu()
         {

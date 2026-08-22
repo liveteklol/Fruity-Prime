@@ -144,72 +144,102 @@ namespace MphRead.Mods.Network
             double lastReport = 0;
             double lastStateBroadcast = 0;
             _matchStarted = 0;
-            while (_running && !cancel.IsCancellationRequested)
+            try
             {
-                double now = clock.Elapsed.TotalSeconds;
-                foreach (ReceivedPacket packet in _transport.Drain())
+                while (_running && !cancel.IsCancellationRequested)
                 {
-                    Handle(packet, now);
-                }
-                DropTimedOut(now);
-
-                // The server owns the match clock, not the authority client:
-                // that is what lets a joiner adopt a running match's timer
-                // instead of starting its own, and what keeps the rotation
-                // advancing even while players come and go.
-                float limit = _rotation.Current.TimeLimit;
-                if (_matchEndedAt < 0 && limit > 0 && _peers.Count > 0
-                    && now - _matchStarted >= limit)
-                {
-                    EndMatch(now, "time limit");
-                }
-                else if (_matchEndedAt >= 0 && now - _matchEndedAt >= EndSequenceSeconds)
-                {
-                    AdvanceMap(now);
-                }
-                // Repeated rather than sent once: UDP drops, and a client that
-                // missed the state packet would otherwise sit on a stale map.
-                if (now - lastStateBroadcast >= 1.0)
-                {
-                    lastStateBroadcast = now;
-                    // Order matters only in that the roster carries the last
-                    // measurement: ping first, publish second.
-                    PingPeers(now);
-                    BroadcastMatchState(now);
-                    BroadcastRoster();
-                    if (_authority != null)
+                    double now = clock.Elapsed.TotalSeconds;
+                    foreach (ReceivedPacket packet in _transport.Drain())
                     {
-                        NotifyAuthority(_authority);
+                        Handle(packet, now);
                     }
-                    Reporter?.Beat(now, ServerName, listenPort,
-                        (byte)_peers.Count, (byte)_maxPlayers,
-                        (byte)_rotation.Current.Mode, _rotation.Current.RoomKey);
+                    DropTimedOut(now);
+
+                    // The server owns the match clock, not the authority client:
+                    // that is what lets a joiner adopt a running match's timer
+                    // instead of starting its own, and what keeps the rotation
+                    // advancing even while players come and go.
+                    float limit = _rotation.Current.TimeLimit;
+                    if (_matchEndedAt < 0 && limit > 0 && _peers.Count > 0
+                        && now - _matchStarted >= limit)
+                    {
+                        EndMatch(now, "time limit");
+                    }
+                    else if (_matchEndedAt >= 0 && now - _matchEndedAt >= EndSequenceSeconds)
+                    {
+                        AdvanceMap(now);
+                    }
+                    // Repeated rather than sent once: UDP drops, and a client that
+                    // missed the state packet would otherwise sit on a stale map.
+                    if (now - lastStateBroadcast >= 1.0)
+                    {
+                        lastStateBroadcast = now;
+                        // Order matters only in that the roster carries the last
+                        // measurement: ping first, publish second.
+                        PingPeers(now);
+                        BroadcastMatchState(now);
+                        BroadcastRoster();
+                        if (_authority != null)
+                        {
+                            NotifyAuthority(_authority);
+                        }
+                        Reporter?.Beat(now, ServerName, listenPort,
+                            (byte)_peers.Count, (byte)_maxPlayers,
+                            (byte)_rotation.Current.Mode, _rotation.Current.RoomKey);
+                    }
+                    if (now - lastReport >= 30)
+                    {
+                        lastReport = now;
+                        Log($"{_peers.Count} peer(s) connected"
+                            + (_authority != null ? $", authority = slot {_authority.SlotIndex}" : ", no authority")
+                            + $", map {_rotation.Current.RoomKey}"
+                            + (limit > 0 ? $", {Math.Max(0, limit - (now - _matchStarted)):0} s left" : "")
+                            + (_transport is { PacketsDropped: > 0 }
+                                ? $", {_transport.PacketsDropped} packet(s) dropped" : ""));
+                    }
+                    // A millisecond between passes while anyone is connected --
+                    // well under any sane packet interval -- and twenty while
+                    // nobody is. An empty server spinning at 1 kHz cost 5-7% of a
+                    // core on the Pi around the clock for nothing; the only thing
+                    // waiting on this loop then is the next Hello, and twenty
+                    // milliseconds is not a join anybody can feel.
+                    Thread.Sleep(_peers.Count == 0 ? 20 : 1);
                 }
-                if (now - lastReport >= 30)
-                {
-                    lastReport = now;
-                    Log($"{_peers.Count} peer(s) connected"
-                        + (_authority != null ? $", authority = slot {_authority.SlotIndex}" : ", no authority")
-                        + $", map {_rotation.Current.RoomKey}"
-                        + (limit > 0 ? $", {Math.Max(0, limit - (now - _matchStarted)):0} s left" : "")
-                        + (_transport is { PacketsDropped: > 0 }
-                            ? $", {_transport.PacketsDropped} packet(s) dropped" : ""));
-                }
-                // A millisecond between passes while anyone is connected --
-                // well under any sane packet interval -- and twenty while
-                // nobody is. An empty server spinning at 1 kHz cost 5-7% of a
-                // core on the Pi around the clock for nothing; the only thing
-                // waiting on this loop then is the next Hello, and twenty
-                // milliseconds is not a join anybody can feel.
-                Thread.Sleep(_peers.Count == 0 ? 20 : 1);
             }
+            finally
+            {
+                Shutdown(listenPort);
+            }
+        }
+
+        /// <summary>
+        /// Come off the list and give the socket back.
+        ///
+        /// In a finally, not after the loop: this used to be plain statements
+        /// at the end of Run, so anything thrown inside the loop skipped the
+        /// farewell entirely and left the game listed -- offered to players,
+        /// answering nothing -- until the directory timed it out. A hosted
+        /// game runs inside the player's own process, where an exception is
+        /// swallowed by the thread wrapper and nothing says so.
+        /// </summary>
+        private void Shutdown(ushort listenPort)
+        {
             Log("shutting down");
-            // Say so, rather than letting the directory work it out from fifty
-            // seconds of silence. A server that has just been stopped is a
-            // server nobody should still be offered.
-            Reporter?.Farewell(listenPort);
+            _running = false;
+            try
+            {
+                // Say so, rather than letting the directory work it out from
+                // fifty seconds of silence. A server that has just been
+                // stopped is a server nobody should still be offered.
+                Reporter?.Farewell(listenPort);
+            }
+            catch (Exception)
+            {
+                // Nothing left to tell, and nothing left to do about it.
+            }
             Reporter?.Dispose();
-            _transport.Dispose();
+            Reporter = null;
+            _transport?.Dispose();
             _transport = null;
         }
 

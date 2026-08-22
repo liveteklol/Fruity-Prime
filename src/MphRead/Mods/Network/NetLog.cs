@@ -31,7 +31,26 @@ namespace MphRead.Mods.Network
         private static bool _failed;
 
         /// <summary>Seconds between periodic snapshots. Events are written immediately.</summary>
-        public const double Interval = 1.0;
+        /// <summary>
+        /// Seconds between roster dumps. One a second is right for reading by
+        /// eye; a diagnostic that compares two clients' idea of where a
+        /// player is needs them far closer together than that, because the
+        /// time between the two samples being compared is itself counted as
+        /// disagreement. MPHREAD_NETLOG_INTERVAL overrides it.
+        /// </summary>
+        public static readonly double Interval = ReadInterval();
+
+        private static double ReadInterval()
+        {
+            string? value = Environment.GetEnvironmentVariable("MPHREAD_NETLOG_INTERVAL");
+            if (value != null && Double.TryParse(value, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out double parsed)
+                && parsed > 0 && parsed <= 10)
+            {
+                return parsed;
+            }
+            return 1.0;
+        }
 
         public static bool Enabled { get; private set; }
 

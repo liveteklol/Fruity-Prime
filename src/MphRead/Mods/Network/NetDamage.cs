@@ -70,6 +70,51 @@ namespace MphRead.Mods.Network
         public static readonly int[] Replayed = new int[Slots];
 
         /// <summary>
+        /// Beams each slot actually spawned on this machine.
+        ///
+        /// The missing third of the picture. Resolved says whether a hit
+        /// landed and Replayed whether the victim was told, but neither can
+        /// tell "the shot missed" from "the shot was never fired here at
+        /// all" -- and on the authority, which is the only machine whose
+        /// shots count, those are completely different faults. A puppet that
+        /// holds fire on its owner's screen and spawns nothing here means the
+        /// input never arrived; one that spawns plenty and resolves nothing
+        /// means it is firing into the wrong place.
+        /// </summary>
+        public static readonly int[] Fired = new int[Slots];
+
+        /// <summary>
+        /// Total degrees between where a slot's shots went and where its gun
+        /// was pointing, and the worst single case. UpdateAimVecs drags the
+        /// shot half way from the aim towards the body's facing, so a puppet
+        /// whose facing does not follow its aim fires beside itself.
+        /// </summary>
+        public static readonly double[] AimDrift = new double[Slots];
+        public static readonly double[] WorstDrift = new double[Slots];
+
+        /// <summary>Called wherever a beam is spawned, for <see cref="Fired"/>.</summary>
+        public static void NoteFired(PlayerEntity shooter, Vector3 shotVec, Vector3 aimVec)
+        {
+            if (!NetSession.Active)
+            {
+                return;
+            }
+            int slot = shooter.SlotIndex;
+            if (slot < 0 || slot >= Slots)
+            {
+                return;
+            }
+            Fired[slot]++;
+            if (shotVec.LengthSquared > 0.0001f && aimVec.LengthSquared > 0.0001f)
+            {
+                float dot = Math.Clamp(Vector3.Dot(shotVec.Normalized(), aimVec.Normalized()), -1f, 1f);
+                double degrees = Math.Acos(dot) * 180.0 / Math.PI;
+                AimDrift[slot] += degrees;
+                WorstDrift[slot] = Math.Max(WorstDrift[slot], degrees);
+            }
+        }
+
+        /// <summary>
         /// The most hits one snapshot may report as new. Generous next to
         /// anything a real fight produces between two frames, and far below
         /// the wrap that a regressed counter looks like.
@@ -87,6 +132,9 @@ namespace MphRead.Mods.Network
             Array.Clear(_everSeen);
             Array.Clear(Resolved);
             Array.Clear(Replayed);
+            Array.Clear(Fired);
+            Array.Clear(AimDrift);
+            Array.Clear(WorstDrift);
             Replaying = false;
             ReplayBeam = BeamType.None;
         }

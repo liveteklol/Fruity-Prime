@@ -67,8 +67,10 @@ namespace MphRead.Mods.Launcher
             }
 
             using var renderer = new RenderWindow();
-            bool teamPlay = settings.TeamPlay == "on"
-                || plan.Mode.ToString().EndsWith("Teams", StringComparison.Ordinal);
+            // GameState's own list, not the mode's name: Capture is a team
+            // mode that does not end in "Teams", and testing the name left
+            // every player and bot in a Capture match on no team at all.
+            bool teamPlay = settings.TeamPlay == "on" || GameState.IsTeamMode(plan.Mode);
             GameMode mode = plan.Mode;
 
             if (NetSession.Active)

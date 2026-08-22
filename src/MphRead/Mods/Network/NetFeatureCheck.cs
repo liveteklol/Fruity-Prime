@@ -488,6 +488,20 @@ namespace MphRead.Mods.Network
                 pipeline.Append($" [{slot}] {NetDamage.Resolved[slot]}/{NetDamage.Replayed[slot]}");
             }
             Console.WriteLine(pipeline.ToString());
+            var fired = new StringBuilder("    shots spawned here (per slot):");
+            for (int slot = 0; slot < PlayerEntity.SlotCapacity; slot++)
+            {
+                if (_records[slot].SpawnedFrames == 0)
+                {
+                    continue;
+                }
+                double avg = NetDamage.Fired[slot] > 0
+                    ? NetDamage.AimDrift[slot] / NetDamage.Fired[slot]
+                    : 0;
+                fired.Append($" [{slot}] {NetDamage.Fired[slot]}"
+                    + $"(drift {avg:0.0}/{NetDamage.WorstDrift[slot]:0.0} deg)");
+            }
+            Console.WriteLine(fired.ToString());
             Console.WriteLine($"    remote position snaps: {NetPlayerBridge.Snaps} "
                 + $"(worst {NetPlayerBridge.WorstSnap:0.0} units) -- these are the visible teleports");
             if (NetPlayerBridge.RejectedUpdates > 0)

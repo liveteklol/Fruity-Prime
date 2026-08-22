@@ -1031,6 +1031,7 @@ namespace MphRead.Entities
                 flags |= BeamSpawnFlags.PrimeHunter;
             }
             BeamResultFlags result = BeamProjectileEntity.Spawn(this, EquipInfo, _muzzlePos, shotVec, flags, NodeRef, _scene);
+            Mods.Network.NetDamage.NoteFired(this, shotVec, _gunVec1);
             if (result == BeamResultFlags.NoSpawn)
             {
                 EquipInfo.Weapon = curWeapon;
