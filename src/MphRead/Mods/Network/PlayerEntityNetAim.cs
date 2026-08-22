@@ -19,8 +19,50 @@ namespace MphRead.Entities
     /// </summary>
     public partial class PlayerEntity
     {
+        private const int NetworkHistoryLength = 120;
+        private readonly Vector3[] _networkPositionHistory = new Vector3[NetworkHistoryLength];
+        private readonly uint[] _networkPositionFrames = new uint[NetworkHistoryLength];
+        private int _networkPositionHistoryCount;
+
+        internal void ModRecordNetworkPosition(uint frame)
+        {
+            int count = Math.Min(_networkPositionHistoryCount, NetworkHistoryLength - 1);
+            for (int i = count; i > 0; i--)
+            {
+                _networkPositionHistory[i] = _networkPositionHistory[i - 1];
+                _networkPositionFrames[i] = _networkPositionFrames[i - 1];
+            }
+            _networkPositionHistory[0] = Position;
+            _networkPositionFrames[0] = frame;
+            _networkPositionHistoryCount = Math.Min(count + 1, NetworkHistoryLength);
+        }
+
+        internal bool ModGetNetworkPosition(uint frame, out Vector3 position)
+        {
+            for (int i = 0; i < _networkPositionHistoryCount; i++)
+            {
+                if (_networkPositionFrames[i] <= frame)
+                {
+                    position = _networkPositionHistory[i];
+                    return true;
+                }
+            }
+            position = default;
+            return false;
+        }
+
         /// <summary>Where this player's gun points. Sent as the aim in every intent.</summary>
         internal Vector3 ModGunVector => _gunVec1;
+
+
+        internal void ModRefreshNetworkAim()
+        {
+            if (NetSession.Active && SlotIndex != NetHooks.LocalSlot
+                && NetSession.RemoteIntentValid[SlotIndex])
+            {
+                ModSetAim(NetSession.RemoteIntents[SlotIndex].Aim);
+            }
+        }
 
         /// <summary>
         /// Point a remote player's gun where its owner is pointing it.
@@ -35,6 +77,14 @@ namespace MphRead.Entities
             if (!(aim.LengthSquared > 0.0001f))
             {
                 return;
+            }
+            if (NetSession.Active && SlotIndex != NetHooks.LocalSlot)
+            {
+                // A remote player's camera is not the authoritative state.
+                // Repositioning the player without moving this cached camera
+                // made its transmitted aim originate from the previous room
+                // position, so every remote beam missed its target.
+                CameraInfo.Position = Position;
             }
             _gunVec1 = aim.Normalized();
             float flat = MathF.Sqrt(_gunVec1.X * _gunVec1.X + _gunVec1.Z * _gunVec1.Z);
@@ -56,6 +106,7 @@ namespace MphRead.Entities
         /// </summary>
         internal void ModRefreshNodeRef(OpenTK.Mathematics.Vector3 previousPosition)
         {
+            _volume = CollisionVolume.Move(_volumeUnxf, Position);
             NodeRef = _scene.UpdateNodeRef(NodeRef, previousPosition, Position);
         }
 

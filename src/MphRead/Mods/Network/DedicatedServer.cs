@@ -47,6 +47,7 @@ namespace MphRead.Mods.Network
         private readonly MapRotation _rotation;
         private NetTransport? _transport;
         private Peer? _authority;
+        private byte[]? _lastSnapshot;
         private volatile bool _running;
         private double _matchStarted;
         /// <summary>
@@ -521,6 +522,10 @@ namespace MphRead.Mods.Network
         /// </summary>
         private void NotifyAuthority(Peer peer)
         {
+            if (_lastSnapshot != null)
+            {
+                _transport?.Send(peer.EndPoint, PacketType.Snapshot, _lastSnapshot);
+            }
             _scratch[0] = 1;
             _transport?.Send(peer.EndPoint, PacketType.Authority, _scratch.AsSpan(0, 1));
         }
@@ -656,6 +661,7 @@ namespace MphRead.Mods.Network
             {
                 return;
             }
+            _lastSnapshot = packet.Payload.ToArray();
             for (int i = 0; i < _peers.Count; i++)
             {
                 if (_peers[i] != peer)

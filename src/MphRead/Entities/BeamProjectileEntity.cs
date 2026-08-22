@@ -6,6 +6,7 @@ using MphRead.Effects;
 using MphRead.Formats;
 using MphRead.Formats.Collision;
 using MphRead.Formats.Culling;
+using MphRead.Mods.Network;
 using OpenTK.Mathematics;
 
 namespace MphRead.Entities
@@ -391,6 +392,10 @@ namespace MphRead.Entities
                 {
                     continue;
                 }
+                if (NetLog.Enabled)
+                {
+                    NetDamage.PlayerChecks[player.SlotIndex]++;
+                }
                 bool hasHalfturret = player.Hunter == Hunter.Weavel && player.Flags2.TestFlag(PlayerFlags2.Halfturret);
                 if ((Owner == player || hasHalfturret && Owner == player.Halfturret)
                     && (!Flags.TestFlag(BeamFlags.SelfDamage) || Age < 1 / 30f * 4))
@@ -439,14 +444,40 @@ namespace MphRead.Entities
                     {
                         hitPlayer = true;
                     }
+                    if (!hitPlayer && NetSession.IsAuthority && Owner is PlayerEntity shooter
+                        && shooter.SlotIndex != NetSession.LocalSlot
+                        && shooter.SlotIndex >= 0 && shooter.SlotIndex < NetSession.RemoteIntents.Length)
+                    {
+                        uint viewFrame = NetSession.RemoteIntents[shooter.SlotIndex].ViewFrame;
+                        if (viewFrame != 0 && player.ModGetNetworkPosition(viewFrame, out Vector3 viewedPosition))
+                        {
+                            NetDamage.RewindAttempts[shooter.SlotIndex, player.SlotIndex]++;
+                            hitPlayer = CollisionDetection.CheckCylindersOverlap(BackPosition, Position,
+                                viewedPosition.AddY(minY), Vector3.UnitY, dot, radii, ref playerRes);
+                            if (hitPlayer)
+                            {
+                                NetDamage.RewindHits[shooter.SlotIndex, player.SlotIndex]++;
+                            }
+                        }
+                    }
                 }
                 if (hitPlayer && playerRes.Distance < minDist)
                 {
+                    NetDamage.NotePlayerOverlap(Owner, player);
+                    if (NetLog.Enabled)
+                    {
+                        NetDamage.PlayerOverlaps[player.SlotIndex]++;
+                        NetDamage.PlayerAccepted[player.SlotIndex]++;
+                    }
                     minDist = playerRes.Distance;
                     anyRes = playerRes;
                     colWith = player;
                     noColEff = false;
                     hitHalfturret = false;
+                }
+                else if (hitPlayer && NetLog.Enabled)
+                {
+                    NetDamage.PlayerOverlaps[player.SlotIndex]++;
                 }
                 // todo?: else wifi check
                 if (hasHalfturret && Owner != player.Halfturret)

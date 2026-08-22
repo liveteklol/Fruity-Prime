@@ -44,6 +44,7 @@ namespace MphRead.Mods.Network
         public static bool IsClient => Role == NetRole.Client;
         public static int LocalSlot { get; private set; } = 0;
         public static uint NetFrame { get; private set; }
+        public static uint LastSnapshotFrame => _lastSnapshotFrame;
         public static string? LastError { get; private set; }
 
         /// <summary>Latest authoritative state per slot, applied by clients.</summary>
@@ -150,6 +151,7 @@ namespace MphRead.Mods.Network
             NetMatchEnd.Reset();
             NetPlayerBridge.Reset();
             IsAuthority = false;
+            _authorityNeedsStateApply = false;
             if (_transport != null)
             {
                 if (Role == NetRole.Client && _hostEndPoint != null)
@@ -322,6 +324,7 @@ namespace MphRead.Mods.Network
                     if (!IsAuthority)
                     {
                         IsAuthority = true;
+                        _authorityNeedsStateApply = true;
                         Console.WriteLine("[net] this client is now the simulation authority");
                         NetLog.Event("became the simulation authority");
                     }
@@ -448,6 +451,17 @@ namespace MphRead.Mods.Network
         /// snapshots and no player would see another move.
         /// </summary>
         public static bool IsAuthority { get; private set; }
+        private static bool _authorityNeedsStateApply;
+
+        public static bool ConsumeAuthorityStateSync()
+        {
+            if (!_authorityNeedsStateApply)
+            {
+                return false;
+            }
+            _authorityNeedsStateApply = false;
+            return true;
+        }
 
         /// <summary>How many peers the server last reported, including us.</summary>
         public static int ServerPlayerCount => ServerMatch?.PlayerCount ?? 0;

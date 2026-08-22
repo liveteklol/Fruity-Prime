@@ -82,6 +82,10 @@ namespace MphRead.Mods.Network
         /// means it is firing into the wrong place.
         /// </summary>
         public static readonly int[] Fired = new int[Slots];
+        public static readonly int[] PlayerChecks = new int[Slots];
+        public static readonly int[] PlayerOverlaps = new int[Slots];
+        public static readonly int[] PlayerAccepted = new int[Slots];
+        public static readonly int[,] PlayerOverlapsByShooter = new int[Slots, Slots];
 
         /// <summary>
         /// Total degrees between where a slot's shots went and where its gun
@@ -114,6 +118,19 @@ namespace MphRead.Mods.Network
             }
         }
 
+        public static void NotePlayerOverlap(EntityBase? owner, PlayerEntity target)
+        {
+            if (!NetSession.Active || owner is not PlayerEntity shooter)
+            {
+                return;
+            }
+            if (shooter.SlotIndex >= 0 && shooter.SlotIndex < Slots
+                && target.SlotIndex >= 0 && target.SlotIndex < Slots)
+            {
+                PlayerOverlapsByShooter[shooter.SlotIndex, target.SlotIndex]++;
+            }
+        }
+
         /// <summary>
         /// The most hits one snapshot may report as new. Generous next to
         /// anything a real fight produces between two frames, and far below
@@ -133,6 +150,10 @@ namespace MphRead.Mods.Network
             Array.Clear(Resolved);
             Array.Clear(Replayed);
             Array.Clear(Fired);
+            Array.Clear(PlayerChecks);
+            Array.Clear(PlayerOverlaps);
+            Array.Clear(PlayerAccepted);
+            Array.Clear(PlayerOverlapsByShooter);
             Array.Clear(AimDrift);
             Array.Clear(WorstDrift);
             Replaying = false;

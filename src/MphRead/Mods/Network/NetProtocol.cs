@@ -575,7 +575,7 @@ namespace MphRead.Mods.Network
         /// number each one belongs to lets the receiver take each press once.
         /// </summary>
         public const int PressHistory = 8;
-        public const int Size = 4 + 4 + 12 + 1 + 4 * PressHistory + 12 + 4;
+        public const int Size = 4 + 4 + 12 + 1 + 4 * PressHistory + 12 + 2 + 2;
 
         public uint Frame;          // client's frame counter, for ordering
         public IntentButtons Buttons;

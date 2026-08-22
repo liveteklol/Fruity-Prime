@@ -708,8 +708,12 @@ namespace MphRead.Entities
                     }
                 }
             }
-            ProcessMovement();
+            if (!Mods.Network.NetHooks.SkipRemoteMovement(this))
+            {
+                ProcessMovement();
+            }
             UpdateCamera();
+            ModRefreshNetworkAim();
             UpdateAimVecs();
             if (_frozenTimer == 0 && _health > 0 && !_field6D0)
             {
@@ -1002,7 +1006,12 @@ namespace MphRead.Entities
             {
                 return false;
             }
-            Vector3 shotVec = _aimPosition - _muzzlePos;
+            Vector3 shotOrigin = Mods.Network.NetHooks.RemoteShotOrigin(this, _muzzlePos);
+            Vector3 shotVec = Mods.Network.NetHooks.RemoteShotDirection(this, _aimPosition - _muzzlePos);
+            if (shotOrigin != _muzzlePos)
+            {
+                shotVec = Mods.Network.NetHooks.RemoteShotDirection(this, shotVec);
+            }
             if (_disruptedTimer > 0)
             {
                 // random values between -3 and 3
@@ -1030,7 +1039,7 @@ namespace MphRead.Entities
             {
                 flags |= BeamSpawnFlags.PrimeHunter;
             }
-            BeamResultFlags result = BeamProjectileEntity.Spawn(this, EquipInfo, _muzzlePos, shotVec, flags, NodeRef, _scene);
+            BeamResultFlags result = BeamProjectileEntity.Spawn(this, EquipInfo, shotOrigin, shotVec, flags, NodeRef, _scene);
             Mods.Network.NetDamage.NoteFired(this, shotVec, _gunVec1);
             if (result == BeamResultFlags.NoSpawn)
             {
@@ -1623,7 +1632,10 @@ namespace MphRead.Entities
                     }
                 }
             }
-            ProcessMovement();
+            if (!Mods.Network.NetHooks.SkipRemoteMovement(this))
+            {
+                ProcessMovement();
+            }
             UpdateCamera();
         }
 

@@ -502,6 +502,31 @@ namespace MphRead.Mods.Network
                     + $"(drift {avg:0.0}/{NetDamage.WorstDrift[slot]:0.0} deg)");
             }
             Console.WriteLine(fired.ToString());
+            var collision = new StringBuilder("    player collision checks:");
+            for (int slot = 0; slot < PlayerEntity.SlotCapacity; slot++)
+            {
+                if (_records[slot].SpawnedFrames == 0)
+                {
+                    continue;
+                }
+                collision.Append($" [{slot}] {NetDamage.PlayerChecks[slot]}"
+                    + $"/{NetDamage.PlayerOverlaps[slot]}"
+                    + $"/{NetDamage.PlayerAccepted[slot]}");
+            }
+            Console.WriteLine(collision.ToString());
+            var pairs = new StringBuilder("    player overlaps by shooter:");
+            for (int shooter = 0; shooter < PlayerEntity.SlotCapacity; shooter++)
+            {
+                for (int target = 0; target < PlayerEntity.SlotCapacity; target++)
+                {
+                    int count = NetDamage.PlayerOverlapsByShooter[shooter, target];
+                    if (count > 0)
+                    {
+                        pairs.Append($" [{shooter}->{target}] {count}");
+                    }
+                }
+            }
+            Console.WriteLine(pairs.ToString());
             Console.WriteLine($"    remote position snaps: {NetPlayerBridge.Snaps} "
                 + $"(worst {NetPlayerBridge.WorstSnap:0.0} units) -- these are the visible teleports");
             if (NetPlayerBridge.RejectedUpdates > 0)

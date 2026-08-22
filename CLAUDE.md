@@ -961,6 +961,117 @@ updated, which is the intended outcome.
 the Pi: a version 2 server refuses a version 3 client outright, so deploy the
 server before handing the client to anybody.
 
+## Network damage investigation handoff (2026-08-22)
+
+The latency bug is reproducible against `france-mining.com:27888`, the
+dedicated server on the RPi3B. It does not reproduce reliably on loopback. The
+failure is directional and intermittent: a client can fire normally while one
+remote slot receives zero damage for the whole match.
+
+### Work completed
+
+- Added diagnostics to `NetDamage`: `Fired`, `AimDrift`, and projectile player
+  collision counters (`PlayerChecks`, `PlayerOverlaps`, `PlayerAccepted`).
+- Made `MPHREAD_NETLOG_INTERVAL` configurable in `NetLog`; 0.2 seconds was used
+  for wire comparisons, but logging changes timing and can mask the bug.
+- Tested and retained the existing team-mode, server `Farewell`, pause focus,
+  and network diagnostics changes already present in the worktree.
+- Tried network position corrections in `NetPlayerBridge`: pre-simulation
+  application, direct position correction, local-player authoritative position,
+  stale velocity clearing, and cached volume refresh. None eliminated the bug.
+- Tried authority handoff snapshot transfer. It was not the root cause and the
+  current handoff code should be reviewed before being kept as a final change.
+- A temporary protocol-4 `ViewFrame` experiment caused the Pi server to crash
+  in `IntentPacket.Read`; it was removed. `NetConfig.ProtocolVersion` is back
+  at **3** and the Pi was redeployed with the matching ARM64 build.
+- A temporary historical-position lag compensation experiment was removed as
+  unvalidated.
+
+### Measurements
+
+The corrected client build was run in four campaigns of four 70-second matches
+against the Pi, with three clients started three seconds apart (`Samus`,
+`Kanden`, `Trace`). Earlier campaigns reproduced an immune slot in most runs;
+the final clean protocol-3 run also reproduced it. Typical authority reports:
+
+```text
+damage pipeline: [0] 5/0 [1] 0/0 [2] 0/0
+player collision checks: [0] 911/3/0 [1] 916/1/0 [2] 916/0/0
+FAIL: never took a single hit: BRAVO_F (slot 1), CHARLIE_F (slot 2)
+```
+
+The first number in each collision tuple is checks, the second is geometric
+overlap, and the third is the winning collision accepted after `minDist`.
+Thus the immune target is usually not rejected by `TakeDamage`; its projectile
+path never overlaps the target volume on the authority. Other targets do
+overlap, so this is not a general collision-pool failure.
+
+The test harness also has a limitation: its `FindTarget` chooses the nearest
+player independently on each client. Staggered joins and latency can make
+clients choose different targets, so `never took a single hit` is not by itself
+proof of a gameplay defect. Use the collision counters and synchronized target
+scenarios for the next validation.
+
+### Current state and next investigation
+
+- The Pi service is active and stable on protocol 3 after the bad protocol-4
+  deployment was rolled back.
+- Standard Release and Debug/Avalonia builds pass with zero compiler errors;
+  `git diff --check` passed.
+- The key code path is `Renderer.OnUpdateFrame` -> `NetHooks.AfterInput` ->
+  `PlayerInput.ProcessInput` -> `PlayerProcess` ->
+  `BeamProjectileEntity.CheckCollision` -> `PlayerEntity.TakeDamage`.
+- The strongest remaining hypothesis is not yet proven: each client aims at a
+  locally selected target using a different, delayed world view, while the
+  authority resolves the shot against its own current world. Make the test
+  target deterministic first, then log the shooter slot, target slot, intent
+  frame, shooter position, aim vector, and target position at projectile spawn.
+  Do not add another gameplay correction until that experiment distinguishes
+  wrong target/aim from wrong authoritative target position.
+- Useful artifacts are under `/home/livetek/mph-net-test/`, especially
+  `campaign-fix/`, `campaign-presim/`, `campaign-direct/`, `campaign-volume/`,
+  `collision-diag/`, and `packet-fix-full/`. They are generated test output,
+  not source changes.
+
+### Latest attempt (2026-08-22 20:24)
+
+The attempted frame-stamped lag compensation was tested in three 70-second
+Pi matches and did not fix the issue. It was removed. During that experiment,
+`IntentPacket.Size` was found to be 73 while `Write`/`Read`'s real layout was
+69 bytes; the size is now corrected to 69 while the protocol remains version
+3. The Pi was redeployed and is active with the matching ARM64 build.
+
+The latest clean protocol-3 run still reproduced the issue:
+
+```text
+damage pipeline: [0] 5/0 [1] 0/0 [2] 0/0
+player collision checks: [0] 911/3/0 [1] 916/1/0 [2] 916/0/0
+FAIL: never took a single hit: BRAVO_F (slot 1), CHARLIE_F (slot 2)
+```
+
+The Pi did not crash. A short smoke test showed snapshots and intents flowing
+with the corrected 69-byte packet. The bug therefore remains unresolved; do
+not describe the current position or velocity changes as a validated fix.
+The next useful change is to make `NetTestScript.FindTarget` deterministic
+across clients and log shooter/target slots at shot spawn. The current test can
+choose different nearest targets under latency, which makes its zero-damage
+assertion ambiguous.
+
+The target test was then made deterministic as a three-slot ring (`0 -> 1 -> 2
+-> 0`) and run against the Pi. It still reproduced zero-overlap victims, so the
+failure is not explained solely by different target selection. A frame-stamped
+rewind was attempted with protocol 4, but three full matches did not improve
+the result and the experiment was removed. The current Pi service is back on
+protocol 3 and active.
+
+The deterministic ring was also run locally with the same instrumentation: all
+three pairs produced overlaps and damage (`0->1`, `1->2`, `2->0`). Against the
+Pi, the same ring produced cases such as `[0] 5/0 [1] 0/0 [2] 0/0` with no
+overlap for the remote targets. This isolates the remaining defect to the
+latency path rather than a generally broken player collision routine. The
+current test client uses the corrected packet size and the Pi is deployed with
+protocol 3; no protocol-4 experiment is active.
+
 ## Audit status
 
 Since the damage work (2026-08-20), re-verified with `run-check.sh`:

@@ -209,6 +209,23 @@ namespace MphRead.Mods.Network
             Set(c.RollRight, intent.Buttons.HasFlag(IntentButtons.RollRight), missed.HasFlag(IntentButtons.RollRight));
             Set(c.RollUp, intent.Buttons.HasFlag(IntentButtons.RollUp), missed.HasFlag(IntentButtons.RollUp));
             Set(c.RollDown, intent.Buttons.HasFlag(IntentButtons.RollDown), missed.HasFlag(IntentButtons.RollDown));
+            if (NetSession.IsAuthority)
+            {
+                // The owner already simulated movement and sent its resulting
+                // position. Re-simulating movement here lets local collision
+                // resolution move the authoritative hitbox a second time.
+                Set(c.MoveLeft, false);
+                Set(c.MoveRight, false);
+                Set(c.MoveUp, false);
+                Set(c.MoveDown, false);
+                Set(c.Jump, false);
+                Set(c.Boost, false);
+                Set(c.RolltLeft, false);
+                Set(c.RollRight, false);
+                Set(c.RollUp, false);
+                Set(c.RollDown, false);
+                player.Speed = Vector3.Zero;
+            }
             if (intent.WeaponSelect != 0xFF)
             {
                 player.ModSetWeapon((BeamType)intent.WeaponSelect);
@@ -353,12 +370,11 @@ namespace MphRead.Mods.Network
             }
             if (isLocal)
             {
-                // Health and score come from the authority; position does
-                // not. This player's own machine is where it is simulated,
-                // and pulling it towards a second simulation of itself is
-                // what produced the rubber-banding -- yanked ten units, then
-                // walked straight back by the local collision, several times
-                // a second.
+                // The authority owns the collision result. Keeping a second
+                // local position here lets local collision correction diverge
+                // from the world that resolves damage for everyone else.
+                Move(player, state.Position);
+                player.Speed = state.Speed;
                 player.Health = state.Health;
                 return;
             }
@@ -463,14 +479,11 @@ namespace MphRead.Mods.Network
                 Move(player, intent.Position);
                 return;
             }
-            // Close the gap over a few frames rather than in one. Updates
-            // arrive unevenly and every lost one used to show up as a jump;
-            // spreading the catch-up turns a stutter into a glide, at the
-            // cost of being a fraction of a second behind. A wide gap is
-            // closed faster, so a burst of loss does not leave the player
-            // visibly wading back to where it belongs.
-            float rate = distance > FastCatchUpAbove ? FastCatchUpRate : CatchUpRate;
-            Move(player, player.Position + delta * rate);
+            // The owner also sends the aim that was calculated against this
+            // position. Smoothing here leaves the authoritative hitbox behind
+            // that aim under latency, so moving directly is required for
+            // collision and rendering to agree.
+            Move(player, intent.Position);
         }
 
         /// <summary>
@@ -485,6 +498,11 @@ namespace MphRead.Mods.Network
         {
             Vector3 previous = player.Position;
             player.Position = position;
+            // This runs after PlayerProcess has captured PrevPosition. Keep
+            // the next collision sweep anchored to the corrected position;
+            // otherwise the engine treats the network correction as player
+            // movement and can push the puppet away from the hitbox.
+            player.PrevPosition = position;
             player.ModRefreshNodeRef(previous);
         }
     }

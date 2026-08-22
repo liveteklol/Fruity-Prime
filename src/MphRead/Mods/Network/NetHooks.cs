@@ -1,4 +1,5 @@
 using MphRead.Entities;
+using OpenTK.Mathematics;
 
 namespace MphRead.Mods.Network
 {
@@ -39,6 +40,35 @@ namespace MphRead.Mods.Network
             return NetSession.Active;
         }
 
+        public static bool SkipRemoteMovement(PlayerEntity player)
+        {
+            return NetSession.IsAuthority && player.SlotIndex != NetSession.LocalSlot;
+        }
+
+        public static Vector3 RemoteShotOrigin(PlayerEntity player, Vector3 current)
+        {
+            if (!NetSession.IsAuthority || player.SlotIndex == NetSession.LocalSlot
+                || player.SlotIndex < 0 || player.SlotIndex >= NetSession.RemoteIntents.Length)
+            {
+                return current;
+            }
+            return current + NetSession.RemoteIntents[player.SlotIndex].Position - player.Position;
+        }
+
+        public static Vector3 RemoteShotDirection(PlayerEntity player, Vector3 current)
+        {
+            if (NetSession.IsAuthority && player.SlotIndex != NetSession.LocalSlot
+                && player.SlotIndex >= 0 && player.SlotIndex < NetSession.RemoteIntents.Length)
+            {
+                Vector3 aim = NetSession.RemoteIntents[player.SlotIndex].Aim;
+                if (aim.LengthSquared > 0.0001f)
+                {
+                    return aim.Normalized();
+                }
+            }
+            return current;
+        }
+
         /// <summary>
         /// Fill a remote player's Controls from the network, exactly the way
         /// PlayerAi fills a bot's. Returns true when this slot belongs to
@@ -56,6 +86,13 @@ namespace MphRead.Mods.Network
             }
             if (player.LoadFlags.TestFlag(LoadFlags.Active) && NetSession.RemoteIntentValid[slot])
             {
+                if (player.LoadFlags.TestFlag(LoadFlags.Spawned) && player.Health > 0)
+                {
+                    // Position and controls must enter the simulation
+                    // together. Applying the position after the scene step
+                    // left projectile collision testing on the old hitbox.
+                    NetPlayerBridge.ApplyReportedPosition(player, NetSession.RemoteIntents[slot]);
+                }
                 NetPlayerBridge.ApplyIntent(player, NetSession.RemoteIntents[slot]);
             }
             return true;
@@ -134,6 +171,10 @@ namespace MphRead.Mods.Network
             // in line with the server's roster every frame.
             NetSlotManager.Sync();
             NetLog.Snapshot(NetSession.NetFrame / 60.0, scene);
+            if (NetSession.IsAuthority && NetSession.ConsumeAuthorityStateSync())
+            {
+                ApplyRemoteStates();
+            }
             if (NetSession.LocalSlot < 0 || !NetSession.IsClient)
             {
                 return;
@@ -193,34 +234,8 @@ namespace MphRead.Mods.Network
                 PlayerEntity player = PlayerEntity.Players[i];
                 if (player.LoadFlags.TestFlag(LoadFlags.Active))
                 {
+                    player.ModRecordNetworkPosition(NetSession.NetFrame);
                     player.ModRepairVectors();
-                }
-            }
-            // Every player follows the position its own owner reported, on
-            // every machine including the authority's. Doing this after the
-            // scene has stepped means the local simulation cannot drag a
-            // remote player away from where its owner put it.
-            //
-            // Except for the second after a room change, when some peers are
-            // still standing in the room this client has left and their
-            // coordinates mean nothing here. The authority's snapshot places
-            // everybody in the meantime.
-            for (int i = 0; i < PlayerEntity.Players.Count && !NetRoomChange.Settling; i++)
-            {
-                if (i == NetSession.LocalSlot || !NetSession.RemoteIntentValid[i])
-                {
-                    continue;
-                }
-                PlayerEntity remote = PlayerEntity.Players[i];
-                if (remote.LoadFlags.TestFlag(LoadFlags.Active)
-                    && remote.LoadFlags.TestFlag(LoadFlags.Spawned)
-                    && remote.Health > 0)
-                {
-                    // Only while alive. A player falling out of the level
-                    // drops hundreds of units before it dies, and following
-                    // that is neither useful nor distinguishable from a
-                    // desync when counting how far players jump.
-                    NetPlayerBridge.ApplyReportedPosition(remote, NetSession.RemoteIntents[i]);
                 }
             }
             // Also for a client the dedicated server designated as authority:

@@ -438,6 +438,19 @@ namespace MphRead.Mods.Network
 
         private static PlayerEntity? FindTarget(PlayerEntity self)
         {
+            if (NetSession.Active && self.SlotIndex >= 0)
+            {
+                int targetSlot = (self.SlotIndex + 1) % 3;
+                if (targetSlot < PlayerEntity.Players.Count)
+                {
+                    PlayerEntity target = PlayerEntity.Players[targetSlot];
+                    if (target != self && target.LoadFlags.TestFlag(LoadFlags.Active)
+                        && target.LoadFlags.TestFlag(LoadFlags.Spawned) && target.Health > 0)
+                    {
+                        return target;
+                    }
+                }
+            }
             PlayerEntity? best = null;
             float bestDistance = Single.MaxValue;
             for (int i = 0; i < PlayerEntity.Players.Count; i++)
