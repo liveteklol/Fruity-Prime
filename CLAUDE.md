@@ -82,6 +82,7 @@ export ALSOFT_DRIVERS=null PULSE_SERVER=   # else ALSA retries stall frames
 | `MphRead -connect HOST -port N -name X -hunter H` | join from the command line, no launcher |
 | `MphRead -netcheck HOST -port N -name X -hunter H -seconds N [-shots DIR] [-size WxH]` | a real client driven by a script, which reports what it saw. Exit code 0 = pass |
 | `~/mph-net-test/run-remote.sh HOST PORT SECONDS hunter...` | the same check against a server that is not on this machine -- which is the one that matters, since eight clients on one box measure the box |
+| `~/mph-net-test/run-lag.sh MS SECONDS hunter...` | the same check against a loopback server behind `udp-lag.py`, which holds every datagram for `MS` before passing it on. A latency bug reproduced at a number you chose, rather than at whatever the internet is doing -- and the Pi answers in 7-17 ms, so it is the *worse* instrument for one |
 | `MphRead -maptest "ROOM" -players 8 -seconds 22` | load one room with a full house, drive every player, and report what the map holds and whether it survived |
 | `MphRead -maptest "ROOM" -players 8 -bots` | the same, but the other seven are **AI bots** rather than the scripted tour. A different code path -- the tour writes Controls and never touches the behaviour trees -- and the only one that finds what only PlayerAi touches |
 | `MphRead -rooms` | list every multiplayer room, one per line, for a shell loop |
@@ -961,116 +962,268 @@ updated, which is the intended outcome.
 the Pi: a version 2 server refuses a version 3 client outright, so deploy the
 server before handing the client to anybody.
 
-## Network damage investigation handoff (2026-08-22)
+## The damage bug, and what it actually was (2026-08-23)
 
-The latency bug is reproducible against `france-mining.com:27888`, the
-dedicated server on the RPi3B. It does not reproduce reliably on loopback. The
-failure is directional and intermittent: a client can fire normally while one
-remote slot receives zero damage for the whole match.
+Two separate faults, both introduced by commit `bbb13b8`, and neither of them
+latency. They were hunted as a latency problem for a fortnight because the
+authority is the one machine with no latency, and it was the only one whose
+shots landed.
 
-### Work completed
+### 1. Every client except the authority was frozen in place
 
-- Added diagnostics to `NetDamage`: `Fired`, `AimDrift`, and projectile player
-  collision counters (`PlayerChecks`, `PlayerOverlaps`, `PlayerAccepted`).
-- Made `MPHREAD_NETLOG_INTERVAL` configurable in `NetLog`; 0.2 seconds was used
-  for wire comparisons, but logging changes timing and can mask the bug.
-- Tested and retained the existing team-mode, server `Farewell`, pause focus,
-  and network diagnostics changes already present in the worktree.
-- Tried network position corrections in `NetPlayerBridge`: pre-simulation
-  application, direct position correction, local-player authoritative position,
-  stale velocity clearing, and cached volume refresh. None eliminated the bug.
-- Tried authority handoff snapshot transfer. It was not the root cause and the
-  current handoff code should be reviewed before being kept as a final change.
-- A temporary protocol-4 `ViewFrame` experiment caused the Pi server to crash
-  in `IntentPacket.Read`; it was removed. `NetConfig.ProtocolVersion` is back
-  at **3** and the Pi was redeployed with the matching ARM64 build.
-- A temporary historical-position lag compensation experiment was removed as
-  unvalidated.
+`ApplyState` had been changed to take position and speed from the snapshot for
+this machine's own player. That closes a loop with no way out:
 
-### Measurements
+- The authority does not simulate a remote player's movement. It puts the
+  puppet wherever the owner's last intent said.
+- So the position it publishes for a client **is that client's own report from
+  a round trip ago**.
+- Writing it back into the local player means the next intent carries it again,
+  unchanged. The two agree forever.
 
-The corrected client build was run in four campaigns of four 70-second matches
-against the Pi, with three clients started three seconds apart (`Samus`,
-`Kanden`, `Trace`). Earlier campaigns reproduced an immune slot in most runs;
-the final clean protocol-3 run also reproduced it. Typical authority reports:
+Every frame of local movement was computed and thrown away before it could be
+published. `player.Speed = Vector3.Zero` on the authority's puppets was the
+other half: that zero went into the snapshot as the authoritative velocity of
+every remote player, and each client had its own speed cleared sixty times a
+second.
 
-```text
-damage pipeline: [0] 5/0 [1] 0/0 [2] 0/0
-player collision checks: [0] 911/3/0 [1] 916/1/0 [2] 916/0/0
-FAIL: never took a single hit: BRAVO_F (slot 1), CHARLIE_F (slot 2)
-```
+Measured, three clients, seventy seconds: the authority travelled 95 units and
+the other two travelled **0 and 2**. It reproduced on loopback exactly as it did
+on the Pi -- the handoff note saying it did not was reading the damage columns
+rather than the movement ones.
 
-The first number in each collision tuple is checks, the second is geometric
-overlap, and the third is the winning collision accepted after `minDist`.
-Thus the immune target is usually not rejected by `TakeDamage`; its projectile
-path never overlaps the target volume on the authority. Other targets do
-overlap, so this is not a general collision-pool failure.
+The fix is the design the rest of the file already describes: position belongs
+to the machine playing the character. Only health, score, spawn and death come
+from the authority. `DesyncDistance` (30 units) is a corruption backstop, not a
+correction -- a respawn arrives through `ModNetSpawn`, not through here.
 
-The test harness also has a limitation: its `FindTarget` chooses the nearest
-player independently on each client. Staggered joins and latency can make
-clients choose different targets, so `never took a single hit` is not by itself
-proof of a gameplay defect. Use the collision counters and synchronized target
-scenarios for the next validation.
+### 2. Remote players fired from their ankles
 
-### Current state and next investigation
+`ModSetAim` set a remote player's `CameraInfo.Position` to its bare `Position`.
+Every shot in the game starts from that field -- `UpdateAimVecs` builds
+`_gunDrawPos` and then `_muzzlePos` out of it -- and `UpdateCameraFirst` puts it
+`AimYOffset` above the feet, which is **0.9 units**.
 
-- The Pi service is active and stable on protocol 3 after the bad protocol-4
-  deployment was rolled back.
-- Standard Release and Debug/Avalonia builds pass with zero compiler errors;
-  `git diff --check` passed.
-- The key code path is `Renderer.OnUpdateFrame` -> `NetHooks.AfterInput` ->
-  `PlayerInput.ProcessInput` -> `PlayerProcess` ->
-  `BeamProjectileEntity.CheckCollision` -> `PlayerEntity.TakeDamage`.
-- The strongest remaining hypothesis is not yet proven: each client aims at a
-  locally selected target using a different, delayed world view, while the
-  authority resolves the shot against its own current world. Make the test
-  target deterministic first, then log the shooter slot, target slot, intent
-  frame, shooter position, aim vector, and target position at projectile spawn.
-  Do not add another gameplay correction until that experiment distinguishes
-  wrong target/aim from wrong authoritative target position.
-- Useful artifacts are under `/home/livetek/mph-net-test/`, especially
-  `campaign-fix/`, `campaign-presim/`, `campaign-direct/`, `campaign-volume/`,
-  `collision-diag/`, and `packet-fix-full/`. They are generated test output,
-  not source changes.
+So on the authority, every remote player's beam left along a ray parallel to the
+one its owner was looking down and nine tenths of a unit below it. Aimed at
+somebody's chest, that goes into the floor in front of them. The authority's own
+player was unaffected, because the engine still owned its camera -- which is
+exactly why the failure looked directional and looked like lag.
 
-### Latest attempt (2026-08-22 20:24)
-
-The attempted frame-stamped lag compensation was tested in three 70-second
-Pi matches and did not fix the issue. It was removed. During that experiment,
-`IntentPacket.Size` was found to be 73 while `Write`/`Read`'s real layout was
-69 bytes; the size is now corrected to 69 while the protocol remains version
-3. The Pi was redeployed and is active with the matching ARM64 build.
-
-The latest clean protocol-3 run still reproduced the issue:
+The number that proves it, three clients on one map at **11 ms** of ping:
 
 ```text
-damage pipeline: [0] 5/0 [1] 0/0 [2] 0/0
-player collision checks: [0] 911/3/0 [1] 916/1/0 [2] 916/0/0
-FAIL: never took a single hit: BRAVO_F (slot 1), CHARLIE_F (slot 2)
+authority   player overlaps by shooter: [0->1] 2 [1->0] 1
+slot 1      player overlaps by shooter: [1->2] 69
+slot 2      player overlaps by shooter: [2->0] 58
 ```
 
-The Pi did not crash. A short smoke test showed snapshots and intents flowing
-with the corrected 69-byte packet. The bug therefore remains unresolved; do
-not describe the current position or velocity changes as a validated fix.
-The next useful change is to make `NetTestScript.FindTarget` deterministic
-across clients and log shooter/target slots at shot spawn. The current test can
-choose different nearest targets under latency, which makes its zero-damage
-assertion ambiguous.
+Slot 1 counted 69 of its own shots overlapping slot 2. The machine that decides
+what is hit counted none. Eleven milliseconds is less than one frame, so nothing
+about latency can account for that gap.
 
-The target test was then made deterministic as a three-slot ring (`0 -> 1 -> 2
--> 0`) and run against the Pi. It still reproduced zero-overlap victims, so the
-failure is not explained solely by different target selection. A frame-stamped
-rewind was attempted with protocol 4, but three full matches did not improve
-the result and the experiment was removed. The current Pi service is back on
-protocol 3 and active.
+After the fix, at 130 ms of induced latency, the three now agree:
 
-The deterministic ring was also run locally with the same instrumentation: all
-three pairs produced overlaps and damage (`0->1`, `1->2`, `2->0`). Against the
-Pi, the same ring produced cases such as `[0] 5/0 [1] 0/0 [2] 0/0` with no
-overlap for the remote targets. This isolates the remaining defect to the
-latency path rather than a generally broken player collision routine. The
-current test client uses the corrected packet size and the Pi is deployed with
-protocol 3; no protocol-4 experiment is active.
+```text
+authority   [0->1] 4 [1->0] 3 [1->2] 19 [2->0] 2
+slot 1      [0->1] 5 [1->0] 1 [1->2] 20 [2->0] 1
+slot 2      [0->1] 5 [1->0] 3 [1->2] 18 [2->0] 7
+```
+
+### Where it stands
+
+Three clients, a hundred seconds, MP3 PROVING GROUND, `run-remote.sh` against
+the Pi, after all four fixes:
+
+| | Before | After |
+|---|---|---|
+| Local player travelled, non-authority clients | 0 and 2 units | 200-320 units |
+| `damage pipeline` resolved on the authority | `[0] 5 [1] 0 [2] 0` | `[0] 21 [1] 19 [2] 37` |
+| Replayed on each observer | did not match | `21/19/37` on both, exactly |
+| `player overlaps by shooter`, shooter vs authority | `69` vs `0` | agree within 4 on every pair |
+| Slots that never took a hit | one or two, every run | none |
+| Visible teleports | up to 715, worst 265 units | **0** |
+| Cross-check mismatches | 0-3 | **0** |
+| `RESULT` | FAIL | **PASS on all three** |
+
+The same at 130 ms through `run-lag.sh`: PASS on all three, `[0] 31 [1] 3 [2] 20`
+resolved and replayed identically, 0 teleports.
+
+**Pick the map deliberately.** MP1 SANCTORUS, which the Pi's rotation opens on,
+is large and vertical enough that three scripted players never meet: a run there
+produces zero player overlaps for *anybody* and deaths by kill plane, which
+looks like a damage failure and is not one. MP3 PROVING GROUND is the small
+room the comparisons above use.
+
+### The zoom check, which was the harness and not the game
+
+One check still failed after that: Trace zoomed for 148 frames and neither
+observer saw it. It looked like `PlayerState.FlagZoomed` not surviving the trip.
+It was not -- **the tour had never once pressed the zoom button**.
+
+`EquipZoomWeapon` pressed the Imperialist's *own weapon key*, and a weapon key
+only selects a weapon the player has already picked up. On a fresh roster nobody
+has one, so the key did nothing, `ModCanZoom` stayed false, `Hold(c.Zoom, ...)`
+was held false, and the phase reported `untested` -- which reads as "not proven"
+and was really "never attempted". The 148 frames came from a later cycle, after
+the affliction phase had *issued* Trace its affinity Imperialist, and by then the
+phase that would have tested the replication was long past.
+
+Instrumented, the intent carried no `IntentButtons.Zoom` at all, in either
+direction, for a whole run. Two fixes, both in the tour:
+
+- `ModArmZoomWeapon` issues a zoom-capable weapon the way `ModArmAffinityWeapon`
+  issues the affinity one. The affliction probe had already learned this lesson;
+  the zoom phase had not.
+- The press drives *towards* the wanted state (`!EquipInfo.Zoomed`) rather than
+  on a fixed cadence. `UpdateZoom` is a toggle on the rising edge, so a timer
+  zooms in and straight back out: the owner finished a 300-frame phase having
+  been zoomed for two of them while its puppet, which had received a different
+  number of edges, sat zoomed for a hundred and twenty. Pressing only while not
+  yet zoomed converges, and re-presses on its own if an edge is lost.
+- Leaving the phase, zoom is pressed off. Nothing else clears it, and the
+  Imperialist does *half* damage unzoomed -- a player that wandered out still
+  zoomed was quietly firing a different weapon for every phase after it.
+
+Two clients, 80 s, with that in place: `zoom mine 124 / theirs 123` one way and
+`mine 258 / theirs 286` the other, PASS on both, 0 mismatches. The replication
+was never broken. **`untested` is not a pass, and it is not a fail either -- it
+is a question about the harness.**
+
+### Two more, uncovered by the first fix
+
+Taking the local player's position from the snapshot had been hiding things, not
+only freezing people. With it gone, two real disagreements became visible.
+
+**Every respawn put the two machines in different places.** `GetRespawnPoint`
+chooses among the spawn points that no living player is standing near *on the
+machine running it*, and rotates its choice with the frame counter, so two
+machines running it a few frames apart do not pick the same one. The local
+player also respawns early by holding fire, so it makes that choice well before
+the authority makes its own -- and then both believe they know where the player
+is, half a level apart, with nothing to bring them back: the client publishes its
+own spot in every intent and the authority answers with the other one, for the
+rest of that life. Fifty-five of these in a hundred seconds, up to 175 units
+apart.
+
+Spawning locally first is kept -- it is what makes a respawn feel immediate
+rather than arrive a round trip later, and what still works if snapshots stall.
+Only the *placement* is handed over: on the frame the authority's snapshot first
+reports this player as spawned, its position is taken. That is one correction at
+the moment of a respawn, which is the moment nobody is looking.
+
+**A derived velocity became a launch.** With the authority no longer simulating a
+puppet's movement, `Speed` was being worked out from the difference between two
+reported positions. Across a respawn that difference is the whole level, and
+dividing it by two frames gives a velocity of a hundred and fifty units a frame.
+That number does not stay put: it goes into the snapshot as the player's
+authoritative speed, every client applies it to its puppet, and the owner takes
+it back at its next respawn and is fired out of the map. Measured mid-flight, the
+authority held a player at Y=163 climbing 35 units a frame, and one client logged
+975 corrections in a hundred seconds.
+
+A step beyond `SnapDistance` is now a teleport rather than movement and yields
+zero, the derived speed is clamped to `MaxReportedSpeed` (5 units per frame,
+against boost's 0.6), and a freshly placed player is given no speed at all rather
+than the snapshot's.
+
+Three clients, a hundred seconds at 130 ms, after both:
+
+| | Before | After |
+|---|---|---|
+| Visible teleports, worst | 715, 265 units | **0, 0 units** |
+| `pulled back to the authority` | 975 / 55 / 0 | 3 / 0 / 0 |
+| Cross-check mismatches | 1 | **0** |
+| `damage pipeline` | resolved 19/6/41 | resolved 31/3/20, replayed 31/3/20 on both |
+| Weavel's halfturret | never exercised | 601 frames, observers saw 600 and 617 |
+
+Weavel had never been in a networked check before this. The halfturret crosses
+on the first attempt, so nothing was wrong with it -- but "no Weavel has ever
+played one of these" was not written down anywhere either. Put one in the
+roster.
+
+### Measuring latency without the Pi
+
+`tools`-adjacent, in the test rig: `udp-lag.py` is a UDP relay that holds every
+datagram for a chosen time before passing it on, and `run-lag.sh` starts a
+loopback server behind it.
+
+```bash
+cd ~/mph-net-test
+./run-lag.sh 60 90 Samus Kanden Trace   # 60 ms each way, 90 s, three clients
+```
+
+This is what a latency bug should be reproduced against from now on. The Pi is a
+worse instrument for it than it looks: from this machine it answers in 7-17 ms,
+which is *less* than the induced 60 ms, so "it only happens on the Pi" was never
+about the Pi's latency. Use the relay to choose the number, and the Pi to
+confirm.
+
+### Two traps this investigation lost days to
+
+- **`run-check.sh` was testing a stale binary.** It copied
+  `bin/Release/net9.0/MphRead.dll`, which the rename to `FruityPrime` had made
+  nonexistent, with `2>/dev/null` on the end. Every run since silently exercised
+  whatever build was last copied by hand. Both runners now copy `FruityPrime.dll`
+  and fail loudly if there is nothing to copy.
+- **The Pi was running protocol 4.** The notes said the experiment had been
+  rolled back and the Pi redeployed at protocol 3; it had not been. A
+  protocol-3 client is refused at Hello *silently* -- the server logs a line and
+  answers nothing, so the client reports "the server did not answer in time",
+  which reads as a dead server. Check it before believing anything:
+
+  ```bash
+  python3 - <<'PY'
+  import socket
+  s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.settimeout(5)
+  s.sendto(bytes([14]), ("france-mining.com", 27888))
+  d, _ = s.recvfrom(2048)
+  print("protocol", d[1 + 95 + 1])
+  PY
+  ```
+
+- **The feature check could not fail honestly on the authority.** It compared
+  every puppet against `NetSession.RemoteStates`, which on the authority is
+  whatever arrived before it was promoted and never moves again. That read clean
+  only while everybody was frozen; the moment players moved it reported
+  "their position drifted far from the authority's" for players standing exactly
+  where the authority had put them. It is skipped there now, and says so.
+
+### What is still worth doing, and what is not
+
+The protocol does not need replacing. It is a relay plus a client authority,
+with sequence numbers on all three streams, redundant press history, and
+idempotent full snapshots -- which is a normal shape for eight players among
+friends, and none of the above was caused by it.
+
+What it genuinely lacks is **lag compensation**, and one missing field is why it
+cannot have any: nothing a client sends says which of the authority's snapshots
+it was looking at. `IntentPacket.Frame` and `SnapshotHeader.Frame` are counters
+in two unrelated clocks -- each starts at zero when its own process joins -- so
+the frame-stamped rewind that was tried and abandoned was indexing the
+authority's history with the shooter's frame number, against clients started
+three seconds apart and a 120-entry history. It could not have worked, and the
+three campaigns that showed it did not are not evidence against rewind.
+
+The cheap fix, if hit registration under real latency ever needs improving: the
+client echoes back `NetSession.LastSnapshotFrame` in the intent. That number is
+already in the authority's own timebase, so no clock synchronisation is needed
+at all, and `ModRecordNetworkPosition` is already keeping the history it would
+index. It costs four bytes, a protocol bump, and a redeploy of the Pi. It is not
+needed for correctness -- shots now land where they are aimed -- only for the
+fraction of hits that a round trip legitimately eats.
+
+Two smaller things, neither urgent:
+
+- **Snapshots are full state at 60 Hz with no acknowledgement.** Eight players is
+  ~525 bytes sixty times a second to each client, so the relay's uplink carries
+  about 1.8 Mbit/s of snapshot and 0.9 of relayed intent. Fine on a LAN, notable
+  on a home upload. The same echoed frame number is what would make delta
+  compression against the last acked snapshot possible.
+- **Remote players are placed at the newest reported position, with no
+  interpolation buffer.** That is right on the authority, which resolves damage
+  and must not aim at a smoothed ghost. On the other clients it is a 30 Hz
+  staircase for no benefit, since their own hit resolution is discarded anyway.
 
 ## Audit status
 
@@ -1169,6 +1322,11 @@ why its column is the weakest.
   launcher leaves them out of its map list for the same reason.
 - `zoom` and `double damage` only get tested when a bot happens to pick the item
   up, so they are often reported `untested`.
+- `double damage` is still usually `untested` for the reason zoom was: nothing
+  in the tour picks one up. Unlike zoom it is probably fine -- item pickup is
+  simulated on every machine from replicated positions, and the three clients
+  in a 90 s match agree exactly on how many items were taken (`12`, `12`, `12`)
+  -- but "probably fine" is not "measured".
 - **A run with match restarts in it is not a clean read of the tour.**
   `NetTestScript` keys its 15 phases to the *server's* clock, and a new match
   restarts that clock, so clients that finish loading a fraction of a second
@@ -1484,7 +1642,7 @@ This is not the DS Wi-Fi protocol and cannot talk to real hardware or an emulato
 | Snapshot | the authority's view of every player: health, score, form, weapon, zoom, and a damage record. Sent every frame |
 | Damage | resolved only by the authority; every other client throws away locally-resolved hits. The authority stamps each hit with a counter, and victims replay the *difference* in that counter, so several hits between two snapshots are all accounted for |
 | Score | carried in the snapshot. Counting locally worked only for whoever had been present since the first kill |
-| Remote smoothing | remote players ease toward their reported position (35% of the gap per frame, 60% when it is wide) and only jump past 15 units, so a lost burst glides instead of popping |
+| Remote smoothing | none, deliberately, on the machine that resolves damage: a remote player is placed at the position its owner reported, because the aim in the same packet was computed against exactly that position and easing towards it leaves the hitbox behind the shot. Beyond 15 units it is a respawn or a teleporter and is counted as a snap. The eased catch-up the constants still describe is not wired up on the other clients either, where it would cost nothing -- see the end of the damage-bug section |
 | Slots | `PlayerEntity.SlotCapacity` (8). Every slot-indexed array is sized from it |
 | Map rotation | the server owns it; clients poll the match state and load the new room, rebuilding every player slot and resetting the scores |
 

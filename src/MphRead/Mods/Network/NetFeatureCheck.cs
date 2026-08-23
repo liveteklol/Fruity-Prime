@@ -68,6 +68,13 @@ namespace MphRead.Mods.Network
             public double WorstStep;
             public int Teleports;
             public int FramesSinceRespawn;
+            /// <summary>
+            /// Frames since a jump pad or a teleporter last acted on this
+            /// slot, and the running total the engine has reported, so a
+            /// launch can be told from a desync.
+            /// </summary>
+            public int FramesSinceLaunch;
+            public int LastWorldEvents;
         }
 
         /// <summary>
@@ -75,6 +82,16 @@ namespace MphRead.Mods.Network
         /// spare. Roughly 0.35 units per frame walking, more when boosting.
         /// </summary>
         private const float TeleportStep = 9f;
+
+        /// <summary>
+        /// How long after a jump pad or a teleporter a large step is still
+        /// that, rather than a correction. A pad's launch is spent over
+        /// several frames and a remote copy of it arrives in 30 Hz steps, so
+        /// this is generous on purpose -- half a second of not calling a
+        /// launch a desync costs nothing, and calling one a desync buries the
+        /// real ones.
+        /// </summary>
+        private const int LaunchGraceFrames = 30;
 
         private readonly Record[] _records = new Record[PlayerEntity.MaxPlayers];
         private int _itemSamples;
@@ -103,6 +120,10 @@ namespace MphRead.Mods.Network
 
         public void Observe(Scene scene)
         {
+            // Ask the engine to report pads and teleporters. Off by default
+            // and free when off; what it costs when on is an increment on the
+            // frame a player touches one.
+            Mods.WorldEvents.Watching = true;
             _localSlot = Math.Max(NetSession.LocalSlot, 0);
             // Path metrics -- distance walked, degrees turned -- are sampled
             // where the two sides can be compared: the local player at the
@@ -241,6 +262,22 @@ namespace MphRead.Mods.Network
                 {
                     record.Deaths++;
                 }
+                // A jump pad and a teleporter both move a player further in
+                // one frame than any amount of running, and the engine says
+                // so at the moment they act (Mods.WorldEvents, already hooked
+                // in JumpPadEntity and TeleporterEntity for the map audit).
+                // Without asking, this check reported every pad in the game as
+                // a visible teleport: two clients alone on AD2 ALINOS PERCH,
+                // agreeing on every number between them, still produced
+                // "2 teleport(s), worst jump 21.9 units" -- which reads as a
+                // desync and is a player being thrown across a room exactly
+                // as the map intends.
+                int worldEvents = Mods.WorldEvents.JumpPadsFor(slot)
+                    + Mods.WorldEvents.TeleportsFor(slot);
+                record.FramesSinceLaunch = worldEvents != record.LastWorldEvents
+                    ? 0
+                    : record.FramesSinceLaunch + 1;
+                record.LastWorldEvents = worldEvents;
                 record.FramesSinceRespawn = player.Health > record.LastHealth || player.Health == 0
                     ? 0
                     : record.FramesSinceRespawn + 1;
@@ -268,7 +305,8 @@ namespace MphRead.Mods.Network
                     // and health and position arrive from different places, so
                     // they can be a few frames out of step. Only count jumps
                     // well clear of one.
-                    if (frameStep > TeleportStep && record.FramesSinceRespawn > 60)
+                    if (frameStep > TeleportStep && record.FramesSinceRespawn > 60
+                        && record.FramesSinceLaunch > LaunchGraceFrames)
                     {
                         record.Teleports++;
                         record.WorstStep = Math.Max(record.WorstStep, frameStep);
@@ -299,6 +337,18 @@ namespace MphRead.Mods.Network
                 }
 
                 if (slot == _localSlot || !NetSession.RemoteStateValid[slot])
+                {
+                    continue;
+                }
+                // Not on the authority, which is the one machine with nothing
+                // to compare against: it publishes snapshots and does not
+                // receive them, so RemoteStates holds whatever reached it
+                // before it was promoted and never moves again. Measured
+                // against a live world that gap grows without bound, and it
+                // reported "their position drifted far from the authority's"
+                // for players standing exactly where the authority had put
+                // them. It read clean only while everybody was frozen.
+                if (NetSession.IsAuthority)
                 {
                     continue;
                 }
@@ -619,9 +669,12 @@ namespace MphRead.Mods.Network
             Console.Write(report.ToString());
             Console.WriteLine($"    {them}: {other.Teleports} teleport(s), worst jump "
                 + $"{other.WorstStep:0.0} units");
-            Console.WriteLine($"    {them}: form disagreed on {other.FormDisagreeFrames} frame(s) "
-                + $"(longest run {other.WorstFormDisagreeRun}), "
-                + $"worst position gap {other.WorstPositionGap:0.00} units");
+            Console.WriteLine(NetSession.IsAuthority
+                ? $"    {them}: form and position agreement not measured here -- "
+                    + "this client is the authority and receives no snapshot to compare with"
+                : $"    {them}: form disagreed on {other.FormDisagreeFrames} frame(s) "
+                    + $"(longest run {other.WorstFormDisagreeRun}), "
+                    + $"worst position gap {other.WorstPositionGap:0.00} units");
             if (other.WorstFormDisagreeRun > 60)
             {
                 Console.WriteLine("    FAIL: their form stayed wrong for "

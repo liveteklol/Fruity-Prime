@@ -444,22 +444,6 @@ namespace MphRead.Entities
                     {
                         hitPlayer = true;
                     }
-                    if (!hitPlayer && NetSession.IsAuthority && Owner is PlayerEntity shooter
-                        && shooter.SlotIndex != NetSession.LocalSlot
-                        && shooter.SlotIndex >= 0 && shooter.SlotIndex < NetSession.RemoteIntents.Length)
-                    {
-                        uint viewFrame = NetSession.RemoteIntents[shooter.SlotIndex].ViewFrame;
-                        if (viewFrame != 0 && player.ModGetNetworkPosition(viewFrame, out Vector3 viewedPosition))
-                        {
-                            NetDamage.RewindAttempts[shooter.SlotIndex, player.SlotIndex]++;
-                            hitPlayer = CollisionDetection.CheckCylindersOverlap(BackPosition, Position,
-                                viewedPosition.AddY(minY), Vector3.UnitY, dot, radii, ref playerRes);
-                            if (hitPlayer)
-                            {
-                                NetDamage.RewindHits[shooter.SlotIndex, player.SlotIndex]++;
-                            }
-                        }
-                    }
                 }
                 if (hitPlayer && playerRes.Distance < minDist)
                 {
