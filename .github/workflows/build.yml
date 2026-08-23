@@ -20,7 +20,7 @@ jobs:
     name: no game assets
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: nothing from the game is tracked
         run: tools/check-no-game-assets.sh
 
@@ -69,9 +69,9 @@ jobs:
             summary: the game and the launcher, for an Apple Silicon Mac
             extra: ""
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '9.0.x'
 
@@ -104,7 +104,7 @@ jobs:
         if: matrix.rid == 'linux-x64'
         run: tools/check-dedicated-server.sh publish/${{ matrix.id }}
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: FruityPrime-${{ matrix.id }}
           path: publish/${{ matrix.id }}
@@ -122,9 +122,9 @@ jobs:
     needs: assets
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '9.0.x'
 
@@ -150,7 +150,7 @@ jobs:
         shell: bash
         run: tools/check-dedicated-server.sh publish/win-x64-server
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: FruityPrime-win-x64-server
           path: publish/win-x64-server
