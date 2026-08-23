@@ -127,11 +127,34 @@ namespace MphRead.Mods
                 _captured = ScreenCapture.Save(Scene, ThumbnailGenerator.PathFor(_roomKey));
                 if (_captured)
                 {
-                    ThumbnailLog.Write($"{_roomKey}: captured at {Scene.Size.X}x{Scene.Size.Y}");
+                    ThumbnailLog.Write($"{_roomKey}: captured at {Scene.Size.X}x{Scene.Size.Y}"
+                        + (_attempts > 0 ? $" on attempt {_attempts + 1}, window shown" : ""));
                 }
                 if (!_captured)
                 {
                     ThumbnailLog.Write($"{_roomKey}: attempt {_attempts + 1} produced nothing usable");
+                    // Show the window and try again.
+                    //
+                    // A capture window is never displayed -- there is nothing
+                    // to look at and thirty-three of them flashing would be
+                    // worse than useless. But a driver is entitled to do
+                    // nothing at all for a window with no visible surface,
+                    // and some do: an Intel Iris Xe on a compatibility 3.2
+                    // context rendered every one of thirty-three rooms at
+                    // 0.00% lit while the game itself ran fine on the same
+                    // machine. Mesa has the mirror image of this, recorded in
+                    // CLAUDE.md -- a hidden window there has no usable back
+                    // buffer, which is why captures read the offscreen target
+                    // in the first place.
+                    //
+                    // So it stays hidden for the attempt that costs nothing,
+                    // and only a machine that needs the window sees it.
+                    if (!IsVisible)
+                    {
+                        IsVisible = true;
+                        ThumbnailLog.Write($"{_roomKey}: showing the window and retrying -- "
+                            + "this driver appears not to render to a hidden one");
+                    }
                     // A few more frames in case the first one simply came too
                     // early, then stop: if the context cannot draw, no number
                     // of frames will change that.
