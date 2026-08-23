@@ -497,7 +497,25 @@ namespace MphRead.Mods.Network
         /// Sending the form is what lets the receiver convert instead of
         /// guess. Free: another spare bit.
         /// </summary>
-        AltFormState = 1u << 18
+        AltFormState = 1u << 18,
+        /// <summary>
+        /// Whether the sender considers itself alive and on the map.
+        ///
+        /// Without it the authority cannot tell "here is where I am" from
+        /// "here is where my body is lying". A dead player keeps sending
+        /// intents, and they keep carrying the spot it died on -- so the
+        /// authority puts the puppet on a spawn point and the very next
+        /// packet drags it back onto the corpse, which is then published as
+        /// the position it respawned at.
+        ///
+        /// The frame number cannot answer this. It was tried: ignore intents
+        /// composed before the spawn. But the owner's counter keeps rising
+        /// while it is still dead, so the barrier is cleared within two
+        /// frames and the corpse position wins anyway. Measured from a real
+        /// session, seven respawns out of seven landed exactly on the spot of
+        /// death, to two decimal places, on both machines.
+        /// </summary>
+        InPlayState = 1u << 19
     }
 
     /// <summary>

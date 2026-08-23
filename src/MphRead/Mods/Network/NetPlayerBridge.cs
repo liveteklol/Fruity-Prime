@@ -198,6 +198,12 @@ namespace MphRead.Mods.Network
             // Which frame Position below is measured in. See
             // IntentButtons.AltFormState.
             if (player.IsAltForm) buttons |= IntentButtons.AltFormState;
+            // Whether Position below is where this player is, or where its
+            // body is lying. See IntentButtons.InPlayState.
+            if (player.LoadFlags.TestFlag(LoadFlags.Spawned) && player.Health > 0)
+            {
+                buttons |= IntentButtons.InPlayState;
+            }
             return new IntentPacket
             {
                 Buttons = buttons,
@@ -763,7 +769,21 @@ namespace MphRead.Mods.Network
                 _staleFrames[slot] = 0;
             }
             _wasInPlay[slot] = inPlay;
-            if (!inPlay || intent.Frame > _spawnIntentFrame[slot])
+            if (!inPlay)
+            {
+                _staleFrames[slot] = 0;
+                return false;
+            }
+            // The owner still says it is down, so what it is sending is where
+            // its body is lying, not where it is. This is the test that
+            // works: the frame number does not, because a dead player's
+            // counter keeps rising and clears the barrier within two frames
+            // while the position it carries stays on the corpse.
+            if (!intent.Buttons.HasFlag(IntentButtons.InPlayState))
+            {
+                return true;
+            }
+            if (intent.Frame > _spawnIntentFrame[slot])
             {
                 _staleFrames[slot] = 0;
                 return false;
