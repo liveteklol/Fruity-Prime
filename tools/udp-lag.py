@@ -27,7 +27,7 @@ owner = {}       # socket -> client address
 queue = []       # (due, seq, socket, payload, destination)
 seq = 0
 lock = threading.Lock()
-stats = [0, 0]   # forwarded, dropped
+stats = [0, 0, 0]   # forwarded, dropped by design, failed to send
 
 def send_later(sock, payload, dest):
     global seq
@@ -50,8 +50,14 @@ def pump():
             try:
                 sock.sendto(payload, dest)
                 stats[0] += 1
-            except OSError:
-                pass
+            except OSError as err:
+                # Never silently: a relay that cannot forward looks exactly
+                # like a server that is not there, and swallowing this cost a
+                # whole sweep.
+                stats[2] += 1
+                if stats[2] == 1:
+                    print(f"[lag] send failed: {err}. Nothing is being"
+                          f" forwarded to {dest}.", flush=True)
         time.sleep(0.001)
 
 threading.Thread(target=pump, daemon=True).start()
@@ -68,7 +74,13 @@ while True:
         if ready is down:
             if addr not in up:
                 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                s.bind(("127.0.0.1", 0))
+                # Any address, not loopback. A socket bound to 127.0.0.1
+                # cannot send to a public one -- the kernel refuses it with
+                # EINVAL -- so pointing this relay at the real server made it
+                # drop every packet. Six runs of a sweep against the Pi
+                # reported nothing but "could not join", which reads as a dead
+                # server and was a dead relay.
+                s.bind(("", 0))
                 up[addr] = s
                 owner[s] = addr
                 print(f"[lag] client {addr} -> local port {s.getsockname()[1]}", flush=True)
