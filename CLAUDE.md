@@ -1142,6 +1142,82 @@ on the first attempt, so nothing was wrong with it -- but "no Weavel has ever
 played one of these" was not written down anywhere either. Put one in the
 roster.
 
+### Sweeping at random, and what it turned up
+
+A fixed scenario stops finding things once it passes. `run-batch.sh` in the test
+rig runs matches whose map, roster, player count, match length, point goal,
+latency and packet loss are all drawn at random, keeps every run's logs, and
+prints only the runs that reported something.
+
+```bash
+cd ~/mph-net-test
+./run-batch.sh 12          # twelve runs, a random seed
+./run-batch.sh 12 31337    # the same twelve again
+```
+
+Short matches and low point goals are deliberate: a match that ends inside a run
+is the case every "is this a new match" bug hides in, and the fixed scenarios had
+all been long enough to avoid it. Four things came out of the first two sweeps,
+and three of them only happen at a rotation.
+
+**`NetRoomChange.Settling` had no callers.** It guarded the loop in
+`AfterSimulation` that applied peer-reported positions; when that work moved into
+`TryApplyRemoteInput` the guard went with it, so the reason the property exists
+had quietly stopped being true. Clients do not finish loading at the same
+instant, and the local player is the worst of it: this client has loaded and
+spawned while the authority is still finishing the old room, so the snapshot
+drags it to an old-room position, the local simulation walks it back, and the two
+alternate. A six-player run at 60 ms: twenty-six corrections in four seconds,
+ping-ponging between two fixed points a room apart, all inside one restart.
+
+**The damage sequence was being reset on each side separately.** The counter in
+`PlayerState` is a sequence number, not a tally -- its only use is the difference
+between two readings -- so a new map does not invalidate it. Resetting it does,
+because the authority and its clients do not change room on the same frame:
+whichever resets first goes back to zero while the other still holds two hundred
+and thirty. The difference between those is either a resync that swallows the
+next real hits, or -- when the numbers fall the other way -- **up to thirty-two
+hits replayed into a player who has just spawned into a fresh match**. Both were
+happening: four `damage sequence jumped` events per client per rotation, and a
+run whose authority resolved 115 hits while three of the five clients watching
+replayed none at all.
+
+**The divergence backstop asked the wrong question.** It compared the authority's
+copy of this machine's own player against where that player is *now* -- and that
+copy is this client's own report from a round trip ago, so under anything fast
+the two are legitimately far apart. A player falling out of the level covers
+thirty units in the half second a 250 ms link takes to answer, and correcting
+that hauled it back up out of its own fall, repeatedly, so it could never die.
+Seventy-seven of those in one run at 250 ms, with peers reporting a player
+jumping sixty-four units at a time. It now compares against where this player
+*was* when the authority was looking -- its own recorded position, a ping's worth
+of frames back, which `ModRecordNetworkPosition` had been keeping and nothing was
+reading -- and requires the disagreement to last a second. Same scenario after:
+no corrections at all, no visible teleports on two of three clients.
+
+**The check called every jump pad a desync.** Two clients alone on
+AD2 ALINOS PERCH, agreeing on every other number between them, still reported
+"2 teleport(s), worst jump 21.9 units". The engine says when a pad or a
+teleporter acts (`Mods.WorldEvents`, already hooked for the map audit); the check
+now asks, and gives the slot the same grace it gives a respawn.
+
+### What is left at 250 ms, and is not a bug
+
+Three clients at 250 ms each way -- half a second of round trip, worse than any
+real connection this will see:
+
+| Reads as | Is |
+|---|---|
+| `alt-attack: they did 36, observers saw 15` | one-frame presses collapsing. Two presses inside one intent window arrive as one, because the edge history is ORed into a single mask per packet. The bombs those presses would have laid still land |
+| `movement: they did 282, observers saw 130` | a 30 Hz reconstruction of a 60 Hz path, with a fifth of the updates arriving out of order and refused. The observer is measuring a shorter polyline, not missing a player |
+| `zoom: they did 105, observers saw 46` | a toggle whose press takes half a second to arrive and half a second to come back |
+| `their form stayed wrong for 181 frames` | the correction machinery running its full budget -- 90 frames of grace, a transition attempted, 90 more, then the form forced. The check fails at 60, which is *below* that budget, so it cannot pass whenever the machinery has had to act at all |
+| `never took a single hit` on a large map | nobody met. Check `player overlaps by shooter`: if it is empty for *everybody*, it is the room, not the network |
+
+The first three are what lag compensation and delta-compressed snapshots would
+improve, and they are the reason the missing acknowledgement field is worth
+having. None of them is a correctness failure.
+
 ### Measuring latency without the Pi
 
 `tools`-adjacent, in the test rig: `udp-lag.py` is a UDP relay that holds every
