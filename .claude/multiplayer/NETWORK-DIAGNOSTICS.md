@@ -62,6 +62,17 @@ worst 265 units), 3/0/0 corrections (was 975/55/0), 0 mismatches, damage
 `31/3/20` resolved and replayed identically, and Weavel's halfturret exercised
 for the first time (601 frames, observers 600 and 617).
 
+## The sweep has to reach the Pi
+
+**A randomised run against a loopback server is a regression check, not a
+real-world one.** Loopback has none of the reordering, jitter or server-side CPU
+load the bugs in this file were found under. `run-batch.sh` is the fast local
+check; `run-batch-pi.sh` is the one whose result counts -- it puts `udp-lag.py`
+*in front of the Pi*, so the real path is underneath and the chosen delay is on
+top, which is the only way to ask a server that answers in 7-17 ms what happens
+at 250. It sets the map, match length and point goal in the server's own
+rotation over SSH per run and restores it on the way out.
+
 ## Reproducing latency
 
 ```bash

@@ -1142,6 +1142,31 @@ on the first attempt, so nothing was wrong with it -- but "no Weavel has ever
 played one of these" was not written down anywhere either. Put one in the
 roster.
 
+### The sweep has to reach the Pi
+
+**A randomised run against a loopback server is a regression check, not a
+real-world one, and it must not be reported as one.** Loopback reproduces
+neither the reordering a real path does, nor a household line's jitter, nor the
+Pi's own processor with eight clients on it -- and those are the conditions
+every bug in this file was found under. `run-batch.sh` runs locally and is the
+fast check; `run-batch-pi.sh` is the one whose result counts.
+
+The two are not alternatives, because each has what the other lacks. The Pi
+answers in 7-17 ms from here whether you want it to or not, so it cannot be
+asked what happens at 250. So the Pi batch puts `udp-lag.py` **in front of the
+Pi** rather than in front of a local server: the real path underneath, the
+chosen delay on top.
+
+```bash
+cd ~/mph-net-test
+MPH_SERVER_PASS=... ./run-batch-pi.sh 8 12345 150   # runs, seed, max added ms
+```
+
+It writes the map, match length and point goal into the server's own rotation
+file over SSH and restarts the service for each run, and puts the original back
+on the way out however it exits. Nothing else can choose the map on a server
+this machine does not own.
+
 ### Measuring latency without the Pi
 
 `tools`-adjacent, in the test rig: `udp-lag.py` is a UDP relay that holds every
