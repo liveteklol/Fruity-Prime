@@ -708,10 +708,8 @@ namespace MphRead.Entities
                     }
                 }
             }
-            if (!Mods.Network.NetHooks.SkipRemoteMovement(this))
-            {
-                ProcessMovement();
-            }
+            ProcessMovement();
+            Mods.Network.NetHooks.AfterRemoteMovement(this);
             UpdateCamera();
             ModRefreshNetworkAim();
             UpdateAimVecs();
@@ -1632,10 +1630,8 @@ namespace MphRead.Entities
                     }
                 }
             }
-            if (!Mods.Network.NetHooks.SkipRemoteMovement(this))
-            {
-                ProcessMovement();
-            }
+            ProcessMovement();
+            Mods.Network.NetHooks.AfterRemoteMovement(this);
             UpdateCamera();
         }
 

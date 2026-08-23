@@ -260,22 +260,6 @@ namespace MphRead.Mods.Network
             Set(c.RollRight, intent.Buttons.HasFlag(IntentButtons.RollRight), missed.HasFlag(IntentButtons.RollRight));
             Set(c.RollUp, intent.Buttons.HasFlag(IntentButtons.RollUp), missed.HasFlag(IntentButtons.RollUp));
             Set(c.RollDown, intent.Buttons.HasFlag(IntentButtons.RollDown), missed.HasFlag(IntentButtons.RollDown));
-            if (NetSession.IsAuthority)
-            {
-                // The owner already simulated movement and sent its resulting
-                // position. Re-simulating movement here lets local collision
-                // resolution move the authoritative hitbox a second time.
-                Set(c.MoveLeft, false);
-                Set(c.MoveRight, false);
-                Set(c.MoveUp, false);
-                Set(c.MoveDown, false);
-                Set(c.Jump, false);
-                Set(c.Boost, false);
-                Set(c.RolltLeft, false);
-                Set(c.RollRight, false);
-                Set(c.RollUp, false);
-                Set(c.RollDown, false);
-            }
             if (intent.WeaponSelect != 0xFF)
             {
                 player.ModSetWeapon((BeamType)intent.WeaponSelect);
@@ -708,6 +692,23 @@ namespace MphRead.Mods.Network
             // that aim under latency, so moving directly is required for
             // collision and rendering to agree.
             Move(player, reported);
+        }
+
+        /// <summary>
+        /// The position half of <see cref="ApplyReportedPosition"/>, with none
+        /// of its bookkeeping. Called a second time in the same frame, after
+        /// the engine's movement step, so the velocity it derives and the
+        /// snaps it counts must not be counted twice.
+        /// </summary>
+        public static void RestoreReportedPosition(PlayerEntity player, in IntentPacket intent)
+        {
+            if (!Sane(intent.Position) || intent.Position == Vector3.Zero
+                || StaleSinceSpawn(player, intent))
+            {
+                return;
+            }
+            Move(player, InForm(player, intent.Position,
+                intent.Buttons.HasFlag(IntentButtons.AltFormState)));
         }
 
         private static readonly uint[] _spawnIntentFrame = new uint[PlayerEntity.SlotCapacity];

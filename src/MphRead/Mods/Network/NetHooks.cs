@@ -40,9 +40,51 @@ namespace MphRead.Mods.Network
             return NetSession.Active;
         }
 
-        public static bool SkipRemoteMovement(PlayerEntity player)
+        /// <summary>
+        /// Put a remote player back where its owner said, after the engine has
+        /// simulated it.
+        ///
+        /// This used to skip ProcessMovement for those players outright, to
+        /// stop the authority re-simulating a position its owner had already
+        /// decided. It stopped far more than that. ProcessMovement is also
+        /// where a biped's animation is chosen and where its body facing is
+        /// brought round, so a puppet on the authority never left the
+        /// animation Spawn() had given it -- and Spawn() sets that one with
+        /// AnimFlags.None, so it loops and never reports Ended, and nothing
+        /// was ever going to replace it.
+        ///
+        /// From a real session on the Pi: the other player sat in
+        /// `biped/Spawn` for 1671 of 2051 state dumps, never ended, while the
+        /// local player cycled Idle, Flourish and Shoot normally. Its facing
+        /// went to NaN and had to be repaired 180 times, all on that one slot,
+        /// for the same reason -- UpdateAimFacing normalises the difference
+        /// between aim and facing, which is the zero vector when a body never
+        /// turns. Only the authority sees this: everywhere else the puppet
+        /// runs the movement step and animates.
+        ///
+        /// So the step runs, and the position is restored immediately after
+        /// it, in the same frame and before anything can test collision
+        /// against it. That is what the skip was protecting and all it was
+        /// protecting.
+        /// </summary>
+        public static void AfterRemoteMovement(PlayerEntity player)
         {
-            return NetSession.IsAuthority && player.SlotIndex != NetSession.LocalSlot;
+            if (!NetSession.Active || !NetSession.IsAuthority
+                || player.SlotIndex == NetSession.LocalSlot || NetRoomChange.Settling)
+            {
+                return;
+            }
+            int slot = player.SlotIndex;
+            if (slot < 0 || slot >= NetSession.RemoteIntents.Length
+                || !NetSession.RemoteIntentValid[slot])
+            {
+                return;
+            }
+            if (!player.LoadFlags.TestFlag(LoadFlags.Spawned) || player.Health <= 0)
+            {
+                return;
+            }
+            NetPlayerBridge.RestoreReportedPosition(player, NetSession.RemoteIntents[slot]);
         }
 
         public static Vector3 RemoteShotOrigin(PlayerEntity player, Vector3 current)
