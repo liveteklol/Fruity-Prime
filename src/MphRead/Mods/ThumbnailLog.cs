@@ -32,8 +32,17 @@ namespace MphRead.Mods
         {
             try
             {
+                // The build identifies itself, because "is this the version
+                // with the diagnostic in it?" cost a whole round trip once:
+                // a log came back with no sign of a feature that had been
+                // added, and there was no way to tell a missing feature from
+                // an older executable except by its absence.
                 File.WriteAllText(Path,
                     $"=== {Branding.Name} preview generation, {DateTime.Now:yyyy-MM-dd HH:mm:ss} ==="
+                    + Environment.NewLine
+                    + $"build {Update.BuildVersion.Display}, assembly "
+                    + $"{System.Reflection.Assembly.GetEntryAssembly()?.GetName().Version?.ToString() ?? "?"}, "
+                    + $"file {File.GetLastWriteTime(AppContext.BaseDirectory)::yyyy-MM-dd HH:mm}"
                     + Environment.NewLine + $"{rooms} room(s) to render" + Environment.NewLine);
                 _failed = false;
             }

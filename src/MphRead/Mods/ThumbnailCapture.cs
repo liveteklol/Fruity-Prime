@@ -102,7 +102,9 @@ namespace MphRead.Mods
             if (!_describedContext)
             {
                 _describedContext = true;
-                string line = $"{ScreenCapture.DescribeContext()}, "
+                string line = $"build {Update.BuildVersion.Display} / "
+                    + $"{System.Reflection.Assembly.GetEntryAssembly()?.GetName().Version?.ToString() ?? "?"}, "
+                    + $"{ScreenCapture.DescribeContext()}, "
                     + $"window asked {_asked.X}x{_asked.Y}, got {ClientSize.X}x{ClientSize.Y}, "
                     + $"offscreen target {Scene.FramebufferStatus}";
                 Console.WriteLine($"[thumbnails] {line}");
