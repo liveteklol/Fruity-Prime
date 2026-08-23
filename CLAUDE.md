@@ -1201,6 +1201,51 @@ AD2 ALINOS PERCH, agreeing on every other number between them, still reported
 teleporter acts (`Mods.WorldEvents`, already hooked for the map audit); the check
 now asks, and gives the slot the same grace it gives a respawn.
 
+### Two found by playing, which no sweep had caught
+
+Both reported from a real match on the Pi at about fifteen milliseconds, so
+neither needs latency -- only a round trip.
+
+**Respawning put the player back where it died.** A dead player's owner keeps
+sending intents carrying the position it died at. The authority puts the puppet
+on a spawn point and, on the very next frame, `ApplyReportedPosition` moves it
+straight back to that death position, because that is what the newest intent
+from a round trip ago still says -- and it then publishes it as the
+authoritative position of a player it has flagged as spawned, for as long as the
+round trip lasts. The owner takes its placement from the first snapshot that says
+"you are spawned", so it respawns correctly and is teleported into wherever it
+had died: through the floor as often as not, its own screen black, a shadow and
+no model on everyone else's. Two or three respawns into a match was enough.
+
+Reported positions composed before a spawn are now ignored. The barrier is the
+intent frame that was current when the puppet was placed: anything up to it
+describes a dead player, and the first intent after it is the owner saying where
+it actually is. Six respawns against the Pi afterwards: no teleports on either
+client, no corrections, no mismatches.
+
+Worth recognising again as a shape: **a stale input is not harmless just because
+it is only a position.** The intent stream has no notion of "this was composed
+before the thing that just happened", and anything the authority does to a
+player of its own accord -- a spawn, and one day a teleporter -- is undone by
+the next packet that predates it.
+
+**The Shock Coil did twice its intended damage against players.** Not a network
+fault at all. It is the one beam that stays alive and re-tests collision every
+frame, and every beam hit carries `DamageFlags.NoDmgInvuln` (set unconditionally
+in `BeamProjectileEntity`), so the per-hit invulnerability window never applies
+and nothing else limits how often it lands. At 30 fps that was its design rate;
+this engine runs at 60, which made it roughly 600 damage a second -- a full
+hunter in a sixth of one, which is what "the Shock Coil one-shots me" is. The
+identical compensation was already in the same file for the same weapon against
+*enemies*, with the same `// todo: FPS stuff` beside it; only the player path had
+been missed.
+
+This changes the weapon. The Shock Coil now does half what it did yesterday,
+which is the original figure, and it will feel it. It is also **not measured** --
+the scripted tour spends Sylux's time in alt form laying bombs and barely fires
+the beam at a player, so this rests on reading the code beside its own
+already-corrected twin. A sustained-fire probe would settle it.
+
 ### What is left at 250 ms, and is not a bug
 
 Three clients at 250 ms each way -- half a second of round trip, worse than any
