@@ -553,8 +553,17 @@ namespace MphRead.Entities
             {
                 form += "+unmorphing";
             }
+            // The frozen timer belongs here because it is the one thing that
+            // stops a form transition without stopping anything else:
+            // ProcessPlayer only advances the biped model's animation while
+            // `_frozenTimer == 0`, and a morph completes when that animation
+            // ends. A puppet frozen mid-morph therefore sits in
+            // "biped+morphing" until the ice runs out, which reads exactly
+            // like a stuck puppet and is not one.
             return $"{form}/{Biped2Anim}"
-                + (Biped2Flags.TestFlag(AnimFlags.Ended) ? "/ended" : "");
+                + (Biped2Flags.TestFlag(AnimFlags.Ended) ? "/ended" : "")
+                + (_frozenTimer > 0 ? $"/frozen:{_frozenTimer}" : "")
+                + (_health == 0 ? "/dead" : "");
         }
 
         private OpenTK.Mathematics.Vector3 _modLastGoodFacing = -OpenTK.Mathematics.Vector3.UnitZ;
