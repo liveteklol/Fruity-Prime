@@ -1,5 +1,4 @@
 using System;
-using System.Threading;
 using OpenTK.Windowing.Desktop;
 
 namespace MphRead.Mods
@@ -8,12 +7,17 @@ namespace MphRead.Mods
     /// The menu Escape opens during a match: let go of the mouse, offer the
     /// way out, and put the settings within reach without leaving the game.
     ///
-    /// It runs on its own thread with its own message loop, and talks to the
-    /// game through the flags below. That is not gold-plating: GLFW window
+    /// The menu is an Avalonia window on the game's own thread, and talks to
+    /// the game through the flags below. It has to be that thread: GLFW window
     /// calls -- closing it, changing its border -- belong to the thread that
-    /// created it, and a WinForms message loop pumped from inside the render
-    /// loop would tie the menu's responsiveness to the frame rate. So the menu
-    /// asks, and <see cref="Poll"/> does it on the game's own thread.
+    /// created it, macOS accepts windows only on the main one, and Avalonia has
+    /// a single UI thread per process in any case. So the menu asks, and
+    /// <see cref="Poll"/> does the window work between frames.
+    ///
+    /// The cost of sharing the thread is that the toolkit only runs when the
+    /// game lets it: <see cref="Poll"/> hands it the tail of every frame while
+    /// the menu is up, which ties the menu's responsiveness to the frame rate
+    /// and is why the match keeps drawing behind it.
     /// </summary>
     public static class PauseMenu
     {
@@ -22,11 +26,6 @@ namespace MphRead.Mods
         private static volatile bool _quit;
         private static volatile bool _toggleFullscreen;
         private static volatile bool _refocus;
-#if MPHREAD_LAUNCHER
-        // The menu's own message loop. Windows-only, like the menu itself.
-        private static Thread? _thread;
-#endif
-
         /// <summary>Open right now: the cursor is free and the player is not driving.</summary>
         public static bool Open => _open;
 
@@ -52,8 +51,12 @@ namespace MphRead.Mods
             WindowY = window.ClientLocation.Y;
             WindowWidth = window.ClientSize.X;
             WindowHeight = window.ClientSize.Y;
-            if (!OperatingSystem.IsWindows())
+#if MPHREAD_AVALONIA
+            if (!Launcher.Gui.GuiLauncher.EnsureSetup())
             {
+                // No toolkit on this machine -- no display, or a session that
+                // could not bind one. Escape keeps its old meaning rather than
+                // doing nothing at all.
                 return false;
             }
             if (_open)
@@ -63,24 +66,34 @@ namespace MphRead.Mods
             }
             OpenMenu();
             return true;
+#else
+            return false;
+#endif
         }
 
         /// <summary>Called once a frame by the game window.</summary>
         public static void Poll(GameWindow window)
         {
+#if MPHREAD_AVALONIA
+            if (_open)
+            {
+                // The menu's share of this frame. Everything it decided lands
+                // in the flags below before they are read.
+                Launcher.Gui.GuiLauncher.Pump();
+            }
+#endif
             if (_refocus)
             {
                 _refocus = false;
                 // Give the keyboard back to the game.
                 //
-                // The menu is a WinForms window on its own thread. Closing it
-                // does not reliably make the game window the foreground one
-                // again -- Windows restricts which thread may hand focus
-                // around -- and an unfocused GLFW window receives no keys and
-                // cannot grab the pointer. The game goes on simulating, so
-                // nothing looks crashed: the mouse still moves, the picture
-                // still draws, and nothing the player presses arrives. That
-                // reads as a freeze.
+                // Closing the menu does not reliably make the game window the
+                // foreground one again -- which window manager decides that,
+                // and on what grounds, is a per-platform matter -- and an
+                // unfocused GLFW window receives no keys and cannot grab the
+                // pointer. The game goes on simulating, so nothing looks
+                // crashed: the mouse still moves, the picture still draws, and
+                // nothing the player presses arrives. That reads as a freeze.
                 try
                 {
                     window.Focus();
@@ -129,36 +142,24 @@ namespace MphRead.Mods
         internal static void MarkClosed()
         {
             _open = false;
-            // Asked for here, done in Poll: the window belongs to the game's
-            // thread, and this runs on the menu's.
+            // Asked for here, done in Poll: this runs inside the toolkit's
+            // teardown for the menu window, and handing focus to the game
+            // window in the middle of that is how a window manager is given two
+            // contradictory instructions in one turn.
             _refocus = true;
         }
 
         private static void OpenMenu()
         {
-
-#if MPHREAD_LAUNCHER
-            if (_thread != null && _thread.IsAlive)
-            {
-                return;
-            }
-            _open = true;
-            _thread = new Thread(Launcher.PauseMenuForm.RunLoop)
-            {
-                IsBackground = true,
-                Name = "MphRead pause menu"
-            };
-            // Single-threaded apartment for the same reason the launcher's is:
-            // file dialogs and image handling go through OLE.
-            _thread.SetApartmentState(ApartmentState.STA);
-            _thread.Start();
+#if MPHREAD_AVALONIA
+            _open = Launcher.Gui.PauseMenuWindow.Open();
 #endif
         }
 
         private static void Close()
         {
-#if MPHREAD_LAUNCHER
-            Launcher.PauseMenuForm.CloseIfOpen();
+#if MPHREAD_AVALONIA
+            Launcher.Gui.PauseMenuWindow.CloseIfOpen();
 #endif
             _open = false;
         }

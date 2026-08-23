@@ -727,6 +727,26 @@ namespace MphRead.Mods.Launcher.Gui
             Close();
         }
 
+        /// <summary>
+        /// Re-read the rows that show a launcher preference. The settings
+        /// window owns the same values, so anything it changed has to reach the
+        /// cards that were built before it opened.
+        /// </summary>
+        private void RefreshPrefRows()
+        {
+            _onlineName.Value = LauncherPrefs.PlayerName;
+            _matchName.Value = LauncherPrefs.PlayerName;
+            _onlineAddress.Value =
+                $"{LauncherPrefs.ServerAddress}:{LauncherPrefs.ServerPort}";
+            int hunter = Array.IndexOf(_hunters, LauncherPrefs.LastHunter.ToString());
+            if (hunter >= 0)
+            {
+                _onlineHunter.Index = hunter;
+                _matchHunter.Index = hunter;
+                _adventureHunter.Index = hunter;
+            }
+        }
+
         /// <summary>Every map at once, as pictures.</summary>
         private async Task BrowseMaps()
         {
@@ -993,12 +1013,14 @@ namespace MphRead.Mods.Launcher.Gui
             // The settings window writes straight into the same MenuSettings
             // and the same LauncherPrefs, so the rows here have to be re-read
             // or they would write the old values back over what was just
-            // chosen there.
+            // chosen there -- a name typed in the settings would last exactly
+            // until the online card saved its own copy on connect.
             int index = _playable.IndexOf(_settings.RoomKey);
             if (index >= 0 && _matchMap != null)
             {
                 _matchMap.Index = index;
             }
+            RefreshPrefRows();
             RefreshSplash();
         }
 

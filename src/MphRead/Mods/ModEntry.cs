@@ -66,31 +66,41 @@ namespace MphRead.Mods
             // paths.txt, and the check exits with "press any key" on a console
             // nobody is looking at. The launcher is the screen that fixes
             // that, so it has to be reachable first.
-#if MPHREAD_LAUNCHER
-            // No arguments means somebody double-clicked the exe, and that
-            // has to be the launcher: the console menu behind it is for people
-            // who typed something. -menu is how they still get it.
-            if ((HasFlag(args, "launcher") || args.Length == 0)
-                && !HasFlag(args, "menu") && OperatingSystem.IsWindows())
-            {
-                Launcher.LauncherEntry.Run(keepConsole: HasFlag(args, "console"));
-                return true;
-            }
-#endif
-            // The launcher off Windows. The window first, the text screen when
-            // there is no display to put it on -- an SSH login, a container, a
-            // machine with no X or Wayland session. -text asks for the text one
-            // on a machine that has both.
+            // The launcher. The window first, the text screen when there is no
+            // display to put it on -- an SSH login, a container, a machine with
+            // no X or Wayland session. -text asks for the text one on a machine
+            // that has both.
             //
-            // Only on -launcher: a bare `MphRead` on Linux has always opened
-            // upstream's console menu, and that is a different screen people
-            // are already using rather than an empty spot to fill.
-            if (HasFlag(args, "launcher") && !HasFlag(args, "menu"))
+            // No arguments means somebody double-clicked the binary, and on the
+            // platforms where that is how a program is normally started that
+            // has to be the launcher: the console menu behind it is for people
+            // who typed something, and -menu is how they still get it. On Linux
+            // a bare invocation has always opened upstream's console menu and
+            // still does -- that is a screen people are already using, not an
+            // empty spot to fill.
+            bool doubleClicked = args.Length == 0
+                && (OperatingSystem.IsWindows() || OperatingSystem.IsMacOS());
+#if MPHREAD_SERVER
+            // Except in the server package, which has no launcher of either
+            // kind and ships without game files: a bare invocation there is
+            // answered further down by ServerUsage, which says what the binary
+            // is for. Double-clicking FruityPrimeServer.exe must not open a
+            // text launcher offering matches it cannot play.
+            doubleClicked = false;
+#endif
+            if ((HasFlag(args, "launcher") || doubleClicked) && !HasFlag(args, "menu"))
             {
 #if MPHREAD_AVALONIA
                 if (!HasFlag(args, "text") && Launcher.Gui.GuiLauncher.TryRun())
                 {
                     return true;
+                }
+                // The window could not be opened. On Windows that means the
+                // process has no console either -- it is a GUI binary -- so the
+                // text launcher would print into nothing.
+                if (OperatingSystem.IsWindows())
+                {
+                    Mods.ConsoleWindow.Show();
                 }
 #endif
                 Launcher.TextLauncher.Run();

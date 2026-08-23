@@ -110,9 +110,6 @@ namespace MphRead.Mods.Launcher.Gui
             }
         }
 
-        /// <summary>True once there is a toolkit to put a window on.</summary>
-        internal static bool Ready => _setUp;
-
         /// <summary>
         /// Is there a display at all? Checked before Avalonia is initialised
         /// rather than by catching its failure, because the failure is a native

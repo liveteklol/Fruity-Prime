@@ -23,8 +23,9 @@ aspirational.
 | Path | What |
 |---|---|
 | `~/MphRead-dev` | the source. Upstream is NoneGiven/MphRead; everything added lives under `src/MphRead/Mods/` so pulling upstream stays a fast-forward |
+| `src/MphRead.Android/` | the Android head: the same sources, an APK, and a front screen. No match yet |
 | `src/MphRead/Mods/Network/` | the whole multiplayer feature |
-| `src/MphRead/Mods/Launcher/` | the Windows front screen, and the settings window behind it |
+| `src/MphRead/Mods/Launcher/` | the launcher: `Gui/` is every window (Avalonia, all platforms), `Portable/` is the logic and the text screen |
 | `~/mph-net-test/` | the test rig: a copy of the build in `bin/`, extracted game files, `run-check.sh`, `compare-reports.py` |
 | `C:\Users\livetek\Desktop\MPH\MphRead-develop\` | the Windows deliverable |
 | `france-mining.com:27888` | the dedicated server on the user's Pi (systemd unit `mphread-server`) |
@@ -87,20 +88,26 @@ export ALSOFT_DRIVERS=null PULSE_SERVER=   # else ALSA retries stall frames
 | `MphRead -maptest "ROOM" -players 8 -bots` | the same, but the other seven are **AI bots** rather than the scripted tour. A different code path -- the tour writes Controls and never touches the behaviour trees -- and the only one that finds what only PlayerAi touches |
 | `MphRead -rooms` | list every multiplayer room, one per line, for a shell loop |
 | `MphRead -mechanics` | print the catalogue below, generated from the game's own tables |
-| `MphRead` (no arguments, Windows) | the front screen. The Windows build is a GUI binary, so double-clicking it opens the launcher with no terminal behind it |
+| `MphRead` (no arguments, Windows or macOS) | the front screen. The Windows build is a GUI binary, so double-clicking it opens the launcher with no terminal behind it |
 | `MphRead -menu` | the console menu, for people who typed something |
-| `MphRead -launcher [-console]` | the front screen explicitly; `-console` also gives it a terminal. **Off Windows this opens the Avalonia front screen**, or the text one when there is no display. A bare `MphRead` off Windows still opens upstream's `-menu` prompts, unchanged |
+| `MphRead -launcher [-console]` | the front screen explicitly; `-console` also gives it a terminal. The same Avalonia screen on Windows, Linux and macOS, or the text one when there is no display. A bare `MphRead` on Linux still opens upstream's `-menu` prompts, unchanged |
 | `FruityPrime -launcher -text` | the text front screen on a machine that has a display. What an SSH session gets anyway |
 | `FruityPrime -update` | check GitHub for a newer release and open its page. Installs nothing; the one command that answers "am I on the latest build" |
 | `FruityPrime -noupdate` | do none of that, on any command that would have |
 | `FruityPrime -credits` | who this is built on, from `Mods/Credits.cs` |
 | `MphRead -fullscreen` / `-windowed` / `-nohelmet` | display choices for the paths that never open a launcher |
 
-## The launcher (Windows)
+## The launcher
+
+**One launcher, in Avalonia, on Windows, Linux and macOS.** There used to be
+two: a WinForms front screen for Windows and an Avalonia one for everything
+else. The WinForms half is gone -- `Mods/Launcher/` is now `Gui/` and
+`Portable/` and nothing else -- and with it the reason three of the launcher's
+screens existed only on Windows.
 
 `MphRead -launcher` opens a front screen, not a settings dialog: a map picture
-on the left, four things you can do on the right. Everything that is not a
-per-session choice lives in the settings window, which is one of the four and
+on the left, the things you can do on the right. Everything that is not a
+per-session choice lives in the settings window, which is one of the entries and
 is also what the pause menu opens mid-match.
 
 | Entry | What it does |
@@ -108,13 +115,14 @@ is also what the pause menu opens mid-match.
 | Play online | name, hunter, `host` or `host:port`, and a live line saying what that server is running. **Find a server** opens the browser below. Connecting happens in the window -- "connecting", "could not join, it may be off or UDP may be blocked" -- instead of in a console nobody sees |
 | Play offline | map, mode, 0-7 bots and their skill, hunter, and straight into the match |
 | Host a game | the same choices plus a port. **Runs the dedicated server in this process** and joins it over the loopback, so a hosted match has the roster, names, hunters, pings and clock a dedicated one has; friends reach it through Play online |
-| Settings | display, audio, controls, match rules, features, cheats, bugfixes, preview generation -- a rail of sections down the left and one page at a time on the right, the same shape as the front screen. Also reachable from the pause menu during a match |
+| Settings | display, audio, controls, match rules, launcher preferences, features, cheats, bugfixes -- a rail of sections down the left and one page at a time on the right, the same shape as the front screen. Also reachable from the pause menu during a match |
 | Game files | where the .nds goes. Shown first, and everything else greyed out, when there is nothing set up yet |
 
-- Every control is painted by this code (`LauncherTheme`, `MenuButton`,
-  `ChoiceRow`, `HunterPicker`, `FieldBox`, `SplashPanel`). WinForms will not
-  draw a dark combo box or tab strip whatever you set on it, and a half-dark
-  window reads as broken rather than as a choice.
+- Every control is painted by this code (`GuiTheme`, `MenuEntry`, `ChoiceRow`,
+  `SliderRow`, `KeyRow`, `SplashView`); only the text boxes and the scroll bars
+  are stock, under Fluent dark. A half-themed window reads as broken rather than
+  as a choice, and no toolkit's stock controls come out of the box looking like
+  this.
 - The picture is a map preview out of `thumbnails/`, rendered from the user's
   own files -- no art is shipped. A `splash.png` beside the exe replaces the
   home picture. The online card shows the map the server is on; the others show
@@ -124,12 +132,24 @@ is also what the pause menu opens mid-match.
   `MenuSettings`, which gains fields as upstream develops.
 - The six First Hunt "biodefense chamber" rooms are left out of the map list:
   they have no player spawn points, so a match there places nobody.
-- The launcher window is borderless -- drag the picture to move it, `Escape`
-  goes back and then quits -- and the whole menu works from the keyboard. In a
-  match `Escape` means the pause menu instead.
+- The launcher window has a frame, and the whole menu works from the keyboard:
+  `Escape` goes back a card and then quits, Tab walks the entries, Enter takes
+  one. An undecorated window that a given window manager will not let you move
+  is a trap, and there are many window managers. In a match `Escape` means the
+  pause menu instead.
+- **The loop is one process on one thread.** The toolkit is set up once
+  (`GuiLauncher.EnsureSetup`) on the game's own thread, and each visit to the
+  launcher is a nested dispatcher loop ended by the window closing. Avalonia
+  allows one application per process, so the previous shape -- a fresh
+  application per visit, on its own thread -- could only ever have worked for
+  the first match; macOS would not have accepted the thread either.
 - Offline matches can hold eight players. `PlayerEntity.MaxPlayers` defaults to
   the four a DS match could hold, so the launcher raises it before creating
   them; without that, asking for seven opponents silently produces three.
+- **A bare invocation opens the launcher on Windows and macOS**, the two
+  platforms where a program is normally started by double-clicking it. On Linux
+  it still opens upstream's console menu, which is a screen people there are
+  already using; `-launcher` asks for the window.
 - **There is no console window at all.** The Windows build is `WinExe`, so
   Windows never gives the process a terminal; `Mods.ConsoleWindow.Prepare`
   attaches to the parent's console when a command was typed, allocates one when
@@ -146,31 +166,33 @@ is also what the pause menu opens mid-match.
   people working on this; a copy of the launcher in somebody else's hands
   should not follow it wherever it points next.
 
-### The launcher on Linux
+### One launcher, four platforms
 
-`MphRead -launcher` opens a window off Windows too. There are two screens behind
-that one flag and the build picks between them:
+`Mods/Launcher/` is two folders now:
 
 | | Where | What |
 |---|---|---|
-| `Mods/Launcher/` | Windows | the WinForms front screen. **Untouched by the Linux work** |
-| `Mods/Launcher/Gui/` | non-Windows game builds | the Avalonia front screen |
+| `Mods/Launcher/Gui/` | every game build | the front screen, the settings window, the map grid and the pause menu, in Avalonia |
 | `Mods/Launcher/Portable/` | everywhere | preferences, game files, the launch plan, the launch itself, and the text screen |
 
-All three sit on the same `LauncherPrefs`, the same `GameFiles`, and the same
-`MatchStart`, so no two of them can come to disagree about what "host a game"
-does. `LaunchPlan`/`LaunchKind` moved out of `HomeForm` and
-`Launch`/`AddLocalPlayers` moved out of `LauncherEntry` into `MatchStart` for
-exactly that reason: they agree by sharing the code, not by each being kept
-correct. `GameFiles` lost a `[SupportedOSPlatform("windows")]` it never needed --
-it is files, a child process and upstream's `Paths`.
+Both sit on the same `LauncherPrefs`, the same `GameFiles` and the same
+`MatchStart`. `LaunchPlan`/`LaunchKind` and `Launch`/`AddLocalPlayers` live in
+`Portable/` for that reason: the screens agree by sharing the code, not by each
+being kept correct.
 
-**Windows keeps WinForms and never sees Avalonia.** The packages are referenced
-only when `MphReadAvalonia` is set, which is a game build that is not the
-WinForms one, so a Windows publish does not restore them and a server build does
-not carry them. Checked, not assumed: `MphRead.exe` contains 0 references to
-`Avalonia.Controls` and 642 to `System.Windows.Forms`; `MphRead` for linux-x64 is
-the other way round.
+**What the WinForms removal cost and bought.** Deleted: `HomeForm` (1779 lines),
+`SettingsForm` (586), `PauseMenuForm`, `MapPickerForm`, `LauncherTheme`,
+`WindowChrome` and the nine painted controls under them -- about 4,600 lines,
+against roughly 1,400 added in Avalonia for the three screens that had no
+counterpart. What it bought is that those three screens now exist everywhere:
+
+| | Before | Now |
+|---|---|---|
+| Settings window | Windows only; other platforms got a card with five choices and a note saying "run `-menu`" | the same eight-section window on every platform, from the front screen and from the pause menu |
+| Pause menu | Windows only; `Escape` elsewhere did what it always did | every platform |
+| Map grid | Windows only | every platform |
+| Target frameworks | `net9.0-windows` for Windows, `net9.0` for the rest | `net9.0` for all of them |
+| Platforms published | win-x64, linux-x64, linux-arm64 | those plus osx-x64 and osx-arm64, and an Android head that compiles the whole codebase |
 
 **Three screens, one of which is text.** `-launcher` opens the window; with no
 `DISPLAY` and no `WAYLAND_DISPLAY` -- an SSH login, a container, a headless box
@@ -178,38 +200,81 @@ the other way round.
 that on a machine that has both. The fallback is the point: a launcher that
 cannot open a window must not be a build that will not start.
 
-The Avalonia screen is a port of the design, not of the code. Same palette,
-value for value (`GuiTheme` repeats `LauncherTheme`'s numbers, because
-`LauncherTheme` is System.Drawing and does not compile here); same card-at-a-time
-shape; same painted menu entries with a marker bar and tracked capitals. Two
-things are deliberately different, both because Linux is not Windows:
+**One toolkit, one thread, one process.** `GuiLauncher.EnsureSetup` stands
+Avalonia up once, on the thread that calls in -- the game's own thread, the one
+the GL context will belong to -- and each visit to the launcher is
+`Dispatcher.UIThread.PushFrame`, ended by the window's `Closed` event. Three
+things force that shape:
 
-- **The window has a frame.** The WinForms one is borderless and dragged by the
-  picture. An undecorated window that a given window manager will not let you
-  move is a trap, and there are many window managers.
-- **Only the text boxes and scroll bars are stock controls**, under Fluent dark.
-  Everything else is drawn, for the same reason the WinForms screen draws its
-  own.
+- Avalonia allows one application per process. A second `AppBuilder.Setup`
+  throws, so the previous arrangement (a fresh application per visit, on its own
+  thread) would have fallen back to the text launcher on the way back from the
+  first match.
+- macOS accepts windows only on the main thread, which rules out the private UI
+  thread the WinForms launcher used.
+- The pause menu needs the toolkit *during* a match, on the thread the render
+  loop is running on.
 
-The gap this closes is not that Linux could not play: `-connect`, `-servers`,
-`-hostgame` and `-menu` were all already there. It is that they are separate
-commands with addresses to copy between them, nothing remembered what you chose
-last time, and **an offline match against bots had no command-line spelling at
-all** -- `-room` is the viewer's room path with no bots and `-maptest` is the
-test harness driving them to a script.
+`GuiLauncher.Pump` is the other half: a nested frame that runs until a
+background-priority job it posted comes back, so it processes everything pending
+and returns rather than taking the thread. `PauseMenu.Poll` calls it once a
+frame while the menu is up. `Ask` calls it once after the launcher closes, and
+that one is not cosmetic: on X11 the window's destroy request sits unflushed in
+the connection's output buffer until something runs the loop again, so without
+it the launcher stayed painted on screen for the whole match. Seen, then fixed,
+then checked -- the window list is empty ten seconds into a match now.
 
 Known limits, none of them hidden from the user:
 
 - Play online, offline and host are unusable until game files are set up, and
   both screens say so rather than failing when pressed.
-- Volumes, controls, match rules and cheats are still `-menu`. Neither new
-  screen reimplements the settings window; both say where it is.
-- There is no pause menu off Windows -- `PauseMenuForm` is WinForms. In a match,
-  `Escape` does what it did before.
 - Avalonia binds X11 client libraries the game itself does not: a system without
   `libICE`/`libSM` gets the text launcher rather than a window. That is what the
   fallback is for, and it is not hypothetical -- the WSL box this was built on
   was missing both.
+
+### macOS and Android
+
+**macOS** is published like any other desktop target now (`osx-x64` and
+`osx-arm64`, cross-compiled on the Linux runner along with the rest), and the
+sound library ships with it: the OpenAL copy in the csproj is keyed on the RID
+rather than being a Windows and a Linux special case, so a mac build carries
+`libopenal.1.dylib` where it used to carry nothing at all. **Nobody has started
+one.** Both mac packages are cross-compiled and unrun; the main thing worth
+watching there is that GLFW and AppKit share a process and a main thread, which
+this arrangement is designed for and which no mac has confirmed.
+
+**Android** is `src/MphRead.Android/`, a head project that compiles the same
+sources with `ANDROID` defined and produces an APK. What runs there today is a
+front screen: who you are, the server directory's list with a live status query
+per server, and a plain statement of what is missing. What is missing is the
+match: the engine draws through OpenTK and reads input from GLFW, neither of
+which exists on Android, so a mobile renderer and touch controls are the work
+between here and playing on a phone -- not the game logic, which compiles for
+Android already and is the part this proves.
+
+That compile is the point of the project even before that work happens: every
+time the shared code grows something desktop-only, the Android head stops
+building at the commit that did it. Two things it already forced out:
+`LauncherPrefs.Directory` (an Android package's own directory is read-only, so
+the head points launcher.txt at the app's data directory), and the `ANDROID`
+guard in `GuiLauncher` (Android stands the toolkit up from its activity and has
+no desktop backend to detect).
+
+Building it needs the Android workload and an SDK:
+
+```bash
+dotnet workload install android
+dotnet build src/MphRead.Android/MphRead.Android.csproj -c Debug \
+  -p:AndroidSdkDirectory=$HOME/android-sdk
+```
+
+`EnableAvaloniaXamlCompilation=false` is set there deliberately: there is no
+XAML in this project (every screen is C#), and with AvaloniaResource items
+present the XAML compiler runs anyway and disagrees with the Android SDK about
+where it left the assembly (`obj/.../Avalonia/Avalonia/`), which fails the build
+after a clean compile. The `avares://` assets are embedded by a different target
+and are unaffected -- checked by looking for them in the built assembly.
 
 ### First run is the whole screen
 
@@ -272,15 +337,23 @@ so the two are seamless.
 ### The settings window
 
 A rail of sections down the left -- Display, Audio, Controls, Match rules,
-Features, Cheats, Bugfixes, Map previews -- and one page at a time on the
-right, over the same painted controls as the front screen. It replaced a
-WinForms tab strip that no theming reaches, and it no longer carries a map
-list: choosing the map is a per-session decision and belongs on the card that
-starts the match.
+Launcher, Features, Cheats, Bugfixes -- and one page at a time on the right,
+over the same painted controls as the front screen. It carries no map list:
+choosing the map is a per-session decision and belongs on the card that starts
+the match, with the picture beside it.
 
-Rows are laid out in `LayoutPages`, after the content panel has a size:
-a `Label`'s height cannot be measured before its width is known, and doing it
-in the constructor is what produced overlapping notes.
+`Gui/SettingsWindow.cs`, and **the same window on every platform**. Off Windows
+there used to be a card with five choices and a note reading "volumes,
+controls, match rules and cheats are in the console menu: run `-menu`" -- which
+is a launcher telling the person who opened it to go and type instead. The
+**Launcher** section is what that card became: name, hunter, default server,
+server directory and the update check, which live in `launcher.txt` rather than
+in `settings.json`, and which Windows could not edit anywhere before.
+
+Rows need no layout pass: Avalonia measures each one with the width its panel
+gives it. The one trap is that a `ScrollViewer`'s `Padding` is *not* taken off
+that width, so the page's inset is its own `Margin` -- with the padding, every
+wrapped note ran off the right edge of the window by exactly 26 pixels.
 
 **Saving writes the file and applies it.** For a long time it only did the
 first, and on the launcher's path nothing ever read the file back: upstream's
@@ -330,38 +403,51 @@ exception rather than only `IOException`: an install under Program Files raises
 
 ### The pause menu
 
-`Escape` during a match opens it (`Mods.PauseMenu` + `Launcher.PauseMenuForm`):
+`Escape` during a match opens it (`Mods.PauseMenu` + `Gui.PauseMenuWindow`):
 **Resume**, **Fullscreen/Windowed**, **Settings**, **Leave match**, **Quit**.
 The cursor comes back, the player stops being driven, and a windowed game can
 be moved or resized -- which is what Escape is for in every other game and did
-not exist here.
+not exist here. **On every platform now**; it was Windows-only for as long as it
+was WinForms.
 
-- It runs on **its own STA thread with its own message loop** and talks to the
-  game through volatile flags. GLFW window calls belong to the thread that
-  created the window, and a WinForms loop pumped from inside the render loop
-  would tie the menu's responsiveness to the frame rate. `PauseMenu.Poll` is
-  called once a frame and does the window work on the game's thread.
-- `ApplicationConfiguration.Initialize()` throws `InvalidOperationException`
-  once a form exists in the process, which is every time the launcher opened
-  first. Swallowing that is the whole reason the menu appears at all.
-- The form centres on **the game window**, not the desktop: `HandleEscape`
-  records `ClientLocation`/`ClientSize` before starting the thread.
-- **Settings** opens over the menu, not under it. This menu is `TopMost` --
-  the game behind it may be borderless fullscreen -- and Windows keeps every
-  topmost window above every ordinary one, while a modal dialog is only
-  guaranteed to sit above its *owner*. The settings window therefore opened,
-  took the keyboard, and drew underneath the panel that had launched it, so
-  nothing on it could be reached. The dialog is topmost while in-game, and the
-  menu steps out of the topmost band while the dialog is up, so the two are
-  never arguing about which is in front.
+- It is a window on **the game's own thread**, and talks to the game through
+  volatile flags. GLFW window calls belong to the thread that created the
+  window, so the menu asks and `PauseMenu.Poll` does the work on the game's
+  thread the next frame.
+- The toolkit gets its slice of each frame from `GuiLauncher.Pump`, called by
+  `Poll` while the menu is up. That ties the menu's responsiveness to the frame
+  rate, which is the trade for the match carrying on behind it -- and a
+  networked match cannot be paused anyway, so watching it carry on is the honest
+  presentation.
+- `HandleEscape` calls `GuiLauncher.EnsureSetup` before opening anything: a
+  session started from a command line (`-connect`, `-room`) never opened a
+  launcher, so the first Escape is where the toolkit is first needed. A machine
+  with no display gets `false` back and Escape keeps its old meaning rather than
+  doing nothing.
+- The window centres on **the game window**, not the desktop: `HandleEscape`
+  records `ClientLocation`/`ClientSize` first.
+- **Settings** opens over the menu, not under it. Both are topmost, because the
+  game behind them may be borderless fullscreen and a menu that disappears
+  behind the window it belongs to is not a menu; the pause menu steps out of the
+  topmost band while the dialog is up so the two are not left arguing about
+  which of them is in front.
 - **Leave match** closes the window and returns to the launcher;
-  `LauncherEntry.Run` is a loop, and `Quit` is the only entry that ends the
+  `GuiLauncher.Run` is a loop, and `Quit` is the only entry that ends the
   program. The loop re-reads `settings.json` and `launcher.txt` each time round,
   because the pause menu's settings window commits its own copy of both, and it
   sets `PlayerEntity.MaxPlayers` from the bot count rather than raising it, so a
   seven-bot match does not leave the next one at eight. A second match is
   otherwise the same path as the first: `new Scene` calls `GameState.Reset` and
   `PlayerEntity.Construct`, so every slot is rebuilt.
+- **How it was checked without a game window.** The WSL box this was built on
+  cannot show a GLFW window at all -- `Scene.OnRenderFrame` never returns a
+  frame, so `IsVisible` is never set, for the plain `-room` viewer as much as
+  for a match -- so the menu was driven the way the render loop drives it: set
+  the toolkit up, open the menu, call `Pump` sixty times a second, and press
+  keys at it over X11. Resume, Fullscreen, Settings, Leave match and Quit each
+  set exactly the flag `Poll` reads (`_toggleFullscreen`, `_leave`, `_quit`) and
+  each close the menu with `_refocus` set. The in-game settings window opens
+  over it and reads **Apply** rather than **Save and close**.
 
 ### First run: the .nds file
 
@@ -463,7 +549,7 @@ second client joined it as slot 1 with no special handling.
 | Piece | What |
 |---|---|
 | `MphRead -masterserver` (`Network/NetMaster.cs`) | the directory. Servers announce themselves every 15 s, entries expire after 50 s of silence, and a `MasterQuery` gets the list back in as many datagrams as it takes. It relays no gameplay, stores nothing, and shares a box with the server it lists |
-| `MphRead -servers [-master HOST]` | the same list, printed. Makes the two calls the browser makes and formats the same fields, which is the only way to exercise that data path on a machine with no WinForms -- which is every machine this is developed on |
+| `MphRead -servers [-master HOST]` | the same list, printed. Makes the two calls the browser makes and formats the same fields, which is how that data path is exercised on a machine with no display |
 | `MasterReporter` | the server's end. One datagram every 15 s. Every failure is swallowed and retried -- a directory being down must never touch a match -- and the first one prints a line so an operator who expected to be listed can see why they are not |
 | `ServerBrowserForm` | the list. Rows come from the directory and are then **confirmed by this machine**: one `StatusQuery` each, which answers map, mode, head count and round trip in a single exchange, and which fails for exactly the servers this player could not have joined anyway. Rows appear as they answer, sorted by players and then by latency |
 
@@ -520,7 +606,7 @@ backing fields. They are structs, so `default` is an ordinary value of them --
 the browser holds one for every row it has not probed yet -- and plain
 auto-properties handed those rows a null to call `.Length` on. That crashed the
 window on the first row of the first list anybody opened, which none of the
-headless checks could have caught: nothing outside WinForms ever constructs a
+headless checks could have caught: nothing outside the browser ever constructs a
 `ServerStatus` it has not filled in. `-servers` exists partly so that the rest
 of that path is checkable without a Windows box.
 
@@ -818,8 +904,8 @@ match uses. Thirty-three rooms, eight bots each: no crashes.
 
 | Workflow | When | What |
 |---|---|---|
-| `.github/workflows/build.yml` | every push and pull request | publishes `win-x64`, `linux-x64`, `linux-x64-server` and `linux-arm64` on one Ubuntu runner — the csproj's `EnableWindowsTargeting` is what lets the WinForms build come from Linux — and uploads each as an artifact. A second job on a **Windows** runner builds the Windows dedicated server and starts it there |
-| `.github/workflows/release.yml` | a `v*` tag, or by hand | those four plus the Windows server: five packages, two zips and three tarballs, each with a short note, attached to a GitHub release |
+| `.github/workflows/build.yml` | every push and pull request | publishes `win-x64`, `linux-x64`, `linux-x64-server`, `linux-arm64`, `osx-x64` and `osx-arm64` on one Ubuntu runner — every target is `net9.0` now, so nothing needs a runner of its own — and uploads each as an artifact. A second job on a **Windows** runner builds the Windows dedicated server and starts it there |
+| `.github/workflows/release.yml` | a `v*` tag, or by hand | those six plus the Windows server: seven packages, attached to a GitHub release |
 
 **A release needs a real, pushed tag before it needs anything else.**
 
@@ -870,7 +956,7 @@ gets both a game build and a server build, the same way Windows always has —
 the Pi is a server-only machine and the plain x64 one exists for a VPS or a
 spare desktop nobody plays on. Each leaves out the launcher of either kind and
 the UI toolkit behind it, and defines `MPHREAD_SERVER`, which is a different
-question from "has no launcher": the Linux game build has no WinForms launcher
+question from "has no launcher": a game build without a display has no window
 either and is still a game. That define is what makes a bare invocation print
 what the binary is for, rather than falling through to upstream's setup check
 and answering a server that ships without game files with "could not find
@@ -1420,14 +1506,27 @@ why its column is the weakest.
 
 ## Known gaps
 
-- **Two front screens now exist and only one of them has been used in anger.**
-  The Avalonia screen has been opened, navigated and read pixel by pixel on
-  WSLg; nobody has yet played a match from it on a real Linux desktop, and the
-  card that most needs that is "host a game", whose failure paths are the ones a
-  screenshot cannot show. The WinForms screen is unchanged and unaffected.
-- **The pause menu is still Windows-only.** `PauseMenuForm` is WinForms; off
-  Windows, `Escape` in a match does what it did before. That is the one entry
-  from the Windows launcher's list with no counterpart yet.
+- **The one launcher has never been seen on Windows or macOS.** It is the same
+  code on all three desktops now, which is the point, but the only machine it
+  has run on is this WSL box: the front screen, the settings window, the map
+  grid and the pause menu were driven and screenshotted there over X11. Windows
+  in particular changes two things this cannot check -- the process is a GUI
+  binary with no console, and GLFW and Avalonia share a message queue rather
+  than two X connections.
+- **Nobody has played a match from the window.** The launcher starts one and the
+  launcher window goes away when it does (checked), but this box cannot show a
+  GLFW window at all -- `Scene.OnRenderFrame` never produces a frame under its
+  GL, so `IsVisible` is never set, for `-room` as much as for a match. So
+  "Escape opens the pause menu over a running match" is proven on the menu's
+  side (its flags, its windows, the pump) and unproven on the game's.
+- **macOS is cross-compiled and unrun.** Both mac packages publish from the
+  Linux runner and carry their natives, including the OpenAL copy they never had
+  before. What nobody has watched is GLFW and AppKit sharing a process and a
+  main thread, which is exactly what the one-thread arrangement asks of them.
+- **Android builds and shows a screen; it does not play.** The engine wants
+  OpenTK and GLFW. Until it has a mobile renderer and touch controls, the APK is
+  a front screen and a compile check -- a valuable one, since it fails at the
+  commit that adds anything desktop-only to the shared code.
 - **The update check has never seen a release of this repository.** There are
   none yet, so it was tested against NoneGiven/MphRead, which has them: the
   check, the version comparison, the "0.35.0.0 is available" line, the entry on

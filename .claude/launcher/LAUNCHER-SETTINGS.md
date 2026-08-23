@@ -1,19 +1,61 @@
 # Launcher — settings
 
 Details about the settings window: layout, saving, and key toggles.
+It is `Mods/Launcher/Gui/SettingsWindow.cs`, and it is the same window on every
+platform and from both places that open it (the front screen, and the pause menu
+during a match).
 
 Layout
 
-- A rail of sections down the left -- Display, Audio, Controls, Match rules, Features, Cheats, Bugfixes, Map previews -- and one page at a time on the right, using `LayoutPages` so labels measure properly after layout.
+- A rail of sections down the left -- Display, Audio, Controls, Match rules,
+  Launcher, Features, Cheats, Bugfixes -- and one page at a time on the right.
+- The selected section is marked with the accent on its bar and label
+  (`MenuEntry.Selected`), which is deliberately not the same as the hover fill:
+  "this is where you are" and "this is what the pointer is over" are two
+  different things.
+- Rows stretch to the page: Avalonia measures them with the width the panel
+  gives them, so nothing here needs the manual pass the WinForms window did.
+  The page's inset is its own `Margin` and not the `ScrollViewer`'s `Padding`,
+  which is not taken off the measured width.
+- The footer's button says **Save and close** from the launcher and **Apply**
+  from a match.
+
+Sections
+
+| Section | What is on it |
+|---|---|
+| Display | window mode; the helmet switch with its two opacity sliders; HUD opacity |
+| Audio | sound-effect and music volume; the game's text language |
+| Controls | mouse sensitivity, invert either axis, and every key binding, plus reset to defaults |
+| Match rules | point goal, time limit, damage level, team play, friendly fire, hunter radar, affinity weapons |
+| Launcher | your name and hunter, the default server, the server directory, and whether to check for updates. These live in `launcher.txt`, not `settings.json` |
+| Features / Cheats / Bugfixes | every `public static bool` on those three classes, by reflection, so the list cannot drift |
 
 Saving and applying
 
-- Saving writes the file and applies it. `Mods.GameSettings.Apply` makes volume and language changes take effect immediately. `ApplyMatchRules` applies match rules into the renderer after `GameState.Setup` has chosen defaults.
-- The launcher writes two files beside the exe: `controls.txt`, `launcher.txt`. Code catches `UnauthorizedAccessException` and other exceptions when writing under Program Files.
+- Saving writes the file **and applies it**. `Mods.GameSettings.Apply` makes the
+  volumes and the language take effect at once -- which is what makes the music
+  slider work *during* a match, since this window also opens from the pause menu
+  -- and `ApplyMatchRules` applies match rules from the renderer after
+  `GameState.Setup` has chosen the mode's defaults.
+- `Commit` runs inside a `try`; a failure becomes a line in the footer rather
+  than an exception thrown out of a window that may be sitting over a match.
+- The launcher writes two files beside the exe: `controls.txt` and
+  `launcher.txt`. Both catch every exception, not only `IOException`: an install
+  under Program Files raises `UnauthorizedAccessException`, which is not one.
+  `LauncherPrefs.Directory` is settable for platforms whose package directory is
+  read-only -- the Android head points it at the app's data directory.
 
 Notable toggles
 
-- Window modes: windowed or borderless fullscreen. `Mods.WindowMode` owns it; F11/Alt+Enter toggle at any time. Escape opens pause menu instead of leaving fullscreen.
-- Helmet opacity: separate sliders for helmet shell layers and visor; `-nohelmet` zeroes both.
-- Controls: `Mods.InputSettings` holds canonical `PlayerControls` and writes to `controls.txt`. Rebinds apply to running players via `ApplyToPlayers`.
-
+- Window modes: windowed or borderless fullscreen. `Mods.WindowMode` owns it;
+  F11/Alt+Enter toggle at any time. Escape opens the pause menu instead of
+  leaving fullscreen.
+- Helmet opacity: one switch over both `HelmetOpacity` and `VisorOpacity`, with a
+  slider each behind it. Clearing only the shell is what leaves a tinted pane
+  with nothing behind it; `-nohelmet` zeroes both.
+- Controls: `Mods.InputSettings` holds the canonical `PlayerControls` and writes
+  it to `controls.txt`. A rebind made from the pause menu also goes through
+  `ApplyToPlayers`, because the players in a running match already hold their
+  own copies. `KeyRow` maps the toolkit's key enumeration to GLFW's, and refuses
+  anything unmapped rather than binding it to whatever key shares its number.

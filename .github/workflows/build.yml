@@ -56,6 +56,18 @@ jobs:
             rid: linux-arm64
             summary: the dedicated server and the directory, for a Raspberry Pi
             extra: "-p:MphReadServer=true"
+          # macOS, both processors. Cross-compiled here like the rest: the
+          # launcher is Avalonia on every platform now, so there is nothing in
+          # a mac build that has to be produced on a mac. Nobody has started
+          # one -- see the known gaps in CLAUDE.md.
+          - id: osx-x64
+            rid: osx-x64
+            summary: the game and the launcher, for an Intel Mac
+            extra: ""
+          - id: osx-arm64
+            rid: osx-arm64
+            summary: the game and the launcher, for an Apple Silicon Mac
+            extra: ""
     steps:
       - uses: actions/checkout@v4
 
@@ -63,9 +75,8 @@ jobs:
         with:
           dotnet-version: '9.0.x'
 
-      # The Windows build targets net9.0-windows for WinForms; the csproj sets
-      # EnableWindowsTargeting so that it can be produced from Linux like the
-      # rest, on one runner.
+      # Every target is net9.0 and every launcher is Avalonia, so all six of
+      # these come off one Ubuntu runner.
       - name: publish ${{ matrix.summary }}
         run: >
           dotnet publish src/MphRead/MphRead.csproj

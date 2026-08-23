@@ -77,7 +77,7 @@ jobs:
         run: |
           set -euo pipefail
           stamp="-p:Version=$VERSION -p:InformationalVersion=$VERSION"
-          for rid in win-x64 linux-x64; do
+          for rid in win-x64 linux-x64 osx-x64 osx-arm64; do
             dotnet publish src/MphRead/MphRead.csproj -c Release -r "$rid" $stamp \
               --self-contained true -p:PublishSingleFile=true -o "publish/$rid"
           done
@@ -104,6 +104,7 @@ jobs:
       - name: nothing from the game is in the output
         run: >
           tools/check-no-game-assets.sh publish/win-x64 publish/linux-x64
+          publish/osx-x64 publish/osx-arm64
           publish/linux-arm64 publish/win-x64-server publish/linux-x64-server
 
       # A GUI game and a console server, which is what makes one
@@ -187,6 +188,35 @@ jobs:
           F11 or Alt+Enter switches to fullscreen, Escape opens the pause menu.
           NOTE
           ( cd publish/linux-x64 && tar czf "../../dist/FruityPrime-$TAG-linux-x64.tar.gz" . )
+
+          # The two macOS packages. Same note, and the same launcher: the
+          # front screen is Avalonia on every desktop now, so nothing about a
+          # mac build differs except its processor. Neither has been started
+          # by anybody -- see the known gaps in CLAUDE.md.
+          for rid in osx-x64 osx-arm64; do
+            cp LICENSE "publish/$rid/" 2>/dev/null || true
+            cat > "publish/$rid/README.txt" <<'NOTE'
+          Fruity Prime -- Metroid Prime Hunters, on a Mac, with multiplayer.
+
+          Set up with your own Metroid Prime Hunters cartridge dump (.nds).
+          It is unpacked next to this program and the file is left alone. No
+          game data is included in this download, and none is downloaded.
+
+            ./FruityPrime
+
+          opens the front screen: adventure, play online, play offline against
+          bots, host a game, settings, and the game-files setup.
+
+          macOS keeps downloaded programs quarantined. If it refuses to open
+          this one, clear the flag on the folder:
+
+            xattr -dr com.apple.quarantine .
+
+          F11 or Alt+Enter switches to fullscreen, Escape opens the pause menu.
+          NOTE
+            chmod +x "publish/$rid/FruityPrime" || true
+            ( cd "publish/$rid" && tar czf "../../dist/FruityPrime-$TAG-$rid.tar.gz" . )
+          done
           cat > publish/linux-arm64/SERVER.txt <<'NOTE'
           Fruity Prime dedicated server.
 

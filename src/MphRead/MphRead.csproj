@@ -6,22 +6,18 @@
          binary is for instead of asking for game files it will never use. It is
          what the Pi and the Windows server download are published with.
 
-         The WinForms launcher is built for a Windows RID and nothing else; a
-         server build opts back out of it. -->
+         One framework for every target. The launcher is Avalonia on all four
+         desktop platforms, so nothing here needs the Windows desktop TFM any
+         more, which is also what makes an osx or android build of these
+         sources possible at all. -->
+    <TargetFramework>net9.0</TargetFramework>
+    <!-- A console binary everywhere except a Windows game build, which is a GUI
+         one: double-clicking it has to open the launcher and nothing else, and
+         a console subsystem process gets a terminal before Main can hide it.
+         Mods/ConsoleWindow attaches or allocates one for command-line runs. -->
     <MphReadWindowsUi Condition="$(RuntimeIdentifier.StartsWith('win')) and '$(MphReadServer)' != 'true'">true</MphReadWindowsUi>
-    <!-- A console binary everywhere except the Windows launcher build, which
-         is a GUI one: double-clicking it has to open the launcher and nothing
-         else, and a console subsystem process gets a terminal before Main can
-         hide it. Mods/ConsoleWindow attaches or allocates one for
-         command-line runs. -->
     <OutputType Condition="'$(MphReadWindowsUi)' != 'true'">Exe</OutputType>
     <OutputType Condition="'$(MphReadWindowsUi)' == 'true'">WinExe</OutputType>
-    <!-- Mods/Launcher is WinForms, which needs the Windows desktop target.
-         Every other build stays on plain net9.0 and excludes it. -->
-    <TargetFramework Condition="'$(MphReadWindowsUi)' != 'true'">net9.0</TargetFramework>
-    <TargetFramework Condition="'$(MphReadWindowsUi)' == 'true'">net9.0-windows</TargetFramework>
-    <UseWindowsForms Condition="'$(MphReadWindowsUi)' == 'true'">true</UseWindowsForms>
-    <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <!-- On Windows the server needs a second, differently named executable.
 
          Windows bakes the subsystem into the PE header at link time, so a GUI
@@ -49,26 +45,21 @@
     <AssemblyName Condition="'$(MphReadServer)' == 'true' and $(RuntimeIdentifier.StartsWith('win'))">FruityPrimeServer</AssemblyName>
     <Product>Fruity Prime</Product>
     <RootNamespace>MphRead</RootNamespace>
-    <DefineConstants Condition="'$(UseWindowsForms)' == 'true'">$(DefineConstants);MPHREAD_LAUNCHER</DefineConstants>
-    <!-- Not the same question as "has no launcher": the Linux game build has
-         no launcher either and is still a game. This one is shipped as the
-         server package, with no game files and no way to get any, which is why
-         it answers a bare invocation differently. -->
+    <!-- Not the same question as "has no launcher": a server build is shipped
+         with no game files and no way to get any, which is why it answers a
+         bare invocation differently. -->
     <DefineConstants Condition="'$(MphReadServer)' == 'true'">$(DefineConstants);MPHREAD_SERVER</DefineConstants>
-    <!-- The graphical launcher off Windows, in Avalonia. A game build that is
-         not the WinForms one gets it; the server builds do not, because a
-         headless relay has no use for a UI toolkit and every megabyte of one
-         is a megabyte in the Pi's download. -->
-    <MphReadAvalonia Condition="'$(MphReadWindowsUi)' != 'true' and '$(MphReadServer)' != 'true'">true</MphReadAvalonia>
+    <!-- The graphical launcher, in Avalonia, on every platform a person plays
+         on. Server builds do not get it, because a headless relay has no use
+         for a UI toolkit and every megabyte of one is a megabyte in the Pi's
+         download. -->
+    <MphReadAvalonia Condition="'$(MphReadServer)' != 'true'">true</MphReadAvalonia>
     <DefineConstants Condition="'$(MphReadAvalonia)' == 'true'">$(DefineConstants);MPHREAD_AVALONIA</DefineConstants>
-    <!-- Without a DPI declaration Windows bitmap-stretches the window, which
-         is both blurry and lays controls out at the wrong size. -->
-    <ApplicationHighDpiMode Condition="'$(UseWindowsForms)' == 'true'">PerMonitorV2</ApplicationHighDpiMode>
     <!-- The exe's own icon: Explorer, the taskbar, a pinned shortcut. Two
          variants of the same mark, because the game and the server are two
          different things to have pinned next to each other, and the server's
          carries a small badge so the two are not the same picture at a
-         glance. Windows only; the property does nothing on the Linux TFM. -->
+         glance. Windows only; the property does nothing on other platforms. -->
     <ApplicationIcon Condition="$(RuntimeIdentifier.StartsWith('win')) and '$(MphReadServer)' != 'true'">Assets\fruity-prime.ico</ApplicationIcon>
     <ApplicationIcon Condition="$(RuntimeIdentifier.StartsWith('win')) and '$(MphReadServer)' == 'true'">Assets\fruity-prime-server.ico</ApplicationIcon>
     <PublishSingleFile>true</PublishSingleFile>
@@ -78,21 +69,12 @@
     <ProduceReferenceAssembly>False</ProduceReferenceAssembly>
   </PropertyGroup>
 
-  <!-- Mods\Launcher\ is the WinForms front screen and the painted controls it
-       is made of. Mods\Launcher\Portable\ is the half of the launcher that is
+  <!-- Mods\Launcher\Gui\ is the front screen and every window behind it, in
+       Avalonia. Mods\Launcher\Portable\ is the half of the launcher that is
        just logic: preferences, game-file setup, what a launch consists of, and
        the text front screen that stands in for the window where there is no
-       WinForms. The split is the folder, so neither list has to be kept by
-       hand as files are added. -->
-  <ItemGroup Condition="'$(UseWindowsForms)' != 'true'">
-    <Compile Remove="Mods\Launcher\*.cs" />
-  </ItemGroup>
-
-  <!-- Mods\Launcher\Gui\ is the Avalonia front screen: the same five entries as
-       the WinForms one, over the same Portable\ logic, for the platforms
-       WinForms cannot reach. Only the builds that declared it get the packages,
-       so a Windows build never restores Avalonia and a server build never
-       carries it. -->
+       display. Only builds that declared the toolkit get the packages, so a
+       server build never restores Avalonia and never carries it. -->
   <ItemGroup Condition="'$(MphReadAvalonia)' != 'true'">
     <Compile Remove="Mods\Launcher\Gui\**" />
   </ItemGroup>
@@ -107,16 +89,6 @@
          is the splash screen's default picture; the mark is the window icon. -->
     <AvaloniaResource Include="Assets\fruity-prime-logo.png" />
     <AvaloniaResource Include="Assets\fruity-prime-mark.png" />
-  </ItemGroup>
-
-  <!-- The wordmark for the WinForms splash panel, which reads it as a plain
-       embedded resource (System.Resources, not Avalonia's scheme) since this
-       is the Windows game build. The server build has no splash panel and
-       does not need it. -->
-  <ItemGroup Condition="'$(UseWindowsForms)' == 'true'">
-    <EmbeddedResource Include="Assets\fruity-prime-logo.png">
-      <LogicalName>FruityPrime.Assets.fruity-prime-logo.png</LogicalName>
-    </EmbeddedResource>
   </ItemGroup>
 
   <ItemGroup>
@@ -149,15 +121,33 @@
                       GeneratePathProperty="true" ExcludeAssets="all" />
   </ItemGroup>
 
-  <ItemGroup Condition="'$(MphReadServer)' != 'true' and $(RuntimeIdentifier.StartsWith('win'))">
-    <None Include="$(PkgSilk_NET_OpenAL_Soft_Native)\runtimes\win-x64\native\soft_oal.dll"
+  <!-- Every game build gets it, under whichever name that platform's loader
+       probes for: openal32.dll on Windows, libopenal.so.1 on Linux,
+       libopenal.1.dylib on macOS. The RID picks the copy; a build with no RID
+       at all (plain `dotnet build` on this machine) is treated as this
+       machine's, which is what makes F5 produce a binary with sound. -->
+  <PropertyGroup>
+    <MphReadAudioRid Condition="'$(RuntimeIdentifier)' != ''">$(RuntimeIdentifier)</MphReadAudioRid>
+    <MphReadAudioRid Condition="'$(RuntimeIdentifier)' == '' and $([MSBuild]::IsOSPlatform('Windows'))">win-x64</MphReadAudioRid>
+    <MphReadAudioRid Condition="'$(RuntimeIdentifier)' == '' and $([MSBuild]::IsOSPlatform('Linux'))">linux-x64</MphReadAudioRid>
+    <MphReadAudioRid Condition="'$(RuntimeIdentifier)' == '' and $([MSBuild]::IsOSPlatform('OSX'))">osx-x64</MphReadAudioRid>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(MphReadServer)' != 'true' and $(MphReadAudioRid.StartsWith('win'))">
+    <None Include="$(PkgSilk_NET_OpenAL_Soft_Native)\runtimes\$(MphReadAudioRid)\native\soft_oal.dll"
           Link="openal32.dll" CopyToOutputDirectory="PreserveNewest"
           CopyToPublishDirectory="PreserveNewest" Visible="false" />
   </ItemGroup>
 
-  <ItemGroup Condition="'$(MphReadServer)' != 'true' and ('$(RuntimeIdentifier)' == 'linux-x64' or ('$(RuntimeIdentifier)' == '' and $([MSBuild]::IsOSPlatform('Linux'))))">
-    <None Include="$(PkgSilk_NET_OpenAL_Soft_Native)\runtimes\linux-x64\native\libopenal.so"
+  <ItemGroup Condition="'$(MphReadServer)' != 'true' and $(MphReadAudioRid.StartsWith('linux'))">
+    <None Include="$(PkgSilk_NET_OpenAL_Soft_Native)\runtimes\$(MphReadAudioRid)\native\libopenal.so"
           Link="libopenal.so.1" CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" Visible="false" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(MphReadServer)' != 'true' and $(MphReadAudioRid.StartsWith('osx'))">
+    <None Include="$(PkgSilk_NET_OpenAL_Soft_Native)\runtimes\$(MphReadAudioRid)\native\libopenal.dylib"
+          Link="libopenal.1.dylib" CopyToOutputDirectory="PreserveNewest"
           CopyToPublishDirectory="PreserveNewest" Visible="false" />
   </ItemGroup>
 
