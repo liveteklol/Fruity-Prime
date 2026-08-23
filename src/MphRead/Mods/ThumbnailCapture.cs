@@ -59,9 +59,12 @@ namespace MphRead.Mods
         public Scene Scene { get; }
         public bool Succeeded => _captured;
 
+        private readonly Vector2i _asked;
+
         private ThumbnailCapture(string roomKey, int width, int height)
             : base(GameSettings(), WindowSettings(width, height))
         {
+            _asked = new Vector2i(width, height);
             _roomKey = roomKey;
             _settleFrames = SettleFrames;
             Scene = new Scene(Size, KeyboardState, MouseState, _ => { }, Close);
@@ -95,8 +98,10 @@ namespace MphRead.Mods
             if (!_describedContext)
             {
                 _describedContext = true;
-                Console.WriteLine($"[thumbnails] {ScreenCapture.DescribeContext()}, "
-                    + $"window {ClientSize.X}x{ClientSize.Y}");
+                string line = $"{ScreenCapture.DescribeContext()}, "
+                    + $"window asked {_asked.X}x{_asked.Y}, got {ClientSize.X}x{ClientSize.Y}";
+                Console.WriteLine($"[thumbnails] {line}");
+                ThumbnailLog.Write(line);
             }
         }
 
@@ -120,8 +125,13 @@ namespace MphRead.Mods
                 // let a run of thirty rooms announce success and leave thirty
                 // black pictures behind.
                 _captured = ScreenCapture.Save(Scene, ThumbnailGenerator.PathFor(_roomKey));
+                if (_captured)
+                {
+                    ThumbnailLog.Write($"{_roomKey}: captured at {Scene.Size.X}x{Scene.Size.Y}");
+                }
                 if (!_captured)
                 {
+                    ThumbnailLog.Write($"{_roomKey}: attempt {_attempts + 1} produced nothing usable");
                     // A few more frames in case the first one simply came too
                     // early, then stop: if the context cannot draw, no number
                     // of frames will change that.
@@ -157,6 +167,7 @@ namespace MphRead.Mods
             catch (Exception ex)
             {
                 Console.WriteLine($"[thumbnails] failed {roomKey}: {ex.Message}");
+                ThumbnailLog.Write($"{roomKey}: threw {ex.GetType().Name}: {ex.Message}");
                 return false;
             }
         }

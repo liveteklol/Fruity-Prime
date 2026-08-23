@@ -35,9 +35,11 @@ namespace MphRead.Mods
                 // into a loud missing one.
                 if (LitFraction(pixels) < MinLitFraction)
                 {
-                    Console.WriteLine($"[capture] {Path.GetFileName(path)} came out black "
-                        + $"({LitFraction(pixels) * 100:0.00}% lit); not saving it. "
-                        + $"The scene rendered nothing -- {DescribeContext()}");
+                    string why = $"{Path.GetFileName(path)} came out black "
+                        + $"({LitFraction(pixels) * 100:0.00}% lit, {width}x{height}); not saving it. "
+                        + $"The scene rendered nothing -- {DescribeContext()}";
+                    Console.WriteLine($"[capture] {why}");
+                    ThumbnailLog.Write(why);
                     return false;
                 }
                 string? directory = Path.GetDirectoryName(path);

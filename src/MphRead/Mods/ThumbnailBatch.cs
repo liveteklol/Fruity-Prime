@@ -22,6 +22,7 @@ namespace MphRead.Mods
         public static int Run(IReadOnlyList<string> rooms, int parallelism,
                               int width, int height, Action<string>? report = null)
         {
+            ThumbnailLog.Begin(rooms.Count);
             if (rooms.Count == 0)
             {
                 return 0;
