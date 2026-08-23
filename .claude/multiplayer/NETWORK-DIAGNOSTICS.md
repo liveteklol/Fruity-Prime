@@ -62,6 +62,47 @@ worst 265 units), 3/0/0 corrections (was 975/55/0), 0 mismatches, damage
 `31/3/20` resolved and replayed identically, and Weavel's halfturret exercised
 for the first time (601 frames, observers 600 and 617).
 
+## The randomised sweep
+
+`~/mph-net-test/run-batch.sh <runs> [seed]` draws map, roster, player count,
+match length, point goal, latency (0-250 ms each way) and packet loss (0-3%) at
+random, keeps every run's logs under `batch-<seed>/NN/`, and prints only the runs
+that reported something. Short matches and low point goals are deliberate: a
+match that ends inside a run is the case every "is this a new match" bug hides
+in, and the fixed scenarios were all long enough to avoid it.
+
+Four more came out of it, three of them only at a rotation:
+
+5. **`NetRoomChange.Settling` had no callers** -- the guard went with the loop it
+   was attached to. 26 corrections in 4 s at one restart, the local player
+   alternating between two rooms' coordinates.
+6. **The damage sequence was reset on each side separately at a room change.**
+   It is a sequence number, not a tally; resetting it on machines that change
+   room on different frames means either a resync that swallows the next real
+   hits or **up to 32 hits replayed into a player who has just spawned**. Four
+   `damage sequence jumped` events per client per rotation; one run had the
+   authority resolve 115 hits and three of five clients replay none.
+7. **The divergence backstop compared against "now"** instead of against the
+   instant the authority was looking at. A player falling out of the level covers
+   30 units in half a round trip at 250 ms, so it was hauled back up out of its
+   own fall and could never die -- 77 in one run, peers seeing 64-unit jumps. It
+   now indexes this player's own recorded history by the ping and requires a
+   second of disagreement. After: zero corrections, zero teleports.
+8. **Every jump pad was being called a desync.** `Mods.WorldEvents` already
+   reports pads and teleporters; the check now asks and grants the same grace it
+   gives a respawn.
+
+## What is left at 250 ms and is not a bug
+
+`alt-attack` at ~40% (one-frame presses collapsing into one intent window),
+`movement` at ~50% (a 30 Hz reconstruction of a 60 Hz path with a fifth of the
+updates reordered and refused), `zoom` lagging (a toggle with a half-second round
+trip), `form stayed wrong for 181 frames` (the correction machinery's full budget
+-- and the check fails at 60, *below* that budget, so it cannot pass whenever the
+machinery has acted), and `never took a single hit` on a large map (check
+`player overlaps by shooter`: empty for *everybody* means the room, not the
+network).
+
 ## The sweep has to reach the Pi
 
 **A randomised run against a loopback server is a regression check, not a

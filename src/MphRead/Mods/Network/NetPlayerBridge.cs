@@ -463,12 +463,13 @@ namespace MphRead.Mods.Network
                     // that put it there.
                     player.Speed = Vector3.Zero;
                 }
-                else if ((state.Position - player.Position).LengthSquared > DesyncDistance * DesyncDistance)
+                else if (Diverged(player, state, slot))
                 {
                     NetLog.Event($"slot {player.SlotIndex} pulled back to the authority "
                         + $"from {player.Position} to {state.Position}");
                     Move(player, state.Position);
                     player.Speed = state.Speed;
+                    _divergedFrames[slot] = 0;
                 }
                 player.Health = state.Health;
                 return;
@@ -533,6 +534,58 @@ namespace MphRead.Mods.Network
             player.ModForceForm(altForm);
         }
 
+        private static readonly int[] _divergedFrames = new int[PlayerEntity.SlotCapacity];
+
+        /// <summary>
+        /// How long this machine's own player must look wrong before it is
+        /// moved. Long enough that nothing latency can produce survives it.
+        /// </summary>
+        private const int DivergedFramesBeforeCorrecting = 60;
+
+        /// <summary>
+        /// Whether the authority's copy of this machine's own player is
+        /// somewhere it cannot be explained by the trip.
+        ///
+        /// Comparing it against where the player is *now* is the wrong
+        /// question, and asking it that way was a bug of its own. The
+        /// authority's copy is this client's own report from a round trip
+        /// ago, so under anything fast the two are legitimately far apart:
+        /// a player falling out of the level covers thirty units in the half
+        /// second a 250 ms link takes to answer, and correcting that hauled it
+        /// back up out of the fall, over and over, so it could never die.
+        /// Seventy-seven of those in one run, and the peers watching saw a
+        /// player jumping 64 units at a time.
+        ///
+        /// So compare it against where this player *was* when the authority
+        /// was looking -- its own recorded position, a ping's worth of frames
+        /// back. That is the same instant, and a difference then is a real
+        /// disagreement rather than a stale reading. It still has to persist,
+        /// because one bad snapshot is not a desync.
+        /// </summary>
+        private static bool Diverged(PlayerEntity player, in PlayerState state, int slot)
+        {
+            if (slot < 0 || slot >= _divergedFrames.Length)
+            {
+                return false;
+            }
+            Vector3 then = player.Position;
+            int lagFrames = slot < NetSession.SlotPing.Length
+                ? Math.Clamp(NetSession.SlotPing[slot] * 60 / 1000, 0, 100)
+                : 0;
+            if (lagFrames > 0 && NetSession.NetFrame > (uint)lagFrames
+                && player.ModGetNetworkPosition(NetSession.NetFrame - (uint)lagFrames, out Vector3 past))
+            {
+                then = past;
+            }
+            if ((state.Position - then).LengthSquared <= DesyncDistance * DesyncDistance)
+            {
+                _divergedFrames[slot] = 0;
+                return false;
+            }
+            _divergedFrames[slot]++;
+            return _divergedFrames[slot] >= DivergedFramesBeforeCorrecting;
+        }
+
         /// <summary>
         /// Forget where the authority had everybody standing, because it was
         /// in a different room. The next snapshot that reports a player
@@ -543,6 +596,9 @@ namespace MphRead.Mods.Network
         {
             Array.Clear(_authoritySpawned);
             Array.Clear(_reportSeen);
+            Array.Clear(_divergedFrames);
+            Array.Clear(_spawnIntentFrame);
+            Array.Clear(_wasInPlay);
         }
 
         public static void Reset()
@@ -555,6 +611,9 @@ namespace MphRead.Mods.Network
             Array.Clear(_pressSeen);
             Array.Clear(_pressHistory);
             Array.Clear(_authoritySpawned);
+            Array.Clear(_divergedFrames);
+            Array.Clear(_spawnIntentFrame);
+            Array.Clear(_wasInPlay);
             Array.Clear(_lastReportPosition);
             Array.Clear(_lastReportFrame);
             Array.Clear(_reportSeen);
@@ -578,6 +637,10 @@ namespace MphRead.Mods.Network
             {
                 return; // the owner has not spawned yet
             }
+            if (StaleSinceSpawn(player, intent))
+            {
+                return;
+            }
             NoteReportedVelocity(player, intent);
             Vector3 delta = intent.Position - player.Position;
             float distance = delta.Length;
@@ -596,6 +659,51 @@ namespace MphRead.Mods.Network
             // that aim under latency, so moving directly is required for
             // collision and rendering to agree.
             Move(player, intent.Position);
+        }
+
+        private static readonly uint[] _spawnIntentFrame = new uint[PlayerEntity.SlotCapacity];
+        private static readonly bool[] _wasInPlay = new bool[PlayerEntity.SlotCapacity];
+
+        /// <summary>
+        /// Whether this intent describes where a player stood before it was
+        /// put back on the map, and so must not be acted on.
+        ///
+        /// This is the respawn glitch. A player dies; its owner keeps sending
+        /// intents carrying the position it died at. The authority puts the
+        /// puppet on a spawn point -- and on the very next frame this method
+        /// moves it straight back to the death position, because that is what
+        /// the newest intent from a round trip ago still says. It then
+        /// publishes that as the authoritative position of a player it has
+        /// flagged as spawned, for as long as the round trip lasts.
+        ///
+        /// What the owner does with that snapshot is the visible half: the
+        /// first one it receives saying "you are spawned" is the one it takes
+        /// its placement from, so it respawns correctly and is then teleported
+        /// into wherever it had died -- through the floor as often as not, so
+        /// its own screen goes black and everyone else sees a shadow and no
+        /// model. Reported from play on the Pi after two or three respawns in
+        /// one match, at fifteen milliseconds: it does not need latency, only
+        /// a round trip.
+        ///
+        /// The barrier is the intent frame that was current when the puppet
+        /// was placed. Anything up to and including it was composed before the
+        /// spawn and describes a dead player; the first intent after it is the
+        /// owner reporting where it actually is now.
+        /// </summary>
+        private static bool StaleSinceSpawn(PlayerEntity player, in IntentPacket intent)
+        {
+            int slot = player.SlotIndex;
+            if (slot < 0 || slot >= _spawnIntentFrame.Length)
+            {
+                return false;
+            }
+            bool inPlay = player.LoadFlags.TestFlag(LoadFlags.Spawned) && player.Health > 0;
+            if (inPlay && !_wasInPlay[slot])
+            {
+                _spawnIntentFrame[slot] = intent.Frame;
+            }
+            _wasInPlay[slot] = inPlay;
+            return inPlay && intent.Frame <= _spawnIntentFrame[slot];
         }
 
         private static readonly Vector3[] _lastReportPosition = new Vector3[PlayerEntity.SlotCapacity];

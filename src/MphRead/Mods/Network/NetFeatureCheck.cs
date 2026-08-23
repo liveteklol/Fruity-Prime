@@ -30,7 +30,23 @@ namespace MphRead.Mods.Network
             public float MinY = Single.MaxValue;
             public float MaxY = Single.MinValue;
             public double FacingDegrees;
+            /// <summary>
+            /// Frames on which at least one of this slot's projectiles was
+            /// alive on this machine. Not a count of shots: a beam that hits
+            /// a wall a metre away contributes one frame and a beam down a
+            /// corridor contributes twenty, so this moves with where a puppet
+            /// is standing and aiming as much as with whether its owner
+            /// pulled the trigger. Read <see cref="ShotsFired"/> for that.
+            /// </summary>
             public int BeamFrames;
+            /// <summary>
+            /// Beams this machine actually spawned for this slot, which is
+            /// the question "did the fire button arrive" actually asks.
+            /// Accumulated from NetDamage.Fired rather than read from it, so
+            /// it survives the reset a map rotation does to those tallies.
+            /// </summary>
+            public int ShotsFired;
+            public int LastFiredTotal;
             public int BombFrames;
             public int HalfturretFrames;
             public int AltFormFrames;
@@ -67,6 +83,15 @@ namespace MphRead.Mods.Network
             public double WorstPositionGap;
             public double WorstStep;
             public int Teleports;
+            /// <summary>
+            /// Whether this slot was ever compared against a snapshot -- that
+            /// is, whether this client spent any of the run not being the
+            /// authority. Recorded rather than asked at the end, because
+            /// authority moves when a peer leaves and a client promoted in
+            /// the last three seconds of a run would otherwise report that it
+            /// had measured nothing, having measured the whole match.
+            /// </summary>
+            public bool EverCompared;
             public int FramesSinceRespawn;
             /// <summary>
             /// Frames since a jump pad or a teleporter last acted on this
@@ -199,6 +224,14 @@ namespace MphRead.Mods.Network
                 {
                     record.BeamFrames++;
                 }
+                int firedTotal = NetDamage.Fired[slot];
+                // Negative means the tallies were cleared by a rotation, not
+                // that shots were un-fired.
+                if (firedTotal > record.LastFiredTotal)
+                {
+                    record.ShotsFired += firedTotal - record.LastFiredTotal;
+                }
+                record.LastFiredTotal = firedTotal;
                 if (bombs[slot] > 0)
                 {
                     record.BombFrames++;
@@ -352,6 +385,7 @@ namespace MphRead.Mods.Network
                 {
                     continue;
                 }
+                record.EverCompared = true;
                 // What the authority last said about this player against what
                 // this client is drawing. The totals cannot separate "never
                 // arrived" from "arrived and was overridden"; this can.
@@ -599,6 +633,7 @@ namespace MphRead.Mods.Network
             ("jump", Height),
             ("facing", r => r.FacingDegrees),
             ("shooting", r => r.BeamFrames),
+            ("shots", r => r.ShotsFired),
             ("weapon-switch", r => r.WeaponChanges),
             ("alt-attack", r => r.AltAttackPresses),
             ("alt-form", r => r.AltFormInMorphPhase),
@@ -646,7 +681,16 @@ namespace MphRead.Mods.Network
             Line("movement", mine.Travelled, other.Travelled, 5, "units");
             Line("jump", Height(mine), Height(other), 1.5, "units");
             Line("facing", mine.FacingDegrees, other.FacingDegrees, 180, "deg");
-            Line("shooting", mine.BeamFrames, other.BeamFrames, 10, "frames");
+            // Both, because they fail differently. "shots" is the input
+            // path: a shortfall there means the fire button did not arrive.
+            // "shooting" is projectile-frames, which also moves with where
+            // the puppet was pointing, so a shortfall there with "shots"
+            // matching means the beams were spawned and died early -- a
+            // puppet firing into a wall, not a lost press. Reading the second
+            // as the first is what turned "they did 2429, I saw 406" into a
+            // hunt for a network fault that was not there.
+            Line("shots", mine.ShotsFired, other.ShotsFired, 10, "shots");
+            Line("shooting", mine.BeamFrames, other.BeamFrames, 10, "beam-frames");
             Line("weapon switch", mine.WeaponChanges, other.WeaponChanges, 2, "changes",
                 pairwise: true);
             Line("alt attack", mine.AltAttackPresses, other.AltAttackPresses, 3, "presses",
@@ -669,7 +713,7 @@ namespace MphRead.Mods.Network
             Console.Write(report.ToString());
             Console.WriteLine($"    {them}: {other.Teleports} teleport(s), worst jump "
                 + $"{other.WorstStep:0.0} units");
-            Console.WriteLine(NetSession.IsAuthority
+            Console.WriteLine(!other.EverCompared
                 ? $"    {them}: form and position agreement not measured here -- "
                     + "this client is the authority and receives no snapshot to compare with"
                 : $"    {them}: form disagreed on {other.FormDisagreeFrames} frame(s) "

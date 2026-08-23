@@ -949,7 +949,7 @@ dotnet publish src/MphRead/MphRead.csproj -c Release -r win-x64 \
 The exe is often locked by a running game: write `MphRead.new.exe`, then `mv`.
 Any protocol change means server **and** every client must be the same build.
 
-`NetConfig.ProtocolVersion` is **3** as of this build. Version 2 grew the
+`NetConfig.ProtocolVersion` is **4** as of this build. Version 2 grew the
 roster by a ping per entry; version 3 added the shooter's ammo to the intent,
 the point goal and the match number and the ending flag to the match state, a
 name to the status reply, and the `MatchEnd` handshake. Every one of those
@@ -959,8 +959,16 @@ line in the server log instead. Older clients cannot join until they are
 updated, which is the intended outcome.
 
 **The server and every client must be the same build**, and that now includes
-the Pi: a version 2 server refuses a version 3 client outright, so deploy the
+the Pi: a version 3 server refuses a version 4 client outright, so deploy the
 server before handing the client to anybody.
+
+**Version 4 is a refusal on behaviour, not on layout.** Nothing in the wire
+format moved. A version 3 build reads every byte correctly and then plays a
+different game -- its own player frozen where it stands, its shots leaving from
+its ankles, its respawns putting it back inside whatever it died in. The
+authority is simply the first client to connect, so one stale copy joining first
+hands every one of those faults to everybody in the match. Nothing in the
+protocol would have noticed, which is exactly why the version had to say so.
 
 ## The damage bug, and what it actually was (2026-08-23)
 
@@ -1141,6 +1149,127 @@ Weavel had never been in a networked check before this. The halfturret crosses
 on the first attempt, so nothing was wrong with it -- but "no Weavel has ever
 played one of these" was not written down anywhere either. Put one in the
 roster.
+
+### Sweeping at random, and what it turned up
+
+A fixed scenario stops finding things once it passes. `run-batch.sh` in the test
+rig runs matches whose map, roster, player count, match length, point goal,
+latency and packet loss are all drawn at random, keeps every run's logs, and
+prints only the runs that reported something.
+
+```bash
+cd ~/mph-net-test
+./run-batch.sh 12          # twelve runs, a random seed
+./run-batch.sh 12 31337    # the same twelve again
+```
+
+Short matches and low point goals are deliberate: a match that ends inside a run
+is the case every "is this a new match" bug hides in, and the fixed scenarios had
+all been long enough to avoid it. Four things came out of the first two sweeps,
+and three of them only happen at a rotation.
+
+**`NetRoomChange.Settling` had no callers.** It guarded the loop in
+`AfterSimulation` that applied peer-reported positions; when that work moved into
+`TryApplyRemoteInput` the guard went with it, so the reason the property exists
+had quietly stopped being true. Clients do not finish loading at the same
+instant, and the local player is the worst of it: this client has loaded and
+spawned while the authority is still finishing the old room, so the snapshot
+drags it to an old-room position, the local simulation walks it back, and the two
+alternate. A six-player run at 60 ms: twenty-six corrections in four seconds,
+ping-ponging between two fixed points a room apart, all inside one restart.
+
+**The damage sequence was being reset on each side separately.** The counter in
+`PlayerState` is a sequence number, not a tally -- its only use is the difference
+between two readings -- so a new map does not invalidate it. Resetting it does,
+because the authority and its clients do not change room on the same frame:
+whichever resets first goes back to zero while the other still holds two hundred
+and thirty. The difference between those is either a resync that swallows the
+next real hits, or -- when the numbers fall the other way -- **up to thirty-two
+hits replayed into a player who has just spawned into a fresh match**. Both were
+happening: four `damage sequence jumped` events per client per rotation, and a
+run whose authority resolved 115 hits while three of the five clients watching
+replayed none at all.
+
+**The divergence backstop asked the wrong question.** It compared the authority's
+copy of this machine's own player against where that player is *now* -- and that
+copy is this client's own report from a round trip ago, so under anything fast
+the two are legitimately far apart. A player falling out of the level covers
+thirty units in the half second a 250 ms link takes to answer, and correcting
+that hauled it back up out of its own fall, repeatedly, so it could never die.
+Seventy-seven of those in one run at 250 ms, with peers reporting a player
+jumping sixty-four units at a time. It now compares against where this player
+*was* when the authority was looking -- its own recorded position, a ping's worth
+of frames back, which `ModRecordNetworkPosition` had been keeping and nothing was
+reading -- and requires the disagreement to last a second. Same scenario after:
+no corrections at all, no visible teleports on two of three clients.
+
+**The check called every jump pad a desync.** Two clients alone on
+AD2 ALINOS PERCH, agreeing on every other number between them, still reported
+"2 teleport(s), worst jump 21.9 units". The engine says when a pad or a
+teleporter acts (`Mods.WorldEvents`, already hooked for the map audit); the check
+now asks, and gives the slot the same grace it gives a respawn.
+
+### Two found by playing, which no sweep had caught
+
+Both reported from a real match on the Pi at about fifteen milliseconds, so
+neither needs latency -- only a round trip.
+
+**Respawning put the player back where it died.** A dead player's owner keeps
+sending intents carrying the position it died at. The authority puts the puppet
+on a spawn point and, on the very next frame, `ApplyReportedPosition` moves it
+straight back to that death position, because that is what the newest intent
+from a round trip ago still says -- and it then publishes it as the
+authoritative position of a player it has flagged as spawned, for as long as the
+round trip lasts. The owner takes its placement from the first snapshot that says
+"you are spawned", so it respawns correctly and is teleported into wherever it
+had died: through the floor as often as not, its own screen black, a shadow and
+no model on everyone else's. Two or three respawns into a match was enough.
+
+Reported positions composed before a spawn are now ignored. The barrier is the
+intent frame that was current when the puppet was placed: anything up to it
+describes a dead player, and the first intent after it is the owner saying where
+it actually is. Six respawns against the Pi afterwards: no teleports on either
+client, no corrections, no mismatches.
+
+Worth recognising again as a shape: **a stale input is not harmless just because
+it is only a position.** The intent stream has no notion of "this was composed
+before the thing that just happened", and anything the authority does to a
+player of its own accord -- a spawn, and one day a teleporter -- is undone by
+the next packet that predates it.
+
+**The Shock Coil did twice its intended damage against players.** Not a network
+fault at all. It is the one beam that stays alive and re-tests collision every
+frame, and every beam hit carries `DamageFlags.NoDmgInvuln` (set unconditionally
+in `BeamProjectileEntity`), so the per-hit invulnerability window never applies
+and nothing else limits how often it lands. At 30 fps that was its design rate;
+this engine runs at 60, which made it roughly 600 damage a second -- a full
+hunter in a sixth of one, which is what "the Shock Coil one-shots me" is. The
+identical compensation was already in the same file for the same weapon against
+*enemies*, with the same `// todo: FPS stuff` beside it; only the player path had
+been missed.
+
+This changes the weapon. The Shock Coil now does half what it did yesterday,
+which is the original figure, and it will feel it. It is also **not measured** --
+the scripted tour spends Sylux's time in alt form laying bombs and barely fires
+the beam at a player, so this rests on reading the code beside its own
+already-corrected twin. A sustained-fire probe would settle it.
+
+### What is left at 250 ms, and is not a bug
+
+Three clients at 250 ms each way -- half a second of round trip, worse than any
+real connection this will see:
+
+| Reads as | Is |
+|---|---|
+| `alt-attack: they did 36, observers saw 15` | one-frame presses collapsing. Two presses inside one intent window arrive as one, because the edge history is ORed into a single mask per packet. The bombs those presses would have laid still land |
+| `movement: they did 282, observers saw 130` | a 30 Hz reconstruction of a 60 Hz path, with a fifth of the updates arriving out of order and refused. The observer is measuring a shorter polyline, not missing a player |
+| `zoom: they did 105, observers saw 46` | a toggle whose press takes half a second to arrive and half a second to come back |
+| `their form stayed wrong for 181 frames` | the correction machinery running its full budget -- 90 frames of grace, a transition attempted, 90 more, then the form forced. The check fails at 60, which is *below* that budget, so it cannot pass whenever the machinery has had to act at all |
+| `never took a single hit` on a large map | nobody met. Check `player overlaps by shooter`: if it is empty for *everybody*, it is the room, not the network |
+
+The first three are what lag compensation and delta-compressed snapshots would
+improve, and they are the reason the missing acknowledgement field is worth
+having. None of them is a correctness failure.
 
 ### The sweep has to reach the Pi
 

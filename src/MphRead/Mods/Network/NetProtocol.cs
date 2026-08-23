@@ -836,8 +836,19 @@ namespace MphRead.Mods.Network
         /// end-of-match handshake, and a name to the status reply. A mismatch
         /// is refused at Hello, with a line in the server log, which is a far
         /// better failure than garbled names.
+        ///
+        /// Version 4 is the odd one: nothing in the layout moved. It is a
+        /// refusal on *behaviour*, because a version 3 build reads every byte
+        /// correctly and then plays a different game -- its own player frozen
+        /// where it stands, its shots leaving from its ankles, its respawns
+        /// putting it back inside whatever it died in. Two of those are worse
+        /// coming from the authority than from anyone else, and the authority
+        /// is simply the first client to connect, so one stale copy joining
+        /// first hands every one of those faults to everybody in the match.
+        /// Nothing in the wire would have noticed; this is what makes the
+        /// server say no.
         /// </summary>
-        public const int ProtocolVersion = 3;
+        public const int ProtocolVersion = 4;
         /// <summary>
         /// Frames between intent packets. Not every frame: with N players the
         /// server relays N*(N-1) of them per frame, and at six players that
