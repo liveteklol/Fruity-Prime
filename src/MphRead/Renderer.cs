@@ -604,8 +604,15 @@ namespace MphRead
                 RenderbufferTarget.Renderbuffer, _renderBuffer);
 
             FramebufferErrorCode status = GL.CheckFramebufferStatus(FramebufferTarget.Framebuffer);
+            FramebufferStatus = status;
             if (status != FramebufferErrorCode.FramebufferComplete)
             {
+                // Was a Debugger.Break, which is silence in a release build --
+                // and an incomplete framebuffer is exactly the fault that
+                // renders nothing while every other signal says the context
+                // is fine. Say it out loud.
+                Console.WriteLine($"[render] the offscreen target is not usable: {status}. "
+                    + $"Nothing drawn into it will appear. Size {Size.X}x{Size.Y}.");
                 Debugger.Break();
             }
 
@@ -1317,6 +1324,37 @@ namespace MphRead
         /// or not anything is on screen. It carries the world but not the HUD,
         /// which is drawn straight to the window afterwards.
         /// </summary>
+        /// <summary>
+        /// Whether the offscreen target this scene draws into is usable.
+        /// Reported rather than asserted: a release build has no debugger to
+        /// break into, and an incomplete framebuffer is silent otherwise.
+        /// </summary>
+        public FramebufferErrorCode FramebufferStatus { get; private set; }
+            = FramebufferErrorCode.FramebufferComplete;
+
+        /// <summary>
+        /// The first GL error since the last time this was asked, drained.
+        /// A driver that refuses immediate-mode calls raises InvalidOperation
+        /// on every one of them and renders nothing, with no other symptom.
+        /// </summary>
+        public OpenTK.Graphics.OpenGL.ErrorCode DrainGlError()
+        {
+            var first = OpenTK.Graphics.OpenGL.ErrorCode.NoError;
+            for (int i = 0; i < 64; i++)
+            {
+                OpenTK.Graphics.OpenGL.ErrorCode code = GL.GetError();
+                if (code == OpenTK.Graphics.OpenGL.ErrorCode.NoError)
+                {
+                    break;
+                }
+                if (first == OpenTK.Graphics.OpenGL.ErrorCode.NoError)
+                {
+                    first = code;
+                }
+            }
+            return first;
+        }
+
         public byte[]? ReadSceneTarget(out int width, out int height)
         {
             width = Size.X;

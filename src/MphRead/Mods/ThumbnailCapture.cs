@@ -41,6 +41,7 @@ namespace MphRead.Mods
         private const int RetryFrames = 20;
         private const int MaxAttempts = 3;
         private int _attempts;
+        private OpenTK.Graphics.OpenGL.ErrorCode _frameError;
 
         private static GameWindowSettings GameSettings() => new()
         {
@@ -99,7 +100,8 @@ namespace MphRead.Mods
             {
                 _describedContext = true;
                 string line = $"{ScreenCapture.DescribeContext()}, "
-                    + $"window asked {_asked.X}x{_asked.Y}, got {ClientSize.X}x{ClientSize.Y}";
+                    + $"window asked {_asked.X}x{_asked.Y}, got {ClientSize.X}x{ClientSize.Y}, "
+                    + $"offscreen target {Scene.FramebufferStatus}";
                 Console.WriteLine($"[thumbnails] {line}");
                 ThumbnailLog.Write(line);
             }
@@ -115,6 +117,10 @@ namespace MphRead.Mods
             {
                 return;
             }
+            // Drained after the scene has drawn and before anything else
+            // touches GL, so what it reports belongs to the frame that was
+            // just rendered.
+            _frameError = Scene.DrainGlError();
             bool capturing = !_captured && _settleFrames-- <= 0;
             bool giveUp = false;
             if (capturing)
@@ -132,7 +138,8 @@ namespace MphRead.Mods
                 }
                 if (!_captured)
                 {
-                    ThumbnailLog.Write($"{_roomKey}: attempt {_attempts + 1} produced nothing usable");
+                    ThumbnailLog.Write($"{_roomKey}: attempt {_attempts + 1} produced nothing usable "
+                        + $"(target {Scene.FramebufferStatus}, first GL error this frame {_frameError})");
                     // Show the window and try again.
                     //
                     // A capture window is never displayed -- there is nothing
