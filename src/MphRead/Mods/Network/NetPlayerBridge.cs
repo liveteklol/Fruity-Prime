@@ -16,17 +16,6 @@ namespace MphRead.Mods.Network
     public static class NetPlayerBridge
     {
         /// <summary>
-        /// How far the local player may drift from the authority before it is
-        /// pulled back. Not zero: the authority runs the same code on the
-        /// same intent, so a small difference is latency rather than
-        /// disagreement, and snapping it away every frame would make the
-        /// player's own movement stutter. Not infinite either -- that was the
-        /// old behaviour, and it let two machines hold two different worlds
-        /// in which a shot could connect on one screen and miss on the other.
-        /// </summary>
-        private const float CorrectionDistance = 1.5f;
-
-        /// <summary>
         /// How long a form disagreement is tolerated before it is forced.
         /// Longer than the morph animation, so a transition that is simply
         /// playing out is never cut short -- that was what removed the
@@ -34,7 +23,13 @@ namespace MphRead.Mods.Network
         /// </summary>
         private const int FormGraceFrames = 90;
         private static readonly int[] _formMismatch = new int[PlayerEntity.SlotCapacity];
-        private static readonly uint[] _lastCorrection = new uint[PlayerEntity.SlotCapacity];
+
+        /// <summary>
+        /// Whether the last snapshot had each slot standing on the map, so the
+        /// frame the authority places somebody can be told from the thousands
+        /// of frames afterwards on which it merely still has them placed.
+        /// </summary>
+        private static readonly bool[] _authoritySpawned = new bool[PlayerEntity.SlotCapacity];
 
         /// <summary>
         /// Beyond this a remote player is placed outright, not eased. Well
@@ -69,6 +64,26 @@ namespace MphRead.Mods.Network
         /// </summary>
         public static long Snaps { get; private set; }
         public static float WorstSnap { get; private set; }
+
+        /// <summary>
+        /// How far this machine's own player may be from the authority's copy
+        /// of it before it is pulled back.
+        ///
+        /// Wide on purpose. The authority's copy is this client's own report
+        /// from a round trip ago, so under boost across a bad line the two
+        /// are several units apart while nothing at all is wrong, and a
+        /// threshold tight enough to call that a desync is a threshold that
+        /// fires constantly. This is here for corruption, not for latency.
+        /// </summary>
+        private const float DesyncDistance = 30f;
+
+        /// <summary>
+        /// The fastest a puppet may be said to be travelling, in units per
+        /// frame. Boost -- the quickest a hunter moves under its own power --
+        /// caps at 0.6, so this is eight times anything legitimate and exists
+        /// only to stop a derived velocity from becoming a launch.
+        /// </summary>
+        private const float MaxReportedSpeed = 5f;
 
         /// <summary>Positions beyond this are not a level, they are corruption.</summary>
         private const float PositionLimit = 100000f;
@@ -224,7 +239,6 @@ namespace MphRead.Mods.Network
                 Set(c.RollRight, false);
                 Set(c.RollUp, false);
                 Set(c.RollDown, false);
-                player.Speed = Vector3.Zero;
             }
             if (intent.WeaponSelect != 0xFF)
             {
@@ -315,7 +329,8 @@ namespace MphRead.Mods.Network
         /// are the match, and a client that decided them for itself was
         /// playing a different one -- but keeps its facing, because aim has to
         /// answer the mouse now rather than after a round trip, and keeps its
-        /// position until it has drifted past <see cref="CorrectionDistance"/>.
+        /// own position -- see the isLocal branch, and
+        /// <see cref="DesyncDistance"/> for the one case that overrides it.
         /// </summary>
         public static void ApplyState(PlayerEntity player, in PlayerState state, bool isLocal)
         {
@@ -328,10 +343,17 @@ namespace MphRead.Mods.Network
             }
             bool spawned = (state.Flags & PlayerState.FlagSpawned) != 0;
             bool wasInPlay = player.LoadFlags.TestFlag(LoadFlags.Spawned) && player.Health > 0;
+            int slot = player.SlotIndex;
+            // The frame the authority put this player back on the map.
+            bool justPlaced = spawned && slot >= 0 && slot < _authoritySpawned.Length
+                && !_authoritySpawned[slot];
+            if (slot >= 0 && slot < _authoritySpawned.Length)
+            {
+                _authoritySpawned[slot] = spawned;
+            }
             // The authority keeps the score for everybody, including for this
             // client's own player. Counting locally worked only for whoever
             // had been present since the first kill.
-            int slot = player.SlotIndex;
             if (slot >= 0 && slot < GameState.Points.Length)
             {
                 GameState.Points[slot] = state.Points;
@@ -370,11 +392,67 @@ namespace MphRead.Mods.Network
             }
             if (isLocal)
             {
-                // The authority owns the collision result. Keeping a second
-                // local position here lets local collision correction diverge
-                // from the world that resolves damage for everyone else.
-                Move(player, state.Position);
-                player.Speed = state.Speed;
+                // Position and speed stay with the machine playing this
+                // character; only the match -- health, score, spawn, death --
+                // comes from the authority.
+                //
+                // Taking them from the snapshot closes a loop with no way
+                // out. The authority does not simulate a remote player's
+                // movement: it puts the puppet wherever the owner's last
+                // intent said. So the position it publishes for this client
+                // *is* this client's own report from a round trip ago, and
+                // writing it back here means the next intent carries it
+                // again unchanged. The two values agree forever, the
+                // character is pinned to the spot the loop closed on, and
+                // every frame of local movement is computed and thrown away
+                // before it is ever published. That froze every client except
+                // the authority -- 0 units travelled in seventy seconds, on
+                // loopback as much as over the wire.
+                //
+                // A respawn or a death does not come through here: those are
+                // the !wasInPlay and !spawned branches above. What is left is
+                // a divergence no latency can explain, and only that is
+                // taken.
+                if (justPlaced)
+                {
+                    // Except at a respawn, which is the one moment the
+                    // authority owns this player's position outright.
+                    //
+                    // `GetRespawnPoint` chooses from the spawn points that are
+                    // free of living players *on the machine running it*, and
+                    // rotates its choice with the frame counter, so two
+                    // machines running it a few frames apart do not pick the
+                    // same one. The local player also respawns early by
+                    // holding fire, so it makes that choice well before the
+                    // authority makes its own. Both then believe they know
+                    // where this player is standing, half a level apart, and
+                    // nothing brings them back together: the client publishes
+                    // its own spot in every intent and the authority replies
+                    // with the other one, for the rest of the life.
+                    //
+                    // Fifty-five of these in a hundred seconds, at up to 175
+                    // units. The old code hid it -- it overwrote this
+                    // player's position from every snapshot, which froze it
+                    // solid but did make the two agree.
+                    //
+                    // Spawning locally first is kept: it is what makes a
+                    // respawn feel immediate rather than arrive a round trip
+                    // later, and it is what still works if snapshots stall.
+                    // Only the placement is handed over.
+                    Move(player, state.Position);
+                    // Not the authority's speed: a player that has just been
+                    // put on a spawn point is standing still, and whatever the
+                    // snapshot carries here was derived across the teleport
+                    // that put it there.
+                    player.Speed = Vector3.Zero;
+                }
+                else if ((state.Position - player.Position).LengthSquared > DesyncDistance * DesyncDistance)
+                {
+                    NetLog.Event($"slot {player.SlotIndex} pulled back to the authority "
+                        + $"from {player.Position} to {state.Position}");
+                    Move(player, state.Position);
+                    player.Speed = state.Speed;
+                }
                 player.Health = state.Health;
                 return;
             }
@@ -447,6 +525,10 @@ namespace MphRead.Mods.Network
             Array.Clear(_lastPressFrame);
             Array.Clear(_pressSeen);
             Array.Clear(_pressHistory);
+            Array.Clear(_authoritySpawned);
+            Array.Clear(_lastReportPosition);
+            Array.Clear(_lastReportFrame);
+            Array.Clear(_reportSeen);
         }
 
         /// <summary>
@@ -467,6 +549,7 @@ namespace MphRead.Mods.Network
             {
                 return; // the owner has not spawned yet
             }
+            NoteReportedVelocity(player, intent);
             Vector3 delta = intent.Position - player.Position;
             float distance = delta.Length;
             if (distance > SnapDistance)
@@ -484,6 +567,76 @@ namespace MphRead.Mods.Network
             // that aim under latency, so moving directly is required for
             // collision and rendering to agree.
             Move(player, intent.Position);
+        }
+
+        private static readonly Vector3[] _lastReportPosition = new Vector3[PlayerEntity.SlotCapacity];
+        private static readonly uint[] _lastReportFrame = new uint[PlayerEntity.SlotCapacity];
+        private static readonly bool[] _reportSeen = new bool[PlayerEntity.SlotCapacity];
+
+        /// <summary>
+        /// How fast a puppet is travelling, worked out from the positions its
+        /// owner reported rather than from a simulation of it.
+        ///
+        /// Nothing else fills this in. The authority skips a remote player's
+        /// movement step entirely -- the owner already ran it and sent the
+        /// result -- so Speed would keep whatever it last held, and it was
+        /// therefore forced to zero. But Speed is in the snapshot, so that
+        /// zero became the authoritative velocity of every remote player on
+        /// every screen: opponents slid around at a dead stop, and each
+        /// client had its own speed cleared sixty times a second.
+        ///
+        /// The gap between two reports is what it is divided by, so this
+        /// stays right when a packet goes missing and the next one covers
+        /// four frames instead of two.
+        /// </summary>
+        private static void NoteReportedVelocity(PlayerEntity player, in IntentPacket intent)
+        {
+            int slot = player.SlotIndex;
+            if (slot < 0 || slot >= _lastReportFrame.Length)
+            {
+                return;
+            }
+            if (_reportSeen[slot] && intent.Frame > _lastReportFrame[slot])
+            {
+                // Capped: a report that follows a long silence describes a
+                // gap, not a frame of movement, and dividing by two hundred
+                // is as wrong as dividing by one.
+                uint elapsed = Math.Min(intent.Frame - _lastReportFrame[slot], 8);
+                Vector3 travelled = intent.Position - _lastReportPosition[slot];
+                float step = travelled.Length;
+                if (!Sane(travelled) || step > SnapDistance)
+                {
+                    // Not movement: a respawn, a teleporter, or a gap in the
+                    // packets. Dividing a jump across the level by two frames
+                    // produces a velocity of a hundred and fifty units a
+                    // frame, and that number does not stay here -- it goes
+                    // into the snapshot as this player's authoritative speed,
+                    // every client applies it to its puppet, and the owner
+                    // takes it back at its next respawn and is launched out of
+                    // the level. Measured before this guard: the authority
+                    // held a player at Y=163 and climbing 35 units a frame.
+                    player.Speed = Vector3.Zero;
+                }
+                else
+                {
+                    Vector3 speed = travelled / elapsed;
+                    float magnitude = speed.Length;
+                    // Belt and braces. Boost, the fastest a hunter moves, caps
+                    // at 0.6 units a frame; anything near this ceiling is
+                    // already not a hunter running.
+                    if (magnitude > MaxReportedSpeed)
+                    {
+                        speed *= MaxReportedSpeed / magnitude;
+                    }
+                    player.Speed = speed;
+                }
+            }
+            if (!_reportSeen[slot] || intent.Frame > _lastReportFrame[slot])
+            {
+                _reportSeen[slot] = true;
+                _lastReportFrame[slot] = intent.Frame;
+                _lastReportPosition[slot] = intent.Position;
+            }
         }
 
         /// <summary>

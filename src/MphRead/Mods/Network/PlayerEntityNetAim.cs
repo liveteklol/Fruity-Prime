@@ -84,7 +84,27 @@ namespace MphRead.Entities
                 // Repositioning the player without moving this cached camera
                 // made its transmitted aim originate from the previous room
                 // position, so every remote beam missed its target.
-                CameraInfo.Position = Position;
+                //
+                // At eye height, which this line used to leave out. Every
+                // shot in the game starts from CameraInfo.Position -- it is
+                // what _gunDrawPos and then _muzzlePos are built from in
+                // UpdateAimVecs -- and UpdateCameraFirst puts it AimYOffset
+                // above the feet, nine tenths of a unit. Assigning the bare
+                // position therefore fired every remote player's beam from
+                // its ankles, along a ray parallel to the one its owner was
+                // looking down and nine tenths of a unit under it. Aimed at
+                // somebody's chest that goes into the floor in front of
+                // them.
+                //
+                // The tell was that it looked exactly like latency and was
+                // not: on the authority the shots that landed were its own,
+                // the one player whose camera the engine still owned. With
+                // eleven milliseconds of ping and three clients on one map,
+                // slot 1's own machine counted 69 of its shots overlapping
+                // slot 2 while the authority counted none at all.
+                CameraInfo.Position = _field6D0
+                    ? Position
+                    : Position.AddY(Fixed.ToFloat(Values.AimYOffset));
             }
             _gunVec1 = aim.Normalized();
             float flat = MathF.Sqrt(_gunVec1.X * _gunVec1.X + _gunVec1.Z * _gunVec1.Z);
@@ -415,6 +435,37 @@ namespace MphRead.Entities
         }
 
         /// <summary>
+        /// Issue a weapon that can zoom, for the tour's zoom phase.
+        ///
+        /// The phase used to press the Imperialist's own key and hope. In a
+        /// match it is picked up, not issued, so a fresh roster has nobody
+        /// holding one, the key press did nothing, and the phase reported
+        /// `untested` run after run -- which reads as "not proven" and was
+        /// really "never attempted". The same reasoning as
+        /// <see cref="ModArmAffinityWeapon"/>: a probe that waits to walk over
+        /// the right pickup never gets there.
+        ///
+        /// Judicator as the fallback because it is the other weapon in the
+        /// table carrying <see cref="WeaponFlags.CanZoom"/>.
+        /// </summary>
+        internal void ModArmZoomWeapon()
+        {
+            BeamType beam = BeamType.Imperialist;
+            if (!Weapons.Current[(int)beam].Flags.TestFlag(WeaponFlags.CanZoom))
+            {
+                beam = BeamType.Judicator;
+            }
+            _availableWeapons[beam] = true;
+            _availableCharges[beam] = true;
+            WeaponInfo info = Weapons.Current[(int)beam];
+            _ammo[info.AmmoType] = _ammoMax[info.AmmoType];
+            if (CurrentWeapon != beam)
+            {
+                TryEquipWeapon(beam, silent: true);
+            }
+        }
+
+        /// <summary>
         /// Turn a scripted player without a session behind it.
         ///
         /// The map audit runs the tour with no network at all, and the hook
@@ -482,9 +533,6 @@ namespace MphRead.Entities
         /// <summary>Whether this player can currently be zoomed, for the test tour.</summary>
         internal bool ModCanZoom => EquipInfo.Weapon != null
             && EquipInfo.Weapon.Flags.TestFlag(WeaponFlags.CanZoom);
-
-        /// <summary>The weapons this player could switch to, for the test tour.</summary>
-        internal bool ModHasWeapon(BeamType weapon) => _availableWeapons[weapon];
 
         /// <summary>
         /// The form and animation state, for the per-client log.
