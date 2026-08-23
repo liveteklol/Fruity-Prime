@@ -389,6 +389,38 @@ namespace MphRead.Mods
 
             // Load one room with a full house of players and report what it
             // contains and whether it survived.
+            string? dpsTest = ValueAfter(args, "dpstest");
+            if (dpsTest != null)
+            {
+                Hunter dpsHunter = Hunter.Sylux;
+                string? dpsHunterValue = ValueAfter(args, "hunter");
+                if (dpsHunterValue != null && Enum.TryParse(dpsHunterValue, ignoreCase: true, out Hunter parsedDpsHunter))
+                {
+                    dpsHunter = parsedDpsHunter;
+                }
+                BeamType dpsBeam = BeamType.ShockCoil;
+                string? dpsBeamValue = ValueAfter(args, "weapon");
+                if (dpsBeamValue != null && Enum.TryParse(dpsBeamValue, ignoreCase: true, out BeamType parsedDpsBeam))
+                {
+                    dpsBeam = parsedDpsBeam;
+                }
+                double dpsSeconds = 10;
+                string? dpsSecondsValue = ValueAfter(args, "seconds");
+                if (dpsSecondsValue != null && Double.TryParse(dpsSecondsValue,
+                    System.Globalization.CultureInfo.InvariantCulture, out double parsedDpsSeconds))
+                {
+                    dpsSeconds = parsedDpsSeconds;
+                }
+                float dpsDistance = 2.2f;
+                string? dpsDistanceValue = ValueAfter(args, "distance");
+                if (dpsDistanceValue != null && Single.TryParse(dpsDistanceValue,
+                    System.Globalization.CultureInfo.InvariantCulture, out float parsedDpsDistance))
+                {
+                    dpsDistance = parsedDpsDistance;
+                }
+                Environment.ExitCode = Network.WeaponDps.Run(dpsTest, dpsHunter, dpsBeam, dpsSeconds, dpsDistance);
+                return true;
+            }
             string? mapTest = ValueAfter(args, "maptest");
             if (mapTest != null)
             {

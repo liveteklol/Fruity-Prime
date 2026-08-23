@@ -419,7 +419,20 @@ namespace MphRead.Entities
         /// </summary>
         internal void ModArmAffinityWeapon()
         {
-            BeamType beam = Weapons.GetAffinityBeam(Hunter);
+            ModArmWeapon(Weapons.GetAffinityBeam(Hunter));
+        }
+
+        /// <summary>
+        /// Issue a weapon outright: available, chargeable, full ammo, equipped.
+        ///
+        /// Everything a probe needs and nothing a match should ever do. In a
+        /// match a weapon is picked up, so a test that waits to walk over the
+        /// right pickup never reaches the thing it was written to measure --
+        /// which is how the affliction states and the zoom phase both went
+        /// untested for months.
+        /// </summary>
+        internal void ModArmWeapon(BeamType beam)
+        {
             if (beam < BeamType.PowerBeam || beam > BeamType.OmegaCannon)
             {
                 return;
@@ -455,14 +468,7 @@ namespace MphRead.Entities
             {
                 beam = BeamType.Judicator;
             }
-            _availableWeapons[beam] = true;
-            _availableCharges[beam] = true;
-            WeaponInfo info = Weapons.Current[(int)beam];
-            _ammo[info.AmmoType] = _ammoMax[info.AmmoType];
-            if (CurrentWeapon != beam)
-            {
-                TryEquipWeapon(beam, silent: true);
-            }
+            ModArmWeapon(beam);
         }
 
         /// <summary>

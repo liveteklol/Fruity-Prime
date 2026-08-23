@@ -118,7 +118,7 @@ namespace MphRead.Mods.Network
         /// Read by NetHooks.ForceSpawn, which is the one place the engine asks
         /// whether a waiting player should be placed now.
         /// </summary>
-        public static bool ForceEveryone { get; private set; }
+        public static bool ForceEveryone { get; internal set; }
 
         /// <summary>Print what the affliction probe saw. Set by -netdebug.</summary>
         public static bool Diagnostic { get; set; }

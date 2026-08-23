@@ -594,22 +594,7 @@ namespace MphRead.Entities
                                 }
                             }
                             wholeDamage = (uint)Math.Clamp(damage, 0, Int32.MaxValue);
-                            // The Shock Coil is the one beam that stays alive
-                            // and re-tests collision every frame, and every
-                            // beam hit carries NoDmgInvuln, so nothing else
-                            // limits how often it lands. The game ran at 30
-                            // fps and this runs at 60, which doubled its rate
-                            // against players -- about 600 damage a second,
-                            // which kills a full hunter in a sixth of one.
-                            // Reported from play as "the Shock Coil one-shots
-                            // me".
-                            //
-                            // The same compensation is already in this file
-                            // for the same weapon against enemies, with the
-                            // same "todo: FPS stuff" beside it; only the
-                            // player path was missed.
-                            if (wholeDamage != 0
-                                && (Beam != BeamType.ShockCoil || _scene.FrameCount % 2 == 0)) // todo: FPS stuff
+                            if (wholeDamage != 0)
                             {
                                 player.TakeDamage(wholeDamage, damageFlags, damageDir, this);
                             }
