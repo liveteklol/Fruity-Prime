@@ -34,9 +34,43 @@ namespace MphRead.Mods
                 Console.WriteLine("[thumbnails] cannot locate this executable; running serially");
                 return RunSerial(rooms, width, height, report);
             }
+            int written = RunWorkers(rooms, parallelism, width, height, exePath, report,
+                out List<string> failed);
+            if (failed.Count > 0 && parallelism > 1)
+            {
+                // Ten of these run at once, and each is a GL context with a
+                // 1600x900 offscreen target and a room's worth of textures in
+                // it. A discrete card does not notice; an integrated one
+                // sharing system memory can refuse the allocations, and what
+                // that looks like from inside is texture calls failing with
+                // GL_INVALID_OPERATION and every frame coming out black --
+                // while the same room renders perfectly in the game, which is
+                // one context rather than ten.
+                //
+                // So a run that lost rooms tries them again one at a time
+                // before giving up. Still as worker processes: GLFW wants its
+                // windows on the main thread and the launcher calls this from
+                // a background one, so capturing in-process here would trade
+                // one fault for another.
+                string note = $"[thumbnails] {failed.Count} preview(s) failed with {parallelism} "
+                    + "at a time; retrying them one at a time";
+                Console.WriteLine(note);
+                report?.Invoke(note);
+                ThumbnailLog.Write(note);
+                written += RunWorkers(failed, 1, width, height, exePath, report, out _);
+            }
+            return written;
+        }
+
+        private static int RunWorkers(IReadOnlyList<string> rooms, int parallelism,
+                                      int width, int height, string exePath,
+                                      Action<string>? report, out List<string> failedRooms)
+        {
 
             var queue = new Queue<string>(rooms);
             var running = new List<(Process Proc, string Room)>();
+            var failed = new List<string>();
+            failedRooms = failed;
             int done = 0;
             int written = 0;
 
@@ -67,6 +101,10 @@ namespace MphRead.Mods
                     if (ok)
                     {
                         written++;
+                    }
+                    else
+                    {
+                        failed.Add(room);
                     }
                     string line = $"[thumbnails] {done}/{rooms.Count}  "
                         + $"{(ok ? "ok" : "FAILED")}  {room}";
@@ -119,6 +157,10 @@ namespace MphRead.Mods
             int written = 0;
             for (int i = 0; i < rooms.Count; i++)
             {
+                if (ThumbnailGenerator.Exists(rooms[i]))
+                {
+                    continue;
+                }
                 if (ThumbnailCapture.CaptureRoom(rooms[i], width, height))
                 {
                     written++;
