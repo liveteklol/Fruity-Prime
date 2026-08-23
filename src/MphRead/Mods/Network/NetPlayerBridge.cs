@@ -644,6 +644,7 @@ namespace MphRead.Mods.Network
             Array.Clear(_divergedFrames);
             Array.Clear(_spawnIntentFrame);
             Array.Clear(_wasInPlay);
+            Array.Clear(_staleFrames);
         }
 
         public static void Reset()
@@ -659,6 +660,7 @@ namespace MphRead.Mods.Network
             Array.Clear(_divergedFrames);
             Array.Clear(_spawnIntentFrame);
             Array.Clear(_wasInPlay);
+            Array.Clear(_staleFrames);
             Array.Clear(_lastReportPosition);
             Array.Clear(_lastReportFrame);
             Array.Clear(_reportSeen);
@@ -710,6 +712,15 @@ namespace MphRead.Mods.Network
 
         private static readonly uint[] _spawnIntentFrame = new uint[PlayerEntity.SlotCapacity];
         private static readonly bool[] _wasInPlay = new bool[PlayerEntity.SlotCapacity];
+        private static readonly int[] _staleFrames = new int[PlayerEntity.SlotCapacity];
+
+        /// <summary>
+        /// The longest a puppet's position may be held back while its owner is
+        /// still reporting frames from before it respawned. One round trip is
+        /// thirty frames at 250 ms; this is four times that and then the guard
+        /// gives up rather than waiting on a number that may never arrive.
+        /// </summary>
+        private const int StaleAfterSpawnFrames = 120;
 
         /// <summary>
         /// Whether this intent describes where a player stood before it was
@@ -748,9 +759,32 @@ namespace MphRead.Mods.Network
             if (inPlay && !_wasInPlay[slot])
             {
                 _spawnIntentFrame[slot] = intent.Frame;
+                _staleFrames[slot] = 0;
             }
             _wasInPlay[slot] = inPlay;
-            return inPlay && intent.Frame <= _spawnIntentFrame[slot];
+            if (!inPlay || intent.Frame > _spawnIntentFrame[slot])
+            {
+                _staleFrames[slot] = 0;
+                return false;
+            }
+            // Bounded, and that is the whole point of the counter. What this
+            // has to cover is one round trip -- thirty frames at 250 ms -- and
+            // a guard that waits for a frame number to grow can wait forever
+            // if it never does: a peer that reconnects restarts its counter at
+            // zero, and a slot that changes hands inherits the barrier of
+            // whoever held it. Blocking a puppet's position for good would
+            // leave its hitbox at the spawn point and its derived speed at
+            // zero, which is a player nobody can hit and who slides without
+            // ever taking a step -- and nothing would have said so.
+            if (++_staleFrames[slot] <= StaleAfterSpawnFrames)
+            {
+                return true;
+            }
+            NetLog.Event($"slot {slot} still reporting pre-spawn frames after "
+                + $"{_staleFrames[slot]} of them; following it anyway");
+            _spawnIntentFrame[slot] = intent.Frame;
+            _staleFrames[slot] = 0;
+            return false;
         }
 
         private static readonly Vector3[] _lastReportPosition = new Vector3[PlayerEntity.SlotCapacity];
