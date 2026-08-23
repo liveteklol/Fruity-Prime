@@ -96,6 +96,47 @@ namespace MphRead.Mods
         /// to say so. It is the documented cause on Mesa and it is not unique
         /// to Mesa.
         /// </summary>
+        // Kept alive deliberately: the driver holds this pointer for the
+        // lifetime of the context, and a delegate that is only a local goes
+        // to the collector and takes the process with it on the next message.
+        private static DebugProc? _debugCallback;
+        private static int _messagesLogged;
+
+        /// <summary>
+        /// Ask the driver to say which call it is refusing.
+        ///
+        /// GL_INVALID_OPERATION on its own names nothing: it is the error for
+        /// several dozen different mistakes, and a frame that raises one every
+        /// time can be refusing anything. KHR_debug is the extension that
+        /// turns it into a sentence, and it is the difference between another
+        /// guess and an answer. Off in normal play -- it costs a callback per
+        /// message and there is nobody to read them.
+        /// </summary>
+        public static void EnableDebugOutput(Action<string> report)
+        {
+            try
+            {
+                _debugCallback = (source, type, id, severity, length, message, param) =>
+                {
+                    if (severity == DebugSeverity.DebugSeverityNotification || _messagesLogged >= 12)
+                    {
+                        return;
+                    }
+                    _messagesLogged++;
+                    string text = System.Runtime.InteropServices.Marshal.PtrToStringAnsi(message, length);
+                    report($"GL says: [{severity}] {type} from {source}: {text}");
+                };
+                GL.Enable(EnableCap.DebugOutput);
+                GL.Enable((EnableCap)All.DebugOutputSynchronous);
+                GL.DebugMessageCallback(_debugCallback, IntPtr.Zero);
+            }
+            catch (Exception ex)
+            {
+                report($"could not turn on GL debug output ({ex.GetType().Name}); "
+                    + "this driver may not have KHR_debug");
+            }
+        }
+
         public static string DescribeContext()
         {
             try

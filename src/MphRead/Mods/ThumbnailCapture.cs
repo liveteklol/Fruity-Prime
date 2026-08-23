@@ -85,6 +85,9 @@ namespace MphRead.Mods
             // drawn into, leaving unwritten black bands on two edges. Adopt
             // the size the window actually got before anything is allocated.
             Scene.Size = ClientSize;
+            // Before the scene builds anything, so the driver's complaint
+            // about the first refused call is caught rather than inferred.
+            ScreenCapture.EnableDebugOutput(ThumbnailLog.Write);
             Scene.OnLoad();
             base.OnLoad();
             // OnResize normally sets the viewport and resizes the offscreen
