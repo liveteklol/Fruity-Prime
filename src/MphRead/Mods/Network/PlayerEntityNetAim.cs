@@ -417,6 +417,25 @@ namespace MphRead.Entities
         ///
         /// Test-only: nothing in a normal session calls this.
         /// </summary>
+        /// <summary>
+        /// Put a remote player's zoom where its owner says it is.
+        ///
+        /// Only for a weapon that can zoom: the engine's own toggle is gated
+        /// the same way, and a player flagged zoomed while holding a weapon
+        /// with no sight would draw a laser it does not have and take the
+        /// Imperialist's unzoomed halving on a beam that has none.
+        /// </summary>
+        internal void ModSetZoom(bool zoomed)
+        {
+            bool canZoom = EquipInfo.Weapon != null
+                && EquipInfo.Weapon.Flags.TestFlag(WeaponFlags.CanZoom);
+            bool wanted = zoomed && canZoom;
+            if (EquipInfo.Zoomed != wanted)
+            {
+                UpdateZoom(wanted);
+            }
+        }
+
         internal void ModArmAffinityWeapon()
         {
             ModArmWeapon(Weapons.GetAffinityBeam(Hunter));

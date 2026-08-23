@@ -461,7 +461,25 @@ namespace MphRead.Mods.Network
         RollLeft = 1u << 13,
         RollRight = 1u << 14,
         RollUp = 1u << 15,
-        RollDown = 1u << 16
+        RollDown = 1u << 16,
+        /// <summary>
+        /// Not a button: whether the sender is *currently* zoomed.
+        ///
+        /// Zoom was the last thing in this packet still being reconstructed on
+        /// the receiver from a rising edge, and reconstruction is exactly what
+        /// the ammo and the weapon are here to avoid. UpdateZoom is a toggle,
+        /// and it is ignored unless the player already holds a weapon that can
+        /// zoom -- so at 250 ms, where a puppet's weapon runs a quarter of a
+        /// second behind its owner's, the press arrives before the Imperialist
+        /// does, the toggle is skipped, the press is spent, and the owner
+        /// never presses again because on its own screen it is already zoomed.
+        /// Measured against the Pi: 485 frames zoomed on the owner and zero on
+        /// all five machines watching.
+        ///
+        /// A state rather than an edge cannot be missed twice. It costs
+        /// nothing -- the mask had fifteen bits spare.
+        /// </summary>
+        ZoomedState = 1u << 17
     }
 
     /// <summary>

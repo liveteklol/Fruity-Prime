@@ -162,6 +162,8 @@ namespace MphRead.Mods.Network
             if (c.RollRight.IsDown) buttons |= IntentButtons.RollRight;
             if (c.RollUp.IsDown) buttons |= IntentButtons.RollUp;
             if (c.RollDown.IsDown) buttons |= IntentButtons.RollDown;
+            // The owner's own answer, not an edge for the receiver to rebuild.
+            if (player.EquipInfo.Zoomed) buttons |= IntentButtons.ZoomedState;
             return new IntentPacket
             {
                 Buttons = buttons,
@@ -245,6 +247,10 @@ namespace MphRead.Mods.Network
                 player.ModSetWeapon((BeamType)intent.WeaponSelect);
             }
             player.ModSetAmmo(intent.AmmoUa, intent.AmmoMissiles);
+            // After the weapon, because zoom belongs to one and the engine
+            // refuses it on a weapon that cannot. Taken as state rather than
+            // rebuilt from the press: see IntentButtons.ZoomedState.
+            player.ModSetZoom(intent.Buttons.HasFlag(IntentButtons.ZoomedState));
         }
 
         /// <summary>
