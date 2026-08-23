@@ -127,7 +127,37 @@ namespace MphRead.Entities
         internal void ModRefreshNodeRef(OpenTK.Mathematics.Vector3 previousPosition)
         {
             _volume = CollisionVolume.Move(_volumeUnxf, Position);
-            NodeRef = _scene.UpdateNodeRef(NodeRef, previousPosition, Position);
+            // Looked up from the position, not walked to from the last one.
+            //
+            // UpdateNodeRef only changes the node when the segment between
+            // two positions crosses an active portal, which is right for a
+            // player walking and wrong for one whose position is written in:
+            // a network update steps across a portal without the segment ever
+            // being tested against it, the node stays behind, and it stays
+            // behind for good, because every later step is measured from the
+            // wrong node.
+            //
+            // What that costs is invisibility. PlayerDraw culls on
+            // `IsMainPlayer || IsVisible(NodeRef)`, so a puppet holding a node
+            // the viewer cannot see is not drawn -- while its shadow, which
+            // goes another way, still is, and its hitbox, which follows the
+            // position, still works. Reported from play as a player who was
+            // there, could be shot, and could not be seen. Two logs of the
+            // same second: the same slot at the same position, node 7/110 on
+            // one machine and 5/75 on the other.
+            //
+            // None means the position is inside no part at all -- a fraction
+            // outside the geometry, which happens -- and the node it had is a
+            // better answer than nothing.
+            Formats.Culling.NodeRef found = _scene.GetNodeRefByPosition(Position);
+            if (found.PartIndex != -1)
+            {
+                NodeRef = found;
+            }
+            else
+            {
+                NodeRef = _scene.UpdateNodeRef(NodeRef, previousPosition, Position);
+            }
         }
 
         /// <summary>
