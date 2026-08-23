@@ -166,11 +166,19 @@ namespace MphRead.Mods.Network
             PlayerEntity.PlayerCount = 1;
             PlayerEntity.MainPlayerIndex = localSlot;
             // Everything keyed to the old room has to go: which slots are
-            // switched on, which hits have been shown, and the scores, which
-            // start again with the map exactly as they do on a Quake server.
+            // switched on, the per-match damage tallies, and the scores,
+            // which start again with the map exactly as they do on a Quake
+            // server.
+            //
+            // Not the damage *sequence*, which is the one thing here that
+            // must survive a rotation -- see NetDamage.ResetForRoomChange.
+            // The authority and its clients do not change room on the same
+            // frame, so a counter that restarts on each machine separately
+            // is a counter the two sides disagree about for as long as the
+            // gap lasts.
             NetSlotManager.Reset();
             NetPlayerSetup.Reset();
-            NetDamage.Reset();
+            NetDamage.ResetForRoomChange();
             ResetScores();
             Console.WriteLine($"[net] player slots rebuilt for the new room, main player = slot {localSlot}");
             return PlayerEntity.Players[localSlot];

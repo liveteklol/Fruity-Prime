@@ -138,6 +138,39 @@ namespace MphRead.Mods.Network
         /// </summary>
         private const byte MaxCatchUp = 32;
 
+        /// <summary>
+        /// Everything except the counter and the baseline, for a room change.
+        ///
+        /// The counter must survive one. It is not a count of anything a
+        /// match owns -- it is a sequence number, and its only use is the
+        /// difference between two of them, so a new map does not invalidate
+        /// it. Resetting it does invalidate it, because the authority and its
+        /// clients do not change room on the same frame: whichever resets
+        /// first goes back to zero while the other is still holding two
+        /// hundred and thirty, and the difference between those is either a
+        /// resync that swallows the next real hits or -- when the numbers
+        /// fall the other way round -- up to thirty-two hits replayed into a
+        /// player who has just spawned into a fresh match. Both were
+        /// happening, four "damage sequence jumped" events per client per
+        /// rotation.
+        ///
+        /// The tallies go, because they are per-match diagnostics.
+        /// </summary>
+        public static void ResetForRoomChange()
+        {
+            Array.Clear(Resolved);
+            Array.Clear(Replayed);
+            Array.Clear(Fired);
+            Array.Clear(PlayerChecks);
+            Array.Clear(PlayerOverlaps);
+            Array.Clear(PlayerAccepted);
+            Array.Clear(PlayerOverlapsByShooter);
+            Array.Clear(AimDrift);
+            Array.Clear(WorstDrift);
+            Replaying = false;
+            ReplayBeam = BeamType.None;
+        }
+
         public static void Reset()
         {
             Array.Clear(_sequence);
