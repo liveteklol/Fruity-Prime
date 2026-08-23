@@ -39,6 +39,15 @@ namespace MphRead.Mods.Launcher.Gui
         public static readonly StyledProperty<bool> PrimaryProperty =
             AvaloniaProperty.Register<MenuEntry, bool>(nameof(Primary));
 
+        /// <summary>
+        /// The entry whose page is on screen, in a rail of them. Marked with
+        /// the accent on the bar and the label -- but not with the hover fill,
+        /// so that "this is where you are" and "this is what the pointer is
+        /// over" stay two different things.
+        /// </summary>
+        public static readonly StyledProperty<bool> SelectedProperty =
+            AvaloniaProperty.Register<MenuEntry, bool>(nameof(Selected));
+
         public string Title
         {
             get => GetValue(TitleProperty);
@@ -69,6 +78,12 @@ namespace MphRead.Mods.Launcher.Gui
             set => SetValue(PrimaryProperty, value);
         }
 
+        public bool Selected
+        {
+            get => GetValue(SelectedProperty);
+            set => SetValue(SelectedProperty, value);
+        }
+
         public event EventHandler? Click;
 
         private readonly double _titleSize;
@@ -80,7 +95,7 @@ namespace MphRead.Mods.Launcher.Gui
             // to ask for a repaint -- the label is painted, not templated, so
             // "Connect" becoming "Connecting" has to invalidate here.
             AffectsRender<MenuEntry>(TitleProperty, SubtitleProperty, AccentProperty,
-                SubtitleColorProperty, PrimaryProperty, IsEnabledProperty);
+                SubtitleColorProperty, PrimaryProperty, SelectedProperty, IsEnabledProperty);
         }
 
         public MenuEntry(string title, string subtitle = "", double titleSize = 21)
@@ -158,6 +173,7 @@ namespace MphRead.Mods.Launcher.Gui
         public override void Render(DrawingContext context)
         {
             bool lit = (IsPointerOver || IsFocused) && IsEnabled;
+            bool marked = lit || (Selected && IsEnabled);
             var body = new Rect(0, 0, Bounds.Width, Bounds.Height);
             if (Primary)
             {
@@ -172,11 +188,11 @@ namespace MphRead.Mods.Launcher.Gui
             }
             const double bar = 3;
             context.FillRectangle(
-                new SolidColorBrush(lit ? Accent : Color.FromRgb(48, 56, 72)),
+                new SolidColorBrush(marked ? Accent : Color.FromRgb(48, 56, 72)),
                 new Rect(0, 0, bar, body.Height));
 
             double textLeft = bar + 14;
-            Color titleColor = !IsEnabled ? GuiTheme.TextDim : lit ? Accent : GuiTheme.Text;
+            Color titleColor = !IsEnabled ? GuiTheme.TextDim : marked ? Accent : GuiTheme.Text;
             double lineHeight = TrackedText.LineHeight(_titleSize);
             double top = Subtitle.Length > 0 ? 8 : (body.Height - lineHeight) / 2;
             TrackedText.Draw(context, Title.ToUpperInvariant(), _titleSize,

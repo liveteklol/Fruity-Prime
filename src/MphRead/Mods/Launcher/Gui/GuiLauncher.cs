@@ -1,27 +1,41 @@
 using System;
 using System.Collections.Generic;
-using System.Runtime.ExceptionServices;
-using System.Threading;
 using Avalonia;
-using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Themes.Fluent;
+using Avalonia.Threading;
 using MphRead.Mods.Network;
 
 namespace MphRead.Mods.Launcher.Gui
 {
     /// <summary>
-    /// Entry point for the graphical launcher on the platforms WinForms cannot
-    /// reach.
+    /// Entry point for the graphical launcher, on every platform.
     ///
-    /// The loop is <c>LauncherEntry</c>'s: one launcher, then a match, then the
-    /// launcher again. What differs is that the window has to be raised and
-    /// torn down around each match rather than shown as a dialog -- Avalonia
-    /// owns a real application lifetime and does not offer a nested one, so the
-    /// screen is a full app run per visit, and the answer comes back through a
-    /// field the way the WinForms version passes it back off its STA thread.
+    /// The loop is the one every game with a front screen has: one launcher,
+    /// then a match, then the launcher again. "Leave match" in the pause menu
+    /// comes back here; "Quit" and closing the launcher are what end the
+    /// program.
+    ///
+    /// The toolkit is set up **once, on the thread that calls in** -- which is
+    /// the game's own thread, the one the GL context will belong to -- and each
+    /// visit to the launcher is a nested dispatcher loop on it rather than a
+    /// fresh application. Three things make that the right shape and not an
+    /// optimisation:
+    ///
+    /// - Avalonia allows one application per process. A second
+    ///   <c>AppBuilder.Setup</c> throws, so a launcher that stood one up per
+    ///   visit worked exactly once and fell back to the text screen on the way
+    ///   back from the first match.
+    /// - macOS will not accept windows off the main thread. AppKit is not
+    ///   thread-safe and a window created anywhere else does not draw, which
+    ///   rules out the private UI thread the WinForms launcher used.
+    /// - The pause menu needs the toolkit *during* a match, on the thread the
+    ///   render loop is running on. Nothing else can pump it.
     /// </summary>
     public static class GuiLauncher
     {
+        private static bool _setUp;
+        private static bool _failed;
+
         /// <summary>
         /// Show the launcher, or say why it could not be shown.
         ///
@@ -34,7 +48,7 @@ namespace MphRead.Mods.Launcher.Gui
         /// </summary>
         public static bool TryRun()
         {
-            if (!Probe())
+            if (!EnsureSetup())
             {
                 return false;
             }
@@ -50,6 +64,54 @@ namespace MphRead.Mods.Launcher.Gui
                 return false;
             }
         }
+
+        /// <summary>
+        /// Stand the toolkit up, once per process, on this thread.
+        ///
+        /// Also what the pause menu calls: in a session started from a command
+        /// line rather than from the launcher, nothing has set the toolkit up
+        /// and the first Escape is where it is needed.
+        /// </summary>
+        internal static bool EnsureSetup()
+        {
+            if (_setUp)
+            {
+                return true;
+            }
+            if (_failed || !Probe())
+            {
+                return false;
+            }
+            try
+            {
+#if ANDROID
+                // Android stands the toolkit up itself, from the activity, and
+                // has no desktop backend to detect. Nothing here runs there:
+                // this whole class is the desktop launcher loop, and the head
+                // in src/MphRead.Android is the entry point instead.
+                return false;
+#else
+                AppBuilder.Configure<LauncherApp>()
+                    .UsePlatformDetect()
+                    .WithInterFont()
+                    .SetupWithoutStarting();
+                _setUp = true;
+                return true;
+#endif
+            }
+            catch (Exception ex)
+            {
+                // Remembered, because everything that asks is in a loop or a
+                // frame: a toolkit that could not start on this machine must be
+                // asked once, not once a frame.
+                _failed = true;
+                Console.WriteLine($"[launcher] the window toolkit could not start: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>True once there is a toolkit to put a window on.</summary>
+        internal static bool Ready => _setUp;
 
         /// <summary>
         /// Is there a display at all? Checked before Avalonia is initialised
@@ -88,6 +150,11 @@ namespace MphRead.Mods.Launcher.Gui
 
             while (true)
             {
+                PauseMenu.Reset();
+                // Read again rather than reusing the object from the last time
+                // round: the pause menu's settings window loads and commits its
+                // own copy, so after a match this one is stale and would write
+                // the old values back over it.
                 MenuSettings settings = GameState.LoadSettings();
                 // LoadSettings only fills in Features/Cheats/Bugfixes; the rest
                 // of the file reaches the engine through Mods.GameSettings.
@@ -122,6 +189,13 @@ namespace MphRead.Mods.Launcher.Gui
                     // the game must not leave either behind.
                     NetSession.Stop();
                     NetHostSession.Stop();
+                    // The match may have left one up -- a settings window opened
+                    // from the pause menu on the frame the match ended.
+                    PauseMenuWindow.CloseIfOpen();
+                }
+                if (PauseMenu.QuitProgram)
+                {
+                    return;
                 }
             }
         }
@@ -129,81 +203,56 @@ namespace MphRead.Mods.Launcher.Gui
         /// <summary>
         /// Show the front screen and wait for an answer.
         ///
-        /// On its own thread, and a fresh Avalonia lifetime each time. The GL
-        /// context the game creates afterwards belongs to the thread that
-        /// creates it, and a toolkit that has installed itself on that thread
-        /// is a toolkit pumping messages underneath the render loop.
+        /// A nested dispatcher loop rather than an application lifetime: the
+        /// loop ends when the window closes, the thread carries on into the
+        /// match, and the next visit is another loop on the same toolkit.
         /// </summary>
         private static LaunchPlan Ask(MenuSettings settings, IReadOnlyList<string> rooms)
         {
-            LaunchPlan plan = default;
-            Exception? failure = null;
-            var thread = new Thread(() =>
-            {
-                try
-                {
-                    plan = ShowOnce(settings, rooms);
-                }
-                catch (Exception ex)
-                {
-                    failure = ex;
-                }
-            })
-            {
-                Name = "MphRead launcher",
-                IsBackground = false
-            };
-            thread.Start();
-            thread.Join();
-            if (failure != null)
-            {
-                // Rethrown with its original stack. A plain `throw failure`
-                // resets it to this line, which turns every fault inside the
-                // window into "something went wrong somewhere in the launcher"
-                // -- and this is the path that decides whether to fall back to
-                // the text screen, so it is exactly where the reason matters.
-                ExceptionDispatchInfo.Capture(failure).Throw();
-            }
-            return plan;
+            var window = new HomeWindow(settings, rooms);
+            var frame = new DispatcherFrame();
+            window.Closed += (_, _) => frame.Continue = false;
+            window.Show();
+            Dispatcher.UIThread.PushFrame(frame);
+            // The loop ends on the Closed event, which is raised before the
+            // toolkit has finished taking the window down -- and the thread is
+            // about to spend the next twenty minutes inside a match, where
+            // nothing pumps it. On X11 the destroy request would sit unflushed
+            // in the connection's output buffer for all of that, leaving a
+            // launcher painted over the game that started from it.
+            Pump();
+            return window.Plan;
         }
 
-        private static LaunchPlan ShowOnce(MenuSettings settings, IReadOnlyList<string> rooms)
+        /// <summary>
+        /// Give the toolkit a slice of this frame.
+        ///
+        /// Called once a frame by the game while the pause menu is up. The
+        /// posted job runs after everything already queued -- native input
+        /// included -- and ends the loop, so this processes what is pending and
+        /// returns rather than taking the thread over.
+        /// </summary>
+        internal static void Pump()
         {
-            LaunchPlan plan = default;
-            var lifetime = new ClassicDesktopStyleApplicationLifetime
+            if (!_setUp)
             {
-                ShutdownMode = Avalonia.Controls.ShutdownMode.OnMainWindowClose
-            };
-            AppBuilder.Configure<LauncherApp>()
-                .UsePlatformDetect()
-                .WithInterFont()
-                .SetupWithLifetime(lifetime);
-            var window = new HomeWindow(settings, rooms);
-            lifetime.MainWindow = window;
-            window.Show();
-            lifetime.Start(Array.Empty<string>());
-            plan = window.Plan;
-            return plan;
+                return;
+            }
+            var frame = new DispatcherFrame(exitWhenRequested: false);
+            Dispatcher.UIThread.Post(() => frame.Continue = false,
+                DispatcherPriority.Background);
+            Dispatcher.UIThread.PushFrame(frame);
         }
     }
 
     /// <summary>
     /// The Avalonia application object. Fluent is here for the handful of stock
-    /// controls the screen uses -- the text boxes and the scroll bars; every
-    /// other control on it is drawn by this code, for the same reason the
-    /// WinForms screen draws its own.
+    /// controls the screens use -- the text boxes and the scroll bars; every
+    /// other control on them is drawn by this code, because a launcher whose
+    /// controls are half themed reads as broken rather than as a choice.
     /// </summary>
     internal sealed class LauncherApp : Application
     {
-        /// <summary>
-        /// Dark, because two stock controls survive on this screen -- the text
-        /// boxes and the scroll bars -- and they have to match the rest of it.
-        /// Everything else is drawn by this code, for the same reason the
-        /// WinForms screen draws its own.
-        ///
-        /// In Initialize rather than the constructor only because that is
-        /// where Avalonia expects styles to be registered; both work.
-        /// </summary>
         public override void Initialize()
         {
             Styles.Add(new FluentTheme());

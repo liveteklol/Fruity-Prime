@@ -1,0 +1,80 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The Android head.
+
+       It compiles the same sources as the desktop project rather than
+       referencing it: the desktop project is net9.0 and produces an
+       executable, and an Android application is a different target framework
+       and a different kind of output. Nothing here is a copy: the glob below
+       is the same files, compiled a second time with ANDROID defined.
+
+       WHAT THIS BUILDS TODAY: the whole codebase, and a front screen that runs
+       on a phone. WHAT IT DOES NOT BUILD: a playable match. The engine's window
+       and input come from GLFW through OpenTK, which is desktop-only; giving it
+       a mobile renderer and touch controls is a separate piece of work, and the
+       screen says so rather than offering a button that cannot work.
+
+       It is deliberately NOT in MphRead.sln: building it needs the Android
+       workload and an SDK, and a solution that will not build without them is
+       a solution that stops everybody who is not working on this.
+
+       The value of this project before that work is done is that it is a
+       compile: every time the shared code grows something desktop-only (a
+       System.Drawing type, a Windows API, a process it expects to be able to
+       start) this stops building, at the commit that did it. -->
+
+  <PropertyGroup>
+    <TargetFramework>net9.0-android35.0</TargetFramework>
+    <SupportedOSPlatformVersion>24</SupportedOSPlatformVersion>
+    <OutputType>Exe</OutputType>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <RootNamespace>MphRead</RootNamespace>
+    <AssemblyName>FruityPrime</AssemblyName>
+    <ApplicationId>fr.livetek.fruityprime</ApplicationId>
+    <ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
+    <ApplicationVersion>1</ApplicationVersion>
+    <!-- The launcher's own define, the same one the desktop game builds with:
+         the shared sources gate the Avalonia screens on it. -->
+    <DefineConstants>$(DefineConstants);MPHREAD_AVALONIA</DefineConstants>
+    <!-- The shared sources are globbed in by hand below, so the SDK must not
+         also add this directory's .cs files twice. -->
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AndroidPackageFormat>apk</AndroidPackageFormat>
+    <!-- There is no XAML in this project: every screen here is written in C#.
+         The compiler still runs when AvaloniaResource items are present, and on
+         Android it and the Android SDK disagree about where the compiled
+         assembly went (obj/.../Avalonia/Avalonia/), which fails the build after
+         a clean compile. Turning it off costs nothing while there is no XAML to
+         compile; the avares:// assets are embedded by a separate target and are
+         unaffected, which the build check below verifies. -->
+    <EnableAvaloniaXamlCompilation>false</EnableAvaloniaXamlCompilation>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- This head's own files. -->
+    <Compile Include="*.cs" />
+    <!-- The game, the launcher's logic and its Avalonia controls. -->
+    <Compile Include="..\MphRead\**\*.cs"
+             Exclude="..\MphRead\bin\**;..\MphRead\obj\**" />
+    <AndroidResource Include="Resources\**\*.xml" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.2.3" />
+    <PackageReference Include="Avalonia.Android" Version="11.2.3" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.2.3" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.2.3" />
+    <PackageReference Include="OpenTK" Version="4.9.4" />
+    <PackageReference Include="ReFuel.StbImage" Version="2.1.1" />
+    <AvaloniaResource Include="..\MphRead\Assets\fruity-prime-logo.png"
+                      Link="Assets\fruity-prime-logo.png" />
+    <AvaloniaResource Include="..\MphRead\Assets\fruity-prime-mark.png"
+                      Link="Assets\fruity-prime-mark.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\NcsfPlay\NcsfPlay.csproj" />
+  </ItemGroup>
+
+</Project>

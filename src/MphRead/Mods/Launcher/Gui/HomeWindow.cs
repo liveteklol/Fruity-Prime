@@ -230,8 +230,9 @@ namespace MphRead.Mods.Launcher.Gui
             _offlineEntry.Click += (_, _) => OpenMatch(LaunchKind.Offline);
             _hostEntry = new MenuEntry("Host a game", "Run a server and play on it");
             _hostEntry.Click += (_, _) => OpenMatch(LaunchKind.Host);
-            var settings = new MenuEntry("Settings", "Name, hunter, window, addresses");
-            settings.Click += (_, _) => ShowCard(BuildSettingsCard());
+            var settings = new MenuEntry("Settings",
+                "Display, audio, controls, match rules, cheats");
+            settings.Click += async (_, _) => await OpenSettings();
             _filesEntry = new MenuEntry("Game files", GameFiles.Describe());
             _filesEntry.Click += (_, _) => ShowCard(_setupCard);
             var quit = new MenuEntry("Quit");
@@ -594,6 +595,14 @@ namespace MphRead.Mods.Launcher.Gui
             _matchMap = new ChoiceRow("Map", _playable,
                 Math.Max(0, _playable.IndexOf(_settings.RoomKey)));
             _matchMap.Changed += (_, _) => RefreshSplash();
+            // Stepping through maps one at a time is the right gesture while
+            // the picture beside it changes as you step, and the wrong one when
+            // the map you want is twenty steps away.
+            var browseMaps = new MenuEntry("See every map", "", titleSize: 13)
+            {
+                Accent = GuiTheme.TextDim
+            };
+            browseMaps.Click += async (_, _) => await BrowseMaps();
             _matchMode = new ChoiceRow("Mode", _modes.Select(m => m.Label).ToArray());
             _matchHunter = new ChoiceRow("Hunter", _hunters,
                 Array.IndexOf(_hunters, LauncherPrefs.LastHunter.ToString()));
@@ -617,6 +626,7 @@ namespace MphRead.Mods.Launcher.Gui
 
             card.Children.Add(_matchCaption);
             card.Children.Add(_matchMap);
+            card.Children.Add(browseMaps);
             card.Children.Add(_matchMode);
             card.Children.Add(_matchHunter);
             card.Children.Add(_matchBots);
@@ -715,6 +725,27 @@ namespace MphRead.Mods.Launcher.Gui
                 NewGame = newGame
             };
             Close();
+        }
+
+        /// <summary>Every map at once, as pictures.</summary>
+        private async Task BrowseMaps()
+        {
+            if (_playable.Count == 0)
+            {
+                return;
+            }
+            var picker = new MapPickerWindow(_playable, _matchMap.Value);
+            await picker.ShowDialog(this);
+            if (picker.RoomKey == null)
+            {
+                return;
+            }
+            int index = _playable.IndexOf(picker.RoomKey);
+            if (index >= 0)
+            {
+                _matchMap.Index = index;
+                RefreshSplash();
+            }
         }
 
         private void OpenMatch(LaunchKind kind)
@@ -937,61 +968,38 @@ namespace MphRead.Mods.Launcher.Gui
 
         // ------------------------------------------------------------ settings
 
-        private Control BuildSettingsCard()
+        /// <summary>
+        /// The settings window, over the launcher.
+        ///
+        /// A window rather than another card, and the same window the pause
+        /// menu opens mid-match: it is a rail of seven sections and several
+        /// dozen rows, which is not a thing to page through in a 400-pixel
+        /// column beside a picture.
+        /// </summary>
+        private async Task OpenSettings()
         {
-            var card = Card();
-            var name = new FieldRow("Your name", LauncherPrefs.PlayerName);
-            var hunter = new ChoiceRow("Hunter", _hunters,
-                Array.IndexOf(_hunters, LauncherPrefs.LastHunter.ToString()));
-            var fullscreen = new ToggleRow("Start fullscreen",
-                LauncherPrefs.WindowMode == WindowStartMode.BorderlessFullscreen);
-            var server = new FieldRow("Default server",
-                $"{LauncherPrefs.ServerAddress}:{LauncherPrefs.ServerPort}", boxWidth: 190);
-            var master = new FieldRow("Server directory",
-                $"{LauncherPrefs.MasterHost}:{LauncherPrefs.MasterPort}", boxWidth: 190);
-            var note = new Note("Volumes, controls, match rules and cheats are in the "
-                + $"console menu: run {Mods.Branding.Executable} -menu.");
-
-            var save = new MenuEntry("Save", titleSize: 16) { Primary = true, Height = 44 };
-            save.Click += (_, _) =>
+            try
             {
-                if (name.Value.Length > 0)
-                {
-                    LauncherPrefs.PlayerName = name.Value;
-                }
-                LauncherPrefs.LastHunter = (Hunter)Enum.Parse(typeof(Hunter), hunter.Value);
-                LauncherPrefs.WindowMode = fullscreen.On
-                    ? WindowStartMode.BorderlessFullscreen
-                    : WindowStartMode.Windowed;
-                Mods.WindowMode.Startup = LauncherPrefs.WindowMode;
-                string host = LauncherPrefs.ServerAddress;
-                int port = LauncherPrefs.ServerPort;
-                if (ParseEndpoint(server.Value, ref host, ref port))
-                {
-                    LauncherPrefs.ServerAddress = host;
-                    LauncherPrefs.ServerPort = port;
-                }
-                string masterHost = LauncherPrefs.MasterHost;
-                int masterPort = LauncherPrefs.MasterPort;
-                if (ParseEndpoint(master.Value, ref masterHost, ref masterPort))
-                {
-                    LauncherPrefs.MasterHost = masterHost;
-                    LauncherPrefs.MasterPort = masterPort;
-                }
-                LauncherPrefs.Save();
-                ShowCard(_homeCard);
-            };
-
-            card.Children.Add(new Caption("Settings"));
-            card.Children.Add(name);
-            card.Children.Add(hunter);
-            card.Children.Add(fullscreen);
-            card.Children.Add(server);
-            card.Children.Add(master);
-            card.Children.Add(note);
-            card.Children.Add(save);
-            card.Children.Add(Back(() => ShowCard(_homeCard)));
-            return card;
+                var window = new SettingsWindow(_settings);
+                await window.ShowDialog(this);
+            }
+            catch (Exception ex)
+            {
+                // A failure here used to be an unhandled exception over a
+                // launcher, which is a front screen that simply vanishes.
+                Console.WriteLine($"[launcher] the settings could not be opened: {ex.Message}");
+                return;
+            }
+            // The settings window writes straight into the same MenuSettings
+            // and the same LauncherPrefs, so the rows here have to be re-read
+            // or they would write the old values back over what was just
+            // chosen there.
+            int index = _playable.IndexOf(_settings.RoomKey);
+            if (index >= 0 && _matchMap != null)
+            {
+                _matchMap.Index = index;
+            }
+            RefreshSplash();
         }
 
         // --------------------------------------------------------------- shared
