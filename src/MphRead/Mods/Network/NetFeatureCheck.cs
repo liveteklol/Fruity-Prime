@@ -83,6 +83,15 @@ namespace MphRead.Mods.Network
             public double WorstPositionGap;
             public double WorstStep;
             public int Teleports;
+            /// <summary>
+            /// Whether this slot was ever compared against a snapshot -- that
+            /// is, whether this client spent any of the run not being the
+            /// authority. Recorded rather than asked at the end, because
+            /// authority moves when a peer leaves and a client promoted in
+            /// the last three seconds of a run would otherwise report that it
+            /// had measured nothing, having measured the whole match.
+            /// </summary>
+            public bool EverCompared;
             public int FramesSinceRespawn;
             /// <summary>
             /// Frames since a jump pad or a teleporter last acted on this
@@ -376,6 +385,7 @@ namespace MphRead.Mods.Network
                 {
                     continue;
                 }
+                record.EverCompared = true;
                 // What the authority last said about this player against what
                 // this client is drawing. The totals cannot separate "never
                 // arrived" from "arrived and was overridden"; this can.
@@ -703,7 +713,7 @@ namespace MphRead.Mods.Network
             Console.Write(report.ToString());
             Console.WriteLine($"    {them}: {other.Teleports} teleport(s), worst jump "
                 + $"{other.WorstStep:0.0} units");
-            Console.WriteLine(NetSession.IsAuthority
+            Console.WriteLine(!other.EverCompared
                 ? $"    {them}: form and position agreement not measured here -- "
                     + "this client is the authority and receives no snapshot to compare with"
                 : $"    {them}: form disagreed on {other.FormDisagreeFrames} frame(s) "
