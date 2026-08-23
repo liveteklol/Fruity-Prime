@@ -184,6 +184,9 @@ namespace MphRead.Mods.Network
         public static void AfterRebuild(Scene scene)
         {
             _loadedFrame = Math.Max(NetSession.NetFrame, 1);
+            // Everything the bridge remembered about where players were
+            // standing was about the room that has just been left.
+            NetPlayerBridge.NoteRoomChanged();
             // A rotation is a fresh match: re-assert that nothing in the
             // cheat list is on, in case a long session had one restored.
             NetLaunch.DisableCheatsForMatch();

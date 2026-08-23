@@ -413,7 +413,24 @@ namespace MphRead.Mods.Network
                 // the !wasInPlay and !spawned branches above. What is left is
                 // a divergence no latency can explain, and only that is
                 // taken.
-                if (justPlaced)
+                if (NetRoomChange.Settling)
+                {
+                    // Nothing about position means anything for the second
+                    // after a room change: this client has loaded the new
+                    // room and the authority may not have, so its snapshot is
+                    // still describing where everybody stood in the old one.
+                    // Taking it drags this player to whatever those
+                    // coordinates land on here, the local simulation walks
+                    // back, and the two alternate -- measured at a six-player
+                    // rotation, twenty-six corrections in four seconds
+                    // between two fixed points a room apart.
+                    //
+                    // NoteRoomChanged has cleared the placement record, so
+                    // the first snapshot after this window that says this
+                    // player is spawned counts as a fresh placement and puts
+                    // it where the authority wants it.
+                }
+                else if (justPlaced)
                 {
                     // Except at a respawn, which is the one moment the
                     // authority owns this player's position outright.
@@ -514,6 +531,18 @@ namespace MphRead.Mods.Network
             }
             _formAttempts[slot] = 0;
             player.ModForceForm(altForm);
+        }
+
+        /// <summary>
+        /// Forget where the authority had everybody standing, because it was
+        /// in a different room. The next snapshot that reports a player
+        /// spawned then counts as a placement rather than as a continuation,
+        /// which is what re-seats everyone after a rotation.
+        /// </summary>
+        public static void NoteRoomChanged()
+        {
+            Array.Clear(_authoritySpawned);
+            Array.Clear(_reportSeen);
         }
 
         public static void Reset()

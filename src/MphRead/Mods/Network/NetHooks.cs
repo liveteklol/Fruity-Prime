@@ -86,11 +86,20 @@ namespace MphRead.Mods.Network
             }
             if (player.LoadFlags.TestFlag(LoadFlags.Active) && NetSession.RemoteIntentValid[slot])
             {
-                if (player.LoadFlags.TestFlag(LoadFlags.Spawned) && player.Health > 0)
+                if (player.LoadFlags.TestFlag(LoadFlags.Spawned) && player.Health > 0
+                    && !NetRoomChange.Settling)
                 {
                     // Position and controls must enter the simulation
                     // together. Applying the position after the scene step
                     // left projectile collision testing on the old hitbox.
+                    //
+                    // Except for the second after a room change, when some
+                    // peers are still standing in the room this client has
+                    // left and their coordinates mean nothing here. That
+                    // guard existed, was attached to the loop this call
+                    // replaced, and went with it -- leaving NetRoomChange.
+                    // Settling with no callers at all and every rotation
+                    // back to being a burst of teleports.
                     NetPlayerBridge.ApplyReportedPosition(player, NetSession.RemoteIntents[slot]);
                 }
                 NetPlayerBridge.ApplyIntent(player, NetSession.RemoteIntents[slot]);
