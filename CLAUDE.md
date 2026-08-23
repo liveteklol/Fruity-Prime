@@ -949,7 +949,7 @@ dotnet publish src/MphRead/MphRead.csproj -c Release -r win-x64 \
 The exe is often locked by a running game: write `MphRead.new.exe`, then `mv`.
 Any protocol change means server **and** every client must be the same build.
 
-`NetConfig.ProtocolVersion` is **3** as of this build. Version 2 grew the
+`NetConfig.ProtocolVersion` is **4** as of this build. Version 2 grew the
 roster by a ping per entry; version 3 added the shooter's ammo to the intent,
 the point goal and the match number and the ending flag to the match state, a
 name to the status reply, and the `MatchEnd` handshake. Every one of those
@@ -959,8 +959,16 @@ line in the server log instead. Older clients cannot join until they are
 updated, which is the intended outcome.
 
 **The server and every client must be the same build**, and that now includes
-the Pi: a version 2 server refuses a version 3 client outright, so deploy the
+the Pi: a version 3 server refuses a version 4 client outright, so deploy the
 server before handing the client to anybody.
+
+**Version 4 is a refusal on behaviour, not on layout.** Nothing in the wire
+format moved. A version 3 build reads every byte correctly and then plays a
+different game -- its own player frozen where it stands, its shots leaving from
+its ankles, its respawns putting it back inside whatever it died in. The
+authority is simply the first client to connect, so one stale copy joining first
+hands every one of those faults to everybody in the match. Nothing in the
+protocol would have noticed, which is exactly why the version had to say so.
 
 ## The damage bug, and what it actually was (2026-08-23)
 
