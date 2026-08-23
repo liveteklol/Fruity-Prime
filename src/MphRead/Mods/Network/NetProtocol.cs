@@ -479,7 +479,25 @@ namespace MphRead.Mods.Network
         /// A state rather than an edge cannot be missed twice. It costs
         /// nothing -- the mask had fifteen bits spare.
         /// </summary>
-        ZoomedState = 1u << 17
+        ZoomedState = 1u << 17,
+        /// <summary>
+        /// Not a button either: which form the sender was in when it measured
+        /// the position in this packet.
+        ///
+        /// Position means two different things depending on form. UpdateForm
+        /// shifts it by the distance between the two collision volumes'
+        /// centres on the way into alt and back again on the way out, so the
+        /// same standing spot is a different number in each. A puppet whose
+        /// form has not caught up with its owner's is therefore placed in the
+        /// wrong reference frame, and its hitbox sits that far off the body
+        /// everyone can see -- vertically, on a biped cylinder only 1.6 units
+        /// tall. Reported from play as a player who could not be hurt in
+        /// biped form while alt form worked perfectly.
+        ///
+        /// Sending the form is what lets the receiver convert instead of
+        /// guess. Free: another spare bit.
+        /// </summary>
+        AltFormState = 1u << 18
     }
 
     /// <summary>

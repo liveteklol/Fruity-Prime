@@ -88,6 +88,37 @@ namespace MphRead.Mods.Network
         /// <summary>Positions beyond this are not a level, they are corruption.</summary>
         private const float PositionLimit = 100000f;
 
+        /// <summary>
+        /// A position measured while its owner was in one form, expressed in
+        /// the form this copy of the player is actually in.
+        ///
+        /// UpdateForm moves Position by the difference between the biped and
+        /// alt collision volumes' centres each way, so `P_alt = P_biped +
+        /// (bipedCentre - altCentre)`. The two are the same standing spot
+        /// written in two reference frames, and nothing in the packet said
+        /// which -- so for as long as a puppet's form lagged its owner's, it
+        /// was placed in the wrong one and its hitbox sat that far off the
+        /// body. Vertically, on a biped cylinder 1.6 units tall, which is
+        /// enough for a shot aimed at the chest to pass under it.
+        ///
+        /// A no-op whenever the two agree, which is almost always.
+        /// </summary>
+        private static Vector3 InForm(PlayerEntity player, Vector3 position, bool measuredInAlt)
+        {
+            if (measuredInAlt == player.IsAltForm)
+            {
+                return position;
+            }
+            int hunter = (int)player.Hunter;
+            if (hunter < 0 || hunter >= 8)
+            {
+                return position;
+            }
+            Vector3 delta = PlayerEntity.PlayerVolumes[hunter, 0].SpherePosition
+                - PlayerEntity.PlayerVolumes[hunter, 2].SpherePosition;
+            return measuredInAlt ? position - delta : position + delta;
+        }
+
         private static bool Sane(Vector3 value)
         {
             return Single.IsFinite(value.X) && Single.IsFinite(value.Y) && Single.IsFinite(value.Z)
@@ -164,6 +195,9 @@ namespace MphRead.Mods.Network
             if (c.RollDown.IsDown) buttons |= IntentButtons.RollDown;
             // The owner's own answer, not an edge for the receiver to rebuild.
             if (player.EquipInfo.Zoomed) buttons |= IntentButtons.ZoomedState;
+            // Which frame Position below is measured in. See
+            // IntentButtons.AltFormState.
+            if (player.IsAltForm) buttons |= IntentButtons.AltFormState;
             return new IntentPacket
             {
                 Buttons = buttons,
@@ -480,7 +514,12 @@ namespace MphRead.Mods.Network
                 player.Health = state.Health;
                 return;
             }
-            Move(player, state.Position);
+            // Converted for the same reason the reported position is: the
+            // authority published this while its own copy was in whatever
+            // form FlagAltForm says, and this copy may not be in that form
+            // yet.
+            Move(player, InForm(player, state.Position,
+                (state.Flags & PlayerState.FlagAltForm) != 0));
             player.Speed = state.Speed;
             player.Health = state.Health;
             player.ModSetFacing(state.Facing);
@@ -647,8 +686,10 @@ namespace MphRead.Mods.Network
             {
                 return;
             }
-            NoteReportedVelocity(player, intent);
-            Vector3 delta = intent.Position - player.Position;
+            Vector3 reported = InForm(player, intent.Position,
+                intent.Buttons.HasFlag(IntentButtons.AltFormState));
+            NoteReportedVelocity(player, reported, intent.Frame);
+            Vector3 delta = reported - player.Position;
             float distance = delta.Length;
             if (distance > SnapDistance)
             {
@@ -657,14 +698,14 @@ namespace MphRead.Mods.Network
                 // half the level would be worse than a jump.
                 Snaps++;
                 WorstSnap = Math.Max(WorstSnap, distance);
-                Move(player, intent.Position);
+                Move(player, reported);
                 return;
             }
             // The owner also sends the aim that was calculated against this
             // position. Smoothing here leaves the authoritative hitbox behind
             // that aim under latency, so moving directly is required for
             // collision and rendering to agree.
-            Move(player, intent.Position);
+            Move(player, reported);
         }
 
         private static readonly uint[] _spawnIntentFrame = new uint[PlayerEntity.SlotCapacity];
@@ -732,20 +773,20 @@ namespace MphRead.Mods.Network
         /// stays right when a packet goes missing and the next one covers
         /// four frames instead of two.
         /// </summary>
-        private static void NoteReportedVelocity(PlayerEntity player, in IntentPacket intent)
+        private static void NoteReportedVelocity(PlayerEntity player, Vector3 reported, uint frame)
         {
             int slot = player.SlotIndex;
             if (slot < 0 || slot >= _lastReportFrame.Length)
             {
                 return;
             }
-            if (_reportSeen[slot] && intent.Frame > _lastReportFrame[slot])
+            if (_reportSeen[slot] && frame > _lastReportFrame[slot])
             {
                 // Capped: a report that follows a long silence describes a
                 // gap, not a frame of movement, and dividing by two hundred
                 // is as wrong as dividing by one.
-                uint elapsed = Math.Min(intent.Frame - _lastReportFrame[slot], 8);
-                Vector3 travelled = intent.Position - _lastReportPosition[slot];
+                uint elapsed = Math.Min(frame - _lastReportFrame[slot], 8);
+                Vector3 travelled = reported - _lastReportPosition[slot];
                 float step = travelled.Length;
                 if (!Sane(travelled) || step > SnapDistance)
                 {
@@ -774,11 +815,11 @@ namespace MphRead.Mods.Network
                     player.Speed = speed;
                 }
             }
-            if (!_reportSeen[slot] || intent.Frame > _lastReportFrame[slot])
+            if (!_reportSeen[slot] || frame > _lastReportFrame[slot])
             {
                 _reportSeen[slot] = true;
-                _lastReportFrame[slot] = intent.Frame;
-                _lastReportPosition[slot] = intent.Position;
+                _lastReportFrame[slot] = frame;
+                _lastReportPosition[slot] = reported;
             }
         }
 
