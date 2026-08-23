@@ -302,6 +302,18 @@ namespace MphRead.Mods.Network
                 {
                     continue;
                 }
+                // Not on the authority, which is the one machine with nothing
+                // to compare against: it publishes snapshots and does not
+                // receive them, so RemoteStates holds whatever reached it
+                // before it was promoted and never moves again. Measured
+                // against a live world that gap grows without bound, and it
+                // reported "their position drifted far from the authority's"
+                // for players standing exactly where the authority had put
+                // them. It read clean only while everybody was frozen.
+                if (NetSession.IsAuthority)
+                {
+                    continue;
+                }
                 // What the authority last said about this player against what
                 // this client is drawing. The totals cannot separate "never
                 // arrived" from "arrived and was overridden"; this can.
@@ -619,9 +631,12 @@ namespace MphRead.Mods.Network
             Console.Write(report.ToString());
             Console.WriteLine($"    {them}: {other.Teleports} teleport(s), worst jump "
                 + $"{other.WorstStep:0.0} units");
-            Console.WriteLine($"    {them}: form disagreed on {other.FormDisagreeFrames} frame(s) "
-                + $"(longest run {other.WorstFormDisagreeRun}), "
-                + $"worst position gap {other.WorstPositionGap:0.00} units");
+            Console.WriteLine(NetSession.IsAuthority
+                ? $"    {them}: form and position agreement not measured here -- "
+                    + "this client is the authority and receives no snapshot to compare with"
+                : $"    {them}: form disagreed on {other.FormDisagreeFrames} frame(s) "
+                    + $"(longest run {other.WorstFormDisagreeRun}), "
+                    + $"worst position gap {other.WorstPositionGap:0.00} units");
             if (other.WorstFormDisagreeRun > 60)
             {
                 Console.WriteLine("    FAIL: their form stayed wrong for "

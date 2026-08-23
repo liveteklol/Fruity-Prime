@@ -186,6 +186,17 @@ namespace MphRead.Mods.Network
             PlayerEntity? target = FindTarget(player);
             bool onTarget = AimAt(player, target);
             TestPhase phase = Phase;
+            // Leave the zoom phase the way it was entered. Zoom is sticky --
+            // nothing clears it when the phase ends -- and it changes what the
+            // rest of the tour measures: the Imperialist does *half* damage
+            // unzoomed, so a player that wandered out of the zoom phase still
+            // zoomed was quietly firing a different weapon for every phase
+            // after it. No other phase touches this control, so pressing it
+            // here and falling through costs the phase nothing.
+            if (phase != TestPhase.Zoom && player.EquipInfo.Zoomed && _frame % 8 == 0)
+            {
+                Hold(c.Zoom, true);
+            }
             switch (phase)
             {
                 case TestPhase.Idle:
@@ -239,14 +250,30 @@ namespace MphRead.Mods.Network
                     Square(c);
                     break;
                 case TestPhase.Zoom:
-                    // Zoom belongs to particular weapons, so equip one first
-                    // rather than holding a button that does nothing and
-                    // reporting the feature as broken.
+                    // Zoom belongs to particular weapons, so issue one first.
+                    //
+                    // Issue, not press for: this used to press the
+                    // Imperialist's own key, and a weapon key only selects a
+                    // weapon the player has already picked up. On a fresh
+                    // roster nobody has, so the key did nothing, the Zoom
+                    // button was never held, and the phase reported
+                    // `untested` for run after run -- which reads as "not
+                    // proven" and was really "never attempted". The affliction
+                    // phase below had already learned the same lesson.
                     if (!player.ModCanZoom)
                     {
-                        EquipZoomWeapon(player, c);
+                        player.ModArmZoomWeapon();
                     }
-                    Hold(c.Zoom, player.ModCanZoom);
+                    // Press towards the state we want, not on a timer.
+                    // UpdateZoom is a toggle on the rising edge, so a fixed
+                    // cadence of presses zooms in and straight back out again
+                    // -- the owner ended a 300-frame phase having been zoomed
+                    // for two of them while its puppet, which had received a
+                    // different number of edges, sat zoomed for a hundred and
+                    // twenty. Pressing only while not yet zoomed converges
+                    // instead, and re-presses on its own if an edge is lost,
+                    // which is what a player does.
+                    Hold(c.Zoom, player.ModCanZoom && !player.EquipInfo.Zoomed && _frame % 8 == 0);
                     Hold(c.Shoot, player.ModCanZoom && _frame % 40 < 8);
                     break;
                 case TestPhase.Afflict:
@@ -303,18 +330,6 @@ namespace MphRead.Mods.Network
                 return;
             }
             Hold(c.Shoot, onTarget && _frame % 30 < 24);
-        }
-
-        private static void EquipZoomWeapon(PlayerEntity player, PlayerControls c)
-        {
-            if (player.ModHasWeapon(BeamType.Imperialist))
-            {
-                Hold(c.Imperialist, _frame % 30 == 0);
-            }
-            else if (player.ModHasWeapon(BeamType.Judicator))
-            {
-                Hold(c.Judicator, _frame % 30 == 0);
-            }
         }
 
         /// <summary>
@@ -438,11 +453,26 @@ namespace MphRead.Mods.Network
 
         private static PlayerEntity? FindTarget(PlayerEntity self)
         {
+            // A ring over the slots: everyone shoots at the next slot up from
+            // their own, wrapping round.
+            //
+            // The choice has to be the same on every machine, and "nearest
+            // player" is not: under latency each client is looking at a
+            // slightly different world and two of them can pick different
+            // targets, which makes "that slot took no damage" mean nothing at
+            // all. Slot order is the one thing every client agrees on.
+            //
+            // Over the whole roster, not over three. This was `% 3` while a
+            // three-client run was being debugged, which quietly aimed slots
+            // 3 and up back at slots 1 and 2 -- so every run with more than
+            // three players, the eight-client sweeps included, was measuring
+            // a different scenario than the one it reported.
             if (NetSession.Active && self.SlotIndex >= 0)
             {
-                int targetSlot = (self.SlotIndex + 1) % 3;
-                if (targetSlot < PlayerEntity.Players.Count)
+                int count = PlayerEntity.Players.Count;
+                for (int step = 1; step < count; step++)
                 {
+                    int targetSlot = (self.SlotIndex + step) % count;
                     PlayerEntity target = PlayerEntity.Players[targetSlot];
                     if (target != self && target.LoadFlags.TestFlag(LoadFlags.Active)
                         && target.LoadFlags.TestFlag(LoadFlags.Spawned) && target.Health > 0)
