@@ -38,6 +38,9 @@ namespace MphRead.Mods
         // (20/30s, set by GameState) to clear before the frame is worth
         // keeping.
         private const int SettleFrames = 45;
+        private const int RetryFrames = 20;
+        private const int MaxAttempts = 3;
+        private int _attempts;
 
         private static GameWindowSettings GameSettings() => new()
         {
@@ -85,7 +88,19 @@ namespace MphRead.Mods
             // that call.
             GL.Viewport(0, 0, ClientSize.X, ClientSize.Y);
             Scene.OnResize();
+            // Once, and only from the first worker, so a batch of thirty
+            // rooms does not print it thirty times. What it answers is the
+            // question a black picture cannot: whether the driver gave this
+            // process a context it can actually draw in.
+            if (!_describedContext)
+            {
+                _describedContext = true;
+                Console.WriteLine($"[thumbnails] {ScreenCapture.DescribeContext()}, "
+                    + $"window {ClientSize.X}x{ClientSize.Y}");
+            }
         }
+
+        private static bool _describedContext;
 
         protected override void OnRenderFrame(FrameEventArgs args)
         {
@@ -96,16 +111,28 @@ namespace MphRead.Mods
                 return;
             }
             bool capturing = !_captured && _settleFrames-- <= 0;
+            bool giveUp = false;
             if (capturing)
             {
                 ThumbnailGenerator.EnsureCacheDirectory();
-                ScreenCapture.Save(Scene, ThumbnailGenerator.PathFor(_roomKey));
-                _captured = true;
+                // The result decides, rather than the attempt. Saving refuses
+                // an all-black frame, and reporting that as a capture is what
+                // let a run of thirty rooms announce success and leave thirty
+                // black pictures behind.
+                _captured = ScreenCapture.Save(Scene, ThumbnailGenerator.PathFor(_roomKey));
+                if (!_captured)
+                {
+                    // A few more frames in case the first one simply came too
+                    // early, then stop: if the context cannot draw, no number
+                    // of frames will change that.
+                    _settleFrames = RetryFrames;
+                    giveUp = ++_attempts >= MaxAttempts;
+                }
             }
             SwapBuffers();
             Scene.AfterRenderFrame();
             base.OnRenderFrame(args);
-            if (capturing)
+            if (_captured || giveUp)
             {
                 Close();
             }
