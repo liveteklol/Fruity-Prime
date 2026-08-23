@@ -1,3 +1,4 @@
+using System;
 using MphRead.Entities;
 
 namespace MphRead.Mods.Network
@@ -50,12 +51,49 @@ namespace MphRead.Mods.Network
         /// </summary>
         private static bool _acknowledged;
 
+        /// <summary>Server frames this client has been showing results the server does not agree with.</summary>
+        private static uint _strandedSince;
+
         public static void Reset()
         {
             _lastReport = 0;
             _reported = false;
             _acknowledged = false;
+            _strandedSince = 0;
         }
+
+        /// <summary>
+        /// Whether this machine may decide, from its own scoreboard, that the
+        /// match is over.
+        ///
+        /// Offline, always. Connected, only the machine that keeps the score:
+        /// every other client's Points come out of the authority's snapshot,
+        /// so a client that reaches the point goal a moment before or after
+        /// the authority does is not seeing something the authority missed --
+        /// it is disagreeing with the only copy of the scoreboard that counts,
+        /// and it has no way back. Nothing returns MatchState to InProgress
+        /// until the next rotation, so a client that ends its match early
+        /// spends the rest of the round in its results screen while its player
+        /// stands motionless in everybody else's game.
+        ///
+        /// Two ways that happened in one real match on 2026-08-23:
+        ///
+        /// - a replayed kill counted the kill a second time for one frame
+        ///   (see <see cref="NetDamage"/>), so the sixth kill of a
+        ///   seven-point match ended it on the client;
+        /// - after a rotation a client that finished loading before the
+        ///   authority did applied one last snapshot from the match that had
+        ///   just been won, whose scores were still the winning ones, and
+        ///   ended the brand new match on the frame it started.
+        ///
+        /// Both are fixed at their source. This is the rule that makes a
+        /// third one a hiccup rather than a lost player: the authority
+        /// reaches the goal, tells the server, and every client ends its
+        /// match a round trip later through <see cref="Sync"/>, which is the
+        /// path that was already here.
+        /// </summary>
+        public static bool MayEndOnScore => !NetSession.Active
+            || NetSession.IsAuthority || NetSession.IsHost;
 
         /// <summary>
         /// True while this client is showing the results of a networked match
@@ -83,6 +121,7 @@ namespace MphRead.Mods.Network
                 // out normally rather than being cut to.
                 GameState.MatchTime = 0;
             }
+            RecoverIfStranded(serverEnding);
             if (!NetSession.IsAuthority && !NetSession.IsHost)
             {
                 return;
@@ -113,6 +152,55 @@ namespace MphRead.Mods.Network
             _reported = true;
             _lastReport = NetSession.NetFrame;
             NetSession.SendMatchEnd();
+        }
+
+        /// <summary>
+        /// Frames a client may sit in its results while the server says the
+        /// match is running before it is put back into play.
+        ///
+        /// Longer than the whole results sequence (3 s of the winner's camera
+        /// and 5 s of the scoreboard) so a legitimate ending is never cut
+        /// short, and the server's own intermission is only a second longer
+        /// than that -- so if this expires the server is not ending anything
+        /// and this client is on its own.
+        /// </summary>
+        private const uint StrandedFrames = 60 * 12;
+
+        /// <summary>
+        /// Put a client back into a match the server never stopped running.
+        ///
+        /// The last line of defence, not the fix for anything: a client whose
+        /// match state disagrees with the server's has already lost the
+        /// difference between them, and the causes are dealt with where they
+        /// happen. What this stops is the disagreement lasting the rest of the
+        /// round. Before it, the only way out of a results screen the server
+        /// did not ask for was the next rotation, which on a long map is
+        /// several minutes of standing still.
+        /// </summary>
+        private static void RecoverIfStranded(bool serverEnding)
+        {
+            MatchStatePacket? state = NetSession.ServerMatch;
+            bool serverRunning = state.HasValue && !serverEnding
+                && (state.Value.Flags & MatchStatePacket.FlagInProgress) != 0;
+            if (!serverRunning || GameState.MatchState == MatchState.InProgress)
+            {
+                _strandedSince = 0;
+                return;
+            }
+            if (_strandedSince == 0)
+            {
+                _strandedSince = Math.Max(NetSession.NetFrame, 1);
+                return;
+            }
+            if (NetSession.NetFrame - _strandedSince < StrandedFrames)
+            {
+                return;
+            }
+            _strandedSince = 0;
+            Console.WriteLine("[net] the server's match is still running; leaving the results screen");
+            NetLog.Event("recovered from a results screen the server did not ask for");
+            GameState.ResetMatchProgress();
+            GameState.MatchTime = state!.Value.TimeRemaining;
         }
 
         /// <summary>

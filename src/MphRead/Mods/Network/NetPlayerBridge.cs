@@ -384,7 +384,17 @@ namespace MphRead.Mods.Network
             // The authority keeps the score for everybody, including for this
             // client's own player. Counting locally worked only for whoever
             // had been present since the first kill.
-            if (slot >= 0 && slot < GameState.Points.Length)
+            //
+            // Not for the second after a rotation, for the same reason peer
+            // positions are ignored then: the two machines do not change room
+            // on the same frame, so a client that finished loading first is
+            // still being sent the finished match's snapshots -- and those
+            // carry the winning score. Applying it to the fresh match put the
+            // point goal back on the board on the frame it started, which
+            // ended the new match instantly. Scores begin a match at zero on
+            // every machine, so there is nothing to learn from the authority
+            // during that second anyway.
+            if (slot >= 0 && slot < GameState.Points.Length && !NetRoomChange.Settling)
             {
                 GameState.Points[slot] = state.Points;
                 GameState.Kills[slot] = state.Kills;

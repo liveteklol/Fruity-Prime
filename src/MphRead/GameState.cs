@@ -590,7 +590,10 @@ namespace MphRead
 
         private static void EndIfPointGoalReached()
         {
-            if (PointGoal <= 0)
+            // Connected, the machine that keeps the score is the only one
+            // allowed to decide the score has been reached; everybody else
+            // learns it from the server. See NetMatchEnd.MayEndOnScore.
+            if (PointGoal <= 0 || !Mods.Network.NetMatchEnd.MayEndOnScore)
             {
                 return;
             }
@@ -671,6 +674,10 @@ namespace MphRead
 
         public static void ModeStateDefender(Scene scene)
         {
+            if (!Mods.Network.NetMatchEnd.MayEndOnScore)
+            {
+                return;
+            }
             for (int i = 0; i < PlayerEntity.SlotCapacity; i++)
             {
                 PlayerEntity player = PlayerEntity.Players[i];

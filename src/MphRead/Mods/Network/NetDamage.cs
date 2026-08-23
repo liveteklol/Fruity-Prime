@@ -279,6 +279,50 @@ namespace MphRead.Mods.Network
             return impulse * (MaxImpulse / length);
         }
 
+        private static readonly int[] _savedPoints = new int[Slots];
+        private static readonly int[] _savedKills = new int[Slots];
+        private static readonly int[] _savedDeaths = new int[Slots];
+
+        /// <summary>
+        /// The scoreboard, held across a replayed hit.
+        ///
+        /// A replay is feedback, not scoring. TakeDamage runs the engine's
+        /// whole death path, and that path awards the kill: Points and Kills
+        /// for the attacker, Deaths for the victim. The authority has already
+        /// done all three and the snapshot being applied already carries the
+        /// result, so letting the replay run them again counts the kill twice
+        /// on every machine that is not the authority.
+        ///
+        /// One frame of a score one too high is not cosmetic, because
+        /// EndIfPointGoalReached reads TeamPoints, which UpdateState rebuilds
+        /// from Points at the end of the same frame. On the sixth kill of a
+        /// seven-point match that transient seven ended the match on the
+        /// client while the authority carried on -- the client sat in its
+        /// results screen for the rest of the round, its player standing
+        /// still on everybody else's screen, with 6-2 on the scoreboard it
+        /// was showing. Seen in a real match on 2026-08-23.
+        ///
+        /// Restoring rather than suppressing keeps this in one place. The
+        /// alternative -- assigning the authority's scores after the replay
+        /// instead of before it, in ApplyState -- only works when the
+        /// attacker's slot is applied after the victim's, since the replay
+        /// runs on the victim and moves the *attacker's* row. Here the
+        /// ordering does not matter.
+        /// </summary>
+        private static void SaveScores()
+        {
+            Array.Copy(GameState.Points, _savedPoints, Slots);
+            Array.Copy(GameState.Kills, _savedKills, Slots);
+            Array.Copy(GameState.Deaths, _savedDeaths, Slots);
+        }
+
+        private static void RestoreScores()
+        {
+            Array.Copy(_savedPoints, GameState.Points, Slots);
+            Array.Copy(_savedKills, GameState.Kills, Slots);
+            Array.Copy(_savedDeaths, GameState.Deaths, Slots);
+        }
+
         /// <summary>Fill a snapshot entry for one slot.</summary>
         public static void Write(int slot, ref PlayerState state)
         {
@@ -372,12 +416,14 @@ namespace MphRead.Mods.Network
             Vector3? direction = impulse == Vector3.Zero ? null : impulse;
             Replaying = true;
             ReplayBeam = state.DamageBeam == NoBeam ? BeamType.None : (BeamType)state.DamageBeam;
+            SaveScores();
             try
             {
                 player.TakeDamage((uint)amount, flags, direction, attacker);
             }
             finally
             {
+                RestoreScores();
                 Replaying = false;
                 ReplayBeam = BeamType.None;
             }

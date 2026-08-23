@@ -885,6 +885,11 @@ match uses. Thirty-three rooms, eight bots each: no crashes.
   frames of holding.
 - Standing at an entity's position and expecting its trigger to notice. The
   volume is placed relative to the entity, not on it.
+- Replaying an authoritative event through the engine's own code path and
+  forgetting that the path also *records* the event. `NetDamage.Replay` calls
+  `TakeDamage` for the feedback and got the scoreboard as well, on top of the
+  authority's figures it had just applied -- one frame of a score one too
+  high, which is one frame more than `EndIfPointGoalReached` needs.
 - Reading one client's column of a cross-check as a defect before checking the
   others. A number that is low for *every* observer is systematic -- a rate, a
   sampling difference, a collapsed edge; a number that is low for one is that
@@ -1339,6 +1344,92 @@ which is the original figure, and it will feel it. It is also **not measured** -
 the scripted tour spends Sylux's time in alt form laying bombs and barely fires
 the beam at a player, so this rests on reading the code beside its own
 already-corrected twin. A sustained-fire probe would settle it.
+
+### The match that ended for one client and not the other (2026-08-23)
+
+Reported as "we were 6 points to 2 on the scoreboard and the match was
+considered over for the second client". It then had to be hunted down as a
+motionless zombie and killed to reach 7, and at the rotation that followed it
+opened on a game over and crashed.
+
+**A replayed kill was counted twice.** `NetDamage.Replay` exists so that a
+victim feels the hit -- the indicator, the flinch, the banner -- by running
+the authority's hit through `PlayerEntity.TakeDamage`. But `TakeDamage` also
+*awards* the kill: `Points` and `Kills` for the attacker, `Deaths` for the
+victim. The authority had already done all three and the snapshot being
+applied already carried the result, so on every machine except the authority
+the kill landed on the scoreboard twice.
+
+For one frame. That is enough, because `EndIfPointGoalReached` reads
+`TeamPoints`, and `UpdateState` rebuilds `TeamPoints` from `Points` at the end
+of the same frame -- after the replay and before the next snapshot corrects
+it. So on the sixth kill of a seven-point match the client saw seven, ended
+its match, and sat in its results screen for the rest of the round with 6-2 on
+the board it was showing. Its player stood still in everybody else's game,
+still sending intents, because `UpdateScene` does not run outside
+`MatchState.InProgress`.
+
+Reproduced exactly, two clients, point goal 2, one map:
+
+```text
+BRAVO (client)     21:16:22.309  matchState=GameOver  slot 0: score=1/2p
+ALPHA (authority)  21:16:45.169  matchState=GameOver  slot 0: score=1/1p
+```
+
+`score=1/2p` is `Points`/`TeamPoints` -- the authority's 1 with the replay's
+phantom second point latched into `TeamPoints` beside it. Twenty-three
+seconds of one client watching a results screen while the other played on.
+After the fix the two end 31 ms apart, both at 2 points.
+
+**Nothing moved a slot-ordering problem out of the way.** Assigning the
+authority's scores *after* the replay instead of before it, in `ApplyState`,
+looks like the same fix and is not: the replay runs on the victim's slot and
+moves the *attacker's* row, so it only works when the attacker is applied
+after the victim. `NetDamage` saves the three arrays and restores them around
+the replay instead, and the order stops mattering.
+
+**Then the rotation.** A client resets its scores when it loads the next room,
+and the two machines do not change room on the same frame -- so a client that
+finished loading first was still being sent the finished match's snapshots,
+whose scores were the winning ones. Applying those to the fresh match put the
+point goal back on the board on the frame it started. `ApplyState` now ignores
+peer scores while `NetRoomChange.Settling`, exactly as it already ignored peer
+positions, and for the same reason: a match starts at zero on every machine,
+so there is nothing to learn from the authority during that second.
+
+**And the rule that makes a third one survivable.** Only the machine that
+keeps the score may decide the score has been reached
+(`NetMatchEnd.MayEndOnScore`, checked by `EndIfPointGoalReached` and by
+`ModeStateDefender`). Every other client's `Points` come out of the
+authority's snapshot, so a client that reaches the goal first is not seeing
+something the authority missed -- it is disagreeing with the only copy of the
+scoreboard that counts, and there is no way back: nothing returns `MatchState`
+to `InProgress` until the next rotation. The path that ends a match on a
+client already existed and is the one that should be used -- the authority
+reports, the server sets `FlagEnding`, and `NetMatchEnd.Sync` zeroes every
+client's clock a round trip later.
+
+`NetMatchEnd.RecoverIfStranded` is the backstop under all of it: a client
+showing results for twelve seconds while the server says the match is running
+and not ending is put back into play. Twelve is longer than the whole results
+sequence and longer than the server's own intermission, so a legitimate ending
+is never cut short -- and it means the next bug of this shape costs a hiccup
+rather than a player.
+
+**The crash after the rotation is not explained.** There is no log from that
+client and no stack. What is known is that it spent two minutes in
+`MatchState.Ending`, during which `UpdateScene` never ran while
+`NetHooks.AfterSimulation` kept applying snapshots into the scene -- spawns,
+replayed deaths, effects and sounds all created and never processed or
+retired. That is the state the fixes above prevent, so it may well go with
+them; it has not been reproduced and should not be claimed as fixed.
+
+**The netlog could not answer this and now can.** It recorded `matchTime` and
+no match state and no scores, so a client that had quietly ended its match
+looked identical to one whose player had stopped moving. `STATE` lines now
+carry `matchState=` and `goal=`, and each slot carries
+`score=<points>/<teampoints>p <kills>k<deaths>d` -- which is what made the
+double count visible as `1/2p` in a single line.
 
 ### What is left at 250 ms, and is not a bug
 
