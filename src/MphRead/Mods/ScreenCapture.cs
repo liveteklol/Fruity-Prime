@@ -144,11 +144,19 @@ namespace MphRead.Mods
                 string vendor = GL.GetString(StringName.Vendor) ?? "?";
                 string renderer = GL.GetString(StringName.Renderer) ?? "?";
                 string version = GL.GetString(StringName.Version) ?? "?";
+                int flags = GL.GetInteger((GetPName)All.ContextFlags);
+                // The one that actually decides whether immediate mode
+                // exists. The profile mask can say "compatibility" while this
+                // bit has already removed every deprecated entry point.
+                string forward = (flags & (int)All.ContextFlagForwardCompatibleBit) != 0
+                    ? ", FORWARD-COMPATIBLE (deprecated entry points removed, "
+                        + "which is all of immediate mode)"
+                    : "";
                 int mask = GL.GetInteger((GetPName)All.ContextProfileMask);
                 string profile = (mask & (int)All.ContextCoreProfileBit) != 0
                     ? "CORE (immediate mode is unavailable, which renders everything black)"
                     : (mask & (int)All.ContextCompatibilityProfileBit) != 0 ? "compatibility" : "unreported";
-                return $"GL {version}, profile {profile}, {vendor} / {renderer}";
+                return $"GL {version}, profile {profile}{forward}, {vendor} / {renderer}";
             }
             catch (Exception ex)
             {
