@@ -4,4 +4,7 @@
        the mark is a cherry on transparency, and a launcher's own default
        behind it would put the product's logo on somebody else's white. -->
   <color name="appicon_background">#0A0C10</color>
+
+  <!-- GuiTheme.Ink again, behind the window while Avalonia starts up. -->
+  <color name="window_background">#0A0C10</color>
 </resources>

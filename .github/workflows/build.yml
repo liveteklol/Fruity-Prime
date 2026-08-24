@@ -171,14 +171,20 @@ jobs:
           -p:JavaSdkDirectory="$JAVA_HOME"
           -o publish/android
 
-      # And an untrimmed one beside it. No device has run this port at all yet
-      # (see the known gaps in CLAUDE.md), so the first person to install it
-      # needs to be able to tell "the port is wrong" apart from "the trimmer
-      # took something", and that is a build away rather than a rebuild away.
+      # And an untrimmed one beside it, so that a crash on a device can be told
+      # apart from the trimmer having removed something.
+      #
+      # EmbedAssembliesIntoApk is the whole point of this step. A Debug build
+      # defaults it to false and expects `dotnet build -t:Run` to push the
+      # assemblies over adb afterwards (fast deployment); an APK built that way
+      # and installed by hand holds no managed code at all and aborts at
+      # startup with "No assemblies found in .../.__override__". It is a real
+      # trap: the build succeeds, the APK installs, and it dies before any of
+      # this project's code runs.
       - name: build a debug APK to fall back on
         run: >
           dotnet build src/MphRead.Android/MphRead.Android.csproj
-          -c Debug
+          -c Debug -p:EmbedAssembliesIntoApk=true
           -p:AndroidSdkDirectory="$ANDROID_HOME"
           -p:JavaSdkDirectory="$JAVA_HOME"
 
@@ -196,8 +202,8 @@ jobs:
 
           Both APKs are signed with the SDK's debug key, which is enough to
           install and not enough for a store. Install the release one; the
-          debug one is untrimmed and slower, and is here so that a crash can be
-          told apart from the trimmer having removed something.
+          debug one is untrimmed, much bigger and slower, and is here so that a
+          crash can be told apart from the trimmer having removed something.
 
           The game's own files are yours and are not in here. Extract them on a
           desktop, then copy paths.txt and the extracted folders into
@@ -208,9 +214,10 @@ jobs:
           front screen says so while they are missing, and has a
           "Check for game files" entry for when they arrive.
 
-          No device had run any of this when the APK was built. If it misbehaves,
-          .claude/android/ANDROID-PORT.md lists what to look at, in order, and
-          `adb logcat` is where the renderer says so.
+          The front screen has been run, on an emulator. A match has not: that
+          needs the game files above, which are nobody's to ship. If it
+          misbehaves, .claude/android/ANDROID-PORT.md lists what to look at, in
+          order, and `adb logcat` is where the renderer says so.
           NOTE
           ls -la artifact
 

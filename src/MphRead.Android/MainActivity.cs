@@ -26,7 +26,10 @@ namespace MphRead.Droid
     /// </summary>
     [Activity(
         Label = "Fruity Prime",
-        Theme = "@android:style/Theme.Material.NoActionBar",
+        // Must be an AppCompat descendant: Avalonia's activity is an AndroidX
+        // AppCompatActivity and throws out of onCreate under anything else.
+        // See Resources/values/styles.xml.
+        Theme = "@style/FruityPrime",
         MainLauncher = true,
         LaunchMode = LaunchMode.SingleTop,
         ConfigurationChanges = ConfigChanges.Orientation | ConfigChanges.ScreenSize

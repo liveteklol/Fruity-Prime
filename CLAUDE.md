@@ -149,10 +149,15 @@ other end: `AndroidInput` hands the scene a keyboard and a mouse of its own and
 presses whatever the player has bound, which is why rebinding, aim sensitivity
 and the DS weapon wheel all work without touching `ProcessAllInput`.
 
-**No device has run any of it.** The shaders are validated offline with
-`glslang` and the desktop build is unaffected; that is the whole of what is
-proven. `.claude/android/ANDROID-PORT.md` has the design, the build recipe, the
-game-files directory, and what to watch on a first run, in order.
+**The front screen runs; the match has never been loaded.** An emulator (API
+30, x86_64, software CPU and GL) shows the screen and the game-files card; what
+that box cannot do is load a room, having no extracted game files, so the
+renderer and the touch controls are still unmeasured. Two traps that killed the
+app before any of this project's code ran — an activity theme that was not an
+AppCompat descendant, and a Debug APK that carries no managed code unless
+`EmbedAssembliesIntoApk=true` — are written up with the rest in
+`.claude/android/ANDROID-PORT.md`, along with the build recipe, the game-files
+directory, and how to run an emulator here.
 
 ## Updating
 

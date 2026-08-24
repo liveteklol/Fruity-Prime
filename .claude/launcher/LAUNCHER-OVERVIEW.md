@@ -69,7 +69,8 @@ macOS and Android
   using alias pointing `GL` at `Mods/Render/GlEs.cs`, and the keyboard and
   mouse it reads are synthesised from on-screen controls, so no call site in
   the renderer or the input path changed. Full account:
-  `.claude/android/ANDROID-PORT.md`. **No device has run it** -- see
+  `.claude/android/ANDROID-PORT.md`. The front screen has been run on an
+  emulator; **the match has not been loaded anywhere** -- see
   `.claude/KNOWN-GAPS.md`.
 - The head is still a compile check on shared code: it **stops building** the
   moment that code grows something desktop-only. It already forced out

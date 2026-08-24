@@ -182,11 +182,54 @@ controls work in Debug and throw on the first frame of a release APK. Checked,
 not assumed: the members survive in
 `obj/Release/.../android-arm64/linked/OpenTK.Windowing.GraphicsLibraryFramework.dll`.
 
+## Two traps that cost a release each
+
+Both were found by running the APK, and neither is visible from a build log.
+
+**The activity's theme must be an AppCompat descendant.** Avalonia's
+`AvaloniaMainActivity` is an AndroidX `AppCompatActivity`, and AppCompat throws
+`IllegalStateException: You need to use a Theme.AppCompat theme (or descendant)
+with this activity` out of `onCreate` under anything else. The head shipped with
+`@android:style/Theme.Material.NoActionBar`, a framework theme that looks right
+and can never work: the app died before a line of this project's code ran, every
+time, on every device. `Resources/values/styles.xml` holds the theme now.
+
+**A Debug APK built by `dotnet build` contains no managed code.** Debug defaults
+`EmbedAssembliesIntoApk` to false and expects `dotnet build -t:Run` to push the
+assemblies over adb afterwards. Install that APK by hand and it aborts at
+startup with *"No assemblies found in .../.__override__/<abi>. Assuming this is
+part of Fast Deployment."* The build succeeds, the APK installs, and it is
+hollow. `-p:EmbedAssembliesIntoApk=true` is what makes a debug APK someone can
+be handed; it is ~110 MB rather than 20.
+
+## Testing it here
+
+An emulator runs this without a device, and without KVM -- which WSL does not
+grant unless the user is in the `kvm` group:
+
+```bash
+sdkmanager --sdk_root=$HOME/android-sdk "emulator" "system-images;android-30;default;x86_64"
+avdmanager create avd -n fruity -k "system-images;android-30;default;x86_64" -d pixel_4
+$ANDROID_HOME/emulator/emulator -avd fruity -no-window -no-audio -no-boot-anim \
+  -gpu swiftshader_indirect -accel off -memory 4096 -cores 4
+```
+
+`-accel off` is software CPU emulation: it boots in about five minutes and the
+system UI shows "isn't responding" dialogs of its own, which are the emulator
+and not this app. `adb install -r`, `adb shell am start -n
+fr.livetek.fruityprime/crc64e2a07749a868b9fd.MainActivity`, and `adb shell
+screencap` are enough to see the front screen. With KVM it would be seconds
+rather than minutes.
+
+SwiftShader implements GL ES 3.0, so it is a real check of the shaders and the
+renderer -- for whoever gets game files onto an emulator, which is the one thing
+that would close the gap below.
+
 ## What has not happened
 
-**No device has run this.** See `.claude/KNOWN-GAPS.md`. It compiles, the
-shaders are validated offline, and the desktop build is unaffected -- and that
-is the whole of what is proven. The first run should be watched for, in this
+**No device has run this, and no room has been loaded anywhere.** See `.claude/KNOWN-GAPS.md`. The front screen has been
+driven on an emulator; the shaders are validated offline; the desktop build is
+unaffected. The renderer and the touch controls have never run. The first run should be watched for, in this
 order:
 
 1. `[gles] shader ... failed to compile` in logcat. The compile status is only

@@ -16,14 +16,20 @@ claiming coverage that isn't there.
   proven on the menu's side (flags, windows, the pump) and unproven on the
   game's.
 - **macOS is cross-compiled and unrun.** See `.claude/launcher/LAUNCHER-OVERVIEW.md`.
-- **The Android port has never run on a device.** It builds an APK, the
-  five GLSL ES 3.00 shaders compile and link under `glslang`, and the desktop
-  build is unaffected — that is the whole of what is proven. Nothing has put
-  a frame on a screen, and no thumb has pressed any of it. The renderer's
-  emulation of immediate mode, display lists, the current colour and the
-  alpha test is reasoned-through and unmeasured; `.claude/android/ANDROID-PORT.md`
-  lists what to watch on the first run, in order. The head remains a compile
-  check on shared code either way.
+- **The Android front screen runs; the match does not, because nothing has
+  loaded a room on Android.** The screen has been driven on an emulator
+  (API 30, x86_64, software CPU and GL) and screenshotted: name, hunter,
+  server directory, the map/mode/bot rows and the game-files card all render.
+  What that run could not reach is the renderer, because loading a room needs
+  the extracted game files and this box has none. So the whole of
+  `Mods/Render/GlEs.cs` — immediate mode, display lists, the current colour,
+  the alpha test — is still reasoned-through and unmeasured, and no thumb has
+  pressed any of the touch controls. The five GLSL ES 3.00 shaders do compile
+  and link under `glslang`. `.claude/android/ANDROID-PORT.md` lists what to
+  watch on a first real run, in order.
+- **No *device* has run it either** — the emulator above is x86_64 with
+  SwiftShader, and a phone is arm64 with a real driver. That is the ABI and
+  the GL implementation both differing from what has been tried.
 - **The update check has never seen a release of this repository.** Tested
   against upstream NoneGiven/MphRead instead, which has releases: the check,
   version comparison, "update available" line and page URL were all
