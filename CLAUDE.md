@@ -25,7 +25,7 @@ area is the one being touched.
 | Path | What |
 |---|---|
 | `~/MphRead-dev` | the source. Upstream is NoneGiven/MphRead; everything added lives under `src/MphRead/Mods/` so pulling upstream stays a fast-forward |
-| `src/MphRead.Android/` | the Android head: the same sources, an APK, and a front screen. No match yet |
+| `src/MphRead.Android/` | the Android head: the same sources, an APK, a front screen and a match, over GL ES and touch controls. No device has run it |
 | `src/MphRead/Mods/Network/` | the whole multiplayer feature |
 | `src/MphRead/Mods/Launcher/` | the launcher: `Gui/` is every window (Avalonia, all platforms), `Portable/` is the logic and the text screen |
 | `~/mph-net-test/` | the test rig: a copy of the build in `bin/`, extracted game files, `run-check.sh`, `compare-reports.py` |
@@ -100,8 +100,8 @@ export ALSOFT_DRIVERS=null PULSE_SERVER=   # else ALSA retries stall frames
 
 ## The launcher
 
-**One launcher, in Avalonia, on Windows, Linux, macOS and (front screen only)
-Android** — one thread, one toolkit setup per process
+**One launcher, in Avalonia, on Windows, Linux, macOS and Android** — one
+thread, one toolkit setup per process
 (`GuiLauncher.EnsureSetup`), each visit a nested dispatcher loop. `-launcher`
 opens a front screen, not a settings dialog: a map picture on the left, the
 things you can do on the right.
@@ -137,6 +137,22 @@ Gotchas worth keeping in view without opening another file:
 Deep dive (UI components, settings window, first-run/extraction, macOS/Android):
 `.claude/launcher/LAUNCHER-OVERVIEW.md`, `LAUNCHER-DESIGN.md`,
 `LAUNCHER-SETTINGS.md`, `LAUNCHER-FIRSTRUN.md`.
+
+## Android
+
+The head builds a playable APK. The engine's `GL` is redirected to OpenGL ES 3.0
+by **one using alias** in the Android csproj, pointing the name at
+`Mods/Render/GlEs.cs`, which emulates the four things ES does not have —
+immediate mode, display lists, the current colour and the alpha test — so not
+one call site in upstream's renderer changed. Input is the same trick from the
+other end: `AndroidInput` hands the scene a keyboard and a mouse of its own and
+presses whatever the player has bound, which is why rebinding, aim sensitivity
+and the DS weapon wheel all work without touching `ProcessAllInput`.
+
+**No device has run any of it.** The shaders are validated offline with
+`glslang` and the desktop build is unaffected; that is the whole of what is
+proven. `.claude/android/ANDROID-PORT.md` has the design, the build recipe, the
+game-files directory, and what to watch on a first run, in order.
 
 ## Updating
 

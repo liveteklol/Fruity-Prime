@@ -8,20 +8,20 @@
        and a different kind of output. Nothing here is a copy: the glob below
        is the same files, compiled a second time with ANDROID defined.
 
-       WHAT THIS BUILDS TODAY: the whole codebase, and a front screen that runs
-       on a phone. WHAT IT DOES NOT BUILD: a playable match. The engine's window
-       and input come from GLFW through OpenTK, which is desktop-only; giving it
-       a mobile renderer and touch controls is a separate piece of work, and the
-       screen says so rather than offering a button that cannot work.
+       WHAT THIS BUILDS TODAY: the whole codebase, a front screen, and a match.
+       The engine's window and input come from GLFW through OpenTK, which is
+       desktop-only, so this head supplies both: Mods/Render/GlEs.cs stands in
+       for the desktop GL bindings (see the Using alias below) and the touch
+       controls beside this file stand in for the keyboard and mouse.
 
        It is deliberately NOT in MphRead.sln: building it needs the Android
        workload and an SDK, and a solution that will not build without them is
        a solution that stops everybody who is not working on this.
 
-       The value of this project before that work is done is that it is a
-       compile: every time the shared code grows something desktop-only (a
-       System.Drawing type, a Windows API, a process it expects to be able to
-       start) this stops building, at the commit that did it. -->
+       It is also a compile check on the shared sources: every time they grow
+       something desktop-only (a System.Drawing type, a Windows API, a process
+       they expect to be able to start) this stops building, at the commit that
+       did it. -->
 
   <PropertyGroup>
     <TargetFramework>net9.0-android35.0</TargetFramework>
@@ -58,6 +58,8 @@
     <Compile Include="..\MphRead\**\*.cs"
              Exclude="..\MphRead\bin\**;..\MphRead\obj\**" />
     <AndroidResource Include="Resources\**\*.xml" />
+    <!-- See the file: the two types the touch controls reach by reflection. -->
+    <TrimmerRootDescriptor Include="Properties\TrimmerRoots.xml" />
   </ItemGroup>
 
   <ItemGroup>
@@ -71,6 +73,20 @@
                       Link="Assets\fruity-prime-logo.png" />
     <AvaloniaResource Include="..\MphRead\Assets\fruity-prime-mark.png"
                       Link="Assets\fruity-prime-mark.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The whole of the ES port, in one line.
+
+         The engine calls OpenTK's desktop `GL` from 200-odd places in files
+         that are upstream's, and a compatibility profile is not something
+         Android has. This alias points the name at `Mods/Render/GlEs.cs`
+         instead, for every file in this compilation: a using alias is resolved
+         before the `using OpenTK.Graphics.OpenGL;` at the top of those files,
+         so the call sites do not change and the desktop build does not see
+         any of it. The enum types they pass are still the desktop ones:
+         the same GL constants, which GlEs casts across. -->
+    <Using Include="MphRead.Mods.Render.GlEs" Alias="GL" />
   </ItemGroup>
 
   <ItemGroup>

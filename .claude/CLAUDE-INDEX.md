@@ -6,6 +6,7 @@ the depth — read the one you need for the area you're touching rather than
 loading everything.
 
 - KNOWN-GAPS.md — claims not yet verified, so you don't re-prove or re-claim them
+- android/ANDROID-PORT.md — the GL ES renderer, the touch controls, building the APK
 - launcher/LAUNCHER-OVERVIEW.md — entries, platforms (incl. macOS/Android), threading
 - launcher/LAUNCHER-DESIGN.md — UI components, logo/assets, pitfalls
 - launcher/LAUNCHER-SETTINGS.md — settings window layout and toggles

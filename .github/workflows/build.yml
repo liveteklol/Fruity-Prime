@@ -110,6 +110,116 @@ jobs:
           path: publish/${{ matrix.id }}
           if-no-files-found: error
 
+  # The Android head, and the APK a phone can install.
+  #
+  # Its own job rather than a row in the matrix above, because nothing about it
+  # matches: a different target framework (net9.0-android35.0, not net9.0), a
+  # JDK and an Android SDK the other six targets do not need, and an APK rather
+  # than a folder of binaries. It is also the only job whose failure is usually
+  # about *shared* code -- the head compiles the same sources with ANDROID
+  # defined, so it stops building the moment they grow something desktop-only,
+  # which is the whole reason it was in the tree before it could play anything.
+  #
+  # No asset guard on the output: an APK is a zip this script cannot see into,
+  # and pointing it at a directory holding one would prove nothing. What
+  # actually rules game data out is the `assets` job above -- the APK is built
+  # from tracked sources and NuGet packages and nothing else.
+  android:
+    name: android
+    needs: assets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '9.0.x'
+
+      # The Android workload brings the .NET side of the toolchain. It does not
+      # bring a JDK, and the Android SDK's build tools are Java.
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: install the android workload
+        run: dotnet workload install android
+
+      # net9.0-android35.0 wants platform 35 and its build tools, which a
+      # runner image does not necessarily carry. This target asks for exactly
+      # what the project declares and accepts the licences, instead of naming
+      # sdkmanager packages here that would then have to be kept in step with
+      # the TargetFramework.
+      - name: install what the Android SDK is missing
+        run: >
+          dotnet build src/MphRead.Android/MphRead.Android.csproj
+          -t:InstallAndroidDependencies
+          -p:AndroidSdkDirectory="$ANDROID_HOME"
+          -p:JavaSdkDirectory="$JAVA_HOME"
+          -p:AcceptAndroidSDKLicenses=True
+
+      # The one a player would install. Release runs the IL trimmer over this
+      # app, which matters here more than usual: the touch controls reach
+      # OpenTK's KeyboardState and MouseState by reflection, so
+      # Properties/TrimmerRoots.xml is what keeps them from being linked away
+      # and turning into a first-frame crash that Debug would never show.
+      - name: publish the APK
+        run: >
+          dotnet publish src/MphRead.Android/MphRead.Android.csproj
+          -c Release -p:AndroidPackageFormat=apk
+          -p:AndroidSdkDirectory="$ANDROID_HOME"
+          -p:JavaSdkDirectory="$JAVA_HOME"
+          -o publish/android
+
+      # And an untrimmed one beside it. No device has run this port at all yet
+      # (see the known gaps in CLAUDE.md), so the first person to install it
+      # needs to be able to tell "the port is wrong" apart from "the trimmer
+      # took something", and that is a build away rather than a rebuild away.
+      - name: build a debug APK to fall back on
+        run: >
+          dotnet build src/MphRead.Android/MphRead.Android.csproj
+          -c Debug
+          -p:AndroidSdkDirectory="$ANDROID_HOME"
+          -p:JavaSdkDirectory="$JAVA_HOME"
+
+      - name: collect the APKs
+        run: |
+          set -euo pipefail
+          mkdir -p artifact
+          cp publish/android/*-Signed.apk artifact/FruityPrime-release.apk
+          cp src/MphRead.Android/bin/Debug/net9.0-android35.0/*-Signed.apk \
+            artifact/FruityPrime-debug.apk
+          cat > artifact/INSTALL.txt <<'NOTE'
+          Fruity Prime for Android.
+
+            adb install -r FruityPrime-release.apk
+
+          Both APKs are signed with the SDK's debug key, which is enough to
+          install and not enough for a store. Install the release one; the
+          debug one is untrimmed and slower, and is here so that a crash can be
+          told apart from the trimmer having removed something.
+
+          The game's own files are yours and are not in here. Extract them on a
+          desktop, then copy paths.txt and the extracted folders into
+
+            Android/data/fr.livetek.fruityprime/files
+
+          which shows up over USB with no storage permission asked for. The
+          front screen says so while they are missing, and has a
+          "Check for game files" entry for when they arrive.
+
+          No device had run any of this when the APK was built. If it misbehaves,
+          .claude/android/ANDROID-PORT.md lists what to look at, in order, and
+          `adb logcat` is where the renderer says so.
+          NOTE
+          ls -la artifact
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: FruityPrime-android
+          path: artifact
+          if-no-files-found: error
+
   # The dedicated server for Windows.
   #
   # Its own job on a Windows runner, rather than another row in the matrix

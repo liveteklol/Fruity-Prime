@@ -12,6 +12,7 @@ using Avalonia.Media.Imaging;
 using Avalonia.Platform;
 using Avalonia.Threading;
 using MphRead.Entities;
+using MphRead.Mods;
 using MphRead.Mods.Launcher;
 using MphRead.Mods.Launcher.Gui;
 using MphRead.Mods.Network;
@@ -19,8 +20,8 @@ using MphRead.Mods.Network;
 namespace MphRead.Droid
 {
     /// <summary>
-    /// The screen on a phone: who you are, which servers are up, and an honest
-    /// line about what this build can and cannot do here.
+    /// The screen on a phone: who you are, what to load, and which servers are
+    /// up.
     ///
     /// Built out of the same painted controls as the desktop front screen
     /// (<see cref="MenuEntry"/>, <see cref="Caption"/>, the rows in Rows.cs) so
@@ -29,10 +30,11 @@ namespace MphRead.Droid
     /// server list here is the same query the desktop browser makes, answered
     /// by the same servers.
     ///
-    /// What is missing is the match. The engine draws through OpenTK and takes
-    /// its input from GLFW, and neither exists on Android; until it has a
-    /// mobile renderer and touch controls, a "play" button here would be a
-    /// button that cannot work, so there is not one.
+    /// The play button is real now: the engine draws through
+    /// <see cref="MphRead.Mods.Render.GlEs"/> on OpenGL ES and takes its input
+    /// from <see cref="TouchControls"/>. What it needs is the extracted game
+    /// files, which are the player's own and have to be copied onto the device,
+    /// so the card above it says where.
     /// </summary>
     internal sealed class AndroidHomeView : UserControl
     {
@@ -42,6 +44,35 @@ namespace MphRead.Droid
         private readonly ChoiceRow _hunter;
         private readonly FieldRow _master;
         private MenuEntry _refresh = null!;
+        private ChoiceRow _room = null!;
+        private ChoiceRow _mode = null!;
+        private ChoiceRow _bots = null!;
+        private ChoiceRow _botLevel = null!;
+        private MenuEntry _play = null!;
+        private MenuEntry _recheck = null!;
+        private Note _filesNote = null!;
+
+        // The modes a multiplayer match can be started in, in the order the
+        // desktop front screen lists them. Not every GameMode value is one.
+        private static readonly (string Name, GameMode Mode)[] _modes =
+        {
+            ("Battle", GameMode.Battle),
+            ("Battle teams", GameMode.BattleTeams),
+            ("Survival", GameMode.Survival),
+            ("Survival teams", GameMode.SurvivalTeams),
+            ("Capture", GameMode.Capture),
+            ("Bounty", GameMode.Bounty),
+            ("Bounty teams", GameMode.BountyTeams),
+            ("Defender", GameMode.Defender),
+            ("Defender teams", GameMode.DefenderTeams),
+            ("Nodes", GameMode.Nodes),
+            ("Nodes teams", GameMode.NodesTeams),
+            ("Prime hunter", GameMode.PrimeHunter)
+        };
+
+        private static readonly string[] _botCounts =
+            Enumerable.Range(0, 8).Select(i => i.ToString()).ToArray();
+        private static readonly string[] _botLevels = { "Easy", "Normal", "Hard" };
 
         private static readonly string[] _hunters = Enumerable.Range(0, 7)
             .Select(i => ((Hunter)i).ToString())
@@ -79,18 +110,32 @@ namespace MphRead.Droid
             body.Children.Add(_serverNote);
             body.Children.Add(_servers);
 
-            body.Children.Add(new Caption("Playing here") { Height = 30 });
-            body.Children.Add(new Note(
-                "This build does not play a match on Android yet. The launcher, the "
-                + "preferences and the server directory are the same code as on the "
-                + "desktop; the game itself draws through OpenTK and reads its input "
-                + "from GLFW, neither of which exists on this platform. What is left "
-                + "to do is a mobile renderer and touch controls -- not a port of the "
-                + "game logic, which builds here already.", GuiTheme.Warm));
-            body.Children.Add(new Note(
-                "Until then this screen is useful for what it can answer: who you "
-                + "are, and which servers are up to play on from a desktop.",
-                GuiTheme.TextDim));
+            body.Children.Add(new Caption("Play") { Height = 30 });
+            _filesNote = new Note("", GuiTheme.TextDim);
+            body.Children.Add(_filesNote);
+            // Files arrive on the device while this screen is already up --
+            // over USB, from another app -- so there has to be a way to look
+            // again that is not "kill the app and start it".
+            _recheck = new MenuEntry("Check for game files", "", titleSize: 15);
+            _recheck.Click += (_, _) => RefreshGameFiles();
+            body.Children.Add(_recheck);
+            _room = new ChoiceRow("Map", new[] { "none" });
+            _mode = new ChoiceRow("Mode", _modes.Select(m => m.Name).ToArray());
+            _bots = new ChoiceRow("Bots", _botCounts, Math.Clamp(LauncherPrefs.Bots, 0, 7));
+            _botLevel = new ChoiceRow("Bot skill", _botLevels,
+                Math.Clamp(LauncherPrefs.BotLevel, 0, 2));
+            body.Children.Add(_room);
+            body.Children.Add(_mode);
+            body.Children.Add(_bots);
+            body.Children.Add(_botLevel);
+            _play = new MenuEntry("Play offline", "Load the map with bots", titleSize: 17)
+            {
+                Primary = true,
+                Height = 52
+            };
+            _play.Click += (_, _) => StartMatch();
+            body.Children.Add(_play);
+            RefreshGameFiles();
 
             Content = new ScrollViewer
             {
@@ -126,6 +171,60 @@ namespace MphRead.Droid
                     Foreground = GuiTheme.TextBrush
                 };
             }
+        }
+
+        /// <summary>
+        /// Whether a match could be loaded right now, and what to do about it
+        /// if not. The check is <see cref="GameFiles"/>'s, the same one the
+        /// desktop front screen greys its entries out on; what differs is the
+        /// answer to "so where do I put them", which on Android is one
+        /// directory a player can reach over USB.
+        /// </summary>
+        private void RefreshGameFiles()
+        {
+            string? problem = GameFiles.Problem();
+            if (problem == null)
+            {
+                _filesNote.Text = GameFiles.Describe();
+                _filesNote.Foreground = GuiTheme.GoodBrush;
+                _room.SetItems(ThumbnailGenerator.MultiplayerRooms());
+                _play.IsEnabled = true;
+                return;
+            }
+            _filesNote.Text = $"{problem}. Extract the game on a desktop, then copy "
+                + $"paths.txt and the extracted folders into {GameFiles.Root} -- the "
+                + "app's own directory on this device, which shows up over USB under "
+                + "Android/data. Nothing is downloaded and no Nintendo file is shipped.";
+            _filesNote.Foreground = GuiTheme.WarmBrush;
+            _play.IsEnabled = false;
+        }
+
+        private void StartMatch()
+        {
+            if (MainActivity.Instance == null || GameFiles.Problem() != null)
+            {
+                return;
+            }
+            SavePrefs();
+            int modeIndex = Math.Clamp(Array.FindIndex(_modes, m => m.Name == _mode.Value), 0,
+                _modes.Length - 1);
+            int bots = Math.Clamp(Array.IndexOf(_botCounts, _bots.Value), 0, 7);
+            int level = Math.Clamp(Array.IndexOf(_botLevels, _botLevel.Value), 0, 2);
+            LauncherPrefs.Bots = bots;
+            LauncherPrefs.BotLevel = level;
+            LauncherPrefs.LastKind = (int)LaunchKind.Offline;
+            LauncherPrefs.Save();
+            var plan = new LaunchPlan
+            {
+                Kind = LaunchKind.Offline,
+                Hunter = Enum.Parse<Hunter>(_hunter.Value),
+                PlayerName = LauncherPrefs.PlayerName,
+                RoomKey = _room.Value,
+                Mode = _modes[modeIndex].Mode,
+                Bots = bots,
+                BotLevel = level
+            };
+            MainActivity.Instance.StartMatch(plan);
         }
 
         private void SavePrefs()

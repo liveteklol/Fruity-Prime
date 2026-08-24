@@ -16,9 +16,14 @@ claiming coverage that isn't there.
   proven on the menu's side (flags, windows, the pump) and unproven on the
   game's.
 - **macOS is cross-compiled and unrun.** See `.claude/launcher/LAUNCHER-OVERVIEW.md`.
-- **Android builds and shows a screen; it does not play.** See
-  `.claude/launcher/LAUNCHER-OVERVIEW.md` — the value today is that it fails
-  the build at the commit that adds anything desktop-only to shared code.
+- **The Android port has never run on a device.** It builds an APK, the
+  five GLSL ES 3.00 shaders compile and link under `glslang`, and the desktop
+  build is unaffected — that is the whole of what is proven. Nothing has put
+  a frame on a screen, and no thumb has pressed any of it. The renderer's
+  emulation of immediate mode, display lists, the current colour and the
+  alpha test is reasoned-through and unmeasured; `.claude/android/ANDROID-PORT.md`
+  lists what to watch on the first run, in order. The head remains a compile
+  check on shared code either way.
 - **The update check has never seen a release of this repository.** Tested
   against upstream NoneGiven/MphRead instead, which has releases: the check,
   version comparison, "update available" line and page URL were all
