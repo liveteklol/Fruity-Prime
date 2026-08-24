@@ -58,6 +58,12 @@
     <Compile Include="..\MphRead\**\*.cs"
              Exclude="..\MphRead\bin\**;..\MphRead\obj\**" />
     <AndroidResource Include="Resources\**\*.xml" />
+    <!-- The launcher icon: the cherry mark out of src/MphRead/Assets, scaled
+         to the five densities plus an adaptive foreground. Committed rather
+         than generated at build time so that a build needs no image tooling,
+         and allowed past the asset guard in tools/asset-guard-allow.txt,
+         being our logo rather than anything out of the cartridge. -->
+    <AndroidResource Include="Resources\**\*.png" />
     <!-- See the file: the two types the touch controls reach by reflection. -->
     <TrimmerRootDescriptor Include="Properties\TrimmerRoots.xml" />
   </ItemGroup>
