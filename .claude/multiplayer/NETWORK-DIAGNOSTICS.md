@@ -149,6 +149,99 @@ cd ~/mph-net-test
   Imperialist does half damage unzoomed). Zoom replication was never broken:
   `mine 124 / theirs 123`, PASS both ways.
 
+## Flying bodies, invincible players, hits never counted
+
+Three separate faults, reported together as "weird things happen with two
+Trace clients" -- each one a shape worth recognising again.
+
+9. **A hit launched the victim across the level.** `TakeDamage` adds its
+   `direction` argument straight onto `Speed`, so whatever is in it is a
+   velocity in units per frame. Most beams carry no direction of their own
+   (`DamageDirType` is 0), so `NetDamage.Note` filled one in as
+   `victim.Position - attacker.Position` -- the *distance between the two
+   players*, not a unit vector, so a hit from ten units away launched the
+   victim at ten units a frame through the wall. It looked asymmetric ("A
+   shoots B and B flies, B shoots A and it's fine") because A was the
+   authority, applying its own damage directly with the real vector, while
+   everyone else replays. Fix: relay the impulse verbatim, zero included, and
+   let the receiver's own fallback (indicator only, never `Speed`) handle
+   zero.
+10. **A player took no damage at all, until the shooter switched weapons.**
+    `BeamProjectileEntity` refuses to spawn a beam whose ammo cost exceeds the
+    shooter's ammo. Every machine simulates every player's shots and spends
+    ammo, but pickups are collected locally and not replicated -- so the
+    puppet on the authority's machine ran dry within a round, the authority
+    created no projectile, and the target took nothing while the shooter's own
+    screen showed a hit. Switching weapons "fixed" it only until the other
+    pool ran out too. **Look for this shape whenever a remote player can do
+    something on their own machine and not anyone else's: the puppet runs the
+    same code with different resources, and only the owner's copy of those is
+    authoritative.** Fix: the intent now carries the owner's ammo, the way it
+    already carried position and weapon; `ModSetAmmo` writes it onto the
+    puppet.
+11. **Snapshots were the one stream nobody ordered.** Both intent streams
+    refuse an older frame; `HandleSnapshot` did not, and it's the stream
+    carrying health, score and the damage counter. An overtaken datagram put a
+    player back where they'd been, undid a kill, and ran the (byte-sized)
+    damage counter backwards -- `Replay` read the difference as ~250 new hits:
+    25 resolved on the authority against 258 "replayed" on a client. Ordering
+    the stream took three lines. `NetDamage.Replay` also now refuses more than
+    32 hits in one snapshot, so one bad packet can't flinch, shove or kill
+    from a corrupted count.
+
+## "Observers only see half your turn"
+
+Listed for a long time as packet loss under load. It was two things, neither
+quite that:
+
+12. **The transport dropped the wrong packets.** `NetTransport` queued 256
+    received packets and, when full, dropped the *arriving* one -- the newest
+    input, in a protocol whose packets say "this is where I'm aiming *now*".
+    Eight clients on one machine produce ~2000 packets/s between them, so one
+    130 ms frame overflows it. Queue is 2048 now, socket buffers 1 MB, and an
+    overflow drops the oldest.
+13. **The check compared two different sample rates.** A player publishes
+    position/aim every `IntentSendInterval` frames (30 Hz), but
+    `NetFeatureCheck` measured the *local* player's path every frame (60 Hz)
+    and compared lengths -- looked clean with one opponent (aim moves slowly),
+    fell apart with seven (aim slews several times a second, the 30 Hz
+    reconstruction cuts every corner). Fixed by sampling the local player only
+    at the instants it actually publishes.
+
+Eight clients, 150 s, one machine: 33 mismatches before both fixes, 10 after,
+none of them `facing`.
+
+## The Shock Coil did double damage against players
+
+Not a network fault. It's the one beam that stays alive and re-tests
+collision every frame, and every beam hit carries `DamageFlags.NoDmgInvuln`
+unconditionally, so the per-hit invulnerability window never applied and
+nothing else limited how often it landed. At 30 fps that was fine; this
+engine runs at 60, so it landed roughly twice as often -- ~600 dmg/s, a full
+hunter in a sixth of a second. The identical compensation already existed in
+the same file for the same weapon against *enemies* (with a `// todo: FPS
+stuff` beside it); only the player path had been missed. Now does half what
+it did before -- **not independently measured**, since the scripted tour
+barely fires the beam at a player; rests on reading the code beside its
+already-corrected twin.
+
+## Idle server cost
+
+The Pi's run loop slept 1 ms between passes whether or not anyone was
+connected -- 5-7% of one core burnt for nothing. Now sleeps 20 ms while empty.
+Six real clients on the Pi 3B: 5-22% of one core (typically 11-16%), system
+65-75% idle, 0 packets dropped.
+
+## The scoreboard's ping column
+
+Tab shows scores as always; in a networked match there's now a third column,
+from the server's per-second roster measurement, smoothed so one late
+datagram isn't a worse connection. Green under 80 ms, amber under 160, red
+above, `--` before the first measurement. A player on the same machine as the
+server reads ~20 ms, not 0 — the round trip includes the client's own frame.
+The two stock columns shift left in a networked session (`ModScoreColumn1/2`)
+to make room.
+
 ## Diagnostics available
 
 `NetDamage`: `Fired`, `AimDrift`/`WorstDrift`, `PlayerChecks`,

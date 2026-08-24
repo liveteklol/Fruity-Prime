@@ -1,19 +1,23 @@
 # CLAUDE Index
 
-This index points at the split documentation files made from CLAUDE.md.
+CLAUDE.md is the always-loaded top-level file: identity, paths, environment,
+commands, and short pointers into the topic files below. The topic files hold
+the depth — read the one you need for the area you're touching rather than
+loading everything.
 
-- CLAUDE-OVERVIEW.md
-- launcher/LAUNCHER-OVERVIEW.md
-- launcher/LAUNCHER-DESIGN.md
-- launcher/LAUNCHER-SETTINGS.md
-- launcher/LAUNCHER-FIRSTRUN.md
-- multiplayer/NETWORK-BROWSER.md
-- multiplayer/NETWORK-MATCHEND.md
-- multiplayer/NETWORK-DIAGNOSTICS.md
-- testing/TEST-HARNESS.md
-- testing/TEST-METRICS.md
-- build-deploy/BUILD-WORKFLOW.md
-- build-deploy/DEPLOY-SERVERS.md
-- build-deploy/COMMANDS.md
+- KNOWN-GAPS.md — claims not yet verified, so you don't re-prove or re-claim them
+- launcher/LAUNCHER-OVERVIEW.md — entries, platforms (incl. macOS/Android), threading
+- launcher/LAUNCHER-DESIGN.md — UI components, logo/assets, pitfalls
+- launcher/LAUNCHER-SETTINGS.md — settings window layout and toggles
+- launcher/LAUNCHER-FIRSTRUN.md — extraction flow and progress bar
+- multiplayer/NETWORK-BROWSER.md — server discovery, directory, hosting
+- multiplayer/NETWORK-MATCHEND.md — match end, rotation, the double-counted-kill bug
+- multiplayer/NETWORK-DIAGNOSTICS.md — the full damage-bug postmortem, traps, diagnostics
+- testing/TEST-HARNESS.md — netcheck/maptest, map sweeps, the world and affliction probes
+- testing/TEST-METRICS.md — reading results, common traps, last verified status
+- build-deploy/BUILD-WORKFLOW.md — CI workflows, tagging, binaries, asset guard
+- build-deploy/DEPLOY-SERVERS.md — deploy script and publish commands
 
-Usage: these files are a token-optimised split of CLAUDE.md. Keep them in .claude/ and update them as the single-source CLAUDE.md evolves.
+Usage: these are the token-optimised detail store for CLAUDE.md. Keep them
+current as the code changes; when a fact changes, fix it here rather than
+letting CLAUDE.md's summary and a topic file disagree.

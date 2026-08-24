@@ -15,8 +15,10 @@ where the name lives — nothing else should spell it out.
 | Linux game, Linux and ARM64 server | `FruityPrime` |
 
 This file exists so a fresh session can pick the work up without rediscovering
-the environment or the failure modes. Everything below has been used; nothing is
-aspirational.
+the environment or the failure modes. Everything below has been used; nothing
+is aspirational. It stays short on purpose: depth for a given area lives in
+`.claude/` (indexed in `.claude/CLAUDE-INDEX.md`) and is loaded only when that
+area is the one being touched.
 
 ## Where things are
 
@@ -53,7 +55,6 @@ export ALSOFT_DRIVERS=null PULSE_SERVER=   # else ALSA retries stall frames
   with no root, at the cost of culture-aware string handling — fine for
   building and for the server checks, not something to leave set while
   testing anything that formats text for a player.
-
 - **`MESA_GL_VERSION_OVERRIDE=4.5COMPAT` is not optional.** Without it Mesa gives
   a Core profile despite the Compatability request, every `GL.Begin` fails
   silently with `InvalidOperation`, and every frame renders black. Nothing in
@@ -85,9 +86,9 @@ export ALSOFT_DRIVERS=null PULSE_SERVER=   # else ALSA retries stall frames
 | `~/mph-net-test/run-remote.sh HOST PORT SECONDS hunter...` | the same check against a server that is not on this machine -- which is the one that matters, since eight clients on one box measure the box |
 | `~/mph-net-test/run-lag.sh MS SECONDS hunter...` | the same check against a loopback server behind `udp-lag.py`, which holds every datagram for `MS` before passing it on. A latency bug reproduced at a number you chose, rather than at whatever the internet is doing -- and the Pi answers in 7-17 ms, so it is the *worse* instrument for one |
 | `MphRead -maptest "ROOM" -players 8 -seconds 22` | load one room with a full house, drive every player, and report what the map holds and whether it survived |
-| `MphRead -maptest "ROOM" -players 8 -bots` | the same, but the other seven are **AI bots** rather than the scripted tour. A different code path -- the tour writes Controls and never touches the behaviour trees -- and the only one that finds what only PlayerAi touches |
+| `MphRead -maptest "ROOM" -players 8 -bots` | the same, but AI bots instead of the scripted tour -- a different code path, the only one that finds what only `PlayerAi` touches |
 | `MphRead -rooms` | list every multiplayer room, one per line, for a shell loop |
-| `MphRead -mechanics` | print the catalogue below, generated from the game's own tables |
+| `MphRead -mechanics` | print the catalogue in `MECHANICS.md`, generated from the game's own tables |
 | `MphRead` (no arguments, Windows or macOS) | the front screen. The Windows build is a GUI binary, so double-clicking it opens the launcher with no terminal behind it |
 | `MphRead -menu` | the console menu, for people who typed something |
 | `MphRead -launcher [-console]` | the front screen explicitly; `-console` also gives it a terminal. The same Avalonia screen on Windows, Linux and macOS, or the text one when there is no display. A bare `MphRead` on Linux still opens upstream's `-menu` prompts, unchanged |
@@ -99,922 +100,115 @@ export ALSOFT_DRIVERS=null PULSE_SERVER=   # else ALSA retries stall frames
 
 ## The launcher
 
-**One launcher, in Avalonia, on Windows, Linux and macOS.** There used to be
-two: a WinForms front screen for Windows and an Avalonia one for everything
-else. The WinForms half is gone -- `Mods/Launcher/` is now `Gui/` and
-`Portable/` and nothing else -- and with it the reason three of the launcher's
-screens existed only on Windows.
-
-`MphRead -launcher` opens a front screen, not a settings dialog: a map picture
-on the left, the things you can do on the right. Everything that is not a
-per-session choice lives in the settings window, which is one of the entries and
-is also what the pause menu opens mid-match.
+**One launcher, in Avalonia, on Windows, Linux, macOS and (front screen only)
+Android** — one thread, one toolkit setup per process
+(`GuiLauncher.EnsureSetup`), each visit a nested dispatcher loop. `-launcher`
+opens a front screen, not a settings dialog: a map picture on the left, the
+things you can do on the right.
 
 | Entry | What it does |
 |---|---|
-| Play online | name, hunter, `host` or `host:port`, and a live line saying what that server is running. **Find a server** opens the browser below. Connecting happens in the window -- "connecting", "could not join, it may be off or UDP may be blocked" -- instead of in a console nobody sees |
+| Play online | name, hunter, `host` or `host:port`, and a live line saying what that server is running. **Find a server** opens the browser |
 | Play offline | map, mode, 0-7 bots and their skill, hunter, and straight into the match |
-| Host a game | the same choices plus a port. **Runs the dedicated server in this process** and joins it over the loopback, so a hosted match has the roster, names, hunters, pings and clock a dedicated one has; friends reach it through Play online |
-| Settings | display, audio, controls, match rules, launcher preferences, features, cheats, bugfixes -- a rail of sections down the left and one page at a time on the right, the same shape as the front screen. Also reachable from the pause menu during a match |
+| Host a game | the same choices plus a port, or "online, no setup" to host through the directory with no port forwarding at all. Runs the dedicated server in this process and joins it over the loopback |
+| Settings | display, audio, controls, match rules, launcher preferences, features, cheats, bugfixes. Also reachable from the pause menu during a match |
 | Game files | where the .nds goes. Shown first, and everything else greyed out, when there is nothing set up yet |
 
-- Every control is painted by this code (`GuiTheme`, `MenuEntry`, `ChoiceRow`,
-  `SliderRow`, `KeyRow`, `SplashView`); only the text boxes and the scroll bars
-  are stock, under Fluent dark. A half-themed window reads as broken rather than
-  as a choice, and no toolkit's stock controls come out of the box looking like
-  this.
-- The picture is a map preview out of `thumbnails/`, rendered from the user's
-  own files -- no art is shipped. A `splash.png` beside the exe replaces the
-  home picture. The online card shows the map the server is on; the others show
-  the map about to be played.
-- Choices live in `launcher.txt` beside the exe (`LauncherPrefs`) and keys in
-  `controls.txt` (`InputSettings`), deliberately not in upstream's
-  `MenuSettings`, which gains fields as upstream develops.
-- The six First Hunt "biodefense chamber" rooms are left out of the map list:
-  they have no player spawn points, so a match there places nobody.
-- The launcher window has a frame, and the whole menu works from the keyboard:
-  `Escape` goes back a card and then quits, Tab walks the entries, Enter takes
-  one. An undecorated window that a given window manager will not let you move
-  is a trap, and there are many window managers. In a match `Escape` means the
-  pause menu instead.
-- **The loop is one process on one thread.** The toolkit is set up once
-  (`GuiLauncher.EnsureSetup`) on the game's own thread, and each visit to the
-  launcher is a nested dispatcher loop ended by the window closing. Avalonia
-  allows one application per process, so the previous shape -- a fresh
-  application per visit, on its own thread -- could only ever have worked for
-  the first match; macOS would not have accepted the thread either.
-- Offline matches can hold eight players. `PlayerEntity.MaxPlayers` defaults to
-  the four a DS match could hold, so the launcher raises it before creating
-  them; without that, asking for seven opponents silently produces three.
-- **A bare invocation opens the launcher on Windows and macOS**, the two
-  platforms where a program is normally started by double-clicking it. On Linux
-  it still opens upstream's console menu, which is a screen people there are
-  already using; `-launcher` asks for the window.
-- **There is no console window at all.** The Windows build is `WinExe`, so
-  Windows never gives the process a terminal; `Mods.ConsoleWindow.Prepare`
-  attaches to the parent's console when a command was typed, allocates one when
-  a command was double-clicked, and does neither for the launcher or for a
-  child process whose output is already being captured. If the game fails to
-  start, the launcher allocates one and prints the error there and in a message
-  box.
-- **Cheats are all off in a networked match**, not just the four that obviously
-  leak: `NetLaunch.DisableCheatsForMatch` walks every `public static bool` on
-  `Cheats` by reflection, so the list cannot drift, and a map rotation
-  re-asserts it. `FreeWeaponSelect` defaults to *on*, which is how a player
-  ended up with every weapon and full ammo in a match.
-- The default server is an address, not a hostname. The hostname belongs to the
-  people working on this; a copy of the launcher in somebody else's hands
-  should not follow it wherever it points next.
-
-### One launcher, four platforms
-
-`Mods/Launcher/` is two folders now:
-
-| | Where | What |
-|---|---|---|
-| `Mods/Launcher/Gui/` | every game build | the front screen, the settings window, the map grid and the pause menu, in Avalonia |
-| `Mods/Launcher/Portable/` | everywhere | preferences, game files, the launch plan, the launch itself, and the text screen |
-
-Both sit on the same `LauncherPrefs`, the same `GameFiles` and the same
-`MatchStart`. `LaunchPlan`/`LaunchKind` and `Launch`/`AddLocalPlayers` live in
-`Portable/` for that reason: the screens agree by sharing the code, not by each
-being kept correct.
-
-**What the WinForms removal cost and bought.** Deleted: `HomeForm` (1779 lines),
-`SettingsForm` (586), `PauseMenuForm`, `MapPickerForm`, `LauncherTheme`,
-`WindowChrome` and the nine painted controls under them -- about 4,600 lines,
-against roughly 1,400 added in Avalonia for the three screens that had no
-counterpart. What it bought is that those three screens now exist everywhere:
-
-| | Before | Now |
-|---|---|---|
-| Settings window | Windows only; other platforms got a card with five choices and a note saying "run `-menu`" | the same eight-section window on every platform, from the front screen and from the pause menu |
-| Pause menu | Windows only; `Escape` elsewhere did what it always did | every platform |
-| Map grid | Windows only | every platform |
-| Target frameworks | `net9.0-windows` for Windows, `net9.0` for the rest | `net9.0` for all of them |
-| Platforms published | win-x64, linux-x64, linux-arm64 | those plus osx-x64 and osx-arm64, and an Android head that compiles the whole codebase |
-
-**Three screens, one of which is text.** `-launcher` opens the window; with no
-`DISPLAY` and no `WAYLAND_DISPLAY` -- an SSH login, a container, a headless box
--- it says so and opens `TextLauncher` instead, and `-launcher -text` asks for
-that on a machine that has both. The fallback is the point: a launcher that
-cannot open a window must not be a build that will not start.
-
-**One toolkit, one thread, one process.** `GuiLauncher.EnsureSetup` stands
-Avalonia up once, on the thread that calls in -- the game's own thread, the one
-the GL context will belong to -- and each visit to the launcher is
-`Dispatcher.UIThread.PushFrame`, ended by the window's `Closed` event. Three
-things force that shape:
-
-- Avalonia allows one application per process. A second `AppBuilder.Setup`
-  throws, so the previous arrangement (a fresh application per visit, on its own
-  thread) would have fallen back to the text launcher on the way back from the
-  first match.
-- macOS accepts windows only on the main thread, which rules out the private UI
-  thread the WinForms launcher used.
-- The pause menu needs the toolkit *during* a match, on the thread the render
-  loop is running on.
-
-`GuiLauncher.Pump` is the other half: a nested frame that runs until a
-background-priority job it posted comes back, so it processes everything pending
-and returns rather than taking the thread. `PauseMenu.Poll` calls it once a
-frame while the menu is up. `Ask` calls it once after the launcher closes, and
-that one is not cosmetic: on X11 the window's destroy request sits unflushed in
-the connection's output buffer until something runs the loop again, so without
-it the launcher stayed painted on screen for the whole match. Seen, then fixed,
-then checked -- the window list is empty ten seconds into a match now.
-
-Known limits, none of them hidden from the user:
-
-- Play online, offline and host are unusable until game files are set up, and
-  both screens say so rather than failing when pressed.
-- Avalonia binds X11 client libraries the game itself does not: a system without
-  `libICE`/`libSM` gets the text launcher rather than a window. That is what the
-  fallback is for, and it is not hypothetical -- the WSL box this was built on
-  was missing both.
-
-### macOS and Android
-
-**macOS** is published like any other desktop target now (`osx-x64` and
-`osx-arm64`, cross-compiled on the Linux runner along with the rest), and the
-sound library ships with it: the OpenAL copy in the csproj is keyed on the RID
-rather than being a Windows and a Linux special case, so a mac build carries
-`libopenal.1.dylib` where it used to carry nothing at all. **Nobody has started
-one.** Both mac packages are cross-compiled and unrun; the main thing worth
-watching there is that GLFW and AppKit share a process and a main thread, which
-this arrangement is designed for and which no mac has confirmed.
-
-**Android** is `src/MphRead.Android/`, a head project that compiles the same
-sources with `ANDROID` defined and produces an APK. What runs there today is a
-front screen: who you are, the server directory's list with a live status query
-per server, and a plain statement of what is missing. What is missing is the
-match: the engine draws through OpenTK and reads input from GLFW, neither of
-which exists on Android, so a mobile renderer and touch controls are the work
-between here and playing on a phone -- not the game logic, which compiles for
-Android already and is the part this proves.
-
-That compile is the point of the project even before that work happens: every
-time the shared code grows something desktop-only, the Android head stops
-building at the commit that did it. Two things it already forced out:
-`LauncherPrefs.Directory` (an Android package's own directory is read-only, so
-the head points launcher.txt at the app's data directory), and the `ANDROID`
-guard in `GuiLauncher` (Android stands the toolkit up from its activity and has
-no desktop backend to detect).
-
-Building it needs the Android workload and an SDK:
-
-```bash
-dotnet workload install android
-dotnet build src/MphRead.Android/MphRead.Android.csproj -c Debug \
-  -p:AndroidSdkDirectory=$HOME/android-sdk
-```
-
-`EnableAvaloniaXamlCompilation=false` is set there deliberately: there is no
-XAML in this project (every screen is C#), and with AvaloniaResource items
-present the XAML compiler runs anyway and disagrees with the Android SDK about
-where it left the assembly (`obj/.../Avalonia/Avalonia/`), which fails the build
-after a clean compile. The `avares://` assets are embedded by a different target
-and are unaffected -- checked by looking for them in the built assembly.
-
-### First run is the whole screen
-
-Until there is something to play, the launcher shows the game-files card and
-nothing else: no "Back", and the menu behind it is not reachable. That menu has
-no map previews to put on the left and four of its five entries refused, which
-is a worse first impression than one screen asking for the one thing it needs.
-`_setupBack` is hidden until `GameFiles.Ready`, and the text launcher offers a
-one-entry menu for the same reason. A successful extraction switches straight to
-the full screen, which by then has previews to show.
-
-**The progress bar is milestone-driven, and the total is not known.** Upstream's
-setup walks the ROM's tree and writes as it goes; nothing counts the files
-first, and a counting pass would mean reading the cartridge twice to draw a
-nicer bar. So `SetupProgress` classifies each line the child prints into a phase
--- writing files, unpacking archives, converting music, decompressing code --
-and creeps asymptotically towards that phase's ceiling. It never goes backwards,
-never sits at 100% while work continues, and the *rate* inside a band means
-nothing: a nearly-full band only means that phase has printed a lot of lines.
-What it is good for is the thing somebody actually wants during a five-minute
-extraction, which is knowing it is alive.
-
-The console draws it over itself with a carriage return, but only when stdout is
-a terminal -- into a pipe or a log, that just makes an unreadable file.
-
-### The logo
-
-One source image, chroma-keyed and cropped into four files under
-`src/MphRead/Assets/`, all four allow-listed in `tools/asset-guard-allow.txt`
-(PNG and JPEG are otherwise banned extensions -- they are what a preview and a
-ROM asset are made of).
-
-| File | What | Used by |
-|---|---|---|
-| `fruity-prime-logo.png` | the wordmark, cherry and text together | the game-files card (`SplashView.DrawTitleCard`, `SplashPanel.DrawPlaceholder`) and the README |
-| `fruity-prime-mark.png` | the cherry alone, padded to a square | the Avalonia window icon (`GuiTheme.AppIcon`) |
-| `fruity-prime.ico`, `fruity-prime-server.ico` | the mark, and the mark with a small server badge, each as a 6-size ICO (256 down to 16) | `ApplicationIcon`, conditioned on `MphReadServer` -- the game exe and the server exe are not the same picture at a glance |
-
-The source was a JPEG with a black background and no alpha. The background is
-cut to transparent by how far each pixel's brightest channel is from black,
-ramped rather than thresholded so the anti-aliased edges around the cherry and
-the lettering stay smooth instead of jagged; pixels in that ramp are also
-**unpremultiplied** against black (divided by their own alpha) so they do not
-carry a dark fringe onto whatever they end up composited over. Skipping that
-step is the difference between a clean cutout and a faint black halo on a
-light background.
-
-**256×256 is not a choice, it is the ICO format's ceiling.** A classic ICO
-directory entry stores width and height in one byte each, with 0 meaning 256 --
-there is no way to name a larger frame, on any Windows version. The source crop
-carries real detail up to about 460 px, so the 256 px tile is a downsample, not
-an upscale: nothing here is limited by the year, only by the format.
-
-The game-files card fills its panel with plain black
-(`GuiTheme.Ink`) rather than the gradient-and-grid placeholder this used to
-draw by hand -- real artwork competing with a decorative backdrop reads as
-cluttered, and the logo's own cut background was keyed to exactly that colour
-so the two are seamless.
-
-### The settings window
-
-A rail of sections down the left -- Display, Audio, Controls, Match rules,
-Launcher, Features, Cheats, Bugfixes -- and one page at a time on the right,
-over the same painted controls as the front screen. It carries no map list:
-choosing the map is a per-session decision and belongs on the card that starts
-the match, with the picture beside it.
-
-`Gui/SettingsWindow.cs`, and **the same window on every platform**. Off Windows
-there used to be a card with five choices and a note reading "volumes,
-controls, match rules and cheats are in the console menu: run `-menu`" -- which
-is a launcher telling the person who opened it to go and type instead. The
-**Launcher** section is what that card became: name, hunter, default server,
-server directory and the update check, which live in `launcher.txt` rather than
-in `settings.json`, and which Windows could not edit anywhere before.
-
-Rows need no layout pass: Avalonia measures each one with the width its panel
-gives it. The one trap is that a `ScrollViewer`'s `Padding` is *not* taken off
-that width, so the page's inset is its own `Margin` -- with the padding, every
-wrapped note ran off the right edge of the window by exactly 26 pixels.
-
-**Saving writes the file and applies it.** For a long time it only did the
-first, and on the launcher's path nothing ever read the file back: upstream's
-only reader is `Menu.ShowMenuPrompts`, the console menu, which parses
-settings.json into private statics and hands them to the engine itself -- and
-which the launcher never runs. So the music slider moved a number in
-settings.json and left the music exactly where it was, and so did the sound
-effects volume, the language, and every match rule (point goal, time limit,
-damage level, friendly fire, hunter radar, affinity weapons). `Mods.GameSettings`
-is the missing half: `Apply` does the two volumes and the language the moment
-they change -- which is what makes the music slider work *during* a match,
-since this window also opens from the pause menu -- and `ApplyMatchRules` does
-the rest from `Renderer`, after `GameState.Setup` has chosen the mode's
-defaults and where the console menu's equivalent already sat. A server's rules
-still win: it publishes the point goal and the clock, and those are adopted a
-few frames later.
-
-Saving also cannot take the window down any more. `Commit` runs inside a
-`try`, and a failure becomes a line in the footer rather than an exception --
-which, from the pause menu, would have killed the thread the menu itself runs
-on and left a match going behind a menu that no longer answered. The two files
-beside the executable (`controls.txt`, `launcher.txt`) now catch every
-exception rather than only `IOException`: an install under Program Files raises
-`UnauthorizedAccessException`, which is not one.
-
-- **Window**: windowed, or borderless fullscreen. Borderless rather than
-  exclusive: it alt-tabs instantly and keeps the desktop resolution.
-  `Mods.WindowMode` owns it; `F11` and `Alt+Enter` switch at any time.
-  `Escape` no longer leaves fullscreen -- it opens the pause menu, which has
-  the switch as an entry. The engine hooks are four lines in `Renderer.cs`.
-- **Hunter helmet**: one switch over `Features.HelmetOpacity` **and**
-  `Features.VisorOpacity`, with a slider each behind it. The helmet is three
-  layers -- `Layer3` shell behind the readouts, `Layer2` shell in front,
-  `Layer1` visor pane over the whole view -- and clearing only `HelmetOpacity`
-  leaves the visor pane on screen with nothing behind it, which is exactly what
-  "I turned the helmet off and something is still there" was. `-nohelmet` zeroes
-  both for the same reason. `HudOpacity` is separate and stays separate: the
-  readouts are not the helmet.
-- **Controls**: mouse sensitivity, invert either axis, and every key.
-  `Mods.InputSettings` holds one canonical `PlayerControls`, writes it to
-  `controls.txt` beside the exe, and `PlayerControls.GetDefault` applies it to
-  every set the game creates. A rebind made from the pause menu also goes
-  through `ApplyToPlayers`, because `Apply` copies values into each player's own
-  `Keybind` objects and the players in a running match already have theirs.
-  Sensitivity was a `/ 4f` literal in two places in `PlayerInput` with an
-  "itodo" beside it; `1.00x` is that literal exactly.
-
-### The pause menu
-
-`Escape` during a match opens it (`Mods.PauseMenu` + `Gui.PauseMenuWindow`):
-**Resume**, **Fullscreen/Windowed**, **Settings**, **Leave match**, **Quit**.
-The cursor comes back, the player stops being driven, and a windowed game can
-be moved or resized -- which is what Escape is for in every other game and did
-not exist here. **On every platform now**; it was Windows-only for as long as it
-was WinForms.
-
-- It is a window on **the game's own thread**, and talks to the game through
-  volatile flags. GLFW window calls belong to the thread that created the
-  window, so the menu asks and `PauseMenu.Poll` does the work on the game's
-  thread the next frame.
-- The toolkit gets its slice of each frame from `GuiLauncher.Pump`, called by
-  `Poll` while the menu is up. That ties the menu's responsiveness to the frame
-  rate, which is the trade for the match carrying on behind it -- and a
-  networked match cannot be paused anyway, so watching it carry on is the honest
-  presentation.
-- `HandleEscape` calls `GuiLauncher.EnsureSetup` before opening anything: a
-  session started from a command line (`-connect`, `-room`) never opened a
-  launcher, so the first Escape is where the toolkit is first needed. A machine
-  with no display gets `false` back and Escape keeps its old meaning rather than
-  doing nothing.
-- The window centres on **the game window**, not the desktop: `HandleEscape`
-  records `ClientLocation`/`ClientSize` first.
-- **Settings** opens over the menu, not under it. Both are topmost, because the
-  game behind them may be borderless fullscreen and a menu that disappears
-  behind the window it belongs to is not a menu; the pause menu steps out of the
-  topmost band while the dialog is up so the two are not left arguing about
-  which of them is in front.
-- **Leave match** closes the window and returns to the launcher;
-  `GuiLauncher.Run` is a loop, and `Quit` is the only entry that ends the
-  program. The loop re-reads `settings.json` and `launcher.txt` each time round,
-  because the pause menu's settings window commits its own copy of both, and it
-  sets `PlayerEntity.MaxPlayers` from the bot count rather than raising it, so a
-  seven-bot match does not leave the next one at eight. A second match is
-  otherwise the same path as the first: `new Scene` calls `GameState.Reset` and
-  `PlayerEntity.Construct`, so every slot is rebuilt.
-- **How it was checked without a game window.** The WSL box this was built on
-  cannot show a GLFW window at all -- `Scene.OnRenderFrame` never returns a
-  frame, so `IsVisible` is never set, for the plain `-room` viewer as much as
-  for a match -- so the menu was driven the way the render loop drives it: set
-  the toolkit up, open the menu, call `Pump` sixty times a second, and press
-  keys at it over X11. Resume, Fullscreen, Settings, Leave match and Quit each
-  set exactly the flag `Poll` reads (`_toggleFullscreen`, `_leave`, `_quit`) and
-  each close the menu with `_refocus` set. The in-game settings window opens
-  over it and reads **Apply** rather than **Save and close**.
-
-### First run: the .nds file
-
-`Game files` is the first thing a fresh install sees, because there is nothing
-to play without it. The button opens a file picker, and the extraction is
-upstream's own (`Extract.Setup`, the same code that runs when a ROM is dragged
-onto the exe) **in a child process**: it asks its questions and reports its
-errors on a console, with `Console.ReadKey` waits that would hang a window that
-has none. The child gets its answers on stdin and its output comes back as text
-on the card.
-
-Two consequences worth knowing:
-
-- `-launcher` is dispatched **before** upstream's `CheckSetup`, in
-  `ModEntry.TryHandleHeadless`. It has to be: that check exits with "press any
-  key" when paths.txt is missing, on a console nobody is looking at, so a fresh
-  install could never reach the screen that fixes it. The launcher does the
-  `Paths.UpdatePaths / ChooseMphPath / ChooseFhPath` work itself
-  (`GameFiles.ApplyPaths`).
-- `GameFiles.Problem()` is what the rest of the screen keys off: no paths.txt,
-  a paths.txt from an older extract version, or a path pointing at a directory
-  that is no longer there.
-
-### Asking a server what it is running
-
-`PacketType.StatusQuery` / `StatusReply` (`NetStatus`) answers "what map, what
-mode, how many players" **without claiming a slot**, which is what lets the
-front screen poll it every few seconds while somebody reads the screen. A
-server built before that packet ignores it, so the launcher falls back to a
-Hello/Bye join probe: that one does take a slot, is refused outright by a full
-server, and counts itself among the players (`NetStatus` subtracts it), so it
-is used only until the cheap path answers once, and then rarely. **Redeploy the
-server** after taking this build to get the cheap path.
-
-### The server browser and the directory
-
-Until this existed, playing online meant already knowing an address, which is
-the one thing a new player does not have. **Find a server** on the online card
-opens a list.
-
-**Play online opens the list, not a form.** The address is the one thing a new
-player cannot invent, so it is the first question: the list, with a field on it
-for an address somebody was handed directly, and only then the card with the
-name and the hunter. Back goes to whichever card opened it, and *Change server*
-on the online card goes back to it.
-
-It is a **card on the front screen**, not a window over it -- the same shape as
-Play online, Host a game and Game files, with its own scrolling list sized by
-the same spacer arithmetic (`LayoutSpacer(_browseCard, _serverList, 1f)`: a
-scrolling list is a spacer that happens to have things in it). It began as a
-separate `Form` and that was the wrong call twice over: a popup over a launcher
-that is itself a custom-painted window reads as a different program, and a
-`Form` is the one thing in this codebase that cannot be exercised from a
-headless machine.
-
-**A hosted game can be listed too.** *Host a game* runs the dedicated server in
-the player's own process, so there is no reason it cannot be found the same way
--- but it is somebody's home machine, and being listed publishes its address.
-So it is a switch on the card (`ListHostedGame`), on by default because a game
-nobody can find is a game nobody joins, and the server is named after the host
-rather than after their PC.
-
-### Hosting without opening a port
-
-Being listed is not being reachable. A server on a home PC needs UDP forwarded
-to it from the router, and most people cannot or will not do that -- which made
-*Host a game* a feature that worked on a LAN and nowhere else.
-
-The fix is the one Age of Empires II: DE uses and it is not NAT traversal:
-**the match runs somewhere reachable and the host joins it by connecting out**,
-like everybody else. That fits this engine exactly, because its netcode is
-already "everyone connects to one relay" -- so putting the relay somewhere with
-an open port is the whole of the work.
-
-| Piece | What |
-|---|---|
-| `HostRequest` / `HostReply` | launcher -> directory: room, mode, time limit, point goal, cap, name. The directory starts an ordinary `DedicatedServer` on a port from its range and answers with the port |
-| `-hostports 27900-27919` on the directory | the range it may use, one port per game. Default on: a feature that has to be configured to work is a feature nobody has. `-hostports none` turns it off |
-| `Run it: Online, no setup / On this PC` | the choice on the host card. The first is the default, and hides the port and listing rows -- there is no port to choose and being findable is the point |
-| `MphRead -hostgame "ROOM" [-mode M]` | the same thing from a command line, which is the only way to host from a machine with no launcher |
-| `HostedIdleSeconds` (180) | a game nobody joined is shut down and its port handed back. Generous, because the usual reason one is empty is that the person who asked for it is still loading the map |
-
-The resulting server is *ordinary* in every respect: it registers itself in the
-listing, answers status queries, runs its own single-map rotation, and is
-joined by a client that has no idea it was started this way. That is what makes
-this cheap -- there is no relay framing, no punching, no new transport path,
-and **no client change at all**. The client sees a server at an address.
-
-Hole punching was the other candidate and is what a peer-to-peer game would
-have to do. It was not worth it here: it needs a rendezvous protocol, it needs
-a relay fallback anyway, and it has a failure mode for every symmetric NAT.
-This has none.
-
-Measured end to end on one machine: `-hostgame "MP6 HEADSHOT"` asked the
-directory, got port 27900, joined it, became the authority and loaded the room;
-the directory listed it as `Livetek's game ... MP6 HEADSHOT Battle 1/8`; and a
-second client joined it as slot 1 with no special handling.
-
-| Piece | What |
-|---|---|
-| `MphRead -masterserver` (`Network/NetMaster.cs`) | the directory. Servers announce themselves every 15 s, entries expire after 50 s of silence, and a `MasterQuery` gets the list back in as many datagrams as it takes. It relays no gameplay, stores nothing, and shares a box with the server it lists |
-| `MphRead -servers [-master HOST]` | the same list, printed. Makes the two calls the browser makes and formats the same fields, which is how that data path is exercised on a machine with no display |
-| `MasterReporter` | the server's end. One datagram every 15 s. Every failure is swallowed and retried -- a directory being down must never touch a match -- and the first one prints a line so an operator who expected to be listed can see why they are not |
-| `ServerBrowserForm` | the list. Rows come from the directory and are then **confirmed by this machine**: one `StatusQuery` each, which answers map, mode, head count and round trip in a single exchange, and which fails for exactly the servers this player could not have joined anyway. Rows appear as they answer, sorted by players and then by latency |
-
-Two decisions worth keeping:
-
-- **The address in the list is the one the heartbeat arrived from**, not the
-  one the server believes it has. A server behind a router knows only its
-  private address, and a directory full of `192.168` entries is a list of
-  servers nobody can reach. The port is taken from the heartbeat, because the
-  source port of a datagram is not necessarily the one it listens on.
-- **Latency is measured by the launcher, not reported by the directory.** The
-  master could only ever report its own round trip to each server, which is
-  not the number the person reading the screen cares about.
-
-`net.livetek.fr:27889` is the default, in `NetMasterConfig`. A hostname rather
-than an address -- deliberately unlike the default *game* server, which is an
-address on purpose -- because a directory has to be able to move without a new
-build reaching every server operator. **That name still does not resolve.**
-Until it does, both ends are pointed at the Pi's other name: the launcher
-through `master_host=france-mining.com` in `launcher.txt`, and the server
-through `-master 127.0.0.1`, since the directory shares its box.
-
-`tools/systemd/mphread-master.service` is the unit; `deploy-server.sh` installs
-both it and the game server's, filling in the user and directory, and **leaves
-an existing unit alone** on later deploys -- so the two options added on the Pi
-by hand (`-master 127.0.0.1` on the server, `-public france-mining.com` on the
-directory) survive a redeploy and are not in the templates.
-
-Two things had to be true before anything appeared in a list, and neither is
-visible from the code:
-
-- **`-public` on the directory.** The address in a listing is the one the
-  heartbeat arrived from, which is right for a server behind a router and
-  exactly wrong for the server sharing a box with the directory: that
-  heartbeat arrives from `127.0.0.1`, and a list of loopback addresses sends
-  every player to their own machine. `-public france-mining.com` is the
-  directory being told, once, what to publish for anything registering from
-  the loopback or a private range.
-- **UDP 27889 through the firewall.** `ufw` on the Pi allowed 27888 and
-  nothing else, so the game server answered from outside while the directory
-  timed out -- which looks exactly like a directory that is not running.
-  Check `sudo ufw status | grep 2788` before believing anything else.
-- **Being listed and being reachable are different things.** A server behind a
-  home router registers perfectly -- the directory records the public address
-  the heartbeat arrived from -- and is then unjoinable by anybody, because
-  nothing forwards UDP 27888 to it. Measured from here: a server on this
-  machine appeared as `Livetek local test 89.160.128.233`, answered a status
-  query on `127.0.0.1`, and timed out on its own public address. The browser
-  shows exactly that, as a red row reading "did not answer", which is the
-  honest answer and the one that points at the router.
-
-**`ServerStatus` and `MasterListing` return "" rather than null**, through
-backing fields. They are structs, so `default` is an ordinary value of them --
-the browser holds one for every row it has not probed yet -- and plain
-auto-properties handed those rows a null to call `.Length` on. That crashed the
-window on the first row of the first list anybody opened, which none of the
-headless checks could have caught: nothing outside the browser ever constructs a
-`ServerStatus` it has not filled in. `-servers` exists partly so that the rest
-of that path is checkable without a Windows box.
-
-### Ending a match, and the next map
-
-A match that somebody wins used to end the session. `GameState.ProcessFrame`
-runs the winner's camera, then the scoreboard, then fades to black with
-`AfterFade.Exit` -- correct offline, and on a server it meant every client
-dropped back to its own launcher, so a match ending scattered the people
-playing it. The server, meanwhile, had never heard that anybody won: its
-rotation only knew about the clock, so it kept counting down a map nobody was
-still playing.
-
-| Piece | What |
-|---|---|
-| `NetMatchEnd` | on the authority, sends `PacketType.MatchEnd` when `GameState.MatchState` leaves `InProgress`, repeating until the server's own state comes back with `FlagEnding`. On every client, a server that says `FlagEnding` while this one still thinks the match is running sets `MatchTime = 0`, so the results play out normally rather than being cut to |
-| `DedicatedServer` intermission | both endings -- the clock and the score -- now enter the same 9-second intermission before `AdvanceMap`. That is the client's own sequence (3 s of the winner's camera, 5 s of the scoreboard) plus a second, so the fade to black belongs to the rotation rather than cutting the results short |
-| `MatchStatePacket.MatchId` | counts matches from the server's start. The room key cannot answer "is this a new match": a rotation one map long -- which is what **Host a game** builds -- plays the same room over and over, and a client watching only the name sat on its results screen for the rest of the session. `NetRoomChange` keys on this instead, so the same room simply loads again, which is a clean restart: every slot rebuilt, every score zeroed |
-| `MatchStatePacket.PointGoal` | the score that wins, from the rotation file. It decides when a match ends, so it belongs to the server for the same reason the clock does |
-
-Two things this needed underneath it:
-
-- **`NetMatchSync` must not adopt the clock during the results.** `MatchTime` is
-  the countdown the results sequence itself runs on, so putting the old map's
-  remaining time back on top of it every frame meant the sequence never
-  finished.
-- **The authority must stop reporting once the server has heard.** A client
-  stays in its results for a second or two after the server has rotated, and
-  during that window its match state still says "not in progress" while the
-  server's has stopped saying "ending" -- so the authority reported the end of
-  the *new* match the instant the rotation landed and the server ended it. One
-  whole map skipped per rotation, visible in the server log as two `match over`
-  lines in the same second.
+Gotchas worth keeping in view without opening another file:
+
+- **Cheats are all off in a networked match**, not just the obviously leaky
+  ones: `NetLaunch.DisableCheatsForMatch` walks every `public static bool` on
+  `Cheats` by reflection, so the list can't drift.
+- **There is no console window at all** on the Windows build (`WinExe`).
+  `Mods.ConsoleWindow.Prepare` attaches to a parent console when a command was
+  typed, allocates one when double-clicked, and does neither for the launcher.
+- **A bare invocation opens the launcher on Windows and macOS**; on Linux it
+  still opens upstream's console menu, since that's a screen people there
+  already use — `-launcher` asks for the window there too.
+- Offline matches can hold eight players; `PlayerEntity.MaxPlayers` defaults
+  to four (a DS match's cap), so the launcher raises it before creating
+  players or asking for seven opponents silently produces three.
+- `PacketType.StatusQuery` answers "what map, what mode, how many players"
+  without claiming a slot, which is what lets the browser poll idly. A server
+  built before it falls back to a slot-taking Hello/Bye probe — redeploy the
+  server to get the cheap path. Full account, plus the directory and hosting
+  design: `.claude/multiplayer/NETWORK-BROWSER.md`.
+
+Deep dive (UI components, settings window, first-run/extraction, macOS/Android):
+`.claude/launcher/LAUNCHER-OVERVIEW.md`, `LAUNCHER-DESIGN.md`,
+`LAUNCHER-SETTINGS.md`, `LAUNCHER-FIRSTRUN.md`.
 
 ## Updating
 
 `Mods/Update/`. The program checks GitHub for a newer release on its own, says
-so, and **installs nothing**. "Update now" opens the release page; the download
-and the unpacking are the player's.
-
-**Why it checks by itself but does not install.** `NetConfig.ProtocolVersion`
-makes a server refuse a client on a different build outright, at Hello. So a
-copy one release behind is not slightly worse, it is one that cannot join
-anything -- and working that out from a failed connection is a bad afternoon.
-That is the part worth automating, and it costs a read of one JSON document
-that cannot alter anything on disk. Installing automatically is the other half,
-and it means downloading a file and executing it: there is no signing here, so
-the guarantee would only ever have been "TLS, and GitHub was not compromised".
-Not doing it is better than doing it carefully.
-
-**What the check is:**
-
-- **A local build is never told anything.** The release workflow stamps the tag
-  into the assembly (`-p:Version=`); a build without that stamp reports itself
-  `a local build` and the check stands down, because there is no way to tell
-  whether it is ahead of the release or behind it. `BuildVersion` also refuses
-  the `1.0.0` the SDK invents when nothing was asked for, since it cannot be
-  told from a real v1.0.0.
-- **The asset is a hint, not a fetch.** It is matched on runtime identifier and
-  on whether this is a server build, so the screen can say *which* of the four
-  files on the page is yours. A release whose names do not match is still
-  announced -- the person going to the page can see what is actually on it.
-- **404 is not an error.** A repository that has never published a release
-  answers that way, and it is reported as "no releases have been published yet"
-  rather than as a network problem; so is rate limiting, which anonymous calls
-  hit by IP.
-
-**Where it appears:**
+so, and **installs nothing** — "Update now" opens the release page; download
+and unpacking are the player's. It checks by itself because
+`NetConfig.ProtocolVersion` makes a server refuse a client on a different
+build outright at Hello, so a copy one release behind can't join anything, and
+that's worth automating; it does not install because that means downloading
+and executing a file with no signing behind it, so the guarantee would only
+ever be "TLS, and GitHub was not compromised" — not doing it is better than
+doing it carefully.
 
 | | When it checks | What "update now" does |
 |---|---|---|
-| Launcher window | in the background once the window is up | opens the release page; if there is no browser, puts the address on the badge |
-| Text launcher | at startup, waiting up to 2 s | prints the address, and opens a browser if there is one |
+| Launcher window | in the background once the window is up | opens the release page; badge shows the address if there's no browser |
+| Text launcher | at startup, waiting up to 2 s | prints the address, opens a browser if there is one |
 | `-update` | when asked | prints the address and opens it |
-| Server and directory | at startup, before binding | nothing -- it logs one line saying it is behind and keeps running |
+| Server and directory | at startup, before binding | nothing — logs one line, keeps running (a server has no one at the keyboard to decide, and replacing its binary mid-match drops whoever is playing) |
 
-In the window it is a badge in the bottom-left corner of the picture
-(`UpdateBadge`), not an entry in the menu. Updating is not one of the things you
-opened the launcher to do, so it does not belong in the list of them -- and the
-menu is a card that gets swapped out, which meant a fresh install, sitting on
-the game-files card where an out-of-date copy is most likely to be, never saw
-the notice at all. The picture is behind every card. `SplashView.BottomInset`
-is how the map caption moves up out of its way.
-
-The text launcher waits because it prints its menu once and then blocks on a
-keypress: a check that lands afterwards has no line to appear on until the menu
-is drawn again. The window has no such problem and never blocks on GitHub.
-
-A server is told, not acted on. Nothing there has a person at the keyboard to
-decide, and replacing a server's binary would drop whoever was playing --
-which is the audience the whole feature exists for. `launcher.txt` carries
-`auto_update`, on by default; `-noupdate` turns it off anywhere.
+`launcher.txt` carries `auto_update`, on by default; `-noupdate` turns it off
+anywhere. A local build without the release workflow's version stamp reports
+itself `a local build` and stands down, since there's no way to tell it apart
+from a release either ahead or behind.
 
 ## The test method
 
 The failure that matters here is invisible from one side: two clients can be
 perfectly connected — right slots, agreed clock — while each holds a scene
-containing only itself. So:
-
-1. **`-netcheck` runs the real client.** Real `Scene.OnUpdateFrame`, real
-   `PlayerEntity` simulation, real net hooks, in a hidden window. Harnesses that
-   drove hand-built packets, or pumped the network without stepping the engine,
-   stayed green while the shipping client could not put two players in one match.
-2. **`NetTestScript` replaces the AI with a fixed tour** of 15 phases (idle,
-   walk, jump, turn, shoot, weapon switch, charge, morph A/B, alt attack A/B,
-   unmorph, zoom, afflict, duel), keyed to the **server's clock** so every
-   client is in the same phase at the same moment. The afflict phase hands each
-   hunter its own weapon (`ModArmAffinityWeapon`) before duelling, because
-   freeze, burn and disrupt exist only on the affinity version of a weapon and
-   a tour that waited to walk over the right pickup never reached them. Half the players morph while the other
-   half shoot at them, then they swap — that is how "can a morphed player be
-   hit" gets an answer.
-3. **Every client records what it *did* and what it *saw*.** That is what makes
-   a failure attributable: "I never saw them fire" means nothing if they never
-   fired.
-4. **`compare-reports.py` cross-checks the reports.** What each client says it
-   did must show up as what every other client says it saw, normalised by how
-   long each side actually watched. This is the strict check — no single client
-   can judge "they never switched weapons", because only their own client knows
-   whether they did.
+containing only itself. `-netcheck` runs the **real client** (real
+`Scene.OnUpdateFrame`, real `PlayerEntity` simulation, real net hooks, hidden
+window) driven by `NetTestScript`'s fixed 15-phase tour, keyed to the
+**server's** clock so every client is in the same phase at once. Every client
+records what it *did* and what it *saw*; `compare-reports.py` cross-checks
+that what one claims to have done shows up as what every other client says it
+saw.
 
 ```bash
 cd ~/mph-net-test
 ./run-check.sh 150 Samus Weavel Sylux Trace Samus Noxus   # seconds, then hunters
 ```
 
-Read the output in this order: the per-feature `MISMATCH` lines, then
+Read the output in this order: per-feature `MISMATCH` lines, then
 `scoreboards agree`, then `damage pipeline`, then `remote position snaps`.
 
-### The scoreboard's ping column
-
-Tab shows it, as it always did; in a networked match there is now a third
-column. The numbers are the server's measurement of each peer, carried in the
-roster it already broadcasts every second, smoothed so one late datagram is not
-a worse connection. Green under 80 ms, amber under 160, red above, `--` before
-the first measurement lands.
-
-Two things to expect. A player on the same machine as the server reads ~20 ms
-rather than 0: the round trip includes the client's own frame, since a client
-answers the ping when it next pumps the session. And the two stock columns move
-left when a session is active (`ModScoreColumn1/2`) -- "deaths" is six
-characters at eight pixels and ends at x=239 on a 256-wide screen, so there is
-no room for a third column otherwise.
-
-### Sweeping every map
-
-`-netcheck` needs a server and several processes; the map audit needs neither.
-It loads one room with eight players -- a different hunter per slot, so one run
-covers several alt forms and affinity weapons -- drives all of them through the
-same tour, and prints an inventory of what the room contains.
-
-```bash
-cd ~/mph-net-test
-./run-maps.sh 8 22          # players, seconds per map; ~15 minutes for 33 rooms
-grep MAPCRASH maps3.log     # a crash is a crash a real match would have had
-grep MAPFAIL  maps3.log
-```
-
-A line reads:
-
-```
-MAPTEST MP14 OUTER REACH | players 8 | frames 734 | spawned 8/8 | alt form 3/8
-  | fired 7/8 | deaths 7 | afflicted freeze 0 burn 1 disrupt 0 | spawnpoints 4
-  | jumppads 7 (7/7 launched) teleporters 0 (0/0 moved) doors 0 ...
-```
-
-`spawned 8/8` with `spawnpoints 4` is the interesting one: the maps were drawn
-for four players and the spawn fallback is what lets eight in.
-
-**The world probe.** Counting jump pads answers whether a map contains one, not
-whether it works, and driving players around and hoping they step on one is
-luck. After the tour ends, the audit stands a player on every jump pad and
-teleporter in the room in turn -- `player.Teleport` into it, hold it still for
-twelve frames, watch for the event -- and reports what fired. "Into it" is the
-part that took three tries to get right: a trigger volume is positioned
-relative to its entity, and several pads carry theirs beside or above the
-model, so standing at the entity's own position stands the player next to the
-box. The probe aims at the volume's centre (`JumpPadEntity.ModVolume`), and a
-pad that stays silent is tried twice more -- higher, then in alt form, in case
-it is one of the ones flagged to ignore bipeds -- before it is called silent.
-Three of MP6 HEADSHOT's eight pads were reported dead for a fortnight's worth
-of sweeps on the strength of the first mistake; all eight fire. The engine says so
-itself: `Mods.WorldEvents` is called from `JumpPadEntity` and `TeleporterEntity`
-at the moment they act on a player, and is inert unless a test turns it on. A
-map where *every* pad stays silent is a `MAPFAIL`; one silent pad is not, since
-some are meant to be dropped onto from above.
-
-**The affliction probe.** Freeze, burn and disrupt are the states the tour could
-never reach. Three things had to be true at once, and each was false:
-
-1. *The hunter has to be holding its own weapon.* Those states exist only on the
-   affinity entry of a weapon (`beam + 9`), which in a match is picked up, not
-   issued. `ModArmAffinityWeapon` issues it.
-2. *The shot has to be charged.* Every affliction in the game sits on the
-   **charged** entry of its weapon's affliction pair, and a weapon without the
-   `PartialCharge` flag only counts as charged at `FullCharge * 2` -- 120 frames
-   of holding for the Judicator. A probe that held for 64 frames fired hit after
-   hit that could never freeze anybody. The probe now holds until the weapon
-   itself says it is charged (`ModChargeReady`) and then lets go.
-3. *Letting go has to reach the engine.* `NetTestScript` computed press and
-   release edges inside every `Hold` call, so a phase that cleared all the
-   buttons and then set one to the same value wiped the edge the clear had
-   produced. A charged weapon fires **on release**, so scripted players charged
-   and never fired: the charge phase produced nothing, and neither did the
-   afflictions. Edges are now worked out once, at the end of the frame, from
-   the state at the start of it.
-
-The probe stands the one hunter that can inflict each state two units in front
-of somebody, arms it, charges, fires, and watches for the state. Everybody else
-stands down for the duration, so the victim's health is evidence about our shot
-rather than about the six players who were duelling around it. It reports `ok`,
-`nohit` (the charged shot went out and missed), `FAIL` (it hit and the state did
-not follow) or `n/a` (that hunter is not in this match). `-netdebug` prints what
-each probe saw: the weapon, the peak charge, and what afflictions its shots
-actually carried.
-
-This is how the slot-capacity work was finished. Raising `SlotCapacity` to 8 is
-not one constant: **every array indexed by a player slot has to grow with it**,
-and the ones that do not are invisible until a ninth-slot index hits them.
-Found this way, each as a crash on a specific map:
-
-| Array | Crashed in |
-|---|---|
-| `GameState.BeamKills[4, 9]` | at startup with five players |
-| `TeleporterEntity._triggeredSlots` | any map with a teleporter |
-| `AreaVolumeEntity._triggeredSlots`, `_cooldownSlots`, `_prioritySlots` | any map with area volumes (MP6, MP8) |
-| `PlayerAi._slotHits`, `_slotDamage`, `captureList` | with bots |
-| `PlayerAi._playerVisibility` (`bool[4,4]`) | the first bot to look for a target, with five players |
-| `PlayerAi._globalObjs` (four `AiGlobals`) | the fifth bot to pick a destination, with eight players |
-
-If you raise the capacity again, grep for `[4]` and for `[player.SlotIndex]`
-before trusting it.
-
-The two `PlayerAi` entries above are the ones the scripted tour could never
-find: it writes `Controls` directly and never runs a behaviour tree, so a
-crash that only bots reach was invisible to every sweep. `-maptest -bots` runs
-the same rooms with the AI driving, which is the path the launcher's offline
-match uses. Thirty-three rooms, eight bots each: no crashes.
-
-### What the numbers mean
-
-| Line | Reads as |
-|---|---|
-| `damage pipeline (resolved here / replayed here)` | the two ends of the damage path. The authority shows `N/0`, everyone else `0/N`. They must match: a shortfall means hits were resolved and never reached the victim |
-| `remote position snaps` | visible teleports. Smoothed catch-up is invisible; a snap is not. Healthy is 0-3 per client per 100 s, and the worst ones are respawns. **A run with rotations in it is not comparable**: clients do not finish loading at the same instant, and for about a second some peers are still reporting positions in the room this one has left. `NetRoomChange.Settling` now ignores peer-reported positions for that second -- the authority's snapshot places everybody meanwhile -- but the figure still climbs across a rotation |
-| `late=N` in the packets line | snapshots that arrived after a newer one and were refused. Not loss: these are reordered, and applying them ran health, score and the damage counter backwards |
-| `scoreboards agree (within N event)` | N > 1 means the clients are keeping different scores. Clients stop a few seconds apart, so one event of difference is timing |
-| `form disagreed ... longest run` | one morph animation's worth is normal and desirable. A long run means a puppet is stuck in the wrong form |
-| `FAIL: no beam can hurt these players` | `BeamEffectiveness` is all-Zero — the player is literally invulnerable. See the spawn section of the catalogue |
-| `untested` | the feature was never performed, so nothing is being claimed. Not a pass |
-| `dropped=N` in the packets line | this client could not keep up with what it was sent. Non-zero here reads on *other* clients' reports as "they never saw me turn" |
-| `pings: slot 0 12 ms ...` | what the server measured for each slot, which is what the scoreboard draws |
-| `alt-attack` | rising edges on the alt attack button, on both sides. Separates "the press never arrived" from "it arrived and laid no bomb" |
-| `jumppads 7 (7/7 launched)` | seven in the room, seven tried, seven launched the player standing on them |
-| `afflicted freeze 1 burn 2 disrupt 0` | how many players were frozen, set on fire or disrupted at least once during the run |
-| `(probe freeze ok burn nohit disrupt FAIL)` | the affliction probe: `ok` inflicted it, `nohit` the charged shot missed, `FAIL` it hit and the state did not follow, `n/a` that hunter was not in the match |
-
-### Traps this harness has already fallen into
-
-- Comparing raw totals when clients joined at different times, or after a
-  rotation reset the counters. Normalise by observed time.
-- Judging a Sylux against a Weavel's abilities: only three hunters lay bombs and
-  only Weavel leaves a halfturret.
-- Reporting about one remote player when there are five.
-- Counting a respawn as a teleport, and a smoothed catch-up as a jump.
-- A tolerance of 1.0 silently turns a check into decoration. If a check stops
-  failing, make sure it can still fail.
-- Writing a button twice in one frame. The script clears every control and then
-  sets the ones a phase wants; when the edges were computed inside each write,
-  setting a button to the value the clear had just given it wiped the edge. A
-  charged weapon fires on release, so nothing charged ever fired.
-- Measuring a 60 Hz path against a 30 Hz reconstruction of it. See the gap
-  section below: it looked exactly like packet loss for months.
-- Assuming a hit is a hit. Afflictions ride on the *charged* shot only, and a
-  weapon without the `PartialCharge` flag is not charged until `FullCharge * 2`
-  frames of holding.
-- Standing at an entity's position and expecting its trigger to notice. The
-  volume is placed relative to the entity, not on it.
-- Replaying an authoritative event through the engine's own code path and
-  forgetting that the path also *records* the event. `NetDamage.Replay` calls
-  `TakeDamage` for the feedback and got the scoreboard as well, on top of the
-  authority's figures it had just applied -- one frame of a score one too
-  high, which is one frame more than `EndIfPointGoalReached` needs.
-- Reading one client's column of a cross-check as a defect before checking the
-  others. A number that is low for *every* observer is systematic -- a rate, a
-  sampling difference, a collapsed edge; a number that is low for one is that
-  client's own story, usually that it joined late and missed a burst.
-- Reading `damage pipeline` as a pass because the two ends are both non-zero.
-  `25/0` against `0/258` is not a healthy pipeline with noise on it; a byte
-  counter that has run backwards reads as almost a full wrap forwards, and the
-  three-digit number is the tell.
-- Testing a rotation with a rotation that has more than one map in it. A
-  server hosting a single map plays the same room over and over, and every
-  bug about "is this a new match" hides in exactly that case. Test both --
-  `maprotation-test.txt` (three maps) and `maprotation-one.txt` (one) in
-  `~/mph-net-test/bin/`, both with a two-point goal so a match ends inside a
-  test run.
+Map sweeps (`-maptest`, `-maptest -bots`), the world/affliction probes, how to
+read every metric the harness prints, and the traps that have already cost
+time: `.claude/testing/TEST-HARNESS.md` and `.claude/testing/TEST-METRICS.md`
+(the latter also carries the last verified pass/fail status).
 
 ## Building and releasing
 
-| Workflow | When | What |
-|---|---|---|
-| `.github/workflows/build.yml` | every push and pull request | publishes `win-x64`, `linux-x64`, `linux-x64-server`, `linux-arm64`, `osx-x64` and `osx-arm64` on one Ubuntu runner — every target is `net9.0` now, so nothing needs a runner of its own — and uploads each as an artifact. A second job on a **Windows** runner builds the Windows dedicated server and starts it there |
-| `.github/workflows/release.yml` | a `v*` tag, or by hand | those six plus the Windows server: seven packages, attached to a GitHub release |
+`.github/workflows/build.yml` publishes `win-x64`, `linux-x64`,
+`linux-x64-server`, `linux-arm64`, `osx-x64` and `osx-arm64` on every push and
+PR; `release.yml` publishes those six plus the Windows server (seven packages)
+on a pushed `v*` tag:
 
-**A release needs a real, pushed tag before it needs anything else.**
-
-```
+```bash
 git tag v0.36.0 && git push origin v0.36.0
 ```
 
-triggers it directly. Running it by hand from the Actions tab instead needs the
-tag to already exist for the same reason: the workflow's first step now
-resolves and verifies it with `gh api .../git/ref/tags/$TAG` -- prefixing a
-bare number with `v` if it was typed without one, since every tag here follows
-that convention -- and fails with one clear line if nothing matches, rather
-than handing that straight to `actions/checkout`. It used to: typing `0.36.0`
-into the dispatch box for a tag that was never pushed produced three retries of
-`git fetch ... +refs/heads/0.36.0*:refs/remotes/origin/0.36.0* ...` and a bare
-`exit code 1`, with nothing in the log saying the tag simply did not exist.
-
-The tag comes from `github.event.inputs.tag || github.ref_name`, an
-expressions-engine `||` evaluated before bash ever runs — not a bash
-`${GITHUB_REF_NAME:-...}` fallback. `GITHUB_REF_NAME` is *always* set, and for
-a dispatch run it is whichever branch was picked to run the workflow from
-("master", almost always), not the typed tag; a bash fallback on it never
-reaches the input at all, and silently rebuilds whatever branch the dropdown
-defaulted to instead of failing loudly. Hit once already: a run dispatched
-with nothing typed resolved to `vmaster` and correctly refused to find it.
-
-**The repository was renamed** from `liveteklol/MphRead` to
-`liveteklol/Fruity-Prime`, matching the project. `Mods/Branding.cs.Repository`
-is the current name -- GitHub's old-slug redirect covers `gh`/API calls made
-against the old one, but a redirect is not a guarantee, and the update checker
-should not depend on one lapsing exactly when it is least convenient.
-
-**Two Windows executables, and the difference is one field in the PE header.**
-`FruityPrime.exe` is `WinExe`, so double-clicking it opens the launcher with no
-terminal behind it. That same property makes it useless as a server: Windows
-bakes the subsystem in at link time, so cmd and PowerShell do not wait for it,
-its exit code never reaches `%ERRORLEVEL%`, and a service supervisor cannot tell
-whether it is still up. `dotnet publish -r win-x64 -p:MphReadServer=true`
-publishes the same sources with the launcher left out and a console header, as
-`FruityPrimeServer.exe` — which is exactly the Linux server build with a
-Windows RID on it. `tools/check-subsystem.sh gui|console <exe>` asserts each
-one, in both workflows, because it comes out of a csproj condition and nothing
-else would notice it changing.
-
-**`-p:MphReadServer=true` is the server package**, and it is published three
-times: `win-x64-server`, `linux-x64-server` and `linux-arm64`. Every platform
-gets both a game build and a server build, the same way Windows always has —
-the Pi is a server-only machine and the plain x64 one exists for a VPS or a
-spare desktop nobody plays on. Each leaves out the launcher of either kind and
-the UI toolkit behind it, and defines `MPHREAD_SERVER`, which is a different
-question from "has no launcher": a game build without a display has no window
-either and is still a game. That define is what makes a bare invocation print
-what the binary is for, rather than falling through to upstream's setup check
-and answering a server that ships without game files with "could not find
-paths.txt, drag a ROM onto the executable". Double-clicked on Windows it waits
-for a key before the window closes; `ConsoleWindow.OwnsItsConsole` is how it
-tells that from a shell.
-
-**Only the Windows server is renamed.** The subsystem does not exist off
-Windows, and both Linux server packages hold exactly one binary each, so they
-keep the plain name `FruityPrime` — same as the game build. The Pi's own
-deploy path (`deploy-server.sh`, below) is a separate thing from what this
-workflow publishes: it also targets the name `FruityPrime` now, and carries a
-migration for a box whose systemd unit still points at the project's old name,
-`MphRead`. Dropping the toolkit took the ARM64 download from 104 MB to 86 MB.
-
-**Both x64 Linux builds are started on the release runner**, because it is x64
-and can actually run them: the game build's server capability and the
-standalone server package. The Windows server gets the same proof on a Windows
-runner. The ARM64 package is cross-compiled and never started by CI at all —
-the Pi itself, through `deploy-server.sh`, is the only thing that has ever run
-it.
-
-`tools/check-dedicated-server.sh` runs on Windows too, in Git Bash, rather than
-being translated into PowerShell that would then have to be kept in step. Three
-things differ there and each is handled where it happens: the binary is
-`MphReadServer.exe`, `python3` may only be `python`, and a path the script makes
-has to go through `cygpath` before a .NET process reads it as anything but a path
-on the current drive.
-
-**The dedicated server is started, not just compiled.**
-`tools/check-no-game-assets.sh` proves what is *not* in a build; the linux-x64
-job now also runs `tools/check-dedicated-server.sh publish/linux-x64`, which
-starts a server and a directory out of that build, waits for the server to
-register itself, and asks each of them a question a player depends on. A
-compile says nothing about whether the server still starts on a machine with no
-game data, no display and no sound device -- and that is the machine it is
-for. The release workflow runs the same check before it tags anything.
-
-**No Nintendo asset is ever published.** `tools/check-no-game-assets.sh` runs
-twice in each workflow: once over what git is tracking, once over what the
-build produced. It refuses game-file extensions, the directories extraction and
-the preview cache write into (`thumbnails/`, `files/`, `_archives/`,
-`Savedata/`, `netcheck-shots/`, `paths.txt`, `netlog-*.txt`), and -- for
-tracked files only -- anything over 2 MB, on the grounds that nothing that big
-is source. Map previews are the easy mistake: they are rendered locally and
-look like ordinary screenshots. Something of ours that trips it (a logo, a
-screenshot of the launcher) goes in `tools/asset-guard-allow.txt`; nothing is
-exempt by default. Run it locally before pushing:
+`tools/check-no-game-assets.sh` (no Nintendo asset ever published) and
+`tools/check-dedicated-server.sh` (the server actually starts) both run in CI
+and are worth running locally before pushing:
 
 ```bash
 tools/check-no-game-assets.sh                    # the repository
 tools/check-no-game-assets.sh publish/win-x64    # a build
 ```
+
+Tagging gotcha, PE-header subsystem split, why only the Windows server is
+renamed, and the CI runner layout: `.claude/build-deploy/BUILD-WORKFLOW.md`.
 
 ## Deployment
 
@@ -1023,970 +217,64 @@ tools/check-no-game-assets.sh publish/win-x64    # a build
 MPH_SERVER_HOST=france-mining.com MPH_SERVER_USER=livetek \
   MPH_SERVER_PASS="$(read -rsp 'pi password: ' p; echo "$p")" ./deploy-server.sh
 # MPH_DEPLOY_MASTER=0 to leave the directory alone
-# An SSH key removes the password from this line entirely, which is the setup
-# worth moving to: this file is in the repository, and a password written into
-# it is a password published with it.
-
-# Windows client
-dotnet publish src/MphRead/MphRead.csproj -c Release -r win-x64 \
-  --self-contained true -p:PublishSingleFile=true -o publish/win-x64
-
-# Windows dedicated server (console subsystem, no launcher, no game files)
-dotnet publish src/MphRead/MphRead.csproj -c Release -r win-x64 \
-  -p:MphReadServer=true --self-contained true -p:PublishSingleFile=true \
-  -o publish/win-x64-server
 ```
 
 The exe is often locked by a running game: write `MphRead.new.exe`, then `mv`.
-Any protocol change means server **and** every client must be the same build.
 
-`NetConfig.ProtocolVersion` is **4** as of this build. Version 2 grew the
-roster by a ping per entry; version 3 added the shooter's ammo to the intent,
-the point goal and the match number and the ending flag to the match state, a
-name to the status reply, and the `MatchEnd` handshake. Every one of those
-moves a field, so a client one version behind would read the right bytes at the
-wrong offsets -- the version is what turns that into a refusal at Hello with a
-line in the server log instead. Older clients cannot join until they are
-updated, which is the intended outcome.
-
-**The server and every client must be the same build**, and that now includes
-the Pi: a version 3 server refuses a version 4 client outright, so deploy the
-server before handing the client to anybody.
-
-**Version 4 is a refusal on behaviour, not on layout.** Nothing in the wire
-format moved. A version 3 build reads every byte correctly and then plays a
-different game -- its own player frozen where it stands, its shots leaving from
-its ankles, its respawns putting it back inside whatever it died in. The
-authority is simply the first client to connect, so one stale copy joining first
-hands every one of those faults to everybody in the match. Nothing in the
-protocol would have noticed, which is exactly why the version had to say so.
-
-## The damage bug, and what it actually was (2026-08-23)
-
-Two separate faults, both introduced by commit `bbb13b8`, and neither of them
-latency. They were hunted as a latency problem for a fortnight because the
-authority is the one machine with no latency, and it was the only one whose
-shots landed.
-
-### 1. Every client except the authority was frozen in place
-
-`ApplyState` had been changed to take position and speed from the snapshot for
-this machine's own player. That closes a loop with no way out:
-
-- The authority does not simulate a remote player's movement. It puts the
-  puppet wherever the owner's last intent said.
-- So the position it publishes for a client **is that client's own report from
-  a round trip ago**.
-- Writing it back into the local player means the next intent carries it again,
-  unchanged. The two agree forever.
-
-Every frame of local movement was computed and thrown away before it could be
-published. `player.Speed = Vector3.Zero` on the authority's puppets was the
-other half: that zero went into the snapshot as the authoritative velocity of
-every remote player, and each client had its own speed cleared sixty times a
-second.
-
-Measured, three clients, seventy seconds: the authority travelled 95 units and
-the other two travelled **0 and 2**. It reproduced on loopback exactly as it did
-on the Pi -- the handoff note saying it did not was reading the damage columns
-rather than the movement ones.
-
-The fix is the design the rest of the file already describes: position belongs
-to the machine playing the character. Only health, score, spawn and death come
-from the authority. `DesyncDistance` (30 units) is a corruption backstop, not a
-correction -- a respawn arrives through `ModNetSpawn`, not through here.
-
-### 2. Remote players fired from their ankles
-
-`ModSetAim` set a remote player's `CameraInfo.Position` to its bare `Position`.
-Every shot in the game starts from that field -- `UpdateAimVecs` builds
-`_gunDrawPos` and then `_muzzlePos` out of it -- and `UpdateCameraFirst` puts it
-`AimYOffset` above the feet, which is **0.9 units**.
-
-So on the authority, every remote player's beam left along a ray parallel to the
-one its owner was looking down and nine tenths of a unit below it. Aimed at
-somebody's chest, that goes into the floor in front of them. The authority's own
-player was unaffected, because the engine still owned its camera -- which is
-exactly why the failure looked directional and looked like lag.
-
-The number that proves it, three clients on one map at **11 ms** of ping:
-
-```text
-authority   player overlaps by shooter: [0->1] 2 [1->0] 1
-slot 1      player overlaps by shooter: [1->2] 69
-slot 2      player overlaps by shooter: [2->0] 58
-```
-
-Slot 1 counted 69 of its own shots overlapping slot 2. The machine that decides
-what is hit counted none. Eleven milliseconds is less than one frame, so nothing
-about latency can account for that gap.
-
-After the fix, at 130 ms of induced latency, the three now agree:
-
-```text
-authority   [0->1] 4 [1->0] 3 [1->2] 19 [2->0] 2
-slot 1      [0->1] 5 [1->0] 1 [1->2] 20 [2->0] 1
-slot 2      [0->1] 5 [1->0] 3 [1->2] 18 [2->0] 7
-```
-
-### Where it stands
-
-Three clients, a hundred seconds, MP3 PROVING GROUND, `run-remote.sh` against
-the Pi, after all four fixes:
-
-| | Before | After |
-|---|---|---|
-| Local player travelled, non-authority clients | 0 and 2 units | 200-320 units |
-| `damage pipeline` resolved on the authority | `[0] 5 [1] 0 [2] 0` | `[0] 21 [1] 19 [2] 37` |
-| Replayed on each observer | did not match | `21/19/37` on both, exactly |
-| `player overlaps by shooter`, shooter vs authority | `69` vs `0` | agree within 4 on every pair |
-| Slots that never took a hit | one or two, every run | none |
-| Visible teleports | up to 715, worst 265 units | **0** |
-| Cross-check mismatches | 0-3 | **0** |
-| `RESULT` | FAIL | **PASS on all three** |
-
-The same at 130 ms through `run-lag.sh`: PASS on all three, `[0] 31 [1] 3 [2] 20`
-resolved and replayed identically, 0 teleports.
-
-**Pick the map deliberately.** MP1 SANCTORUS, which the Pi's rotation opens on,
-is large and vertical enough that three scripted players never meet: a run there
-produces zero player overlaps for *anybody* and deaths by kill plane, which
-looks like a damage failure and is not one. MP3 PROVING GROUND is the small
-room the comparisons above use.
-
-### The zoom check, which was the harness and not the game
-
-One check still failed after that: Trace zoomed for 148 frames and neither
-observer saw it. It looked like `PlayerState.FlagZoomed` not surviving the trip.
-It was not -- **the tour had never once pressed the zoom button**.
-
-`EquipZoomWeapon` pressed the Imperialist's *own weapon key*, and a weapon key
-only selects a weapon the player has already picked up. On a fresh roster nobody
-has one, so the key did nothing, `ModCanZoom` stayed false, `Hold(c.Zoom, ...)`
-was held false, and the phase reported `untested` -- which reads as "not proven"
-and was really "never attempted". The 148 frames came from a later cycle, after
-the affliction phase had *issued* Trace its affinity Imperialist, and by then the
-phase that would have tested the replication was long past.
-
-Instrumented, the intent carried no `IntentButtons.Zoom` at all, in either
-direction, for a whole run. Two fixes, both in the tour:
-
-- `ModArmZoomWeapon` issues a zoom-capable weapon the way `ModArmAffinityWeapon`
-  issues the affinity one. The affliction probe had already learned this lesson;
-  the zoom phase had not.
-- The press drives *towards* the wanted state (`!EquipInfo.Zoomed`) rather than
-  on a fixed cadence. `UpdateZoom` is a toggle on the rising edge, so a timer
-  zooms in and straight back out: the owner finished a 300-frame phase having
-  been zoomed for two of them while its puppet, which had received a different
-  number of edges, sat zoomed for a hundred and twenty. Pressing only while not
-  yet zoomed converges, and re-presses on its own if an edge is lost.
-- Leaving the phase, zoom is pressed off. Nothing else clears it, and the
-  Imperialist does *half* damage unzoomed -- a player that wandered out still
-  zoomed was quietly firing a different weapon for every phase after it.
-
-Two clients, 80 s, with that in place: `zoom mine 124 / theirs 123` one way and
-`mine 258 / theirs 286` the other, PASS on both, 0 mismatches. The replication
-was never broken. **`untested` is not a pass, and it is not a fail either -- it
-is a question about the harness.**
-
-### Two more, uncovered by the first fix
-
-Taking the local player's position from the snapshot had been hiding things, not
-only freezing people. With it gone, two real disagreements became visible.
-
-**Every respawn put the two machines in different places.** `GetRespawnPoint`
-chooses among the spawn points that no living player is standing near *on the
-machine running it*, and rotates its choice with the frame counter, so two
-machines running it a few frames apart do not pick the same one. The local
-player also respawns early by holding fire, so it makes that choice well before
-the authority makes its own -- and then both believe they know where the player
-is, half a level apart, with nothing to bring them back: the client publishes its
-own spot in every intent and the authority answers with the other one, for the
-rest of that life. Fifty-five of these in a hundred seconds, up to 175 units
-apart.
-
-Spawning locally first is kept -- it is what makes a respawn feel immediate
-rather than arrive a round trip later, and what still works if snapshots stall.
-Only the *placement* is handed over: on the frame the authority's snapshot first
-reports this player as spawned, its position is taken. That is one correction at
-the moment of a respawn, which is the moment nobody is looking.
-
-**A derived velocity became a launch.** With the authority no longer simulating a
-puppet's movement, `Speed` was being worked out from the difference between two
-reported positions. Across a respawn that difference is the whole level, and
-dividing it by two frames gives a velocity of a hundred and fifty units a frame.
-That number does not stay put: it goes into the snapshot as the player's
-authoritative speed, every client applies it to its puppet, and the owner takes
-it back at its next respawn and is fired out of the map. Measured mid-flight, the
-authority held a player at Y=163 climbing 35 units a frame, and one client logged
-975 corrections in a hundred seconds.
-
-A step beyond `SnapDistance` is now a teleport rather than movement and yields
-zero, the derived speed is clamped to `MaxReportedSpeed` (5 units per frame,
-against boost's 0.6), and a freshly placed player is given no speed at all rather
-than the snapshot's.
-
-Three clients, a hundred seconds at 130 ms, after both:
-
-| | Before | After |
-|---|---|---|
-| Visible teleports, worst | 715, 265 units | **0, 0 units** |
-| `pulled back to the authority` | 975 / 55 / 0 | 3 / 0 / 0 |
-| Cross-check mismatches | 1 | **0** |
-| `damage pipeline` | resolved 19/6/41 | resolved 31/3/20, replayed 31/3/20 on both |
-| Weavel's halfturret | never exercised | 601 frames, observers saw 600 and 617 |
-
-Weavel had never been in a networked check before this. The halfturret crosses
-on the first attempt, so nothing was wrong with it -- but "no Weavel has ever
-played one of these" was not written down anywhere either. Put one in the
-roster.
-
-### Sweeping at random, and what it turned up
-
-A fixed scenario stops finding things once it passes. `run-batch.sh` in the test
-rig runs matches whose map, roster, player count, match length, point goal,
-latency and packet loss are all drawn at random, keeps every run's logs, and
-prints only the runs that reported something.
-
-```bash
-cd ~/mph-net-test
-./run-batch.sh 12          # twelve runs, a random seed
-./run-batch.sh 12 31337    # the same twelve again
-```
-
-Short matches and low point goals are deliberate: a match that ends inside a run
-is the case every "is this a new match" bug hides in, and the fixed scenarios had
-all been long enough to avoid it. Four things came out of the first two sweeps,
-and three of them only happen at a rotation.
-
-**`NetRoomChange.Settling` had no callers.** It guarded the loop in
-`AfterSimulation` that applied peer-reported positions; when that work moved into
-`TryApplyRemoteInput` the guard went with it, so the reason the property exists
-had quietly stopped being true. Clients do not finish loading at the same
-instant, and the local player is the worst of it: this client has loaded and
-spawned while the authority is still finishing the old room, so the snapshot
-drags it to an old-room position, the local simulation walks it back, and the two
-alternate. A six-player run at 60 ms: twenty-six corrections in four seconds,
-ping-ponging between two fixed points a room apart, all inside one restart.
-
-**The damage sequence was being reset on each side separately.** The counter in
-`PlayerState` is a sequence number, not a tally -- its only use is the difference
-between two readings -- so a new map does not invalidate it. Resetting it does,
-because the authority and its clients do not change room on the same frame:
-whichever resets first goes back to zero while the other still holds two hundred
-and thirty. The difference between those is either a resync that swallows the
-next real hits, or -- when the numbers fall the other way -- **up to thirty-two
-hits replayed into a player who has just spawned into a fresh match**. Both were
-happening: four `damage sequence jumped` events per client per rotation, and a
-run whose authority resolved 115 hits while three of the five clients watching
-replayed none at all.
-
-**The divergence backstop asked the wrong question.** It compared the authority's
-copy of this machine's own player against where that player is *now* -- and that
-copy is this client's own report from a round trip ago, so under anything fast
-the two are legitimately far apart. A player falling out of the level covers
-thirty units in the half second a 250 ms link takes to answer, and correcting
-that hauled it back up out of its own fall, repeatedly, so it could never die.
-Seventy-seven of those in one run at 250 ms, with peers reporting a player
-jumping sixty-four units at a time. It now compares against where this player
-*was* when the authority was looking -- its own recorded position, a ping's worth
-of frames back, which `ModRecordNetworkPosition` had been keeping and nothing was
-reading -- and requires the disagreement to last a second. Same scenario after:
-no corrections at all, no visible teleports on two of three clients.
-
-**The check called every jump pad a desync.** Two clients alone on
-AD2 ALINOS PERCH, agreeing on every other number between them, still reported
-"2 teleport(s), worst jump 21.9 units". The engine says when a pad or a
-teleporter acts (`Mods.WorldEvents`, already hooked for the map audit); the check
-now asks, and gives the slot the same grace it gives a respawn.
-
-### Two found by playing, which no sweep had caught
-
-Both reported from a real match on the Pi at about fifteen milliseconds, so
-neither needs latency -- only a round trip.
-
-**Respawning put the player back where it died.** A dead player's owner keeps
-sending intents carrying the position it died at. The authority puts the puppet
-on a spawn point and, on the very next frame, `ApplyReportedPosition` moves it
-straight back to that death position, because that is what the newest intent
-from a round trip ago still says -- and it then publishes it as the
-authoritative position of a player it has flagged as spawned, for as long as the
-round trip lasts. The owner takes its placement from the first snapshot that says
-"you are spawned", so it respawns correctly and is teleported into wherever it
-had died: through the floor as often as not, its own screen black, a shadow and
-no model on everyone else's. Two or three respawns into a match was enough.
-
-Reported positions composed before a spawn are now ignored. The barrier is the
-intent frame that was current when the puppet was placed: anything up to it
-describes a dead player, and the first intent after it is the owner saying where
-it actually is. Six respawns against the Pi afterwards: no teleports on either
-client, no corrections, no mismatches.
-
-Worth recognising again as a shape: **a stale input is not harmless just because
-it is only a position.** The intent stream has no notion of "this was composed
-before the thing that just happened", and anything the authority does to a
-player of its own accord -- a spawn, and one day a teleporter -- is undone by
-the next packet that predates it.
-
-**The Shock Coil did twice its intended damage against players.** Not a network
-fault at all. It is the one beam that stays alive and re-tests collision every
-frame, and every beam hit carries `DamageFlags.NoDmgInvuln` (set unconditionally
-in `BeamProjectileEntity`), so the per-hit invulnerability window never applies
-and nothing else limits how often it lands. At 30 fps that was its design rate;
-this engine runs at 60, which made it roughly 600 damage a second -- a full
-hunter in a sixth of one, which is what "the Shock Coil one-shots me" is. The
-identical compensation was already in the same file for the same weapon against
-*enemies*, with the same `// todo: FPS stuff` beside it; only the player path had
-been missed.
-
-This changes the weapon. The Shock Coil now does half what it did yesterday,
-which is the original figure, and it will feel it. It is also **not measured** --
-the scripted tour spends Sylux's time in alt form laying bombs and barely fires
-the beam at a player, so this rests on reading the code beside its own
-already-corrected twin. A sustained-fire probe would settle it.
-
-### The match that ended for one client and not the other (2026-08-23)
-
-Reported as "we were 6 points to 2 on the scoreboard and the match was
-considered over for the second client". It then had to be hunted down as a
-motionless zombie and killed to reach 7, and at the rotation that followed it
-opened on a game over and crashed.
-
-**A replayed kill was counted twice.** `NetDamage.Replay` exists so that a
-victim feels the hit -- the indicator, the flinch, the banner -- by running
-the authority's hit through `PlayerEntity.TakeDamage`. But `TakeDamage` also
-*awards* the kill: `Points` and `Kills` for the attacker, `Deaths` for the
-victim. The authority had already done all three and the snapshot being
-applied already carried the result, so on every machine except the authority
-the kill landed on the scoreboard twice.
-
-For one frame. That is enough, because `EndIfPointGoalReached` reads
-`TeamPoints`, and `UpdateState` rebuilds `TeamPoints` from `Points` at the end
-of the same frame -- after the replay and before the next snapshot corrects
-it. So on the sixth kill of a seven-point match the client saw seven, ended
-its match, and sat in its results screen for the rest of the round with 6-2 on
-the board it was showing. Its player stood still in everybody else's game,
-still sending intents, because `UpdateScene` does not run outside
-`MatchState.InProgress`.
-
-Reproduced exactly, two clients, point goal 2, one map:
-
-```text
-BRAVO (client)     21:16:22.309  matchState=GameOver  slot 0: score=1/2p
-ALPHA (authority)  21:16:45.169  matchState=GameOver  slot 0: score=1/1p
-```
-
-`score=1/2p` is `Points`/`TeamPoints` -- the authority's 1 with the replay's
-phantom second point latched into `TeamPoints` beside it. Twenty-three
-seconds of one client watching a results screen while the other played on.
-After the fix the two end 31 ms apart, both at 2 points.
-
-**Nothing moved a slot-ordering problem out of the way.** Assigning the
-authority's scores *after* the replay instead of before it, in `ApplyState`,
-looks like the same fix and is not: the replay runs on the victim's slot and
-moves the *attacker's* row, so it only works when the attacker is applied
-after the victim. `NetDamage` saves the three arrays and restores them around
-the replay instead, and the order stops mattering.
-
-**Then the rotation.** A client resets its scores when it loads the next room,
-and the two machines do not change room on the same frame -- so a client that
-finished loading first was still being sent the finished match's snapshots,
-whose scores were the winning ones. Applying those to the fresh match put the
-point goal back on the board on the frame it started. `ApplyState` now ignores
-peer scores while `NetRoomChange.Settling`, exactly as it already ignored peer
-positions, and for the same reason: a match starts at zero on every machine,
-so there is nothing to learn from the authority during that second.
-
-**And the rule that makes a third one survivable.** Only the machine that
-keeps the score may decide the score has been reached
-(`NetMatchEnd.MayEndOnScore`, checked by `EndIfPointGoalReached` and by
-`ModeStateDefender`). Every other client's `Points` come out of the
-authority's snapshot, so a client that reaches the goal first is not seeing
-something the authority missed -- it is disagreeing with the only copy of the
-scoreboard that counts, and there is no way back: nothing returns `MatchState`
-to `InProgress` until the next rotation. The path that ends a match on a
-client already existed and is the one that should be used -- the authority
-reports, the server sets `FlagEnding`, and `NetMatchEnd.Sync` zeroes every
-client's clock a round trip later.
-
-`NetMatchEnd.RecoverIfStranded` is the backstop under all of it: a client
-showing results for twelve seconds while the server says the match is running
-and not ending is put back into play. Twelve is longer than the whole results
-sequence and longer than the server's own intermission, so a legitimate ending
-is never cut short -- and it means the next bug of this shape costs a hiccup
-rather than a player.
-
-**The crash after the rotation is not explained.** There is no log from that
-client and no stack. What is known is that it spent two minutes in
-`MatchState.Ending`, during which `UpdateScene` never ran while
-`NetHooks.AfterSimulation` kept applying snapshots into the scene -- spawns,
-replayed deaths, effects and sounds all created and never processed or
-retired. That is the state the fixes above prevent, so it may well go with
-them; it has not been reproduced and should not be claimed as fixed.
-
-**The netlog could not answer this and now can.** It recorded `matchTime` and
-no match state and no scores, so a client that had quietly ended its match
-looked identical to one whose player had stopped moving. `STATE` lines now
-carry `matchState=` and `goal=`, and each slot carries
-`score=<points>/<teampoints>p <kills>k<deaths>d` -- which is what made the
-double count visible as `1/2p` in a single line.
-
-### What is left at 250 ms, and is not a bug
-
-Three clients at 250 ms each way -- half a second of round trip, worse than any
-real connection this will see:
-
-| Reads as | Is |
-|---|---|
-| `alt-attack: they did 36, observers saw 15` | one-frame presses collapsing. Two presses inside one intent window arrive as one, because the edge history is ORed into a single mask per packet. The bombs those presses would have laid still land |
-| `movement: they did 282, observers saw 130` | a 30 Hz reconstruction of a 60 Hz path, with a fifth of the updates arriving out of order and refused. The observer is measuring a shorter polyline, not missing a player |
-| `zoom: they did 105, observers saw 46` | a toggle whose press takes half a second to arrive and half a second to come back |
-| `their form stayed wrong for 181 frames` | the correction machinery running its full budget -- 90 frames of grace, a transition attempted, 90 more, then the form forced. The check fails at 60, which is *below* that budget, so it cannot pass whenever the machinery has had to act at all |
-| `never took a single hit` on a large map | nobody met. Check `player overlaps by shooter`: if it is empty for *everybody*, it is the room, not the network |
-
-The first three are what lag compensation and delta-compressed snapshots would
-improve, and they are the reason the missing acknowledgement field is worth
-having. None of them is a correctness failure.
-
-### The sweep has to reach the Pi
-
-**A randomised run against a loopback server is a regression check, not a
-real-world one, and it must not be reported as one.** Loopback reproduces
-neither the reordering a real path does, nor a household line's jitter, nor the
-Pi's own processor with eight clients on it -- and those are the conditions
-every bug in this file was found under. `run-batch.sh` runs locally and is the
-fast check; `run-batch-pi.sh` is the one whose result counts.
-
-The two are not alternatives, because each has what the other lacks. The Pi
-answers in 7-17 ms from here whether you want it to or not, so it cannot be
-asked what happens at 250. So the Pi batch puts `udp-lag.py` **in front of the
-Pi** rather than in front of a local server: the real path underneath, the
-chosen delay on top.
-
-```bash
-cd ~/mph-net-test
-MPH_SERVER_PASS=... ./run-batch-pi.sh 8 12345 150   # runs, seed, max added ms
-```
-
-It writes the map, match length and point goal into the server's own rotation
-file over SSH and restarts the service for each run, and puts the original back
-on the way out however it exits. Nothing else can choose the map on a server
-this machine does not own.
-
-### Measuring latency without the Pi
-
-`tools`-adjacent, in the test rig: `udp-lag.py` is a UDP relay that holds every
-datagram for a chosen time before passing it on, and `run-lag.sh` starts a
-loopback server behind it.
-
-```bash
-cd ~/mph-net-test
-./run-lag.sh 60 90 Samus Kanden Trace   # 60 ms each way, 90 s, three clients
-```
-
-This is what a latency bug should be reproduced against from now on. The Pi is a
-worse instrument for it than it looks: from this machine it answers in 7-17 ms,
-which is *less* than the induced 60 ms, so "it only happens on the Pi" was never
-about the Pi's latency. Use the relay to choose the number, and the Pi to
-confirm.
-
-### Two traps this investigation lost days to
-
-- **`run-check.sh` was testing a stale binary.** It copied
-  `bin/Release/net9.0/MphRead.dll`, which the rename to `FruityPrime` had made
-  nonexistent, with `2>/dev/null` on the end. Every run since silently exercised
-  whatever build was last copied by hand. Both runners now copy `FruityPrime.dll`
-  and fail loudly if there is nothing to copy.
-- **The Pi was running protocol 4.** The notes said the experiment had been
-  rolled back and the Pi redeployed at protocol 3; it had not been. A
-  protocol-3 client is refused at Hello *silently* -- the server logs a line and
-  answers nothing, so the client reports "the server did not answer in time",
-  which reads as a dead server. Check it before believing anything:
-
-  ```bash
-  python3 - <<'PY'
-  import socket
-  s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.settimeout(5)
-  s.sendto(bytes([14]), ("france-mining.com", 27888))
-  d, _ = s.recvfrom(2048)
-  print("protocol", d[1 + 95 + 1])
-  PY
-  ```
-
-- **The feature check could not fail honestly on the authority.** It compared
-  every puppet against `NetSession.RemoteStates`, which on the authority is
-  whatever arrived before it was promoted and never moves again. That read clean
-  only while everybody was frozen; the moment players moved it reported
-  "their position drifted far from the authority's" for players standing exactly
-  where the authority had put them. It is skipped there now, and says so.
-
-### What is still worth doing, and what is not
-
-The protocol does not need replacing. It is a relay plus a client authority,
-with sequence numbers on all three streams, redundant press history, and
-idempotent full snapshots -- which is a normal shape for eight players among
-friends, and none of the above was caused by it.
-
-What it genuinely lacks is **lag compensation**, and one missing field is why it
-cannot have any: nothing a client sends says which of the authority's snapshots
-it was looking at. `IntentPacket.Frame` and `SnapshotHeader.Frame` are counters
-in two unrelated clocks -- each starts at zero when its own process joins -- so
-the frame-stamped rewind that was tried and abandoned was indexing the
-authority's history with the shooter's frame number, against clients started
-three seconds apart and a 120-entry history. It could not have worked, and the
-three campaigns that showed it did not are not evidence against rewind.
-
-The cheap fix, if hit registration under real latency ever needs improving: the
-client echoes back `NetSession.LastSnapshotFrame` in the intent. That number is
-already in the authority's own timebase, so no clock synchronisation is needed
-at all, and `ModRecordNetworkPosition` is already keeping the history it would
-index. It costs four bytes, a protocol bump, and a redeploy of the Pi. It is not
-needed for correctness -- shots now land where they are aimed -- only for the
-fraction of hits that a round trip legitimately eats.
-
-Two smaller things, neither urgent:
-
-- **Snapshots are full state at 60 Hz with no acknowledgement.** Eight players is
-  ~525 bytes sixty times a second to each client, so the relay's uplink carries
-  about 1.8 Mbit/s of snapshot and 0.9 of relayed intent. Fine on a LAN, notable
-  on a home upload. The same echoed frame number is what would make delta
-  compression against the last acked snapshot possible.
-- **Remote players are placed at the newest reported position, with no
-  interpolation buffer.** That is right on the authority, which resolves damage
-  and must not aim at a smoothed ghost. On the other clients it is a 30 Hz
-  staircase for no benefit, since their own hit resolution is discarded anyway.
-
-## Audit status
-
-Since the damage work (2026-08-20), re-verified with `run-check.sh`:
-
-| Check | Result |
-|---|---|
-| 3 clients, 130 s, two of them Trace | **PASS on all three**, 0 mismatches, scoreboards agree within 0 events |
-| Damage pipeline on that run | 69/56/49 resolved on the authority, 69/56/48-49 replayed on both observers -- the shortfall is one hit still in flight at the cutoff |
-| Snapshots refused as reordered (`late=`) | 0 on loopback; the guard is for the wire, and the counter is in every report |
-| Match won on points, 3-map rotation, 4 clients | every rotation announced once, all four peers carried across, `2-3 rotation(s) followed` per client |
-| Match won on points, **one**-map rotation | "server started a new match on MP3 PROVING GROUND; loading it" on every client -- the case that used to strand everybody |
-| Authority leaving mid-session | promoted to the next peer, session continued |
-| `tools/check-dedicated-server.sh` | server and directory both start from a published build, register, and answer |
-
-Last full map pass (2026-08-20), before the above:
-
-| Check | Result |
-|---|---|
-| Every multiplayer map, 8 players, 24 s each | **33/33, zero crashes** |
-| Every multiplayer map, 8 **AI bots** (`-bots`) | **33/33, zero crashes** -- after two slot-indexed arrays in `PlayerAi` were grown from four |
-| Players placed | 8/8 on 27 maps; 0/8 on the six First Hunt "biodefense chamber" rooms, which have no spawn points -- the only `MAPFAIL`s in the sweep |
-| Jump pads, each stood in in turn | **every pad on all 24 maps that have one**, MP6 HEADSHOT's eight included |
-| Teleporters, each stood on in turn | both of AD1 TRANSFER LOCK's moved the player |
-| Afflictions, probed per map | freeze landed on 14 maps, disrupt on 13, burn on 6 |
-| 6 clients against the Pi, 110 s | 3 mismatches, all late-joiner or stop-skew artifacts; pings 6-16 ms; `dropped=0` |
-| 8 clients, 150 s, one machine | 10 mismatches, none of them `facing` |
-| Pi 3B under six clients | server process 11-16% of one core, system 65-75% idle |
-| Damage pipeline resolved vs replayed | matches |
-| Invulnerable players (`BeamEffectiveness` all-Zero) | none |
-
-The affliction probe is a sample, not a verdict: it gets about two charged shots
-per state per map, in a live room, and an arcing Magmaul at two units misses
-more often than a Judicator does. Read the tally across the sweep -- all three
-states land on plenty of maps, so the states work -- rather than one map's
-result. `FAIL` in particular overstates: the probe's first press of each cycle
-fires an *uncharged* shot, so a hit that lands from that one while the charged
-shot misses is recorded as "hit, no affliction". Burn shows this most, which is
-why its column is the weakest.
+**`NetConfig.ProtocolVersion` is 4.** Any protocol change means server **and**
+every client must be the same build — a mismatched client is refused outright
+at Hello with a line in the server log, which is the intended outcome and not
+a layout issue: the wire format doesn't move, an old client would read every
+byte correctly and then simulate a different game (frozen in place, shooting
+from its ankles) with nothing in the protocol to notice. Deploy the server
+before handing out a client built against a new protocol. Publish commands and
+the deploy script's env vars: `.claude/build-deploy/DEPLOY-SERVERS.md`.
+
+## Multiplayer: bugs found and fixed
+
+A "damage is broken" report chased as latency for a fortnight turned out to be
+eleven separate faults — frozen remote puppets,
+shots fired from ankle height, respawn placement races, a derived-velocity
+launch bug, a stale settling guard, a per-machine damage-sequence reset, a
+divergence backstop comparing against the wrong instant, jump pads misread as
+desyncs, a damage-direction vector abused as a launch velocity, unreplicated
+ammo making a puppet briefly untouchable, and an unordered snapshot stream —
+plus a double-counted kill that could end a match early for one client and not
+another, and a transport queue that dropped the newest packets under load
+instead of the oldest. None of it was actually latency; all of it reproduced
+at single-digit-millisecond pings on loopback or the Pi.
+
+Shapes worth keeping without opening anything else:
+
+- **A stale input is not harmless just because it's only a position.** The
+  intent stream has no notion of "this predates what just happened," so
+  anything the authority does to a player of its own accord (a spawn, a
+  teleport) can be undone by the next packet that predates it.
+- **Look for this shape whenever a remote player can do something on their
+  own machine and not on anyone else's:** the puppet is running the same code
+  with different *resources* (ammo, in this case), and only the owner's copy
+  of those is authoritative.
+- **`untested` is a question about the harness, not a pass or a fail.** The
+  zoom-replication check read `untested` for months because the tour never
+  actually pressed the zoom button, not because zoom was broken.
+- **A randomised run against a loopback server is a regression check, not a
+  real-world one, and must not be reported as one** — it has none of the
+  reordering, jitter or CPU load the bugs above were found under.
+
+Full postmortem, measurements, before/after tables, and the traps that cost
+the most time: `.claude/multiplayer/NETWORK-DIAGNOSTICS.md`. The
+double-counted-kill bug and match-end/rotation handling specifically:
+`.claude/multiplayer/NETWORK-MATCHEND.md`. Current verified pass/fail status:
+`.claude/testing/TEST-METRICS.md`.
 
 ## Known gaps
 
-- **The one launcher has never been seen on Windows or macOS.** It is the same
-  code on all three desktops now, which is the point, but the only machine it
-  has run on is this WSL box: the front screen, the settings window, the map
-  grid and the pause menu were driven and screenshotted there over X11. Windows
-  in particular changes two things this cannot check -- the process is a GUI
-  binary with no console, and GLFW and Avalonia share a message queue rather
-  than two X connections.
-- **Nobody has played a match from the window.** The launcher starts one and the
-  launcher window goes away when it does (checked), but this box cannot show a
-  GLFW window at all -- `Scene.OnRenderFrame` never produces a frame under its
-  GL, so `IsVisible` is never set, for `-room` as much as for a match. So
-  "Escape opens the pause menu over a running match" is proven on the menu's
-  side (its flags, its windows, the pump) and unproven on the game's.
-- **macOS is cross-compiled and unrun.** Both mac packages publish from the
-  Linux runner and carry their natives, including the OpenAL copy they never had
-  before. What nobody has watched is GLFW and AppKit sharing a process and a
-  main thread, which is exactly what the one-thread arrangement asks of them.
-- **Android builds and shows a screen; it does not play.** The engine wants
-  OpenTK and GLFW. Until it has a mobile renderer and touch controls, the APK is
-  a front screen and a compile check -- a valuable one, since it fails at the
-  commit that adds anything desktop-only to the shared code.
-- **The update check has never seen a release of this repository.** There are
-  none yet, so it was tested against NoneGiven/MphRead, which has them: the
-  check, the version comparison, the "0.35.0.0 is available" line, the entry on
-  both front screens and the page URL were all exercised that way. What that run
-  did not cover is an asset name matching this project's, since upstream's do
-  not — the "no matching asset" path is the one that got tested, and the
-  matching one only by unit test.
-- **No browser has actually been opened.** `OpenPage` was only ever exercised
-  where it correctly declined: a headless run with no `DISPLAY`. `xdg-open` on a
-  real desktop, and `UseShellExecute` on Windows, are untried.
-- **The rename leaves a migration on the Pi.** `deploy-server.sh` rewrites an
-  `ExecStart` that still names `MphRead` and deletes the old binary, but that
-  code has not been run against the real box. Look at
-  `systemctl cat mphread-server` after the first deploy.
-- **The ARM64 server package has never been started by CI.** It is
-  cross-compiled on an x64 runner, so `check-dedicated-server.sh` cannot run it
-  there. `linux-x64-server` is the same build configuration on a processor this
-  runner actually has, and build.yml starts it on every push — the nearest
-  thing to a check ARM64 gets. The Pi is the real test, through
-  `deploy-server.sh`.
-- **The Windows dedicated server is started in CI, but only there.** The
-  `windows-server` job runs `check-dedicated-server.sh` on a Windows runner, so
-  the claim is checked on every push; nobody has yet run it on a Windows machine
-  behind a real firewall for a long session, which is the arrangement the Linux
-  server has had on the Pi and this one has not.
-- **Late joiners and bursty features.** The tour does its bombing and its
-  unmorphing in particular phases, and clients start three seconds apart. A
-  client that joined a phase late reports a fraction of what the subject did,
-  and the normalisation by observed time cannot fix a burst it was not there
-  for. Six clients against the Pi: bombs matched 79-99% for every observer
-  except the last to join, which saw 18%. Judge these against the clients that
-  were present, not against the tally.
-- **Alt-attack presses read ~60% on every observer.** Not loss -- loss would
-  differ per observer. Two presses that fall inside one intent window arrive as
-  one, because the edge history is ORed into a single mask per packet. The
-  bombs those presses would have laid still land 79-99%, so what is being lost
-  is presses that would have done nothing anyway (cooldown, wrong form). Worth
-  knowing before reading the number as a fault.
-- Kanden and Spire show lower fidelity on `unmorph` and projectile lifetime than
-  the other hunters. Not explained.
-- The scoreboard rows tighten to fit past four players, down to 19 px; beyond
-  eight it would need a second column.
-- The First Hunt "biodefense chamber" rooms are listed as multiplayer but carry
-  **no player spawn points**, so nobody can be placed in them. They are survival
-  rooms; keep them out of a Battle rotation rather than trying to fix them. The
-  launcher leaves them out of its map list for the same reason.
-- `zoom` and `double damage` only get tested when a bot happens to pick the item
-  up, so they are often reported `untested`.
-- `double damage` is still usually `untested` for the reason zoom was: nothing
-  in the tour picks one up. Unlike zoom it is probably fine -- item pickup is
-  simulated on every machine from replicated positions, and the three clients
-  in a 90 s match agree exactly on how many items were taken (`12`, `12`, `12`)
-  -- but "probably fine" is not "measured".
-- **A run with match restarts in it is not a clean read of the tour.**
-  `NetTestScript` keys its 15 phases to the *server's* clock, and a new match
-  restarts that clock, so clients that finish loading a fraction of a second
-  apart are briefly in different phases. Testing the point-goal path means a
-  two-point goal, which restarts every 40 seconds; expect `alt form` and
-  `their form stayed wrong for N frames` failures that a run without
-  restarts does not produce. The `181 frames` figure in particular is the
-  correction machinery working as designed -- 90 frames of grace, a real
-  transition attempted, 90 more, then the form forced -- not a puppet that is
-  stuck.
+Claims that are unproven or only partly proven — not bugs, but not to be
+re-claimed as solid either: `.claude/KNOWN-GAPS.md`.
 
-### "Observers only see half your turn", and what it actually was
+## Mechanics catalogue
 
-Listed here for a long time as packet loss under load. It was two things, and
-neither was quite that:
-
-1. **The transport dropped the wrong packets.** `NetTransport` queued 256
-   received packets for the game loop and, when the queue was full, dropped the
-   *arriving* one. Eight clients on one machine produce roughly two thousand
-   packets a second between them, so one 130 ms frame -- ordinary when eight
-   copies of the engine share a CPU -- overflows it. It then threw away the
-   newest packets while a backlog of stale ones drained, which is exactly the
-   wrong choice for a protocol whose packets say "this is where I am aiming
-   *now*". The queue is 2048 now, the socket buffers are 1 MB, and an overflow
-   drops the oldest. Eight clients, 150 s: `dropped=0`, where the same run used
-   to drop.
-2. **The check compared two different things.** A player publishes position and
-   aim every `NetConfig.IntentSendInterval` frames, so a remote copy moves in
-   30 Hz steps. `NetFeatureCheck` measured the local player's path every frame
-   -- a 60 Hz path -- and compared its length against that 30 Hz reconstruction.
-   With one opponent the aim moves slowly and the two agree, which is why two
-   clients always looked clean; with seven it slews between targets several
-   times a second, the reconstruction cuts every corner, and the observer reads
-   a third of it. The check now samples the local player at the instants it
-   publishes an intent, and remote players every frame -- both sides then
-   measure the same polyline, and a shortfall means a packet went missing.
-   Snap detection stayed per-frame: whether a position jumped between two
-   frames is a different question from how far it travelled.
-
-Eight clients, 150 s, one machine: **33 mismatches before, 10 after, none of
-them `facing`**. Two clients agree to within 2% either way, which is what says
-the sampling change corrected a bias rather than hid one.
-
-### Flying bodies, invincible players, and hits that were never counted
-
-Three separate faults, reported together as "weird things happen with two
-Trace clients", and each one has a shape worth recognising again.
-
-**A hit launched the victim across the level.** `PlayerEntity.TakeDamage` adds
-its `direction` argument straight onto `Speed`, so whatever is in it is a
-velocity in units per frame. A beam supplies one that `GetDamageDirection`
-built from a unit vector times the weapon's own magnitude -- a fraction of a
-unit. `NetDamage.Note`, when a hit carried no direction of its own (which is
-most of them: `DamageDirType` is 0 for most beams and knocks nobody back),
-filled one in as `victim.Position - attacker.Position`. That is the *distance
-between the two players*, so a hit from ten units away launched the victim at
-ten units a frame and put them through the wall. The engine's own fallback
-uses that same vector, but only for the damage indicator, never for `Speed`.
-The fix is to relay the impulse verbatim, zero included, and let the receiver
-turn zero into a null direction -- which is exactly what makes `TakeDamage`
-take its own fallback path, for the indicator only.
-
-It looked asymmetric -- "A shoots B and B flies, B shoots A and it is fine" --
-because A was the authority. The authority applies its own damage directly,
-with the real vector; everybody else replays.
-
-**A player could not be damaged at all, until the shooter changed weapon.**
-`BeamProjectileEntity` refuses to spawn a beam whose ammo cost exceeds the
-shooter's ammo. Every machine simulates every player's shots and spends the
-ammo, but pickups are collected locally and are not replicated, so only the
-owner's count is ever right -- and the puppet on the authority's machine runs
-dry within a round. From then on the shooter watched their own beam leave the
-gun and connect while the authority created no projectile at all, so the target
-took nothing. Switching weapons "fixed" it for as long as the other ammo pool
-(missiles against universal ammo) had something left in it. The intent now
-carries the owner's ammo, the way it already carried their position and their
-weapon, and `ModSetAmmo` writes it onto the puppet.
-
-Look for this shape whenever a remote player can do something on their own
-machine and not on anyone else's: the puppet is running the same code with
-different *resources*, and only the owner's copy of those is authoritative.
-
-**Snapshots were the one stream nobody ordered.** Both intent streams refuse a
-frame older than the newest they have seen; `HandleSnapshot` did not, and it is
-the stream carrying health, score and the damage counter. A datagram overtaken
-in flight put a player back where they had been, undid a kill, and ran the
-damage counter backwards -- and since that counter is a byte, `Replay` read the
-difference as about two hundred and fifty new hits. In an eight-player run the
-cross-check showed it plainly: 25 hits resolved on the authority against 258
-"replayed" on a client. Ordering the stream took three lines and, on a
-three-client run, took one client's visible position snaps from 13 to 1 and
-made the damage pipeline agree exactly. `NetDamage.Replay` also refuses more
-than 32 hits in one snapshot now, so a single bad packet cannot flinch, shove
-or -- if it happened to carry zero health -- kill somebody.
-
-### And it was never the Pi
-
-Measured while six clients played on it (`ps`/`top` over SSH, sampled every
-three seconds):
-
-| | Idle | Six clients |
-|---|---|---|
-| `MphRead` server process | 5-7% of one core | 5-22%, typically 11-16% |
-| System, four cores | ~97% idle | 65-75% idle |
-| Packets dropped | 0 | 0 |
-
-A Raspberry Pi 3B has room for several times this. The one thing worth fixing
-was the idle figure: the run loop slept a millisecond between passes whether or
-not anybody was connected, which is 5-7% of a core burnt around the clock for
-nothing. It now sleeps twenty milliseconds while the server is empty -- the only
-thing waiting on that loop is the next Hello.
-
----
-
-# Metroid Prime Hunters — multiplayer mechanics
-
-Generated by `MphRead -mechanics` from the game's own tables.
-
-## Weapons (multiplayer table)
-
-Damage is per shot before any multiplier. "Charged" is a full charge; "min" is the smallest charge that counts as charged.
-
-| Beam | dmg | min-chg | charged | headshot | hs charged | splash | ammo | cost | cooldown | afflictions | notes |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| PowerBeam | 6 | 6 | 36 | 8 | 48 | 0/0 | UA | 0/0 | 5 | - | repeat fire, chargeable |
-| VoltDriver | 14 | 56 | 56 | 21 | 56 | 0/56 | UA | 5/25 | 5 | - | chargeable |
-| Missile | 32 | 48 | 48 | 32 | 48 | 24/32 | missile | 10/15 | 20 | - | chargeable |
-| Battlehammer | 12 | 12 | 12 | 12 | 12 | 8/8 | UA | 4/4 | 10 | - | repeat fire |
-| Imperialist | 72 | 72 | 72 | 200 | 200 | 0/0 | UA | 20/20 | 60 | - | can zoom, repeat fire |
-| Judicator | 24 | 24 | 24 | 32 | 32 | 12/10 | UA | 5/25 | 15 | - | chargeable, can hurt the shooter |
-| Magmaul | 32 | 56 | 56 | 32 | 56 | 16/28 | UA | 10/20 | 20 | - | chargeable, ricochets, can hurt the shooter |
-| ShockCoil | 10 | 10 | 10 | 10 | 10 | 0/0 | UA | 10/10 | 0 | - | continuous, repeat fire |
-| OmegaCannon | 200 | 200 | 200 | 200 | 200 | 200/200 | UA | 0/0 | 60 | - | - |
-
-Affinity versions -- what a hunter gets when it carries its own weapon. Note the extra damage and the afflictions the plain versions do not have:
-
-| Beam | dmg | min-chg | charged | headshot | hs charged | splash | ammo | cost | cooldown | afflictions | notes |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| PowerBeam | 6 | 6 | 40 | 8 | 52 | 0/0 | UA | 0/0 | 4 | - | repeat fire, chargeable |
-| VoltDriver | 14 | 56 | 56 | 21 | 56 | 0/56 | UA | 5/25 | 5 | charged: Disrupt | chargeable |
-| Missile | 32 | 48 | 48 | 32 | 48 | 24/32 | missile | 10/15 | 20 | - | chargeable |
-| Battlehammer | 18 | 18 | 18 | 18 | 18 | 12/12 | UA | 5/5 | 15 | - | repeat fire |
-| Imperialist | 72 | 72 | 72 | 200 | 200 | 0/0 | UA | 20/20 | 60 | - | can zoom, repeat fire |
-| Judicator | 24 | 12 | 12 | 32 | 12 | 12/0 | UA | 5/25 | 15 | charged: Freeze | chargeable, area of effect, can hurt the shooter |
-| Magmaul | 32 | 48 | 48 | 32 | 48 | 16/18 | UA | 10/20 | 20 | charged: Burn | chargeable, ricochets, can hurt the shooter |
-| ShockCoil | 10 | 10 | 10 | 10 | 10 | 0/0 | UA | 10/10 | 0 | - | continuous, repeat fire |
-| OmegaCannon | 60 | 60 | 60 | 60 | 60 | 60/60 | UA | 0/0 | 60 | - | - |
-
-
-Affinity weapon per hunter (the one whose enhanced version it uses):
-
-- Samus: Missile
-- Kanden: VoltDriver
-- Trace: Imperialist
-- Sylux: ShockCoil
-- Noxus: Judicator
-- Spire: Magmaul
-- Weavel: Battlehammer
-
-## Damage multipliers, in the order the code applies them
-
-| Rule | Effect | Where |
-|---|---|---|
-| Beam effectiveness vs the target | x0 / x0.5 / x1 / x2 | `PlayerEntity.TakeDamage`, from `BeamEffectiveness[beam]`. Players are set to Normal for every beam in `Spawn()`; **a player that never spawned has x0 for everything and cannot be hurt at all** |
-| Double damage pickup | x2, and *not* applied to Shock Coil | `BeamProjectileEntity` |
-| Prime Hunter | x1.5 | `BeamProjectileEntity` |
-| **Imperialist without zoom** | **/2** | `BeamProjectileEntity`: `if (weapon.Beam == Imperialist && !equip.Zoomed) damage /= 2` |
-| Quadruple Damage cheat | x4 | `BeamProjectileEntity`, from settings.json. Disabled automatically while connected to a server |
-| Match damage level | x0.75 low / x1 medium / x1.25 high | `PlayerEntity.TakeDamage` |
-| Headshot | uses the weapon's headshot damage instead | `BeamProjectileEntity` |
-| Friendly fire off, same team | x0 | `PlayerEntity.TakeDamage` |
-| Weavel halfturret alive | damage is split between body and turret | `PlayerEntity.TakeDamage` |
-| Affinity weapon | the hunter uses entry `beam + 9`, which is a different set of numbers entirely -- more damage and, for several weapons, an affliction the plain version does not inflict | `PlayerEntity.TryEquipWeapon` |
-
-Invulnerability windows: a hit sets a damage-invulnerability timer (per hunter, `Values.DamageInvuln`), and spawning sets a spawn-invulnerability timer. Both reject further damage until they run out.
-
-## Hunters
-
-| Hunter | energy tank | MP max health | MP ammo cap | alt form | bombs | boost | alt attack |
-|---|---|---|---|---|---|---|---|
-| Samus | 100 | 199 | 599 | Morph Ball | yes | yes | bombs |
-| Kanden | 100 | 199 | 599 | Stinglarva | yes | no | bombs |
-| Trace | 100 | 199 | 599 | Triskelion | no | no | cloak and lunge |
-| Sylux | 100 | 199 | 599 | Lockjaw | yes | no | bombs |
-| Noxus | 100 | 199 | 599 | Vhoscythe | no | no | spin attack |
-| Spire | 100 | 199 | 599 | Dialanche | no | no | slam |
-| Weavel | 100 | 199 | 599 | Halfturret | no | no | leaves a turret that shoots on its own |
-
-Health on spawn is `EnergyTank - 1`; the maximum in multiplayer is `2 * EnergyTank - 1`, so a full pickup run doubles a hunter's effective health.
-
-## Movement, per hunter
-
-Speeds are units per frame as the engine stores them (20.12 fixed point converted to float on load).
-
-| Hunter | walk cap | strafe cap | jump | biped gravity | alt gravity (air/ground) | boost cap | boost charge (min-max) | alt radius |
-|---|---|---|---|---|---|---|---|---|
-| Samus | 0.24 | 0.24 | 0.3 | -0.0188 | -0.0598/-0.0269 | 0.6 | 5-15 | 0.5 |
-| Kanden | 0.24 | 0.24 | 0.3 | -0.0188 | -0.0598/-0.0269 | 0.6 | 5-22 | 0.4 |
-| Trace | 0.24 | 0.24 | 0.3 | -0.0188 | -0.0598/-0.0269 | 0.6 | 5-22 | 0.63 |
-| Sylux | 0.24 | 0.24 | 0.3 | -0.0188 | -0.0398/-0.0269 | 0.6 | 5-22 | 0.63 |
-| Noxus | 0.24 | 0.24 | 0.3 | -0.0188 | -0.0598/-0.0269 | 0.6 | 5-15 | 0.5 |
-| Spire | 0.24 | 0.24 | 0.3 | -0.0188 | -0.0598/-0.0269 | 0.6 | 5-22 | 0.5 |
-| Weavel | 0.24 | 0.24 | 0.3 | -0.0188 | -0.0598/-0.0269 | 0.6 | 5-22 | 0.4 |
-
-- Morphing plays an animation and the form only changes when it ends (`EnterAltForm` sets Morphing; `ProcessPlayer` applies `UpdateForm` on `AnimFlags.Ended`). Unmorphing applies the change immediately.
-- Alt form swaps the collision volume (`PlayerVolumes[hunter, 2]`), and the position is shifted by the difference between the two volume centres.
-- Boost is a charge-then-release: hold to build from `BoostChargeMin` to `BoostChargeMax`, release to convert it into speed between `BoostSpeedMin` and `BoostSpeedMax`.
-
-## States a player can be put into
-
-| State | Cause | Duration | Effect |
-|---|---|---|---|
-| Frozen | Judicator, affinity version, **charged shot only** | 75 frames doubled; 15 doubled if refrozen within 60 doubled | cannot act; the ice layer draws over the hunter; animation frames stop advancing |
-| Disrupted | Volt Driver, affinity, **charged** | 60 doubled | HUD distortion, aim disrupted |
-| Burning | Magmaul, affinity, **charged** | 150 doubled | damage over time, attributed to whoever set the fire |
-
-Every affliction in the game sits on the charged entry of its weapon's
-affliction pair (`WeaponInfo.Afflictions[1]`). An uncharged hit from the same
-weapon inflicts nothing, and "charged" means `ChargeLevel >= FullCharge * 2`
-unless the weapon carries the `PartialCharge` flag, in which case
-`MinCharge * 2` is enough.
-| Double damage | pickup | timer | x2 outgoing damage, Shock Coil excepted; a visible effect is attached to the gun |
-| Cloaked | pickup | timer | alpha drops towards invisible |
-| Deathalt | pickup | timer | forced alt form, health drains, heavy damage output |
-| Halfturret | Weavel morphs | until unmorph or death | the turret is a separate entity that shoots on its own; damage is split between it and the body, and unmorphing gives its remaining health back to Weavel |
-| Damage invulnerable | any hit | `Values.DamageInvuln` doubled | further hits are rejected outright |
-| Spawn invulnerable | spawning | timer | hits are rejected unless the damage carries `IgnoreInvuln` or `Death` |
-
-## Spawning and respawning
-
-`PlayerProcess.GetRespawnPoint` picks a point by these rules, in order:
-
-1. Consider at most 25 spawn points. Skip any that is inactive, still on cooldown, or (on the very first frame) flagged by availability.
-2. In Capture, skip points belonging to the other team.
-3. A point is *valid* only if every living player is at least 10 units away. Among the valid ones, the choice rotates with the frame counter.
-4. If none is valid, take the one furthest from any living player.
-5. If even that is unavailable -- every point on cooldown, which happens with more players than the map was drawn for -- take any active point. Without this last step the player simply does not spawn and waits at the origin.
-
-The chosen point goes on a cooldown of 2 frames doubled, so a crowd cannot all land on the same one.
-
-A dead player waits on `_respawnTimer`; it may spawn early by holding fire. Health on spawn is `EnergyTank - 1`. **`Spawn()` is also what fills in `BeamEffectiveness`** -- a player that reaches the map without it takes zero damage from every beam in the game.
-
-## Match modes
-
-| Mode | Scored on | Second column on the scoreboard |
-|---|---|---|
-| Battle / Battle Teams | points (a kill is +1, dying is -1) | deaths |
-| Survival / Survival Teams | time alive | deaths; running out of lives puts a player out of the game |
-| Capture | octoliths taken | kills |
-| Bounty / Bounty Teams | octoliths delivered | kills |
-| Nodes / Nodes Teams | points from held nodes | kills |
-| Defender / Defender Teams | time holding the node | kills |
-| Prime Hunter | time spent as the prime hunter | kills; the prime hunter deals x1.5 damage and is shown to everyone |
-
-A match ends on the point goal or the time limit, whichever comes first. Team play merges the per-player tallies into two team tallies, and with friendly fire off a shot at a team-mate does nothing at all.
-
-## World interactions
-
-| Thing | Behaviour |
-|---|---|
-| Jump pad | launches whatever touches it along a fixed vector; this is the one place a player legitimately covers a lot of ground in a few frames |
-| Teleporter | moves the player to the linked pad, optionally forcing alt form on arrival |
-| Door / force field | opens on contact or on a weapon of the right colour; locked doors ignore everything else |
-| Kill height | a room-wide floor: below it the player dies. This is what most "random deaths" in a fast match actually are |
-| Lava and hazard volumes | set the player on fire while standing in them, except for Spire, who is immune |
-| Morph camera | a volume that forces the camera behind a morphed player, and blocks unmorphing while inside |
-| Item spawner | respawns its item on a timer once taken |
-
-## Pickups
-
-| Item | Effect |
-|---|---|
-| HealthSmall / HealthMedium / HealthBig | restores health |
-| UASmall / UABig | universal ammo |
-| MissileSmall / MissileBig | missile ammo |
-| VoltDriver, Battlehammer, Imperialist, Judicator, Magmaul, ShockCoil | grants the weapon and its ammo |
-| DoubleDamage | x2 damage for a time, Shock Coil excepted |
-| Cloak | invisibility for a time |
-| Deathalt | forced alt form, drains health, heavy damage |
-| OmegaCannon | one-shot kill weapon |
-
-A player killed in multiplayer drops ammo of the type its killer's weapon uses.
-
-## Bots
-
-A bot is an ordinary player whose `Controls` are written by `PlayerAi.ProcessInput` instead of by a keyboard. That is the whole of the difference, and it is why a networked player can reuse the same surface: relayed input is simply a third writer of the same buttons.
-
-| Piece | What it does |
-|---|---|
-| `PlayerEntity.IsBot` | marks the slot as AI-driven. `Scene.AddPlayer` sets it on every player after the first, which is right for a local match and wrong for a networked one -- the AI would overwrite relayed input, so a networked session clears it on every slot |
-| `BotLevel` (0-2) | difficulty; clamped and used to index reaction and accuracy tables |
-| `AiPersonality` | per-hunter behaviour trees loaded from the ROM's own data, one set per hunter and encounter. `AiPersonalityData1` nodes hold conditions and the function ids to run |
-| `AiData.Process()` | run once per frame per bot from `Scene.UpdateScene`, but only while the bot is alive |
-| `UpdateExecutionPath` / `Execute` | walks the tree and dispatches `Func24Id` to the behaviour functions -- move, aim, fire, morph, use the alt attack, pick a weapon |
-| Weapon choice | prefers the hunter's affinity weapon (`Weapons.AffinityWeapons[hunter]`) and zooms when it holds a weapon that can |
-| `AiFlags3` | the spawn/despawn handshake: one bit asks for the spawn effect and sound, another marks the bot as despawned |
-
-For testing, `NetTestScript` replaces the AI entirely: it writes the same `Controls`, but to a fixed script rather than a behaviour tree, so two machines can be asked to do the same thing at the same moment and compared.
-
-## How multiplayer works here
-
-This is not the DS Wi-Fi protocol and cannot talk to real hardware or an emulator. It connects MphRead instances to each other.
-
-| Piece | Rule |
-|---|---|
-| Server | a relay with no game files: it assigns slots, keeps the match clock and the map rotation, and forwards packets. It never simulates |
-| Authority | the first client to connect. It resolves damage, deaths and scores for everybody |
-| Position | owned by the player it belongs to. Each client publishes its own position in every intent and everyone else follows it, including the authority. Two simulations of one player fighting over a position is what produced rubber-banding |
-| Input | relayed to every client, not only the authority. Input is what makes a player fire, morph, lay a bomb or swing an alt attack; clients that received only positions drew opponents gliding in silence |
-| Ammo | in the intent, alongside the position and the weapon. Everyone simulates a player's shots and spends the ammo; only the owner walks over the pickups that refill it. A puppet that has run dry makes its owner's shots vanish on the machine that decides what they hit |
-| Ordering | every stream refuses a frame older than the newest applied -- intents, relayed intents, and snapshots. UDP reorders as a matter of course, and the snapshot is the one carrying health, score and the damage counter |
-| One-frame presses | carried as an 8-frame history of rising edges, because a press exists in exactly one packet and UDP loses packets. Edges are taken *only* from that history: deriving them from the button level as well applied each press twice, which for a toggle means never |
-| Snapshot | the authority's view of every player: health, score, form, weapon, zoom, and a damage record. Sent every frame |
-| Damage | resolved only by the authority; every other client throws away locally-resolved hits. The authority stamps each hit with a counter, and victims replay the *difference* in that counter, so several hits between two snapshots are all accounted for |
-| Score | carried in the snapshot. Counting locally worked only for whoever had been present since the first kill |
-| Remote smoothing | none, deliberately, on the machine that resolves damage: a remote player is placed at the position its owner reported, because the aim in the same packet was computed against exactly that position and easing towards it leaves the hitbox behind the shot. Beyond 15 units it is a respawn or a teleporter and is counted as a snap. The eased catch-up the constants still describe is not wired up on the other clients either, where it would cost nothing -- see the end of the damage-bug section |
-| Slots | `PlayerEntity.SlotCapacity` (8). Every slot-indexed array is sized from it |
-| Map rotation | the server owns it; clients poll the match state and load the new room, rebuilding every player slot and resetting the scores |
-
+Weapons, damage multipliers, hunters, movement, states/afflictions, spawning,
+match modes, world interactions, pickups, bots, and the multiplayer protocol
+rules are in `MECHANICS.md` at the repository root, regenerated with
+`MphRead -mechanics`.

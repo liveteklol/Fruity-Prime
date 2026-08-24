@@ -54,4 +54,35 @@ First-run behaviour and progress
 - The progress bar is milestone-driven: `SetupProgress` classifies output into
   phases rather than counting files first.
 
+macOS and Android
+
+- **macOS** publishes like any other desktop target (`osx-x64`/`osx-arm64`,
+  cross-compiled on the Linux runner), and OpenAL ships with it
+  (`libopenal.1.dylib`, keyed on RID rather than a Windows/Linux special
+  case). **Nobody has started one.** Both packages are cross-compiled and
+  unrun; the thing to watch is GLFW and AppKit sharing a process and a main
+  thread, which the one-thread launcher arrangement is designed for and no
+  Mac has confirmed.
+- **Android** is `src/MphRead.Android/`, a head project compiling the same
+  sources with `ANDROID` defined. What runs today is a front screen only --
+  the server directory's list with a live status query per server -- because
+  the engine draws through OpenTK and reads input from GLFW, neither of which
+  exists on Android. The value today is that the head **stops building** the
+  moment shared code grows something desktop-only; it already forced out
+  `LauncherPrefs.Directory` (an Android package's directory is read-only, so
+  the head points `launcher.txt` at the app's data directory) and the
+  `ANDROID` guard in `GuiLauncher` (Android stands the toolkit up from its
+  activity, with no desktop backend to detect).
+- Building Android needs the workload and an SDK:
+  ```bash
+  dotnet workload install android
+  dotnet build src/MphRead.Android/MphRead.Android.csproj -c Debug \
+    -p:AndroidSdkDirectory=$HOME/android-sdk
+  ```
+  `EnableAvaloniaXamlCompilation=false` is deliberate: there is no XAML in
+  this project (every screen is C#), and with AvaloniaResource items present
+  the XAML compiler runs anyway and disagrees with the Android SDK about
+  where it left the assembly, failing the build after a clean compile. The
+  `avares://` assets are embedded by a different target and are unaffected.
+
 See also: .claude/launcher/LAUNCHER-DESIGN.md, .claude/launcher/LAUNCHER-SETTINGS.md, .claude/launcher/LAUNCHER-FIRSTRUN.md

@@ -193,11 +193,13 @@ This is not the DS Wi-Fi protocol and cannot talk to real hardware or an emulato
 | Authority | the first client to connect. It resolves damage, deaths and scores for everybody |
 | Position | owned by the player it belongs to. Each client publishes its own position in every intent and everyone else follows it, including the authority. Two simulations of one player fighting over a position is what produced rubber-banding |
 | Input | relayed to every client, not only the authority. Input is what makes a player fire, morph, lay a bomb or swing an alt attack; clients that received only positions drew opponents gliding in silence |
+| Ammo | in the intent, alongside the position and the weapon. Everyone simulates a player's shots and spends the ammo; only the owner walks over the pickups that refill it. A puppet that has run dry makes its owner's shots vanish on the machine that decides what they hit |
+| Ordering | every stream refuses a frame older than the newest applied -- intents, relayed intents, and snapshots. UDP reorders as a matter of course, and the snapshot is the one carrying health, score and the damage counter |
 | One-frame presses | carried as an 8-frame history of rising edges, because a press exists in exactly one packet and UDP loses packets. Edges are taken *only* from that history: deriving them from the button level as well applied each press twice, which for a toggle means never |
 | Snapshot | the authority's view of every player: health, score, form, weapon, zoom, and a damage record. Sent every frame |
 | Damage | resolved only by the authority; every other client throws away locally-resolved hits. The authority stamps each hit with a counter, and victims replay the *difference* in that counter, so several hits between two snapshots are all accounted for |
 | Score | carried in the snapshot. Counting locally worked only for whoever had been present since the first kill |
-| Remote smoothing | remote players ease toward their reported position (35% of the gap per frame, 60% when it is wide) and only jump past 15 units, so a lost burst glides instead of popping |
+| Remote smoothing | none, deliberately, on the machine that resolves damage: a remote player is placed at the position its owner reported, because the aim in the same packet was computed against exactly that position, and easing towards it leaves the hitbox behind the shot. Beyond 15 units it is a respawn or a teleporter and is counted as a snap. See `.claude/multiplayer/NETWORK-DIAGNOSTICS.md` for why smoothing was removed |
 | Slots | `PlayerEntity.SlotCapacity` (8). Every slot-indexed array is sized from it |
 | Map rotation | the server owns it; clients poll the match state and load the new room, rebuilding every player slot and resetting the scores |
 
