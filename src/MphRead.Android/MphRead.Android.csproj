@@ -83,7 +83,12 @@
     <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.11" />
     <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.11" />
     <PackageReference Include="OpenTK" Version="4.9.4" />
-    <PackageReference Include="ReFuel.StbImage" Version="2.1.1" />
+    <!-- The managed binding only. The package's natives are built for Linux and
+         Windows, so they are dead weight in an APK and the only thing they do
+         there is make the build warn that they are not 16 KB page aligned.
+         Nothing on this head calls STB: exporting images and movies is a
+         desktop feature, and preview capture goes through AndroidPng. -->
+    <PackageReference Include="ReFuel.StbImage" Version="2.1.1" ExcludeAssets="native" />
     <AvaloniaResource Include="..\MphRead\Assets\fruity-prime-logo.png"
                       Link="Assets\fruity-prime-logo.png" />
     <AvaloniaResource Include="..\MphRead\Assets\fruity-prime-mark.png"
