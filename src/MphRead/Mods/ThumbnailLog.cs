@@ -25,7 +25,8 @@ namespace MphRead.Mods
         private static readonly object _lock = new();
         private static bool _failed;
 
-        public static string Path => System.IO.Path.Combine(AppContext.BaseDirectory, "thumbnails.log");
+        public static string Path =>
+            System.IO.Path.Combine(Launcher.GameFiles.Root, "thumbnails.log");
 
         /// <summary>Start a fresh file. Called once by whoever runs a batch.</summary>
         public static void Begin(int rooms)
@@ -46,8 +47,10 @@ namespace MphRead.Mods
                     + Environment.NewLine + $"{rooms} room(s) to render" + Environment.NewLine);
                 _failed = false;
             }
-            catch (IOException)
+            catch (Exception)
             {
+                // A read-only directory throws UnauthorizedAccess rather than
+                // IOException, and a log nobody can write is not worth a crash.
                 _failed = true;
             }
         }

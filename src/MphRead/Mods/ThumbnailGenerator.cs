@@ -29,9 +29,13 @@ namespace MphRead.Mods
         public const int ThumbnailWidth = 1600;
         public const int ThumbnailHeight = 900;
 
-        /// <summary>Cache directory, beside the executable so it travels with the install.</summary>
+        /// <summary>
+        /// Cache directory, beside the game files so it travels with the
+        /// install. That is beside the executable everywhere but Android, where
+        /// the package's own directory is read-only -- see GameFiles.Root.
+        /// </summary>
         public static string CacheDirectory =>
-            Path.Combine(AppContext.BaseDirectory, "thumbnails");
+            Path.Combine(Launcher.GameFiles.Root, "thumbnails");
 
         public static string PathFor(string roomKey)
         {
@@ -42,7 +46,14 @@ namespace MphRead.Mods
             return Path.Combine(CacheDirectory, $"{safe}.png");
         }
 
-        public static bool Exists(string roomKey) => File.Exists(PathFor(roomKey));
+        public static bool Exists(string roomKey)
+        {
+            // Zero bytes is what a failed encode leaves behind -- the file was
+            // created before the encoder threw -- and counting it as a preview
+            // is how a room gets skipped for ever after one bad run.
+            var file = new FileInfo(PathFor(roomKey));
+            return file.Exists && file.Length > 0;
+        }
 
         /// <summary>
         /// Multiplayer rooms a launcher would offer.

@@ -20,26 +20,26 @@ namespace MphRead.Mods.Launcher.Gui
     /// gesture when the picture beside it changes as you step, and the wrong one
     /// when you know which map you want and it is twenty steps away. This is the
     /// second half of that: click the map name, see them all, pick one.
+    ///
+    /// A view rather than a window, for <see cref="SettingsView"/>'s reason: the
+    /// desktop puts <see cref="MapPickerWindow"/> around it and Android shows it
+    /// as an overlay, and neither has a copy of the grid.
     /// </summary>
-    internal sealed class MapPickerWindow : Window
+    internal sealed class MapPickerView : UserControl
     {
-        /// <summary>The map that was chosen, or null when the window was closed.</summary>
+        /// <summary>The map that was chosen, or null when it was dismissed.</summary>
         public string? RoomKey { get; private set; }
+
+        /// <summary>Raised when this view is finished with, picked or not.</summary>
+        public event EventHandler? Closed;
 
         private MapTile? _first;
         private MapTile? _selected;
 
-        public MapPickerWindow(IReadOnlyList<string> rooms, string current)
+        public MapPickerView(IReadOnlyList<string> rooms, string current)
         {
-            Title = "Choose a map";
-            Icon = GuiTheme.AppIcon.Value;
-            Width = 1120;
-            Height = 720;
-            MinWidth = 560;
-            MinHeight = 420;
             Background = GuiTheme.InkBrush;
-            RequestedThemeVariant = Avalonia.Styling.ThemeVariant.Dark;
-            WindowStartupLocation = WindowStartupLocation.CenterOwner;
+            Focusable = true;
 
             var grid = new WrapPanel { Orientation = Orientation.Horizontal };
             foreach (string room in rooms)
@@ -53,22 +53,40 @@ namespace MphRead.Mods.Launcher.Gui
                 tile.Clicked += (sender, _) =>
                 {
                     RoomKey = ((MapTile)sender!).RoomKey;
-                    Close();
+                    Closed?.Invoke(this, EventArgs.Empty);
                 };
                 grid.Children.Add(tile);
             }
 
+            // A back entry as well as Escape and the title bar's close button:
+            // shown as an overlay there is no title bar, and a phone's back
+            // gesture is not something to rely on as the only way out.
+            var back = new MenuEntry("Back", titleSize: 13)
+            {
+                Accent = GuiTheme.TextDim,
+                Width = 120,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            back.Click += (_, _) => Closed?.Invoke(this, EventArgs.Empty);
+            var title = new TextBlock
+            {
+                Text = "Choose a map",
+                FontFamily = GuiTheme.Display,
+                FontSize = 18,
+                Foreground = GuiTheme.TextBrush,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            var bar = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
+            Grid.SetColumn(title, 0);
+            Grid.SetColumn(back, 1);
+            bar.Children.Add(title);
+            bar.Children.Add(back);
             var header = new Border
             {
                 Background = GuiTheme.PanelBrush,
                 Padding = new Thickness(18, 12, 12, 12),
-                Child = new TextBlock
-                {
-                    Text = "Choose a map",
-                    FontFamily = GuiTheme.Display,
-                    FontSize = 18,
-                    Foreground = GuiTheme.TextBrush
-                }
+                Child = bar
             };
             var body = new ScrollViewer
             {
@@ -83,9 +101,9 @@ namespace MphRead.Mods.Launcher.Gui
             Content = dock;
         }
 
-        protected override void OnOpened(EventArgs e)
+        protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
         {
-            base.OnOpened(e);
+            base.OnAttachedToVisualTree(e);
             // The map that is already chosen, so the grid can be walked from
             // where it is rather than from the top left.
             Dispatcher.UIThread.Post(() => (_selected ?? _first)?.Focus(),
@@ -96,11 +114,30 @@ namespace MphRead.Mods.Launcher.Gui
         {
             if (e.Key == Key.Escape)
             {
-                Close();
+                Closed?.Invoke(this, EventArgs.Empty);
                 e.Handled = true;
                 return;
             }
             base.OnKeyDown(e);
+        }
+    }
+
+    /// <summary>A frame around <see cref="MapPickerView"/>, and nothing else.</summary>
+    internal sealed class MapPickerWindow : Window
+    {
+        public MapPickerWindow(MapPickerView view)
+        {
+            view.Closed += (_, _) => Close();
+            Title = "Choose a map";
+            Icon = GuiTheme.AppIcon.Value;
+            Width = 1120;
+            Height = 720;
+            MinWidth = 560;
+            MinHeight = 420;
+            Background = GuiTheme.InkBrush;
+            RequestedThemeVariant = Avalonia.Styling.ThemeVariant.Dark;
+            WindowStartupLocation = WindowStartupLocation.CenterOwner;
+            Content = view;
         }
     }
 
@@ -170,7 +207,9 @@ namespace MphRead.Mods.Launcher.Gui
 
         protected override void OnPointerReleased(PointerReleasedEventArgs e)
         {
-            if (IsPointerOver)
+            // See MenuEntry.OnPointerReleased: a finger hovers nothing.
+            Point p = e.GetPosition(this);
+            if (p.X >= 0 && p.Y >= 0 && p.X <= Bounds.Width && p.Y <= Bounds.Height)
             {
                 Clicked?.Invoke(this, EventArgs.Empty);
             }

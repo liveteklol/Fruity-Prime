@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Threading.Tasks;
 using Android.App;
 using Android.Content.PM;
 using Android.OS;
@@ -7,7 +9,9 @@ using Android.Views;
 using Android.Widget;
 using Avalonia;
 using Avalonia.Android;
+using MphRead.Mods;
 using MphRead.Mods.Launcher;
+using MphRead.Mods.Network;
 
 namespace MphRead.Droid
 {
@@ -41,6 +45,7 @@ namespace MphRead.Droid
         private ViewGroup? _content;
         private View? _launcherView;
         private GameView? _gameView;
+        private ThumbnailView? _thumbnails;
         private TouchOverlayView? _overlay;
         private TextView? _notice;
         private readonly TouchControls _controls = new TouchControls();
@@ -73,6 +78,12 @@ namespace MphRead.Droid
                     Console.WriteLine($"[android] could not use {root} as the working directory: {ex.Message}");
                 }
             }
+            // Before base.OnCreate, which is what builds the front screen:
+            // the screen asks whether previews can be rendered while it is
+            // being constructed, and on the desktop the same seam is left empty
+            // so the batch of worker processes answers instead.
+            ThumbnailHost.Current = new AndroidThumbnailHost(this);
+            ScreenCapture.PngWriter = AndroidPng.Write;
             return base.CustomizeAppBuilder(builder).WithInterFont();
         }
 
@@ -84,9 +95,60 @@ namespace MphRead.Droid
             _launcherView = _content?.GetChildAt(0);
         }
 
+        /// <summary>
+        /// Render map previews on this device, one room at a time, and give the
+        /// launcher its progress back.
+        ///
+        /// Landscape while it runs, for the same reason the pictures are a
+        /// fixed size: they are shown in a wide band, and a preview taken in
+        /// portrait is a preview of the ceiling.
+        /// </summary>
+        internal Task<int> RenderPreviews(IReadOnlyList<string> rooms, Action<string> report)
+        {
+            var done = new TaskCompletionSource<int>();
+            if (_content == null || InMatch || _thumbnails != null)
+            {
+                done.SetResult(0);
+                return done.Task;
+            }
+            ScreenOrientation before = RequestedOrientation;
+            RequestedOrientation = ScreenOrientation.SensorLandscape;
+            Window?.AddFlags(WindowManagerFlags.KeepScreenOn);
+            var notice = new TextView(this)
+            {
+                Text = $"Rendering {rooms.Count} map preview(s) from your own files...",
+                Gravity = GravityFlags.Center
+            };
+            notice.SetTextColor(Android.Graphics.Color.Argb(230, 230, 234, 242));
+            notice.SetBackgroundColor(Android.Graphics.Color.Argb(160, 10, 12, 16));
+            _thumbnails = new ThumbnailView(this, rooms,
+                ThumbnailGenerator.ThumbnailWidth, ThumbnailGenerator.ThumbnailHeight,
+                line => RunOnUiThread(() =>
+                {
+                    notice.Text = line;
+                    report(line);
+                }),
+                written => RunOnUiThread(() =>
+                {
+                    if (_thumbnails != null)
+                    {
+                        _content.RemoveView(_thumbnails);
+                        _thumbnails = null;
+                    }
+                    _content.RemoveView(notice);
+                    Window?.ClearFlags(WindowManagerFlags.KeepScreenOn);
+                    RequestedOrientation = before;
+                    done.TrySetResult(written);
+                }));
+            _content.AddView(_thumbnails);
+            _content.AddView(notice);
+            return done.Task;
+        }
+
         protected override void OnPause()
         {
             _gameView?.OnPause();
+            _thumbnails?.OnPause();
             base.OnPause();
         }
 
@@ -94,6 +156,7 @@ namespace MphRead.Droid
         {
             base.OnResume();
             _gameView?.OnResume();
+            _thumbnails?.OnResume();
         }
 
         protected override void OnDestroy()
@@ -105,6 +168,9 @@ namespace MphRead.Droid
             base.OnDestroy();
         }
 
+        // Obsolete on 33+ in favour of OnBackPressedDispatcher, which Avalonia's
+        // activity does not route; this still runs on every version we target.
+#pragma warning disable CA1422
         public override void OnBackPressed()
         {
             if (InMatch)
@@ -112,8 +178,16 @@ namespace MphRead.Droid
                 _gameView?.Stop();
                 return;
             }
+            // The same question Escape asks the desktop launcher: close the
+            // overlay, or go back one card. Only when the front screen has
+            // nothing left to go back to does this leave the app.
+            if (AndroidApp.Home?.GoBack() == true)
+            {
+                return;
+            }
             base.OnBackPressed();
         }
+#pragma warning restore CA1422
 
         /// <summary>Load what the plan asks for and hand the screen to it.</summary>
         internal void StartMatch(LaunchPlan plan)
@@ -201,6 +275,12 @@ namespace MphRead.Droid
             {
                 _launcherView.Visibility = ViewStates.Visible;
             }
+            // The desktop builds a fresh front screen each time round its loop;
+            // this one is the same object across a match, so it is told the
+            // match is over rather than left believing it already answered.
+            AndroidApp.Home?.Reset();
+            NetSession.Stop();
+            NetHostSession.Stop();
             Window?.ClearFlags(WindowManagerFlags.KeepScreenOn);
             GoImmersive(false);
             RequestedOrientation = _orientationBefore;
@@ -231,12 +311,12 @@ namespace MphRead.Droid
                 }
                 return;
             }
-#pragma warning disable CA1422 // the pre-30 way, for the devices that need it
+#pragma warning disable CA1422, CS0618 // the pre-30 way, for the devices that need it
             window.DecorView.SystemUiVisibility = immersive
                 ? (StatusBarVisibility)(SystemUiFlags.ImmersiveSticky | SystemUiFlags.HideNavigation
                     | SystemUiFlags.Fullscreen | SystemUiFlags.LayoutStable)
                 : StatusBarVisibility.Visible;
-#pragma warning restore CA1422
+#pragma warning restore CA1422, CS0618
         }
     }
 }

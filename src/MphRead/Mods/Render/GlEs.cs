@@ -84,7 +84,6 @@ namespace MphRead.Mods.Render
 
         private static OpenTK.Graphics.OpenGL.PrimitiveType _primMode;
         private static int _primStart;
-        private static bool _inPrimitive;
 
         private static readonly Batch _batch = new Batch();
         private static bool _recording;
@@ -128,7 +127,6 @@ namespace MphRead.Mods.Render
             _alphaTestLoc = -1;
             _batch.Clear();
             _recording = false;
-            _inPrimitive = false;
         }
 
         #region immediate mode
@@ -144,12 +142,10 @@ namespace MphRead.Mods.Render
             }
             _primMode = mode;
             _primStart = _batch.VertexCount;
-            _inPrimitive = true;
         }
 
         public static void End()
         {
-            _inPrimitive = false;
             int count = _batch.VertexCount - _primStart;
             EmitIndices(_primMode, _primStart, count);
             if (!_recording)
@@ -721,7 +717,10 @@ namespace MphRead.Mods.Render
 
         public static void CullFace(TriangleFace mode)
         {
+            // The ES enum has no TriangleFace overload; the values are the same.
+#pragma warning disable CS0618
             ES.GL.CullFace((ES.CullFaceMode)(int)mode);
+#pragma warning restore CS0618
         }
 
         public static void BlendFunc(BlendingFactor src, BlendingFactor dst)

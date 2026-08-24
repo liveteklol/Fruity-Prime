@@ -469,7 +469,13 @@ namespace MphRead
             }
             OutputStart();
             GC.Collect(generation: 2, GCCollectionMode.Forced, blocking: true, compacting: true);
-            GCSettings.LatencyMode = GCLatencyMode.SustainedLowLatency;
+            // Android's runtime throws PlatformNotSupported for this, which took
+            // every match on that head down before a room had finished loading.
+            // It is a hint to the collector, so going without it costs nothing.
+            if (!OperatingSystem.IsAndroid())
+            {
+                GCSettings.LatencyMode = GCLatencyMode.SustainedLowLatency;
+            }
         }
 
         private int _frameBuffer = 0;

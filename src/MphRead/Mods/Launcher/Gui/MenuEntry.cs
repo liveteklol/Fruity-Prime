@@ -128,6 +128,10 @@ namespace MphRead.Mods.Launcher.Gui
         {
             _pressed = true;
             Focus();
+            // Captured, the way a stock Button does it: without it a touch
+            // release is routed by a fresh hit test rather than to the row that
+            // was pressed, and the press is simply lost.
+            e.Pointer.Capture(this);
             InvalidateVisual();
             base.OnPointerPressed(e);
         }
@@ -137,11 +141,31 @@ namespace MphRead.Mods.Launcher.Gui
             bool wasPressed = _pressed;
             _pressed = false;
             InvalidateVisual();
+            if (ReferenceEquals(e.Pointer.Captured, this))
+            {
+                e.Pointer.Capture(null);
+            }
             base.OnPointerReleased(e);
-            if (wasPressed && IsEnabled && IsPointerOver)
+            // Where the release landed, not IsPointerOver: a finger hovers
+            // nothing, so on a touchscreen the pointer is already gone from the
+            // row by the time it lets go -- which is every button on Android
+            // doing nothing when pressed.
+            Point p = e.GetPosition(this);
+            bool inside = p.X >= 0 && p.Y >= 0
+                && p.X <= Bounds.Width && p.Y <= Bounds.Height;
+            if (wasPressed && IsEnabled && inside)
             {
                 Click?.Invoke(this, EventArgs.Empty);
             }
+        }
+
+        protected override void OnPointerCaptureLost(PointerCaptureLostEventArgs e)
+        {
+            // A drag that turned into a scroll takes the pointer away; the row
+            // must not still think it is being pressed.
+            _pressed = false;
+            InvalidateVisual();
+            base.OnPointerCaptureLost(e);
         }
 
         protected override void OnGotFocus(GotFocusEventArgs e)
@@ -175,6 +199,9 @@ namespace MphRead.Mods.Launcher.Gui
             bool lit = (IsPointerOver || IsFocused) && IsEnabled;
             bool marked = lit || (Selected && IsEnabled);
             var body = new Rect(0, 0, Bounds.Width, Bounds.Height);
+            // Avalonia hit-tests what was drawn, not the bounds: without this
+            // the row only answers the pointer over its glyphs.
+            context.FillRectangle(Brushes.Transparent, body);
             if (Primary)
             {
                 RenderPrimary(context, body, lit);

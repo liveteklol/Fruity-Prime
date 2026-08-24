@@ -40,6 +40,15 @@
     <!-- The shared sources are globbed in by hand below, so the SDK must not
          also add this directory's .cs files twice. -->
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <!-- CA1416: upstream's console menu, extractor and memory viewer call
+         Console.ReadKey/ReadLine/Clear, which Android does not support. They
+         are compiled here because this head compiles the whole codebase, and
+         none of them is reachable: the entry point is an activity, not Main.
+         The one exception is Extract.Setup's "update this path?" prompt, which
+         GameFiles.RunSetupHere calls with the console redirected and a catch
+         around it. Fixing them properly means editing upstream files, which is
+         what keeps a pull from NoneGiven/MphRead a fast-forward. -->
+    <NoWarn>$(NoWarn);CA1416</NoWarn>
     <AndroidPackageFormat>apk</AndroidPackageFormat>
     <!-- There is no XAML in this project: every screen here is written in C#.
          The compiler still runs when AvaloniaResource items are present, and on
@@ -69,10 +78,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Avalonia" Version="11.2.3" />
-    <PackageReference Include="Avalonia.Android" Version="11.2.3" />
-    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.2.3" />
-    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.2.3" />
+    <PackageReference Include="Avalonia" Version="11.3.11" />
+    <PackageReference Include="Avalonia.Android" Version="11.3.11" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.11" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.11" />
     <PackageReference Include="OpenTK" Version="4.9.4" />
     <PackageReference Include="ReFuel.StbImage" Version="2.1.1" />
     <AvaloniaResource Include="..\MphRead\Assets\fruity-prime-logo.png"

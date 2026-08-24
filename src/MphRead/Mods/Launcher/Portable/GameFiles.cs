@@ -114,6 +114,10 @@ namespace MphRead.Mods.Launcher
         /// </summary>
         public static bool RunSetup(string romPath, Action<string> report)
         {
+            if (InProcessSetup)
+            {
+                return RunSetupHere(romPath, report);
+            }
             string? exe = Environment.ProcessPath;
             if (exe == null)
             {
@@ -203,6 +207,75 @@ namespace MphRead.Mods.Launcher
             Paths.UpdatePaths();
             Paths.ChooseMphPath();
             Paths.ChooseFhPath();
+        }
+
+        /// <summary>
+        /// True where there is no second copy of this program to start.
+        ///
+        /// Android is the whole of it: an app is not an executable a process
+        /// can spawn, so the extraction has to happen in this one. That is not
+        /// the desktop default because upstream's setup asks its questions and
+        /// reports its errors on a console, and a child gets those answered on
+        /// stdin instead of hanging a window that has no console at all.
+        /// </summary>
+        public static bool InProcessSetup => OperatingSystem.IsAndroid();
+
+        /// <summary>
+        /// The same extraction, called rather than spawned.
+        ///
+        /// Upstream's <c>Extract.Setup</c> writes to the console, so the
+        /// console is pointed at the caller's report for the duration. It can
+        /// also *read* from it -- once, to ask whether an existing path should
+        /// be replaced -- and there is no stdin here to answer with, so a
+        /// device that already has files set up is told to clear them rather
+        /// than left waiting on a question nobody can see.
+        /// </summary>
+        private static bool RunSetupHere(string romPath, Action<string> report)
+        {
+            TextWriter previous = Console.Out;
+            try
+            {
+                Console.SetOut(new ReportWriter(report));
+                Extract.Setup(romPath);
+            }
+            catch (Exception ex)
+            {
+                report($"The extraction failed: {ex.Message}");
+                return false;
+            }
+            finally
+            {
+                Console.SetOut(previous);
+            }
+            string? problem = Problem();
+            if (problem != null)
+            {
+                report(problem);
+                return false;
+            }
+            return true;
+        }
+
+        /// <summary>A TextWriter that turns each finished line into one report.</summary>
+        private sealed class ReportWriter : TextWriter
+        {
+            private readonly Action<string> _report;
+            private readonly StringBuilder _line = new();
+
+            public ReportWriter(Action<string> report) => _report = report;
+
+            public override Encoding Encoding => Encoding.UTF8;
+
+            public override void Write(char value)
+            {
+                if (value == '\n')
+                {
+                    _report(_line.ToString().TrimEnd('\r'));
+                    _line.Clear();
+                    return;
+                }
+                _line.Append(value);
+            }
         }
     }
 }

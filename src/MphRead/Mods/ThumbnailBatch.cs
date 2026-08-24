@@ -19,6 +19,15 @@ namespace MphRead.Mods
     {
         public const int DefaultParallelism = 10;
 
+        /// <summary>
+        /// Whether previews can be rendered at all here. Every worker is a
+        /// fresh instance of this executable, and Android has no executable to
+        /// start -- so a phone shows map names and no pictures rather than
+        /// stalling on a batch that can never produce one.
+        /// </summary>
+        public static bool CanRun => !OperatingSystem.IsAndroid()
+            && Environment.ProcessPath != null;
+
         public static int Run(IReadOnlyList<string> rooms, int parallelism,
                               int width, int height, Action<string>? report = null)
         {

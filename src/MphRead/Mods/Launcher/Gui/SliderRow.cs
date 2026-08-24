@@ -146,6 +146,9 @@ namespace MphRead.Mods.Launcher.Gui
 
         public override void Render(DrawingContext context)
         {
+            // See MenuEntry.Render: hit testing follows the drawing.
+            context.FillRectangle(Brushes.Transparent,
+                new Rect(0, 0, Bounds.Width, Bounds.Height));
             var dim = new SolidColorBrush(Color.FromRgb(70, 76, 90));
             TrackedText.Draw(context, _label.ToUpperInvariant(), 11,
                 IsEnabled ? GuiTheme.TextDimBrush : dim,

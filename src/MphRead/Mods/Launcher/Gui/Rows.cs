@@ -86,8 +86,23 @@ namespace MphRead.Mods.Launcher.Gui
             InvalidateVisual();
         }
 
-        private Rect LeftArrow => new(Bounds.Width - 150, 0, 28, Bounds.Height);
+        private Rect LeftArrow
+        {
+            get
+            {
+                // The back arrow slides left to make room for a long value --
+                // a room name is wider than the gap a fixed pair leaves, and
+                // the text used to be drawn straight over both arrows.
+                double x = Math.Min(Bounds.Width - 150,
+                    Bounds.Width - 28 - (_valueWidth + 16) - 28);
+                return new Rect(Math.Max(110, x), 0, 28, Bounds.Height);
+            }
+        }
+
         private Rect RightArrow => new(Bounds.Width - 28, 0, 28, Bounds.Height);
+
+        /// <summary>Set while drawing; the arrows are placed around it.</summary>
+        private double _valueWidth;
 
         protected override void OnPointerMoved(PointerEventArgs e)
         {
@@ -159,6 +174,9 @@ namespace MphRead.Mods.Launcher.Gui
 
         public override void Render(DrawingContext context)
         {
+            // See MenuEntry.Render: hit testing follows the drawing.
+            context.FillRectangle(Brushes.Transparent,
+                new Rect(0, 0, Bounds.Width, Bounds.Height));
             if (IsFocused)
             {
                 context.FillRectangle(GuiTheme.PanelLightBrush,
@@ -168,13 +186,24 @@ namespace MphRead.Mods.Launcher.Gui
                 FlowDirection.LeftToRight, GuiTheme.Face(false), 13, GuiTheme.TextDimBrush);
             context.DrawText(label, new Point(4, (Bounds.Height - label.Height) / 2));
 
+            // The value lives between the arrows, and a room name is long
+            // enough that the pair has to move apart for it; past that it is
+            // trimmed rather than drawn over them.
             var value = new FormattedText(Value, CultureInfo.InvariantCulture,
                 FlowDirection.LeftToRight, GuiTheme.Face(true), 13, GuiTheme.TextBrush);
-            double centre = Bounds.Width - 89;
+            _valueWidth = value.Width;
+            Rect left = LeftArrow;
+            double room = RightArrow.X - left.Right - 8;
+            if (value.Width > room)
+            {
+                value.MaxTextWidth = Math.Max(20, room);
+                value.Trimming = TextTrimming.CharacterEllipsis;
+            }
+            double centre = (left.Right + RightArrow.X) / 2;
             context.DrawText(value, new Point(centre - value.Width / 2,
                 (Bounds.Height - value.Height) / 2));
 
-            Arrow(context, LeftArrow, pointsLeft: true, _leftHot);
+            Arrow(context, left, pointsLeft: true, _leftHot);
             Arrow(context, RightArrow, pointsLeft: false, _rightHot);
         }
 
@@ -258,6 +287,9 @@ namespace MphRead.Mods.Launcher.Gui
 
         public override void Render(DrawingContext context)
         {
+            // See MenuEntry.Render: hit testing follows the drawing.
+            context.FillRectangle(Brushes.Transparent,
+                new Rect(0, 0, Bounds.Width, Bounds.Height));
             if (IsFocused)
             {
                 context.FillRectangle(GuiTheme.PanelLightBrush,
