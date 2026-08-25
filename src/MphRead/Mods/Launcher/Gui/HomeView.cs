@@ -337,6 +337,12 @@ namespace MphRead.Mods.Launcher.Gui
             _cards.Children.Clear();
             _cards.Children.Add(card);
             _current = card;
+            // The splash is a map preview everywhere but the setup card, so it
+            // has to be told which one is up.
+            if (_matchMap != null)
+            {
+                RefreshSplash();
+            }
             if (ReferenceEquals(card, _onlineCard))
             {
                 StartStatusPolling();
@@ -477,23 +483,6 @@ namespace MphRead.Mods.Launcher.Gui
                     + "picking anything.", GuiTheme.TextDim));
             }
             card.Children.Add(choose);
-            // The files can also arrive while this card is up -- over USB, from
-            // another app -- so there has to be a way to look again that is not
-            // "kill the program and start it".
-            var recheck = new MenuEntry("Look again", "", titleSize: 13)
-            {
-                Accent = GuiTheme.TextDim
-            };
-            recheck.Click += (_, _) =>
-            {
-                RefreshGameFilesState();
-                RefreshRooms();
-                RefreshSplash();
-                log.Text = GameFiles.Describe();
-                _setupBack.IsVisible = GameFiles.Ready;
-                RefreshPreviewEntry();
-            };
-            card.Children.Add(recheck);
             // Previews are rendered here from the files that are here. A run
             // can be interrupted, and files can arrive after one, so asking
             // for the missing ones has to be possible without setting up again.
@@ -619,7 +608,7 @@ namespace MphRead.Mods.Launcher.Gui
             }
             if (ok)
             {
-                await RenderPreviews(log);
+                await RenderPreviews(log, progress);
             }
             progress.Finish(ok);
             _setupProgress.Set(progress.Fraction, progress.Stage);
@@ -650,7 +639,7 @@ namespace MphRead.Mods.Launcher.Gui
         /// own GL thread on Android. Nothing is downloaded and no picture ships
         /// with the program.
         /// </summary>
-        private async Task RenderPreviews(Note log)
+        private async Task RenderPreviews(Note log, SetupProgress? progress = null)
         {
             if (!ThumbnailHost.CanRender)
             {
@@ -663,6 +652,10 @@ namespace MphRead.Mods.Launcher.Gui
                 if (_previewProgress != null)
                 {
                     _previewProgress.Subtitle = line;
+                }
+                if (progress != null && progress.Observe(line))
+                {
+                    _setupProgress.Set(progress.Fraction, progress.Stage);
                 }
             }));
             RefreshSplash();
@@ -691,7 +684,10 @@ namespace MphRead.Mods.Launcher.Gui
         /// <summary>Keep the last few lines; the extraction prints hundreds.</summary>
         private static string Tail(string? existing, string line)
         {
-            string[] lines = ((existing ?? "") + line + "\n")
+            // The separator matters: without it each new line was glued onto
+            // the end of the previous one and the whole log read as one
+            // unbroken paragraph.
+            string[] lines = ((existing ?? "") + "\n" + line)
                 .Split('\n', StringSplitOptions.RemoveEmptyEntries);
             return String.Join("\n", lines.Skip(Math.Max(0, lines.Length - 8)));
         }
@@ -1328,6 +1324,15 @@ namespace MphRead.Mods.Launcher.Gui
         {
             RefreshGameFilesState();
             string? room = _playable.Count > 0 && _matchMap != null ? _matchMap.Value : null;
+            // Nothing from the game while the game is still being unpacked.
+            // The setup card is up for the whole of the first run -- the
+            // extraction and then the preview rendering -- and map pictures
+            // appearing one at a time beside it is the generation being
+            // watched, which is the thing it was moved offscreen to avoid.
+            if (ReferenceEquals(_current, _setupCard))
+            {
+                room = null;
+            }
             _splash.ShowRoom(room, room != null ? "Ready" : "");
         }
 

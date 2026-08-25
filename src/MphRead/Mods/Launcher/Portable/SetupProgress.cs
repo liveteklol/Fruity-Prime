@@ -43,13 +43,22 @@ namespace MphRead.Mods.Launcher
 
         // Tuned to the shape of a real extraction: the file tree is by far the
         // longest phase and prints one line per directory, the archives are a
-        // few dozen, and the decompression is a handful.
-        private static readonly Band _files = new(0.04, 0.55, 45, "Writing game files");
-        private static readonly Band _archives = new(0.55, 0.78, 25, "Unpacking archives");
-        private static readonly Band _sound = new(0.78, 0.86, 3, "Converting music");
-        private static readonly Band _binaries = new(0.86, 0.97, 6, "Decompressing code");
+        // few dozen, and the decompression is a handful. They stop at 0.72
+        // because rendering the map previews follows and is part of the same
+        // wait -- a bar that filled and then left the player watching a
+        // seemingly idle screen for another minute was the worst of both.
+        private static readonly Band _files = new(0.03, 0.40, 45, "Writing game files");
+        private static readonly Band _archives = new(0.40, 0.57, 25, "Unpacking archives");
+        private static readonly Band _sound = new(0.57, 0.63, 3, "Converting music");
+        private static readonly Band _binaries = new(0.63, 0.72, 6, "Decompressing code");
 
-        private Band _band = new(0, 0.04, 1, "Starting");
+        /// <summary>
+        /// The one phase whose total *is* known: every preview run counts its
+        /// rooms, so this band is a real fraction rather than a creep.
+        /// </summary>
+        private const double _previewStart = 0.72;
+
+        private Band _band = new(0, 0.03, 1, "Starting");
         private int _seen;
 
         /// <summary>0 to 1. Only ever increases.</summary>
@@ -70,6 +79,11 @@ namespace MphRead.Mods.Launcher
             if (Done)
             {
                 return false;
+            }
+            if (TryPreviewCount(line, out int done, out int total) && total > 0)
+            {
+                _band = new Band(_previewStart, 1, 1, $"Rendering map previews ({done}/{total})");
+                return Set(_previewStart + (1 - _previewStart) * done / total, _band.Stage);
             }
             Band next = Classify(line);
             if (next.Stage != _band.Stage)
@@ -95,6 +109,35 @@ namespace MphRead.Mods.Launcher
             Done = true;
             Fraction = 1;
             Stage = ok ? "Ready to play" : "Setup did not finish";
+        }
+
+        /// <summary>
+        /// "[thumbnails] 8/33 ...", which every preview run prints whichever
+        /// platform and however many workers produced it.
+        /// </summary>
+        private static bool TryPreviewCount(string line, out int done, out int total)
+        {
+            done = 0;
+            total = 0;
+            const string prefix = "[thumbnails] ";
+            if (!line.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                return false;
+            }
+            ReadOnlySpan<char> rest = line.AsSpan(prefix.Length);
+            int slash = rest.IndexOf('/');
+            if (slash <= 0)
+            {
+                return false;
+            }
+            ReadOnlySpan<char> after = rest[(slash + 1)..];
+            int end = 0;
+            while (end < after.Length && Char.IsAsciiDigit(after[end]))
+            {
+                end++;
+            }
+            return Int32.TryParse(rest[..slash], out done)
+                && end > 0 && Int32.TryParse(after[..end], out total);
         }
 
         private Band Classify(string line)
