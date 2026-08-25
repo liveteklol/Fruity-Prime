@@ -41,10 +41,11 @@ namespace MphRead.Droid
         /// <summary>
         /// How many to start.
         ///
-        /// Bounded by the declarations in <see cref="PreviewWorkerTypes"/> and,
-        /// below that, by what the device will hold: each worker is a runtime,
-        /// a GL context and a room's textures, and a phone that runs out kills
-        /// them rather than slowing down.
+        /// Ten, the same as the desktop batch, unless the device says it
+        /// cannot: each worker is a runtime, a GL context and a room's
+        /// textures, and a phone that runs out kills them rather than slowing
+        /// down. A killed worker costs its share of the rooms, which the
+        /// in-process pass afterwards picks up.
         /// </summary>
         public static int Count(Context context)
         {
@@ -54,7 +55,7 @@ namespace MphRead.Droid
             {
                 heapMb = Math.Max(32, manager.MemoryClass);
             }
-            return Math.Clamp(Math.Min(cores, heapMb / 64), 1, PreviewWorkerTypes.All.Count);
+            return Math.Clamp(Math.Min(cores * 2, heapMb / 24), 1, PreviewWorkerTypes.All.Count);
         }
 
         /// <summary>

@@ -120,9 +120,9 @@ namespace MphRead.Droid
 
     // One class per process: android:process is an attribute of the declaration,
     // not of the intent, so the number of workers is the number of declarations.
-    // Six is what a phone will hold -- each is a runtime, a GL context and a
-    // room's textures -- and how many actually start is chosen at run time from
-    // the device's cores and heap.
+    // Ten, the same as the desktop batch; how many actually start is chosen at
+    // run time from the device's cores and heap, since each one is a runtime, a
+    // GL context and a room's textures.
     [Service(Name = "fr.livetek.fruityprime.PreviewWorker0", Process = ":preview0", Exported = false)]
     public sealed class PreviewWorker0 : PreviewService { }
 
@@ -141,12 +141,26 @@ namespace MphRead.Droid
     [Service(Name = "fr.livetek.fruityprime.PreviewWorker5", Process = ":preview5", Exported = false)]
     public sealed class PreviewWorker5 : PreviewService { }
 
+    [Service(Name = "fr.livetek.fruityprime.PreviewWorker6", Process = ":preview6", Exported = false)]
+    public sealed class PreviewWorker6 : PreviewService { }
+
+    [Service(Name = "fr.livetek.fruityprime.PreviewWorker7", Process = ":preview7", Exported = false)]
+    public sealed class PreviewWorker7 : PreviewService { }
+
+    [Service(Name = "fr.livetek.fruityprime.PreviewWorker8", Process = ":preview8", Exported = false)]
+    public sealed class PreviewWorker8 : PreviewService { }
+
+    [Service(Name = "fr.livetek.fruityprime.PreviewWorker9", Process = ":preview9", Exported = false)]
+    public sealed class PreviewWorker9 : PreviewService { }
+
     internal static class PreviewWorkerTypes
     {
         public static readonly IReadOnlyList<Type> All = new[]
         {
             typeof(PreviewWorker0), typeof(PreviewWorker1), typeof(PreviewWorker2),
-            typeof(PreviewWorker3), typeof(PreviewWorker4), typeof(PreviewWorker5)
+            typeof(PreviewWorker3), typeof(PreviewWorker4), typeof(PreviewWorker5),
+            typeof(PreviewWorker6), typeof(PreviewWorker7), typeof(PreviewWorker8),
+            typeof(PreviewWorker9)
         };
     }
 }
