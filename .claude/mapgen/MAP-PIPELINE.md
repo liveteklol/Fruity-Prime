@@ -1,5 +1,13 @@
 # Custom maps: the generator and the Quake 3 importer
 
+**No map ships in `maps/`.** The game is the 27 multiplayer rooms of the
+cartridge and nothing else; what is described below is the hook a player uses
+to add their own, and `maps/q3dm17.json.example` is the worked example of it.
+The three maps that used to travel with the repository -- `longestyard`,
+`testbox` and the converted OpenArena level `wrackdm17`, with its stripped
+`.bsp` and its baked `.tex` -- were taken out, along with the GPL notice they
+needed. `FruityPrime -rooms` printing 27 is the check.
+
 Everything lives in `src/MphRead/Mods/MapGen/`. Two upstream files carry a
 change and both are one token: `RepackCollision` gained the word `partial`,
 and `Metadata`'s two room tables are wrapped in a call that appends the custom
@@ -115,9 +123,10 @@ so a skipped one leaves a hole rather than an invisible wall.
 ### Verified against a real level
 
 OpenArena's `wrackdm17` -- its homage to The Longest Yard, freely licensed --
-converts and plays: 804 surfaces to 3075 triangles, 993 brushes to 6122
+converted and played: 804 surfaces to 3075 triangles, 993 brushes to 6122
 collision faces, 25 spawns, 13 jump pads, 61 item spawns, eight players
-spawning and dying in the void at the kill height. Quake 3's own `pak0.pk3` is
+spawning and dying in the void at the kill height. That was the proof the
+importer works; the map itself no longer ships. Quake 3's own `pak0.pk3` is
 not in this repository and is not fetched by anything here; it is id Software's
 commercial data, and the same rule the project applies to the cartridge applies
 to it.
@@ -191,11 +200,13 @@ about files hold in an APK.
   it produces is not a crash but a map that loads into an object of defaults:
   rooms with no name, no geometry and no spawns, in release only.
 
-Verified on an emulator with a release APK: the three map files are unpacked,
-all three are built on the device from the player's own extracted files -- byte
-for byte what the desktop generates, `wrackdm17` included once its `.pk3` is
-in the maps folder -- and all three are listed in the map picker. A map whose
-source level is absent is left out rather than listed and crashing.
+Verified on an emulator with a release APK, back when three maps shipped: all
+three were unpacked, all three were built on the device from the player's own
+extracted files -- byte for byte what the desktop generates, `wrackdm17`
+included once its `.pk3` was in the maps folder -- and all three were listed in
+the map picker. A map whose source level is absent is left out rather than
+listed and crashing. With nothing shipping, the APK now logs
+`[android] 0 bundled map files` and the picker shows the 27 cartridge rooms.
 
 ## Not done yet
 
