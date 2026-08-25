@@ -128,13 +128,43 @@ binaries are derived from the player's cartridge dump (the textures) and, for
 an imported map, from their copy of another game -- the asset guard rejects
 both, correctly.
 
+## On Android
+
+Three things that are all the same problem: none of the desktop's assumptions
+about files hold in an APK.
+
+- **The map files ship as `AndroidAsset`** and are unpacked on first launch by
+  `AndroidMaps.cs`. Assets in a package are not files -- only `AssetManager`
+  opens them, so `Directory.EnumerateFiles` finds nothing however the path is
+  spelled. They land in the external directory the extracted game files
+  already use, which is also where a player can drop one in over USB; only the
+  names that came out of the package are overwritten on an update.
+- **`CustomRooms.MapDirectory` is settable** for that reason: the package's own
+  directory is read only.
+- **Nothing calls `ModEntry.TryHandle`** on this head -- the entry point is an
+  activity, not `Main` -- so the missing-binary build runs from
+  `AndroidMaps.EnsureBuilt`, off the UI thread at startup and again before a
+  match and before previews.
+- **The map types are trimmer roots.** A release APK is trimmed, the map files
+  are read with reflection-based JSON, and the trimmer cannot see that. What
+  it produces is not a crash but a map that loads into an object of defaults:
+  rooms with no name, no geometry and no spawns, in release only.
+
+Verified on an emulator: the release APK unpacks its three map files, builds
+`LONGEST YARD` and `TESTBOX` on the device from the player's own extracted
+files -- byte for byte what the desktop generates -- leaves `WRACKDM17` out
+because its source level is not there, and lists both in the map picker.
+
 ## Not done yet
 
 - **No navigation mesh.** `nodePath` is null, so bots have no node data.
   `PlayerAi` handles that without crashing, but they wander.
 - **Bezier patches are dropped**, so a converted level is missing its curves.
-- **A map that fails to build still appears in the room list**, and selecting
-  it crashes on the missing file. The registration happens in `Metadata`'s
-  static initialiser, before the game files are known, so it cannot check.
+- **A map is left out when its source level is missing**, which is the case
+  that happens (the map file travels with the repository, the Quake level it
+  was made from does not). A map that fails to build for any *other* reason
+  still appears in the room list and crashes when picked: registration happens
+  in `Metadata`'s static initialiser, before the game files are known, so that
+  is as much as it can check.
 - **Nothing hashes the map** in the network handshake: two clients on the same
   build with different `maps/` will disagree silently.

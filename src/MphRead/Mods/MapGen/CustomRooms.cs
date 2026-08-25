@@ -20,19 +20,29 @@ namespace MphRead.Mods.MapGen
     {
         private static IReadOnlyList<MapDefinition>? _definitions;
         private static int _firstId = -1;
+        // Android builds the map binaries on a background thread while the
+        // front screen is listing rooms on another, and both go through here.
+        private static readonly object _lock = new object();
 
-        public static string MapDirectory { get; }
+        /// <summary>
+        /// Where the map files are. Beside the executable on the desktop; the
+        /// Android head moves it, because the package directory there is read
+        /// only and the maps have to live where the extracted game files
+        /// already do. Set it before anything reads <see cref="Definitions"/>:
+        /// the list is loaded once and cached.
+        /// </summary>
+        public static string MapDirectory { get; set; }
             = Path.Combine(AppContext.BaseDirectory, "maps");
 
         public static IReadOnlyList<MapDefinition> Definitions
         {
             get
             {
-                if (_definitions == null)
+                lock (_lock)
                 {
-                    _definitions = LoadDefinitions();
+                    _definitions ??= LoadDefinitions();
+                    return _definitions;
                 }
-                return _definitions;
             }
         }
 
@@ -49,6 +59,19 @@ namespace MphRead.Mods.MapGen
                 {
                     MapDefinition definition = MapDefinition.Load(path);
                     definition.Name = definition.Name.ToUpperInvariant();
+                    if (definition.Import != null && !File.Exists(definition.Import.Source))
+                    {
+                        // Rooms are indexed by their position in a table that
+                        // is built once, so a room registered here cannot be
+                        // taken out again later -- it would sit in the launcher
+                        // and crash whoever picked it. A converted map whose
+                        // source level is not on this machine is the case that
+                        // actually happens: the map file travels with the
+                        // repository, the level it was made from does not.
+                        Console.WriteLine($"Leaving out map {definition.Name}: its source level "
+                            + $"{definition.Import.Source} is not on this machine");
+                        continue;
+                    }
                     results.Add(definition);
                 }
                 catch (Exception ex)

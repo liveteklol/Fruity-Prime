@@ -79,6 +79,10 @@ namespace MphRead.Droid
                     Console.WriteLine($"[android] could not use {root} as the working directory: {ex.Message}");
                 }
             }
+            // Before the front screen, which lists the rooms: the custom maps
+            // have to be out of the package and their directory named before
+            // anything reads the room tables, since that list is built once.
+            AndroidMaps.Install(Assets, root, PackageTime());
             // Before base.OnCreate, which is what builds the front screen:
             // the screen asks whether previews can be rendered while it is
             // being constructed, and on the desktop the same seam is left empty
@@ -88,10 +92,32 @@ namespace MphRead.Droid
             return base.CustomizeAppBuilder(builder).WithInterFont();
         }
 
+        /// <summary>
+        /// When this package was last installed or updated, so the bundled
+        /// maps are unpacked again after an update and left alone otherwise.
+        /// </summary>
+        private long PackageTime()
+        {
+            try
+            {
+                return PackageManager?.GetPackageInfo(PackageName!, 0)?.LastUpdateTime ?? 0;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[android] could not read the package time: {ex.Message}");
+                return 0;
+            }
+        }
+
         protected override void OnCreate(Bundle? savedInstanceState)
         {
             Instance = this;
             base.OnCreate(savedInstanceState);
+            // The desktop builds missing map binaries from ModEntry.TryHandle;
+            // this head has no Main for that to live in. Off the UI thread:
+            // it reads the extracted game files and writes three binaries per
+            // map, and only the first launch after a map changes does any work.
+            System.Threading.Tasks.Task.Run(AndroidMaps.EnsureBuilt);
             _content = FindViewById(Android.Resource.Id.Content) as ViewGroup;
             _launcherView = _content?.GetChildAt(0);
         }

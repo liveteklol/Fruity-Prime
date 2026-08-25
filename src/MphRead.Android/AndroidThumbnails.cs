@@ -32,6 +32,8 @@ namespace MphRead.Droid
 
         public Task<int> RenderAsync(IReadOnlyList<string> rooms, Action<string> report)
         {
+            // A custom map has no picture until it has binaries to render.
+            AndroidMaps.EnsureBuilt();
             return _activity.RenderPreviews(rooms, report);
         }
     }

@@ -26,6 +26,10 @@ namespace MphRead.Droid
         public static Scene Build(AndroidInput input, Vector2i size, LaunchPlan plan, Action close)
         {
             GameFiles.ApplyPaths();
+            // Cheap once the binaries exist -- a file check per map -- and the
+            // one place that is guaranteed to run before a room is loaded, so
+            // a map added since the last launch is built rather than missing.
+            AndroidMaps.EnsureBuilt();
             // No slot means nothing can be written, which is what a match
             // needs -- the same reason MatchStart gives.
             Menu.SaveSlot = 0;
