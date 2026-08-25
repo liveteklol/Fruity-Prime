@@ -27,7 +27,7 @@ namespace MphRead.Mods.MapGen
         {
             MapImport import = def.Import
                 ?? throw new ProgramException($"Map {def.Name} has no import settings.");
-            Q3Bsp bsp = Q3Bsp.Load(import.Source, import.MapName);
+            Q3Bsp bsp = Q3Bsp.Load(import.Resolve() ?? import.Source, import.MapName);
             var map = new BuiltMap(def);
             float unit = import.UnitsPerUnit;
             var textureSizes = GetTextureSizes(def);

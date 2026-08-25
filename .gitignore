@@ -346,3 +346,7 @@ thumbnails/
 
 # Server deploy staging (built artifacts, never committed).
 publish/
+
+# Source levels for converted maps: the player brings their own.
+maps/*.pk3
+maps/*.bsp

@@ -107,8 +107,49 @@ namespace MphRead.Mods.MapGen
     /// </summary>
     public class MapImport
     {
-        /// <summary>Path to a .bsp, or to a .pk3 with MapName naming the level inside it.</summary>
+        /// <summary>
+        /// The .bsp, or the .pk3 with <see cref="MapName"/> naming the level
+        /// inside it.
+        ///
+        /// A bare name is looked for beside the map files and then beside the
+        /// game files, which is what lets one map file work on a desktop and a
+        /// phone: the level it converts is nobody's to ship -- not ours to put
+        /// in an APK and not the repository's to carry -- so it is the
+        /// player's copy, in the directory they already put their own files
+        /// in. An absolute path is taken as given.
+        /// </summary>
         public string Source { get; set; } = "";
+
+        /// <summary>
+        /// Where the source level actually is, or null when it is not on this
+        /// machine at all.
+        /// </summary>
+        public string? Resolve()
+        {
+            if (Source.Length == 0)
+            {
+                return null;
+            }
+            foreach (string candidate in Candidates())
+            {
+                if (File.Exists(candidate))
+                {
+                    return candidate;
+                }
+            }
+            return null;
+        }
+
+        private IEnumerable<string> Candidates()
+        {
+            yield return Source;
+            if (Path.IsPathRooted(Source))
+            {
+                yield break;
+            }
+            yield return Path.Combine(CustomRooms.MapDirectory, Source);
+            yield return Path.Combine(Mods.Launcher.GameFiles.Root, Source);
+        }
         public string? MapName { get; set; }
 
         /// <summary>

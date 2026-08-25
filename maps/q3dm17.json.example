@@ -1,5 +1,5 @@
 {
-  "//": "Rename to q3dm17.json and point 'source' at your own pak0.pk3, then run: FruityPrime -mapgen Q3DM17",
+  "//": "Rename to q3dm17.json and put your own pak0.pk3 in the maps folder beside it, then run: FruityPrime -mapgen Q3DM17",
   "name": "Q3DM17",
   "inGameName": "The Longest Yard",
   "textureSource": "MP3 PROVING GROUND",
@@ -13,7 +13,7 @@
   "pointLimit": 7,
   "preview": { "position": [60, 45, 70], "target": [0, 0, 0] },
   "import": {
-    "source": "/path/to/quake3/baseq3/pak0.pk3",
+    "source": "pak0.pk3",
     "mapName": "q3dm17",
     "unitsPerUnit": 22,
     "defaultMaterial": 0,

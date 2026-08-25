@@ -56,14 +56,16 @@ namespace MphRead.Droid
 
         protected override AppBuilder CustomizeAppBuilder(AppBuilder builder)
         {
+            // First: everything below reports through Console, and in a
+            // release build that goes nowhere unless this is installed.
+            AndroidConsole.Install();
             // The package's own directory is read-only on Android, so both the
             // preferences and paths.txt move. They move to *external* files
             // rather than internal ones because the extracted game files are
             // hundreds of megabytes a player has to copy onto the device
             // themselves, and this is the directory they can reach over USB
             // without the app asking for a storage permission.
-            string root = GetExternalFilesDir(null)?.AbsolutePath
-                ?? FilesDir?.AbsolutePath ?? "";
+            string root = ChooseRoot();
             if (root.Length > 0)
             {
                 LauncherPrefs.Directory = root;
@@ -82,7 +84,7 @@ namespace MphRead.Droid
             // Before the front screen, which lists the rooms: the custom maps
             // have to be out of the package and their directory named before
             // anything reads the room tables, since that list is built once.
-            AndroidMaps.Install(Assets, root, PackageTime());
+            AndroidMaps.Install(Assets, root);
             // Before base.OnCreate, which is what builds the front screen:
             // the screen asks whether previews can be rendered while it is
             // being constructed, and on the desktop the same seam is left empty
@@ -93,19 +95,67 @@ namespace MphRead.Droid
         }
 
         /// <summary>
-        /// When this package was last installed or updated, so the bundled
-        /// maps are unpacked again after an update and left alone otherwise.
+        /// The directory everything writable lives in.
+        ///
+        /// External files by preference, because the extracted game files are
+        /// hundreds of megabytes a player copies over USB and that is the
+        /// directory they can reach. But a non-null answer from
+        /// <c>GetExternalFilesDir</c> is not a promise that it can be used:
+        /// early after install it returns the path before the volume is ready,
+        /// and every write to it is refused. Taking it on trust is how one
+        /// launch put its files internally, the next one looked externally,
+        /// and the game appeared to lose the files the player had copied.
+        ///
+        /// So: whichever already holds a paths.txt wins, and otherwise the
+        /// first one that can actually be written to.
         /// </summary>
-        private long PackageTime()
+        private string ChooseRoot()
+        {
+            var candidates = new List<string>();
+            string? external = GetExternalFilesDir(null)?.AbsolutePath;
+            if (!String.IsNullOrEmpty(external))
+            {
+                candidates.Add(external);
+            }
+            string? internalFiles = FilesDir?.AbsolutePath;
+            if (!String.IsNullOrEmpty(internalFiles))
+            {
+                candidates.Add(internalFiles);
+            }
+            foreach (string candidate in candidates)
+            {
+                if (Writable(candidate) && File.Exists(Path.Combine(candidate, "paths.txt")))
+                {
+                    return candidate;
+                }
+            }
+            foreach (string candidate in candidates)
+            {
+                if (Writable(candidate))
+                {
+                    if (candidate != candidates[0])
+                    {
+                        Console.WriteLine($"[android] {candidates[0]} cannot be written to; using {candidate}");
+                    }
+                    return candidate;
+                }
+            }
+            return "";
+        }
+
+        private static bool Writable(string directory)
         {
             try
             {
-                return PackageManager?.GetPackageInfo(PackageName!, 0)?.LastUpdateTime ?? 0;
+                Directory.CreateDirectory(directory);
+                string probe = Path.Combine(directory, ".write-probe");
+                File.WriteAllBytes(probe, Array.Empty<byte>());
+                File.Delete(probe);
+                return true;
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                Console.WriteLine($"[android] could not read the package time: {ex.Message}");
-                return 0;
+                return false;
             }
         }
 

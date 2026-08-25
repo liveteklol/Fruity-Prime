@@ -141,6 +141,24 @@ about files hold in an APK.
   names that came out of the package are overwritten on an update.
 - **`CustomRooms.MapDirectory` is settable** for that reason: the package's own
   directory is read only.
+- **The level a converted map is made from is never in the package.** It is not
+  ours to ship, and the generated room binaries are worse -- the borrowed
+  textures are inlined in the model file, so a `.bin` carries cartridge data.
+  So `import.source` takes a bare name and is looked for beside the map files
+  and then beside the game files: the player puts their own `.pk3` where they
+  already put their own files, and the device converts it there. Proven: an
+  emulator built `wrackdm17` from a pushed `pak1-maps.pk3` into the same
+  202,764 and 621,332 bytes the desktop produces.
+- **`ChooseRoot` probes before it commits.** `GetExternalFilesDir` can return a
+  path that cannot be written to -- it did, on a clean install, on every launch
+  after the first -- and the old code trusted a non-null answer. One launch
+  wrote internally, the next looked externally, and the game appeared to lose
+  the files the player had copied. Now whichever root already holds a
+  `paths.txt` wins, else the first that a write probe succeeds in.
+- **`AndroidConsole` sends `Console` to logcat.** Mono does that for a debug
+  build and not for release, so the one class of bug that only appears in
+  release also had no diagnostics. Every wrong turn above was invisible until
+  this existed.
 - **Nothing calls `ModEntry.TryHandle`** on this head -- the entry point is an
   activity, not `Main` -- so the missing-binary build runs from
   `AndroidMaps.EnsureBuilt`, off the UI thread at startup and again before a
@@ -150,10 +168,11 @@ about files hold in an APK.
   it produces is not a crash but a map that loads into an object of defaults:
   rooms with no name, no geometry and no spawns, in release only.
 
-Verified on an emulator: the release APK unpacks its three map files, builds
-`LONGEST YARD` and `TESTBOX` on the device from the player's own extracted
-files -- byte for byte what the desktop generates -- leaves `WRACKDM17` out
-because its source level is not there, and lists both in the map picker.
+Verified on an emulator with a release APK: the three map files are unpacked,
+all three are built on the device from the player's own extracted files -- byte
+for byte what the desktop generates, `wrackdm17` included once its `.pk3` is
+in the maps folder -- and all three are listed in the map picker. A map whose
+source level is absent is left out rather than listed and crashing.
 
 ## Not done yet
 

@@ -59,7 +59,7 @@ namespace MphRead.Mods.MapGen
                 {
                     MapDefinition definition = MapDefinition.Load(path);
                     definition.Name = definition.Name.ToUpperInvariant();
-                    if (definition.Import != null && !File.Exists(definition.Import.Source))
+                    if (definition.Import != null && definition.Import.Resolve() == null)
                     {
                         // Rooms are indexed by their position in a table that
                         // is built once, so a room registered here cannot be
@@ -69,7 +69,8 @@ namespace MphRead.Mods.MapGen
                         // actually happens: the map file travels with the
                         // repository, the level it was made from does not.
                         Console.WriteLine($"Leaving out map {definition.Name}: its source level "
-                            + $"{definition.Import.Source} is not on this machine");
+                            + $"{definition.Import.Source} is not here. Put it in {MapDirectory} "
+                            + "to have this map.");
                         continue;
                     }
                     results.Add(definition);

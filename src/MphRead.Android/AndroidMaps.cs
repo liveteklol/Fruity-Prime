@@ -30,7 +30,7 @@ namespace MphRead.Droid
         /// Unpack the bundled maps and point the game at them. Call before
         /// anything reads the room tables: the map list is loaded once.
         /// </summary>
-        public static void Install(Android.Content.Res.AssetManager? assets, string root, long packageTime)
+        public static void Install(Android.Content.Res.AssetManager? assets, string root)
         {
             if (root.Length == 0)
             {
@@ -45,24 +45,46 @@ namespace MphRead.Droid
             try
             {
                 Directory.CreateDirectory(directory);
-                foreach (string name in assets.List(AssetFolder) ?? Array.Empty<string>())
+                string[] names = assets.List(AssetFolder) ?? Array.Empty<string>();
+                Console.WriteLine($"[android] {names.Length} bundled map files -> {directory}");
+                foreach (string name in names)
                 {
                     if (!name.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
                     {
                         continue;
                     }
+                    try
+                    {
                     string target = Path.Combine(directory, name);
-                    // Only when the package is newer than what was unpacked
-                    // last time, so an update ships its map changes and a
-                    // player's own edits are not rewritten on every launch.
-                    if (File.Exists(target) && File.GetLastWriteTimeUtc(target)
-                        >= DateTimeOffset.FromUnixTimeMilliseconds(packageTime).UtcDateTime)
+                    using Stream source = assets.Open($"{AssetFolder}/{name}");
+                    using var bytes = new MemoryStream();
+                    source.CopyTo(bytes);
+                    // Written only when it would actually differ.
+                    //
+                    // The first version of this compared the file's date
+                    // against the package's install time, which is the obvious
+                    // way and quietly did nothing: whatever
+                    // PackageManager.LastUpdateTime returned here, the test
+                    // came out "already up to date" and an updated map file
+                    // stayed at the version the previous install had unpacked.
+                    // Comparing the bytes needs no Android API to be right and
+                    // cannot get stuck. The cost is that an edit to a map that
+                    // shipped is undone on the next launch -- to keep one,
+                    // copy it to a name of your own, which is a new map as far
+                    // as the game is concerned.
+                    if (File.Exists(target) && File.ReadAllBytes(target).AsSpan()
+                        .SequenceEqual(bytes.ToArray()))
                     {
                         continue;
                     }
-                    using Stream source = assets.Open($"{AssetFolder}/{name}");
-                    using var file = File.Create(target);
-                    source.CopyTo(file);
+                        File.WriteAllBytes(target, bytes.ToArray());
+                        Console.WriteLine($"[android] unpacked {name}");
+                    }
+                    catch (Exception ex)
+                    {
+                        // One map that cannot be written must not stop the rest.
+                        Console.WriteLine($"[android] could not unpack {name}: {ex.Message}");
+                    }
                 }
             }
             catch (Exception ex)

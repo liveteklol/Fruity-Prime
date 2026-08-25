@@ -16,7 +16,7 @@
   "pointLimit": 7,
   "preview": { "position": [94.3, 96, 63.7], "target": [0, 18.9, -41.6] },
   "import": {
-    "source": "/home/livetek/openarena/baseoa/pak1-maps.pk3",
+    "source": "pak1-maps.pk3",
     "mapName": "wrackdm17",
     "unitsPerUnit": 22,
     "defaultMaterial": 0,
