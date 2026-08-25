@@ -125,10 +125,30 @@ namespace MphRead.Mods
 
         private static bool _describedContext;
 
+        /// <summary>
+        /// A custom map has no intro sequence to borrow a viewpoint from, so
+        /// if it named one, use it -- every frame, since the roam camera is
+        /// otherwise left wherever the scene put it.
+        /// </summary>
+        private void ApplyPreviewCamera()
+        {
+            foreach (MapGen.MapDefinition def in MapGen.CustomRooms.Definitions)
+            {
+                if (def.Preview != null && def.Name.Equals(_roomKey, StringComparison.OrdinalIgnoreCase))
+                {
+                    Scene.SetPreviewCamera(
+                        new Vector3(def.Preview.Position[0], def.Preview.Position[1], def.Preview.Position[2]),
+                        new Vector3(def.Preview.Target[0], def.Preview.Target[1], def.Preview.Target[2]));
+                    return;
+                }
+            }
+        }
+
         protected override void OnRenderFrame(FrameEventArgs args)
         {
             GameState.ApplyPause();
             Scene.OnUpdateFrame();
+            ApplyPreviewCamera();
             bool capturing = !_captured && _settleFrames-- <= 0;
             if (!capturing)
             {

@@ -347,6 +347,17 @@ namespace MphRead.Mods
         {
             (int width, int height) = ParseSize(args);
 
+            // Custom maps are registered as rooms from their JSON at startup,
+            // but a room whose binaries are not on disk crashes the moment
+            // something tries to load it. Generating what is missing here --
+            // the one place every entry point passes through, launcher
+            // included, and after the game-file check -- means a map file is
+            // enough to have a working room.
+            if (!HasFlag(args, "mapgen"))
+            {
+                MapGen.CustomRooms.GenerateMissing();
+            }
+
             // Opt-in per-second report of what this process believes about a
             // networked session -- slot occupancy, scoreboard count, which
             // remote slots have state. The failure worth catching is not
@@ -431,6 +442,85 @@ namespace MphRead.Mods
                 Environment.ExitCode = Network.WeaponDps.Run(dpsTest, dpsHunter, dpsBeam, dpsSeconds, dpsDistance);
                 return true;
             }
+            // Generate the binaries for the custom maps in `maps/`. The
+            // textures come out of the player's own extracted files, so this
+            // has to run here rather than at build time, and what ships in the
+            // repository is the JSON, never the .bin.
+            if (HasFlag(args, "mapgen"))
+            {
+                string? only = ValueAfter(args, "mapgen");
+                bool force = HasFlag(args, "force");
+                int count = 0;
+                int failed = 0;
+                foreach (MapGen.MapDefinition def in MapGen.CustomRooms.Definitions)
+                {
+                    if (only != null && !only.Equals(def.Name, StringComparison.OrdinalIgnoreCase)
+                        && !only.Equals("all", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+                    // one map at a time: a map that cannot be built -- most
+                    // often one whose source level is not where it says --
+                    // must not stop the others from being generated
+                    try
+                    {
+                        MapGen.MapPacker.Generate(def, MapGen.CustomRooms.ArchiveDirectory(def),
+                            MapGen.CustomRooms.EntityDirectory(), verbose: true);
+                        count++;
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"{def.Name}: {ex.Message}");
+                        failed++;
+                    }
+                }
+                if (count == 0 && failed == 0)
+                {
+                    Console.WriteLine($"No maps to generate. Put a map JSON in {MapGen.CustomRooms.MapDirectory}.");
+                }
+                Environment.ExitCode = failed == 0 ? 0 : 1;
+                return true;
+            }
+
+            // What levels are in a .pk3, so a conversion knows what to ask
+            // for. Reads the archive's index only -- nothing is extracted.
+            string? q3Maps = ValueAfter(args, "q3maps");
+            if (q3Maps != null)
+            {
+                try
+                {
+                    foreach (string name in MapGen.Q3Bsp.ListMaps(q3Maps))
+                    {
+                        Console.WriteLine(name);
+                    }
+                    Environment.ExitCode = 0;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Could not read {q3Maps}: {ex.Message}");
+                    Environment.ExitCode = 1;
+                }
+                return true;
+            }
+
+            // What a level draws with, commonest first, so a conversion knows
+            // which shaders are worth mapping to a borrowed texture.
+            string? q3Shaders = ValueAfter(args, "q3shaders");
+            if (q3Shaders != null)
+            {
+                Environment.ExitCode = MapGen.MapReport.ListShaders(q3Shaders, ValueAfter(args, "map"));
+                return true;
+            }
+
+            // List a room's materials, with the texture each one uses, so a
+            // map can say which of them it wants to borrow.
+            string? mapMaterials = ValueAfter(args, "mapmaterials");
+            if (mapMaterials != null)
+            {
+                Environment.ExitCode = MapGen.MapReport.ListMaterials(mapMaterials);
+                return true;
+            }
+
             string? mapTest = ValueAfter(args, "maptest");
             if (mapTest != null)
             {

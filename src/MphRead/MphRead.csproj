@@ -161,4 +161,13 @@
     </None>
   </ItemGroup>
 
+  <!-- Custom map sources. These are text: the room binaries they describe are
+       generated on the player's machine from the player's own extracted files
+       and never travel with the build. -->
+  <ItemGroup>
+    <None Include="..\..\maps\*.json" Link="maps\%(Filename)%(Extension)">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>

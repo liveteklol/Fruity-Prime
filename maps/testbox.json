@@ -1,0 +1,32 @@
+{
+  "name": "TESTBOX",
+  "inGameName": "Test Box",
+  "textureSource": "MP3 PROVING GROUND",
+  "scaleFactor": 4,
+  "killHeight": -30,
+  "farClip": 200,
+  "materials": [
+    { "name": "floor", "sourceMaterial": 2, "texScale": 24 },
+    { "name": "wall", "sourceMaterial": 12, "texScale": 24 }
+  ],
+  "brushes": [
+    { "min": [-12, -1, -12], "max": [12, 0, 12], "material": 0 },
+    { "min": [-12, 0, -13], "max": [12, 6, -12], "material": 1 },
+    { "min": [-12, 0, 12], "max": [12, 6, 13], "material": 1 },
+    { "min": [-13, 0, -12], "max": [-12, 6, 12], "material": 1 },
+    { "min": [12, 0, -12], "max": [13, 6, 12], "material": 1 },
+    { "min": [-3, 0, -3], "max": [3, 2, 3], "material": 1 }
+  ],
+  "spawns": [
+    { "position": [-8, 0.5, -8], "yaw": 45 },
+    { "position": [8, 0.5, -8], "yaw": 315 },
+    { "position": [8, 0.5, 8], "yaw": 225 },
+    { "position": [-8, 0.5, 8], "yaw": 135 }
+  ],
+  "jumpPads": [
+    { "position": [-8, 0.05, 0], "target": [0, 2.2, 0] }
+  ],
+  "items": [
+    { "position": [0, 2.6, 0], "type": "MissileExpansion" }
+  ]
+}
