@@ -230,6 +230,19 @@ namespace MphRead.Sound
 
         public static void Load(Scene scene)
         {
+            if (Mods.ThumbnailMode.Active)
+            {
+                // Reading and decoding every sample in the game, plus the
+                // whole stream bank, is the single most expensive thing a
+                // room load does -- and a preview is a picture. Measured at
+                // 933 ms of a 2970 ms load.
+                Instance = new SfxInstanceBase();
+                SfxMute = false;
+                ForceFieldSfxMute = 0;
+                TimedSfxMute = 0;
+                LongSfxMute = 0;
+                return;
+            }
             Instance = new SfxInstance();
             try
             {

@@ -564,13 +564,19 @@ namespace MphRead
                 LoadBeamProjectileResources(scene);
                 LoadRoomResources(scene);
                 LoadHunterResources(Hunter.Samus, scene);
-                LoadHunterResources(Hunter.Kanden, scene);
-                LoadHunterResources(Hunter.Trace, scene);
-                LoadHunterResources(Hunter.Sylux, scene);
-                LoadHunterResources(Hunter.Noxus, scene);
-                LoadHunterResources(Hunter.Spire, scene);
-                LoadHunterResources(Hunter.Weavel, scene);
-                LoadHunterResources(Hunter.Guardian, scene);
+                // A preview creates one Samus so the multiplayer intro camera
+                // has a main player to run against, and draws no hunter at
+                // all. The other seven are 832 ms of a 2970 ms room load.
+                if (!Mods.ThumbnailMode.Active)
+                {
+                    LoadHunterResources(Hunter.Kanden, scene);
+                    LoadHunterResources(Hunter.Trace, scene);
+                    LoadHunterResources(Hunter.Sylux, scene);
+                    LoadHunterResources(Hunter.Noxus, scene);
+                    LoadHunterResources(Hunter.Spire, scene);
+                    LoadHunterResources(Hunter.Weavel, scene);
+                    LoadHunterResources(Hunter.Guardian, scene);
+                }
                 LoadCommonHunterResources(scene);
             }
         }
