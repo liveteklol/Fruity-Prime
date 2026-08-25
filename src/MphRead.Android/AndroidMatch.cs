@@ -1,6 +1,7 @@
 using System;
 using MphRead.Entities;
 using MphRead.Mods.Launcher;
+using MphRead.Mods.Network;
 using OpenTK.Mathematics;
 
 namespace MphRead.Droid
@@ -30,9 +31,43 @@ namespace MphRead.Droid
             Menu.SaveSlot = 0;
             var scene = new Scene(size, input.Keyboard, input.Mouse, _ => { }, close);
             bool teamPlay = GameState.IsTeamMode(plan.Mode);
-            AddLocalPlayers(scene, plan, teamPlay);
-            scene.AddRoom(plan.RoomKey, plan.Mode);
+            if (NetSession.Active)
+            {
+                BuildNetworkedMatch(scene, plan, teamPlay);
+            }
+            else
+            {
+                AddLocalPlayers(scene, plan, teamPlay);
+                scene.AddRoom(plan.RoomKey, plan.Mode);
+            }
             return scene;
+        }
+
+        /// <summary>
+        /// The half of <see cref="MatchStart.Launch"/> that a joined session
+        /// needs.
+        ///
+        /// The map is the server's, not the plan's: an online plan carries an
+        /// empty room key on purpose, because the front screen joins before it
+        /// knows what is running. Loading <c>plan.RoomKey</c> anyway is what
+        /// made joining fail with "No room with this name is known" -- the
+        /// empty string is not a room.
+        /// </summary>
+        private static void BuildNetworkedMatch(Scene scene, LaunchPlan plan, bool teamPlay)
+        {
+            (string RoomKey, GameMode Mode)? room = NetLaunch.ServerRoom();
+            string roomKey = room?.RoomKey ?? plan.RoomKey;
+            // The server's rotation decides the mode as well as the map; a
+            // client that kept its own menu choice would score a different
+            // game from everyone else on the same level.
+            GameMode mode = room?.Mode ?? plan.Mode;
+            if (roomKey.Length == 0)
+            {
+                throw new ProgramException("The server did not say which map it is running.");
+            }
+            NetLaunch.BuildPlayers(scene, plan.Hunter, localRecolor: 0,
+                teamId: teamPlay ? 0 : -1);
+            scene.AddRoom(roomKey, mode, playerCount: NetLaunch.RoomPlayerCount);
         }
 
         private static void AddLocalPlayers(Scene scene, LaunchPlan plan, bool teamPlay)
