@@ -324,11 +324,12 @@ namespace MphRead.Mods.Launcher.Gui
                 v => $"{Math.Clamp(v / 10, 2, 8)}"));
             _celEdge = Add(page, new SliderRow("Outline",
                 (int)Math.Round(RenderOptions.CelEdge * 100)));
-            Explain(page, "The picture goes to flat steps of colour and every edge in the "
-                + "room is drawn around in ink. Not the same as turning lighting off, which "
-                + "only flattens everything: a wall keeps its colour and it is the shading "
-                + "across it that goes to steps. Steps is how many, outline is how dark the "
-                + "line -- and nothing at all turns the outline pass off.");
+            Explain(page, "Every surface is painted in one flat colour -- the one its "
+                + "texture averages to -- and the shapes in the room are drawn around in "
+                + "ink. Not the same as turning lighting off, which only flattens "
+                + "everything: a wall keeps its own colour and it is the shading across it "
+                + "that goes to steps. Steps is how many, outline is how dark the line. "
+                + "The line follows silhouettes and creases only, never a flat wall.");
 
             Heading(page, "Helmet and HUD");
             _helmetRow = Add(page, new ToggleRow("Draw the helmet",

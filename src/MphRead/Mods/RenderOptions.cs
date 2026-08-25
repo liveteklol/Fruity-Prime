@@ -40,16 +40,21 @@ namespace MphRead.Mods
         public static bool Lighting { get; set; } = true;
 
         /// <summary>
-        /// Cel shading: the picture goes to flat steps of colour and the
-        /// shapes in it are drawn around in ink.
+        /// Cel shading: every surface goes to flat colour and the shapes in
+        /// the room are drawn around in ink.
         ///
-        /// Not the same thing as turning lighting off, which only flattens
-        /// everything to full brightness. This bands the *brightness* of the
-        /// finished surface rather than each channel, so a wall keeps its
-        /// colour and it is the shading across it that goes to steps; the
-        /// outline is a separate pass over the depth the scene left behind,
-        /// which is the half that makes it read as drawn rather than merely
-        /// posterised.
+        /// Two halves, and the first one is the one that was missing. The
+        /// texture is not banded, it is *replaced*: each one is averaged to a
+        /// single colour when it is uploaded and the fragment shader paints
+        /// with that, keeping only the texel's alpha so cut-outs are still cut
+        /// out. Banding a photograph of rubble only ever gives banded rubble.
+        /// What is left -- the vertex colours and the lighting -- is then
+        /// banded into <see cref="CelBands"/> steps of brightness, so a wall
+        /// keeps its hue and it is the shading across it that goes to steps.
+        ///
+        /// The second half is <see cref="CelEdge"/>, a pass over the depth the
+        /// scene left behind, which is what makes the picture read as drawn
+        /// rather than merely posterised.
         /// </summary>
         public static bool CelShading { get; set; }
 
@@ -66,6 +71,11 @@ namespace MphRead.Mods
         /// How dark the ink line goes, 0 to 1. Zero is no outline at all, and
         /// the renderer then leaves the depth in the cheaper buffer that
         /// cannot be read back.
+        ///
+        /// One by default, which is a line of solid black. It used to be 0.75
+        /// -- back when the pass inked most of every flat wall and full
+        /// strength would have been unreadable. Now that it only finds the
+        /// silhouettes and the creases, the line wants to be a line.
         /// </summary>
         public static float CelEdge
         {
@@ -73,7 +83,7 @@ namespace MphRead.Mods
             set => _celEdge = Math.Clamp(value, 0, 1);
         }
 
-        private static float _celEdge = 0.75f;
+        private static float _celEdge = 1f;
 
         /// <summary>Distance fog, where the room asks for it.</summary>
         public static bool Fog { get; set; } = true;

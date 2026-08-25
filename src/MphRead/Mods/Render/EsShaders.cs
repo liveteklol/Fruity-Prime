@@ -161,6 +161,11 @@ uniform int alpha_test;
 // the helmet and the HUD go through the RTT one afterwards and are left as
 // they are without anything having to turn this off.
 uniform int cel_bands;
+// The one colour the bound texture averages to, and whether to use it in
+// place of the texture's own. Set per render item by the renderer, which
+// works the average out once when the texture is uploaded.
+uniform bool use_flat;
+uniform vec3 flat_color;
 
 in vec2 texcoord;
 in vec4 color;
@@ -175,13 +180,13 @@ vec4 toon_color(vec4 vtx_color)
 // Brightness to steps, hue left alone: a surface keeps its colour and it is
 // the shading across it that goes flat.
 //
-// The step is softened over the middle third of a band rather than being a
-// hard threshold. A texture's own texel-to-texel variation sits right on a
-// boundary somewhere in every wall, and a hard step turns that variation into
-// speckle -- which is what banding the lighting term alone was avoiding, at
-// the cost of doing nothing at all to a room. Softening it is the way to have
-// both: the band edges are still visible as edges, and noise near one comes
-// out as a gradient a texel wide instead of as salt and pepper.
+// The step used to be softened over the middle third of a band, because the
+// texture was still there underneath and its texel-to-texel variation sat on
+// a band boundary somewhere in every wall, which a hard step turned into
+// speckle. There is no texture under this any more -- use_flat has already
+// replaced it with one colour -- so the softening is down to the width that
+// keeps the boundary from crawling as the camera moves, and a band is a band
+// rather than a gradient.
 vec3 cel_shade(vec3 c)
 {
     float steps = float(cel_bands);
@@ -193,12 +198,12 @@ vec3 cel_shade(vec3 c)
     // the brightest is not blown out.
     float scaled = lum * steps - 0.5;
     float lower = floor(scaled);
-    float level = (lower + 0.5 + smoothstep(0.35, 0.65, scaled - lower)) / steps;
+    float level = (lower + 0.5 + smoothstep(0.46, 0.54, scaled - lower)) / steps;
     vec3 banded = c * (level / lum);
     // A drawn frame is more saturated than a photograph of the same thing,
     // and flattening the shading takes some of the apparent colour with it.
     float grey = dot(banded, vec3(0.299, 0.587, 0.114));
-    return clamp(mix(vec3(grey), banded, 1.25), 0.0, 1.0);
+    return clamp(mix(vec3(grey), banded, 1.35), 0.0, 1.0);
 }
 
 void main()
@@ -207,6 +212,16 @@ void main()
     vec4 col;
     if (use_texture) {
         vec4 texcolor = use_pal_override ? vec4(pal_override_color.xyz, texture(tex, texcoord).w) : texture(tex, texcoord);
+        // Cel shading takes the picture off the texture rather than banding
+        // it. The texel's alpha is kept, so a grate is still a grate and a
+        // decal is still cut to shape, but its colour is replaced by the one
+        // colour the whole texture averages to. Banding a photograph of
+        // rubble only ever produces banded rubble; what makes a picture read
+        // as drawn is that the surface is one colour and the line around it
+        // carries the shape.
+        if (use_flat && !use_pal_override) {
+            texcolor.rgb = flat_color;
+        }
         if (mat_mode == 1) {
             col = vec4(
                 (texcolor.r * texcolor.a + color.r * (1.0 - texcolor.a)),
@@ -335,32 +350,51 @@ in vec2 texcoord;
 
 out vec4 frag_color;
 
-// How far away this pixel is, in world units rather than in the depth
-// buffer's own scale, which crowds everything past arm's length into the
-// last few values and would make one threshold mean two different things
-// at two distances.
-float view_depth(float dx, float dy)
+// The depth buffer's own value, not a distance in world units.
+//
+// That is the whole trick. Window-space depth is an affine function of 1/z,
+// and 1/z is *linear across the screen* for any plane at any angle -- that is
+// what makes perspective-correct interpolation work at all. So the second
+// difference of this number is exactly zero on a flat surface however steeply
+// it runs away from the camera. Linearising it to world units first, which is
+// what this pass used to do, throws that away: z itself is not linear in
+// screen space, its second difference over a floor stretching to the far wall
+// is large, and every flat surface seen at an angle came out scribbled over.
+float raw_depth(float dx, float dy)
 {
-    float z = texture(depth_tex, texcoord + vec2(dx * texel_w, dy * texel_h)).x * 2.0 - 1.0;
-    return (2.0 * near_plane * far_plane)
-        / (far_plane + near_plane - z * (far_plane - near_plane));
+    return texture(depth_tex, texcoord + vec2(dx * texel_w, dy * texel_h)).x;
+}
+
+// The kink at a given reach, divided by that reach so the two comparisons
+// mean the same thing. Reaching further is what gives the line its width: a
+// pixel two away from an edge still sees it, so the ink comes out three or
+// four pixels wide instead of the one pixel a drawn line never is.
+float kink_at(float d, float r)
+{
+    return max(
+        abs(raw_depth(-r, 0.0) + raw_depth(r, 0.0) - 2.0 * d),
+        abs(raw_depth(0.0, -r) + raw_depth(0.0, r) - 2.0 * d)) / r;
 }
 
 void main()
 {
     vec3 base = texture(tex, texcoord).rgb;
-    float d = view_depth(0.0, 0.0);
-    // The *second* difference, not the first. A floor running away towards
-    // the horizon has an enormous first difference per pixel and no edge on
-    // it anywhere; what a silhouette or a crease has that a flat surface
-    // seen edge-on does not is a kink, and this is zero across any plane at
-    // any angle.
-    float kink = max(
-        abs(view_depth(-1.0, 0.0) + view_depth(1.0, 0.0) - 2.0 * d),
-        abs(view_depth(0.0, -1.0) + view_depth(0.0, 1.0) - 2.0 * d));
-    // Relative to the distance, so a line is drawn as readily across the
-    // room as it is on the weapon in front of the camera.
-    float ink = smoothstep(0.008, 0.03, kink / d) * outline;
+    float d = raw_depth(0.0, 0.0);
+    float ink = 0.0;
+    // Nothing was drawn here: the cleared far plane has no shape to draw
+    // around, and the normalisation below divides by nearly zero on it.
+    // The silhouette against it is still found, from the geometry's side.
+    if (d < 0.9999995) {
+        float kink = max(kink_at(d, 1.0), kink_at(d, 2.0));
+        // far/(far-near) - d is (far*near/(far-near))/z, so dividing by it
+        // takes the distance out and leaves a pure change of slope; dividing
+        // by the texel width takes the resolution out, so the same threshold
+        // means the same corner at 640x360 and at 4K. What is left is about
+        // 2 for a right-angled crease and hundreds for a silhouette.
+        float scale = far_plane / (far_plane - near_plane) - d;
+        float rel = kink / max(scale, 1e-9) / texel_w;
+        ink = smoothstep(1.1, 3.5, rel) * outline;
+    }
     frag_color = vec4(base * (1.0 - ink), 1.0);
 }
 ";
@@ -472,13 +506,13 @@ void main()
             Check("VertexShader", Shaders.VertexShader,
                 "4cf1422bddaa3ece44c9cfbf6dab1ede192ee8c3f4fbed362e7da5eebfdfc428");
             Check("FragmentShader", Shaders.FragmentShader,
-                "296f6347af129cb58e938ed366ac307b8b7c435761ffc83a038348224b83dc85");
+                "b7d15d11622cb4ff811f36572d8d74bc30450b75e81404ff27b48dc8665d8528");
             Check("RttVertexShader", Shaders.RttVertexShader,
                 "af070f447840bf1fc51d6bba88a339fab067a4e3a01e460351a2549ca9107f4f");
             Check("RttFragmentShader", Shaders.RttFragmentShader,
                 "021b5992926cb3a8c714fb943b0c85e091cf3cd76d2c487950ca0fb03d27c56e");
             Check("CelFragmentShader", Shaders.CelFragmentShader,
-                "dda28129e0a935503375300ce29ad7fc0be2cc104a80c46d27a1c69f902660ff");
+                "b7bed3704596403b691de6346dcd4a0db9e7cf57567fe99973fc7993cedd871c");
             Check("ShiftFragmentShader", Shaders.ShiftFragmentShader,
                 "2b2511d5506ad9a25d64005b7b9e452f56b550410f96c753a6072a743b3162fa");
         }

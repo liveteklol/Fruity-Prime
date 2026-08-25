@@ -37,6 +37,7 @@ namespace MphRead.Mods
             // here because this runs for every invocation, launcher or not.
             InputSettings.Load();
             Update.Updater.Disabled = HasFlag(args, "noupdate");
+            ApplyRenderOverrides(args);
 
             if (HasFlag(args, "credits"))
             {
@@ -703,6 +704,45 @@ namespace MphRead.Mods
         {
             string? value = ValueAfter(args, "recolor");
             return value != null && Int32.TryParse(value, out int recolor) ? recolor : 0;
+        }
+
+        /// <summary>
+        /// Render-option overrides from the command line, applied for every
+        /// invocation before anything draws.
+        ///
+        /// The settings file is the launcher's, and the paths that never open
+        /// one -- <c>-thumbnail</c>, <c>-maptest</c>, <c>-connect</c> -- had no
+        /// way to ask for cel shading at all. That made the one mode whose
+        /// whole point is what the picture looks like the one mode no
+        /// screenshot command could turn on.
+        /// </summary>
+        private static void ApplyRenderOverrides(string[] args)
+        {
+            string? cel = ValueAfter(args, "cel");
+            if (cel != null && !cel.StartsWith('-'))
+            {
+                RenderOptions.CelShading = RenderOptions.ParseOnOff(cel, RenderOptions.CelShading);
+            }
+            else if (HasFlag(args, "cel"))
+            {
+                // a bare -cel, with the next word belonging to another option
+                RenderOptions.CelShading = true;
+            }
+            string? fog = ValueAfter(args, "fog");
+            if (fog != null && !fog.StartsWith('-'))
+            {
+                RenderOptions.Fog = RenderOptions.ParseOnOff(fog, RenderOptions.Fog);
+            }
+            string? bands = ValueAfter(args, "celbands");
+            if (bands != null && Int32.TryParse(bands, out int bandCount))
+            {
+                RenderOptions.CelBands = bandCount;
+            }
+            string? edge = ValueAfter(args, "celedge");
+            if (edge != null && Int32.TryParse(edge.TrimEnd('%'), out int edgePercent))
+            {
+                RenderOptions.CelEdge = edgePercent / 100f;
+            }
         }
 
         private static bool HasFlag(string[] args, string name)

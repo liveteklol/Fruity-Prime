@@ -725,6 +725,8 @@ namespace MphRead
             _shaderLocations.Emission = GL.GetUniformLocation(_shaderProgramId, "emission");
             _shaderLocations.UseFog = GL.GetUniformLocation(_shaderProgramId, "fog_enable");
             _shaderLocations.CelBands = GL.GetUniformLocation(_shaderProgramId, "cel_bands");
+            _shaderLocations.UseFlat = GL.GetUniformLocation(_shaderProgramId, "use_flat");
+            _shaderLocations.FlatColor = GL.GetUniformLocation(_shaderProgramId, "flat_color");
             _shaderLocations.FogColor = GL.GetUniformLocation(_shaderProgramId, "fog_color");
             _shaderLocations.FogMinDistance = GL.GetUniformLocation(_shaderProgramId, "fog_min");
             _shaderLocations.FogMaxDistance = GL.GetUniformLocation(_shaderProgramId, "fog_max");
@@ -1176,17 +1178,82 @@ namespace MphRead
             _textureCount++;
             bool onlyOpaque = true;
             var pixels = new List<uint>();
+            var average = new FlatColor();
             foreach (ColorRgba pixel in model.GetPixels(textureId, paletteId, recolorId))
             {
                 pixels.Add(pixel.ToUint());
                 onlyOpaque &= pixel.Alpha == 255;
+                average.Add(pixel);
             }
             Texture texture = model.Recolors[recolorId].Textures[textureId];
             GL.BindTexture(TextureTarget.Texture2D, _textureCount);
             GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba, texture.Width, texture.Height, 0,
                 PixelFormat.Rgba, PixelType.UnsignedByte, pixels.ToArray());
             GL.BindTexture(TextureTarget.Texture2D, 0);
+            _flatColors[_textureCount] = average.Result;
             return onlyOpaque;
+        }
+
+        /// <summary>
+        /// The one colour each bound texture averages to, by binding ID.
+        ///
+        /// Cel shading paints surfaces in a flat colour instead of in their
+        /// texture, and this is the colour it uses. Worked out once, as the
+        /// texels go to the card, because it is a property of the texture and
+        /// not of the frame -- and there is no other moment when this code has
+        /// the pixels in hand.
+        /// </summary>
+        private readonly Dictionary<int, Vector3> _flatColors = new Dictionary<int, Vector3>();
+
+        /// <summary>
+        /// A texture's average colour, weighted by alpha.
+        ///
+        /// Weighted because a cut-out texture -- a grate, a decal, a sprite --
+        /// is mostly transparent, and the transparent texels usually carry
+        /// black or whatever happened to be in that corner of the sheet.
+        /// Averaging those in drags every such surface towards black, which is
+        /// the one colour an outline pass needs to keep for itself.
+        /// </summary>
+        private struct FlatColor
+        {
+            private float _red;
+            private float _green;
+            private float _blue;
+            private float _weight;
+            private float _count;
+            private float _plainRed;
+            private float _plainGreen;
+            private float _plainBlue;
+
+            public void Add(ColorRgba pixel)
+            {
+                float alpha = pixel.Alpha / 255f;
+                _red += pixel.Red * alpha;
+                _green += pixel.Green * alpha;
+                _blue += pixel.Blue * alpha;
+                _weight += alpha;
+                _plainRed += pixel.Red;
+                _plainGreen += pixel.Green;
+                _plainBlue += pixel.Blue;
+                _count++;
+            }
+
+            public Vector3 Result
+            {
+                get
+                {
+                    if (_weight > 0.01f)
+                    {
+                        return new Vector3(_red, _green, _blue) / _weight / 255f;
+                    }
+                    // fully transparent: nothing is drawn with it anyway
+                    if (_count > 0)
+                    {
+                        return new Vector3(_plainRed, _plainGreen, _plainBlue) / _count / 255f;
+                    }
+                    return Vector3.One;
+                }
+            }
         }
 
         public int BindGetTexture(IReadOnlyList<ColorRgba> data, int width, int height)
@@ -1196,6 +1263,7 @@ namespace MphRead
             GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba, width, height, 0,
                 PixelFormat.Rgba, PixelType.UnsignedByte, data.ToArray());
             GL.BindTexture(TextureTarget.Texture2D, 0);
+            _flatColors[_textureCount] = AverageOf(data);
             return _textureCount;
         }
 
@@ -1205,6 +1273,18 @@ namespace MphRead
             GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba, width, height, 0,
                 PixelFormat.Rgba, PixelType.UnsignedByte, data.ToArray());
             GL.BindTexture(TextureTarget.Texture2D, 0);
+            // this binding may already have had a different picture in it
+            _flatColors[bindingId] = AverageOf(data);
+        }
+
+        private static Vector3 AverageOf(IReadOnlyList<ColorRgba> data)
+        {
+            var average = new FlatColor();
+            for (int i = 0; i < data.Count; i++)
+            {
+                average.Add(data[i]);
+            }
+            return average.Result;
         }
 
         public void UpdateMaterials(Model model, int recolorId)
@@ -3747,6 +3827,12 @@ namespace MphRead
             GL.Uniform1(_shaderLocations.UseOverride, 0);
             GL.Uniform1(_shaderLocations.UsePaletteOverride, 0);
             GL.Uniform1(_shaderLocations.UseFog, 0);
+            // The damage flash, the locator icons and the intro filter are HUD
+            // drawn through the scene's program because they are models. They
+            // are not part of the world, so they are not flattened and not
+            // banded; UpdateUniforms puts the bands back next frame.
+            GL.Uniform1(_shaderLocations.UseFlat, 0);
+            GL.Uniform1(_shaderLocations.CelBands, 0);
             if (_faceCulling)
             {
                 GL.Enable(EnableCap.CullFace);
@@ -4063,6 +4149,7 @@ namespace MphRead
                 GL.UniformMatrix4(_shaderLocations.TextureMatrix, transpose: false, ref texcoordMatrix);
             }
             GL.Uniform1(_shaderLocations.UseTexture, item.HasTexture && _showTextures ? 1 : 0);
+            SetFlatColor(item.HasTexture && _showTextures ? item.TextureBindingId : -1);
             Vector4? overrideColor = item.OverrideColor;
             if (overrideColor != null)
             {
@@ -4083,6 +4170,28 @@ namespace MphRead
             else
             {
                 GL.Uniform1(_shaderLocations.UsePaletteOverride, 0);
+            }
+        }
+
+        /// <summary>
+        /// Tell the fragment shader which flat colour stands in for the
+        /// texture about to be drawn, or that it should use the texture.
+        ///
+        /// Off unless cel shading is on, and off for anything whose binding
+        /// was never seen going to the card -- there is no average for it, and
+        /// a wrong flat colour is far worse than a texture.
+        /// </summary>
+        private void SetFlatColor(int bindingId)
+        {
+            if (Mods.RenderOptions.CelShading && bindingId != -1
+                && _flatColors.TryGetValue(bindingId, out Vector3 flat))
+            {
+                GL.Uniform1(_shaderLocations.UseFlat, 1);
+                GL.Uniform3(_shaderLocations.FlatColor, flat);
+            }
+            else
+            {
+                GL.Uniform1(_shaderLocations.UseFlat, 0);
             }
         }
 

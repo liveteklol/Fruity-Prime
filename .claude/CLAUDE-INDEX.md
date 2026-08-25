@@ -14,6 +14,7 @@ loading everything.
 - multiplayer/NETWORK-BROWSER.md — server discovery, directory, hosting
 - multiplayer/NETWORK-MATCHEND.md — match end, rotation, the double-counted-kill bug
 - multiplayer/NETWORK-DIAGNOSTICS.md — the full damage-bug postmortem, traps, diagnostics
+- render/CEL-SHADING.md — flat colours in place of textures, and the depth-kink ink pass
 - mapgen/MAP-PIPELINE.md — custom maps: the generator, the Quake 3 importer, the format traps
 - testing/TEST-HARNESS.md — netcheck/maptest, map sweeps, the world and affliction probes
 - testing/TEST-METRICS.md — reading results, common traps, last verified status
