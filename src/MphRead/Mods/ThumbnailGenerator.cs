@@ -78,10 +78,68 @@ namespace MphRead.Mods
                 {
                     continue;
                 }
+                if (!HasPlayerSpawn(entry.Key, entry.Value))
+                {
+                    continue;
+                }
                 rooms.Add(entry.Key);
             }
             rooms.Sort(StringComparer.OrdinalIgnoreCase);
             return rooms;
+        }
+
+        private static readonly Dictionary<string, bool> _spawnCache =
+            new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Whether a match in this room would have anywhere to put anybody.
+        ///
+        /// The six Biodefense Chambers carry the multiplayer flag and no
+        /// entity file at all: no player spawns, so a match there strands
+        /// everybody at the origin and a preview is a picture of somewhere
+        /// nobody can go. They are dropped from the room list itself rather
+        /// than from any one screen, so the launcher, the map grid, the host
+        /// menu, -rooms and the previews all lose them together.
+        ///
+        /// Only the entity file is read -- no models, no collision, no GL.
+        /// </summary>
+        private static bool HasPlayerSpawn(string roomKey, RoomMetadata meta)
+        {
+            if (_spawnCache.TryGetValue(roomKey, out bool known))
+            {
+                return known;
+            }
+            bool found = false;
+            try
+            {
+                if (meta.EntityPath != null)
+                {
+                    int layerId = Metadata.GetMultiplayerEntityLayer(GameMode.Battle,
+                        Network.NetLaunch.RoomPlayerCount);
+                    foreach (Entity entity in Read.GetEntities(meta.EntityPath, layerId, meta.FirstHunt))
+                    {
+                        if (entity.Type != EntityType.PlayerSpawn && entity.Type != EntityType.FhPlayerSpawn)
+                        {
+                            continue;
+                        }
+                        if (((Entity<PlayerSpawnEntityData>)entity).Data.Active != 0)
+                        {
+                            found = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                // A reader that cannot answer must not delist a room that may
+                // be perfectly playable: a bad match is worse than a missing
+                // one only until the launcher has no maps left in it.
+                Console.WriteLine($"[rooms] could not read the spawns in {roomKey}: {ex.Message}");
+                found = true;
+            }
+            _spawnCache[roomKey] = found;
+            return found;
         }
 
         /// <summary>True when First Hunt's extracted files are present.</summary>
