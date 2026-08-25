@@ -20,12 +20,17 @@ namespace MphRead.Mods
         /// </summary>
         public static bool Active { get; private set; }
 
+        private static float _sfxVolume = 0.35f;
+        private static float _musicVolume = 1;
+
         public static void Enter()
         {
             if (Active)
             {
                 return;
             }
+            _sfxVolume = MphRead.Sound.Sfx.Volume;
+            _musicVolume = Music.UserVolume;
             Active = true;
             // Silence rather than skip loading: the sound system is wired
             // into scene setup, and muting is the change with the smallest
@@ -33,6 +38,26 @@ namespace MphRead.Mods
             // audible playback would also overlap into noise.
             MphRead.Sound.Sfx.Volume = 0;
             Music.UserVolume = 0;
+        }
+
+        /// <summary>
+        /// Back to being a game.
+        ///
+        /// The desktop never needed this: every capture is a worker process
+        /// that exits when its picture is written, so the flag dies with it.
+        /// Android renders previews in the app's own process, where entering
+        /// and never leaving means the next match runs with no HUD and no
+        /// sound -- which is exactly how it was reported.
+        /// </summary>
+        public static void Exit()
+        {
+            if (!Active)
+            {
+                return;
+            }
+            Active = false;
+            MphRead.Sound.Sfx.Volume = _sfxVolume;
+            Music.SetUserVolume(_musicVolume);
         }
     }
 }

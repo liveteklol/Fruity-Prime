@@ -45,9 +45,10 @@ namespace MphRead.Droid
         private ViewGroup? _content;
         private View? _launcherView;
         private GameView? _gameView;
-        private ThumbnailView? _thumbnails;
         private TouchOverlayView? _overlay;
         private TextView? _notice;
+        private volatile bool _renderingPreviews;
+        private volatile bool _renderingHere;
         private readonly TouchControls _controls = new TouchControls();
         private ScreenOrientation _orientationBefore = ScreenOrientation.Unspecified;
 
@@ -96,59 +97,105 @@ namespace MphRead.Droid
         }
 
         /// <summary>
-        /// Render map previews on this device, one room at a time, and give the
-        /// launcher its progress back.
+        /// Render map previews on this device and give the launcher its
+        /// progress back.
         ///
-        /// Landscape while it runs, for the same reason the pictures are a
-        /// fixed size: they are shown in a wide band, and a preview taken in
-        /// portrait is a preview of the ceiling.
+        /// Nothing is shown while it runs and nothing is rotated: the work goes
+        /// to <see cref="PreviewService"/> workers in processes of their own,
+        /// drawing into offscreen pbuffers, and the only thing this process
+        /// does is watch the cache directory fill up. Whatever they could not
+        /// produce is rendered here afterwards, on a background thread with an
+        /// offscreen context of its own, so a device that will not start
+        /// services still gets its pictures.
         /// </summary>
         internal Task<int> RenderPreviews(IReadOnlyList<string> rooms, Action<string> report)
         {
-            var done = new TaskCompletionSource<int>();
-            if (_content == null || InMatch || _thumbnails != null)
+            if (rooms.Count == 0 || _renderingPreviews)
             {
-                done.SetResult(0);
-                return done.Task;
+                return Task.FromResult(0);
             }
-            ScreenOrientation before = RequestedOrientation;
-            RequestedOrientation = ScreenOrientation.SensorLandscape;
-            Window?.AddFlags(WindowManagerFlags.KeepScreenOn);
-            var notice = new TextView(this)
+            _renderingPreviews = true;
+            void Report(string line) => RunOnUiThread(() => report(line));
+            // The workers are ordinary services, and a device that goes to
+            // sleep throttles them; the run is long enough for that to matter.
+            RunOnUiThread(() => Window?.AddFlags(WindowManagerFlags.KeepScreenOn));
+            return Task.Run(() =>
             {
-                Text = $"Rendering {rooms.Count} map preview(s) from your own files...",
-                Gravity = GravityFlags.Center
-            };
-            notice.SetTextColor(Android.Graphics.Color.Argb(230, 230, 234, 242));
-            notice.SetBackgroundColor(Android.Graphics.Color.Argb(160, 10, 12, 16));
-            _thumbnails = new ThumbnailView(this, rooms,
-                ThumbnailGenerator.ThumbnailWidth, ThumbnailGenerator.ThumbnailHeight,
-                line => RunOnUiThread(() =>
+                try
                 {
-                    notice.Text = line;
-                    report(line);
-                }),
-                written => RunOnUiThread(() =>
-                {
-                    if (_thumbnails != null)
+                    ThumbnailGenerator.EnsureCacheDirectory();
+                    int written = PreviewWorkers.Run(this, rooms,
+                        PreviewRun.Width, PreviewRun.Height, Report);
+                    var left = new List<string>();
+                    for (int i = 0; i < rooms.Count; i++)
                     {
-                        _content.RemoveView(_thumbnails);
-                        _thumbnails = null;
+                        if (!ThumbnailGenerator.Exists(rooms[i]))
+                        {
+                            left.Add(rooms[i]);
+                        }
                     }
-                    _content.RemoveView(notice);
-                    Window?.ClearFlags(WindowManagerFlags.KeepScreenOn);
-                    RequestedOrientation = before;
-                    done.TrySetResult(written);
-                }));
-            _content.AddView(_thumbnails);
-            _content.AddView(notice);
-            return done.Task;
+                    if (left.Count > 0)
+                    {
+                        written += RenderHere(left, Report);
+                    }
+                    return written;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[thumbnails] the run failed: {ex}");
+                    Report($"[thumbnails] {ex.Message}");
+                    return 0;
+                }
+                finally
+                {
+                    _renderingPreviews = false;
+                    RunOnUiThread(() =>
+                    {
+                        if (!InMatch)
+                        {
+                            Window?.ClearFlags(WindowManagerFlags.KeepScreenOn);
+                        }
+                    });
+                }
+            });
+        }
+
+        /// <summary>
+        /// The fallback: render in this process, on this thread, with an
+        /// offscreen context.
+        ///
+        /// A match cannot run at the same time -- one process holds one world,
+        /// and <see cref="Mods.ThumbnailMode"/> is on while this runs -- so
+        /// <see cref="StartMatch"/> refuses while it does.
+        /// </summary>
+        private int RenderHere(IReadOnlyList<string> rooms, Action<string> report)
+        {
+            if (InMatch)
+            {
+                report("[thumbnails] not while a match is running");
+                return 0;
+            }
+            _renderingHere = true;
+            try
+            {
+                using var gl = OffscreenGl.Create(PreviewRun.Width, PreviewRun.Height);
+                return PreviewRun.Render(rooms, PreviewRun.Width, PreviewRun.Height, report);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[thumbnails] the offscreen context failed: {ex}");
+                report($"[thumbnails] {ex.Message}");
+                return 0;
+            }
+            finally
+            {
+                _renderingHere = false;
+            }
         }
 
         protected override void OnPause()
         {
             _gameView?.OnPause();
-            _thumbnails?.OnPause();
             base.OnPause();
         }
 
@@ -156,7 +203,6 @@ namespace MphRead.Droid
         {
             base.OnResume();
             _gameView?.OnResume();
-            _thumbnails?.OnResume();
         }
 
         protected override void OnDestroy()
@@ -194,6 +240,16 @@ namespace MphRead.Droid
         {
             if (_content == null || InMatch)
             {
+                return;
+            }
+            if (_renderingHere)
+            {
+                // One process holds one world: the preview run owns the entity
+                // lists and the game state until it is finished, and
+                // ThumbnailMode is on while it is.
+                Toast.MakeText(this, "Still rendering map previews; try again in a moment.",
+                    ToastLength.Long)?.Show();
+                AndroidApp.Home?.Reset();
                 return;
             }
             var input = new AndroidInput();

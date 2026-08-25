@@ -55,6 +55,7 @@ namespace MphRead.Mods.Launcher.Gui
         private readonly ProgressRow _setupProgress = new();
         private MenuEntry _setupBack = null!;
         private MenuEntry? _previewEntry;
+        private MenuEntry? _previewProgress;
         private Control _homeCard = null!;
         private Control _setupCard = null!;
         private Control _onlineCard = null!;
@@ -504,7 +505,12 @@ namespace MphRead.Mods.Launcher.Gui
             {
                 _previewEntry.IsEnabled = false;
                 _previewEntry.Title = "Rendering...";
+                // The subtitle as well as the log: on Android the run is
+                // offscreen and in other processes, so this row is the only
+                // thing on the screen that says it is happening.
+                _previewProgress = _previewEntry;
                 await RenderPreviews(log);
+                _previewProgress = null;
                 _previewEntry.IsEnabled = true;
                 _previewEntry.Title = "Render map previews";
                 RefreshPreviewEntry();
@@ -654,6 +660,10 @@ namespace MphRead.Mods.Launcher.Gui
             await ThumbnailHost.RenderMissingAsync(line => Dispatcher.UIThread.Post(() =>
             {
                 log.Text = Tail(log.Text, line);
+                if (_previewProgress != null)
+                {
+                    _previewProgress.Subtitle = line;
+                }
             }));
             RefreshSplash();
         }
