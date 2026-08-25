@@ -39,6 +39,36 @@ namespace MphRead.Mods
         /// <summary>Per-vertex lighting. Off is flatter and cheaper.</summary>
         public static bool Lighting { get; set; } = true;
 
+        /// <summary>
+        /// Cel shading: the lighting goes to hard steps and a dark line is
+        /// drawn where a surface turns away from the camera.
+        ///
+        /// Not the same thing as turning lighting off, which only flattens
+        /// everything to full brightness. This bands the *brightness* rather
+        /// than each channel, so the textures keep their colours and it is the
+        /// shading that goes to steps -- and the silhouette term is what makes
+        /// it read as drawn rather than merely posterised.
+        /// </summary>
+        public static bool CelShading { get; set; }
+
+        /// <summary>How many steps the shading is banded into, 2 to 8.</summary>
+        public static int CelBands
+        {
+            get => _celBands;
+            set => _celBands = Math.Clamp(value, 2, 8);
+        }
+
+        private static int _celBands = 4;
+
+        /// <summary>How dark the silhouette line goes, 0 to 1.</summary>
+        public static float CelEdge
+        {
+            get => _celEdge;
+            set => _celEdge = Math.Clamp(value, 0, 1);
+        }
+
+        private static float _celEdge = 0.75f;
+
         /// <summary>Distance fog, where the room asks for it.</summary>
         public static bool Fog { get; set; } = true;
 
@@ -84,6 +114,17 @@ namespace MphRead.Mods
                 NumberStyles.Integer, CultureInfo.InvariantCulture, out int percent))
             {
                 return Math.Clamp(percent, MinScale, 100);
+            }
+            return fallback;
+        }
+
+        /// <summary>Unclamped; the properties do their own clamping.</summary>
+        public static int ParseInt(string? value, int fallback)
+        {
+            if (value != null && Int32.TryParse(value.Trim().TrimEnd('%'),
+                NumberStyles.Integer, CultureInfo.InvariantCulture, out int number))
+            {
+                return number;
             }
             return fallback;
         }

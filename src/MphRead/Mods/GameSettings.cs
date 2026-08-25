@@ -71,6 +71,11 @@ namespace MphRead.Mods
             RenderOptions.Fog = RenderOptions.ParseOnOff(settings.Fog, RenderOptions.Fog);
             RenderOptions.TextureFiltering = RenderOptions.ParseOnOff(settings.TextureFiltering,
                 RenderOptions.TextureFiltering);
+            RenderOptions.CelShading = RenderOptions.ParseOnOff(settings.CelShading,
+                RenderOptions.CelShading);
+            RenderOptions.CelBands = RenderOptions.ParseInt(settings.CelBands, RenderOptions.CelBands);
+            RenderOptions.CelEdge = RenderOptions.ParseInt(settings.CelEdge,
+                (int)Math.Round(RenderOptions.CelEdge * 100)) / 100f;
         }
 
         /// <summary>

@@ -71,7 +71,10 @@ uniform int texgen_mode;
 uniform mat4 mtx_stack[32];
 
 out vec2 texcoord;
-out vec4 color;
+out vec4 vtx_shade;
+// How square-on this surface faces the camera, for the ink line cel shading
+// draws around a silhouette.
+out float facing;
 
 vec3 light_calc(vec3 light_vec, vec3 light_col, vec3 normal_vec, vec3 dif_col, vec3 amb_col, vec3 spe_col)
 {
@@ -95,6 +98,7 @@ void main()
     gl_Position = proj_mtx * view_mtx * model_mtx * a_position;
     vec4 vtx_color = show_colors ? vtx_in_color : vec4(1.0);
     vec3 normal = normalize(mat3(model_mtx) * a_normal);
+    facing = abs(normalize(mat3(view_mtx * model_mtx) * a_normal).z);
     if (use_light) {
         vec3 dif_current = diffuse;
         vec3 amb_current = ambient;
@@ -105,11 +109,11 @@ void main()
         }
         vec3 col1 = light_calc(light1vec, light1col, normal, dif_current, amb_current, specular);
         vec3 col2 = light_calc(light2vec, light2col, normal, dif_current, amb_current, specular);
-        color = vec4(min((col1 + col2 + emission), vec3(1.0, 1.0, 1.0)), 1.0);
+        vtx_shade = vec4(min((col1 + col2 + emission), vec3(1.0, 1.0, 1.0)), 1.0);
     }
     else {
         // alpha will only be less than 1.0 here if DIF_AMB is used but lighting is disabled
-        color = vec4(vtx_color.rgb, 1.0);
+        vtx_shade = vec4(vtx_color.rgb, 1.0);
     }
     texcoord = vec2(0.0, 0.0);
     if (use_texture) {
@@ -157,9 +161,14 @@ uniform int mat_mode;
 uniform vec3 toon_table[32];
 // 0 - off, 1 - pass only alpha == 1, 2 - pass only alpha < 1
 uniform int alpha_test;
+// Cel shading: 0 bands is off. The renderer clears it before the HUD and
+// the helmet, which are drawn through this same program after the scene.
+uniform int cel_bands;
+uniform float cel_edge;
 
 in vec2 texcoord;
-in vec4 color;
+in vec4 vtx_shade;
+in float facing;
 
 out vec4 frag_color;
 
@@ -171,6 +180,17 @@ vec4 toon_color(vec4 vtx_color)
 void main()
 {
     // mat_mode: 0 - modulate, 1 - decal, 2 - toon
+    // Cel shading bands the *lighting* before it touches the texture. Banding
+    // the final colour instead quantises the texture's own detail, which comes
+    // out as speckle rather than as shading.
+    vec4 color = vtx_shade;
+    if (cel_bands > 0) {
+        float lum = max(max(color.r, color.g), color.b);
+        if (lum > 0.0) {
+            color.rgb *= ceil(lum * float(cel_bands)) / float(cel_bands) / lum;
+        }
+        color.rgb *= 1.0 - cel_edge * (1.0 - smoothstep(0.0, 0.3, facing));
+    }
     vec4 col;
     if (use_texture) {
         vec4 texcolor = use_pal_override ? vec4(pal_override_color.xyz, texture(tex, texcoord).w) : texture(tex, texcoord);
@@ -378,9 +398,9 @@ void main()
             }
             _checked = true;
             Check("VertexShader", Shaders.VertexShader,
-                "4cf1422bddaa3ece44c9cfbf6dab1ede192ee8c3f4fbed362e7da5eebfdfc428");
+                "540ee72c59b28f3ec1889635222efa6a3b1ee54783b6edfd8a1c89c40eb22776");
             Check("FragmentShader", Shaders.FragmentShader,
-                "d4de970d9214d1463b542a8f8f8609d3537732a7f9eb88fe566e01e1b3915927");
+                "283902dd6e89ae8ee99e1d18a2e548668e2b2dff95c74cc66bc56f5efeec4a04");
             Check("RttVertexShader", Shaders.RttVertexShader,
                 "af070f447840bf1fc51d6bba88a339fab067a4e3a01e460351a2549ca9107f4f");
             Check("RttFragmentShader", Shaders.RttFragmentShader,

@@ -26,7 +26,10 @@ uniform int texgen_mode;
 uniform mat4[32] mtx_stack;
 
 varying vec2 texcoord;
-varying vec4 color;
+varying vec4 vtx_shade;
+// How square-on this surface faces the camera, for the ink line cel shading
+// draws around a silhouette.
+varying float facing;
 
 vec3 light_calc(vec3 light_vec, vec3 light_col, vec3 normal_vec, vec3 dif_col, vec3 amb_col, vec3 spe_col)
 {
@@ -49,6 +52,7 @@ void main()
     gl_Position = proj_mtx * view_mtx * model_mtx * gl_Vertex;
     vec4 vtx_color = show_colors ? gl_Color : vec4(1.0);
     vec3 normal = normalize(mat3(model_mtx) * gl_Normal);
+    facing = abs(normalize(mat3(view_mtx * model_mtx) * gl_Normal).z);
     if (use_light) {
         vec3 dif_current = diffuse;
         vec3 amb_current = ambient;
@@ -59,11 +63,11 @@ void main()
         }
         vec3 col1 = light_calc(light1vec, light1col, normal, dif_current, amb_current, specular);
         vec3 col2 = light_calc(light2vec, light2col, normal, dif_current, amb_current, specular);
-        color = vec4(min((col1 + col2 + emission), vec3(1.0, 1.0, 1.0)), 1.0);
+        vtx_shade = vec4(min((col1 + col2 + emission), vec3(1.0, 1.0, 1.0)), 1.0);
     }
     else {
         // alpha will only be less than 1.0 here if DIF_AMB is used but lighting is disabled
-        color = vec4(vtx_color.rgb, 1.0);
+        vtx_shade = vec4(vtx_color.rgb, 1.0);
     }
     if (use_texture) {
         // texgen mode: 0 - none, 1 - texcoord, 2 - normal, 3 - vertex
@@ -109,9 +113,14 @@ uniform vec4 pal_override_color;
 uniform float mat_alpha;
 uniform int mat_mode;
 uniform vec3[32] toon_table;
+// Cel shading: 0 bands is off. The renderer clears it before the HUD and
+// the helmet, which are drawn through this same program after the scene.
+uniform int cel_bands;
+uniform float cel_edge;
 
 varying vec2 texcoord;
-varying vec4 color;
+varying vec4 vtx_shade;
+varying float facing;
 
 vec4 toon_color(vec4 vtx_color)
 {
@@ -121,6 +130,17 @@ vec4 toon_color(vec4 vtx_color)
 void main()
 {
     // mat_mode: 0 - modulate, 1 - decal, 2 - toon
+    // Cel shading bands the *lighting* before it touches the texture. Banding
+    // the final colour instead quantises the texture's own detail, which comes
+    // out as speckle rather than as shading.
+    vec4 color = vtx_shade;
+    if (cel_bands > 0) {
+        float lum = max(max(color.r, color.g), color.b);
+        if (lum > 0.0) {
+            color.rgb *= ceil(lum * float(cel_bands)) / float(cel_bands) / lum;
+        }
+        color.rgb *= 1.0 - cel_edge * (1.0 - smoothstep(0.0, 0.3, facing));
+    }
     vec4 col;
     if (use_texture) {
         vec4 texcolor = use_pal_override ? vec4(pal_override_color.xyz, texture2D(tex, texcoord).w) : texture2D(tex, texcoord);
@@ -282,6 +302,8 @@ void main()
         public int Specular { get; set; }
         public int Emission { get; set; }
         public int UseFog { get; set; }
+        public int CelBands { get; set; }
+        public int CelEdge { get; set; }
         public int FogColor { get; set; }
         public int FogMinDistance { get; set; }
         public int FogMaxDistance { get; set; }

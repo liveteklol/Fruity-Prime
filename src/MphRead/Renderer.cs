@@ -544,7 +544,11 @@ namespace MphRead
             }
             if (vertexStatus == 0 || fragmentStatus == 0)
             {
-                throw new ProgramException("Failed to compile main shaders.");
+                // The driver's own message. Without it a shader that will not
+                // compile is one sentence with nothing in it to act on.
+                throw new ProgramException("Failed to compile main shaders."
+                    + $" vertex: {GL.GetShaderInfoLog(vertexShader)}"
+                    + $" fragment: {GL.GetShaderInfoLog(fragmentShader)}");
             }
 
             _shaderProgramId = GL.CreateProgram();
@@ -666,6 +670,8 @@ namespace MphRead
             _shaderLocations.Specular = GL.GetUniformLocation(_shaderProgramId, "specular");
             _shaderLocations.Emission = GL.GetUniformLocation(_shaderProgramId, "emission");
             _shaderLocations.UseFog = GL.GetUniformLocation(_shaderProgramId, "fog_enable");
+            _shaderLocations.CelBands = GL.GetUniformLocation(_shaderProgramId, "cel_bands");
+            _shaderLocations.CelEdge = GL.GetUniformLocation(_shaderProgramId, "cel_edge");
             _shaderLocations.FogColor = GL.GetUniformLocation(_shaderProgramId, "fog_color");
             _shaderLocations.FogMinDistance = GL.GetUniformLocation(_shaderProgramId, "fog_min");
             _shaderLocations.FogMaxDistance = GL.GetUniformLocation(_shaderProgramId, "fog_max");
@@ -1547,7 +1553,10 @@ namespace MphRead
 
             GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
             // Back to the window: everything from here down -- the quad, the
-            // helmet, the HUD and the fade -- is drawn at full size.
+            // helmet, the HUD and the fade -- is drawn at full size, and none
+            // of it is scene geometry, so cel shading comes off with the
+            // offscreen target.
+            GL.Uniform1(_shaderLocations.CelBands, 0);
             GL.Viewport(0, 0, Size.X, Size.Y);
             GL.Clear(ClearBufferMask.ColorBufferBit);
             GL.Disable(EnableCap.DepthTest);
@@ -2944,6 +2953,9 @@ namespace MphRead
         {
             UseRoomLights();
             GL.Uniform1(_shaderLocations.UseFog, _hasFog && _showFog ? 1 : 0);
+            GL.Uniform1(_shaderLocations.CelBands, Mods.RenderOptions.CelShading
+                ? Mods.RenderOptions.CelBands : 0);
+            GL.Uniform1(_shaderLocations.CelEdge, Mods.RenderOptions.CelEdge);
             GL.Uniform1(_shaderLocations.ShowColors, _showColors ? 1 : 0);
             if (ProcessFrame)
             {

@@ -55,6 +55,9 @@ namespace MphRead.Mods.Launcher.Gui
         private ToggleRow _lightingRow = null!;
         private ToggleRow _fogRow = null!;
         private ToggleRow _filteringRow = null!;
+        private ToggleRow _celRow = null!;
+        private SliderRow _celBands = null!;
+        private SliderRow _celEdge = null!;
         private ToggleRow _helmetRow = null!;
         private SliderRow _helmetOpacity = null!;
         private SliderRow _visorOpacity = null!;
@@ -314,6 +317,17 @@ namespace MphRead.Mods.Launcher.Gui
             Explain(page, "The DS had no filtering, so off is both faster and what the game "
                 + "looked like. Lighting and fog take effect on the next room; the render "
                 + "scale takes effect at once. Room and player detail are in Features.");
+
+            Heading(page, "Cel shading");
+            _celRow = Add(page, new ToggleRow("Cel shading", RenderOptions.CelShading));
+            _celBands = Add(page, new SliderRow("Steps", RenderOptions.CelBands * 10,
+                v => $"{Math.Clamp(v / 10, 2, 8)}"));
+            _celEdge = Add(page, new SliderRow("Outline",
+                (int)Math.Round(RenderOptions.CelEdge * 100)));
+            Explain(page, "The shading goes to hard steps and a dark line is drawn where a "
+                + "surface turns away from you. Not the same as turning lighting off, which "
+                + "only flattens everything: the textures keep their colours and it is the "
+                + "light that goes to steps. Steps is how many, outline is how dark the line.");
 
             Heading(page, "Helmet and HUD");
             _helmetRow = Add(page, new ToggleRow("Draw the helmet",
@@ -617,6 +631,10 @@ namespace MphRead.Mods.Launcher.Gui
             _settings.Lighting = RenderOptions.OnOff(_lightingRow.On);
             _settings.Fog = RenderOptions.OnOff(_fogRow.On);
             _settings.TextureFiltering = RenderOptions.OnOff(_filteringRow.On);
+            _settings.CelShading = RenderOptions.OnOff(_celRow.On);
+            _settings.CelBands = Math.Clamp(_celBands.Value / 10, 2, 8)
+                .ToString(CultureInfo.InvariantCulture);
+            _settings.CelEdge = _celEdge.Value.ToString(CultureInfo.InvariantCulture);
             Features.HelmetOpacity = _helmetRow.On ? _helmetOpacity.Value / 100f : 0;
             Features.VisorOpacity = _helmetRow.On ? _visorOpacity.Value / 100f : 0;
             Features.HudOpacity = _hudOpacity.Value / 100f;
