@@ -46,6 +46,11 @@ namespace MphRead.Mods.MapGen
         private static (byte[], int) BuildModel(BuiltMap map)
         {
             MapDefinition def = map.Definition;
+            string? packPath = def.Import?.ResolveTextures();
+            if (packPath != null)
+            {
+                return BuildModel(map, MapTexturePack.Load(packPath));
+            }
             Model source = Read.GetRoomModelInstance(def.TextureSource).Model;
             Recolor recolor = source.Recolors[0];
             // copy only the textures the map asks for, remapping the IDs as we
@@ -90,6 +95,16 @@ namespace MphRead.Mods.MapGen
             {
                 throw new ProgramException("A map needs at least one material.");
             }
+            return Assemble(map, def, materials, textures, palettes);
+        }
+
+        /// <summary>
+        /// Geometry into a model file, once the materials are decided: the
+        /// part that does not care where the textures came from.
+        /// </summary>
+        private static (byte[], int) Assemble(BuiltMap map, MapDefinition def, List<Material> materials,
+            List<Repack.TextureInfo> textures, List<Repack.PaletteInfo> palettes)
+        {
             float scale = MathF.Pow(2, def.ScaleFactor);
             var renders = new List<IReadOnlyList<RenderInstruction>>();
             var meshes = new List<Mesh>();
@@ -137,6 +152,38 @@ namespace MphRead.Mods.MapGen
             (byte[] bytes, _) = Repack.PackModel((int)scale, Array.Empty<int>(), Array.Empty<int>(),
                 materials, textures, palettes, nodes, meshes, renders, dlists, options);
             return (bytes, vertexCount);
+        }
+
+        /// <summary>
+        /// The same model, wearing the level's own textures.
+        ///
+        /// Nothing is borrowed from a shipped room here, so nothing that came
+        /// off the cartridge ends up in the file: one material per shader, and
+        /// each one's image and palette straight out of the pack.
+        /// </summary>
+        private static (byte[], int) BuildModel(BuiltMap map, MapTexturePack pack)
+        {
+            MapDefinition def = map.Definition;
+            var textures = new List<Repack.TextureInfo>();
+            var palettes = new List<Repack.PaletteInfo>();
+            var materials = new List<Material>();
+            foreach (MapTexturePack.Entry entry in pack.Entries)
+            {
+                textures.Add(new Repack.TextureInfo(TextureFormat.Palette8Bit, opaque: true,
+                    entry.Height, entry.Width, (IReadOnlyList<byte>)entry.Pixels));
+                palettes.Add(new Repack.PaletteInfo(entry.Palette));
+                // The shader name is longer than a material name may be, and
+                // the tail is the part that identifies it.
+                string name = entry.Name.Length <= 30 ? entry.Name : entry.Name[^30..];
+                materials.Add(RawStructs.MakeMaterial(name, textures.Count - 1, palettes.Count - 1,
+                    RepeatMode.Repeat, RepeatMode.Repeat, lighting: false,
+                    diffuse: new ColorRgb(31, 31, 31), ambient: new ColorRgb(0, 0, 0)));
+            }
+            if (materials.Count == 0)
+            {
+                throw new ProgramException("The texture pack is empty.");
+            }
+            return Assemble(map, def, materials, textures, palettes);
         }
 
         /// <summary>Splits a polygon with more than four sides into a triangle fan.</summary>

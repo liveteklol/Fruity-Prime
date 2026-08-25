@@ -30,7 +30,15 @@ namespace MphRead.Mods.MapGen
             Q3Bsp bsp = Q3Bsp.Load(import.Resolve() ?? import.Source, import.MapName);
             var map = new BuiltMap(def);
             float unit = import.UnitsPerUnit;
-            var textureSizes = GetTextureSizes(def);
+            // With a baked pack the level wears its own textures and a
+            // material is one shader; without one, materials are whatever the
+            // map file mapped its shaders onto in a borrowed room.
+            string? packPath = import.ResolveTextures();
+            MapTexturePack? pack = packPath == null ? null : MapTexturePack.Load(packPath);
+            IReadOnlyList<(int, int)> textureSizes = pack == null
+                ? GetTextureSizes(def)
+                : pack.Entries.Select(e => ((int)e.Width, (int)e.Height)).ToList();
+            int unpainted = 0;
 
             int skipped = 0;
             int patches = 0;
@@ -60,7 +68,20 @@ namespace MphRead.Mods.MapGen
                     skipped++;
                     continue;
                 }
-                int material = MatchMaterial(import, texture.Name);
+                int material;
+                if (pack == null)
+                {
+                    material = MatchMaterial(import, texture.Name);
+                }
+                else if (!pack.BySourceIndex.TryGetValue(face.Texture, out material))
+                {
+                    // A shader with no image of its own -- a light or an
+                    // effect, defined in a .shader script rather than a file.
+                    // Dropping the surface is better than painting it with
+                    // somebody else's texture.
+                    unpainted++;
+                    continue;
+                }
                 (int width, int height) = textureSizes[material];
                 for (int i = 0; i + 2 < face.MeshVertCount; i += 3)
                 {
@@ -84,7 +105,14 @@ namespace MphRead.Mods.MapGen
                     }
                     normal = normal.Normalized();
                     map.Faces.Add(new BuiltFace(points, Rebase(uvs), normal, material,
-                        Math.Clamp(0.45f + shade / 3f * 1.1f, 0.25f, 1f)));
+                        // Quake's own lighting does not come across: the
+                        // lightmaps are gone and this engine is not lighting
+                        // these materials, so the vertex colour the compiler
+                        // baked is all there is. Taken literally it is far too
+                        // dark -- a map lit for a lightmap has dim vertices --
+                        // so it is lifted into the top half of the range,
+                        // where it reads as shading rather than as gloom.
+                        Math.Clamp(0.62f + shade / 3f * 0.75f, 0.55f, 1f)));
                 }
             }
 
@@ -166,6 +194,11 @@ namespace MphRead.Mods.MapGen
 
             if (verbose)
             {
+                if (pack != null)
+                {
+                    Console.WriteLine($"  {pack.Entries.Count} baked textures"
+                        + (unpainted > 0 ? $", {unpainted} surfaces dropped for want of one" : ""));
+                }
                 Console.WriteLine($"  imported {bsp.Faces.Count} surfaces -> {map.Faces.Count} triangles"
                     + $" ({patches} patches and {skipped} non-drawing surfaces skipped)");
                 Console.WriteLine($"  {solidBrushes} solid brushes -> {map.Solid.Count} collision faces"

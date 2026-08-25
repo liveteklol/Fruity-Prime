@@ -102,7 +102,8 @@
          nothing in an APK is a file the runtime can enumerate: see
          AndroidMaps.cs, which unpacks these into the external directory the
          game files already use. -->
-    <AndroidAsset Include="..\..\maps\*.json" Link="Assets\maps\%(Filename)%(Extension)" />
+    <AndroidAsset Include="..\..\maps\*.json;..\..\maps\*.bsp;..\..\maps\*.tex"
+                  Link="Assets\maps\%(Filename)%(Extension)" />
     <AvaloniaResource Include="..\MphRead\Assets\fruity-prime-logo.png"
                       Link="Assets\fruity-prime-logo.png" />
     <AvaloniaResource Include="..\MphRead\Assets\fruity-prime-mark.png"

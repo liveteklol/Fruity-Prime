@@ -58,7 +58,24 @@ feeding them structures that never came from a file:
 
 ## Textures
 
-A map borrows them from a room the player already has: `textureSource` names
+Two ways, and the second is the better one.
+
+**Baked from the level's own art.** `tools/bake-textures.py` decodes the
+shaders a level draws with, scales them to 64x64 and quantises each to a
+256-colour palette, into a `.tex` pack the packer turns into `TextureInfo` and
+`PaletteInfo` directly -- one material per shader. Ahead of time, because the
+conversion runs on the machine that plays the game and the Android head has no
+JPEG decoder: its STB natives are desktop builds, left out of the APK on
+purpose. Baking is what lets a converted map look like itself, and it takes
+the cartridge out of the loop entirely -- a room generated this way contains
+nothing from the dump.
+
+A shader with no image of its own (a light or an effect, defined in a
+`.shader` script rather than a file -- four of wrackdm17's twenty-two) has its
+surfaces dropped rather than painted with somebody else's texture.
+
+**Borrowed from a shipped room**, the older way, still used by the hand-built
+maps. A map borrows them from a room the player already has: `textureSource` names
 it, and each material says which of that room's materials to take the texture
 and palette from. They are copied as a pair, so a material cannot end up with
 someone else's palette, and they are written *inline* in the model file, so a
@@ -74,10 +91,16 @@ copied:
 
 - **Axes.** Quake is Z-up, this engine is Y-up. `(x, y, z) -> (x, z, -y)`
   keeps the handedness, so no surface ends up inside out.
-- **Scale.** There is no single right number. Matching the player's height
-  gives ~32 Quake units per unit, matching how high he jumps gives ~19, and
-  Samus crosses the ground more slowly than a Quake player. `unitsPerUnit`
-  defaults to 22 and is meant to be tuned by playing.
+- **Scale.** The number that matters is the one that keeps the level's routes
+  intact. Samus leaves the ground at 1228/4096 per frame against 77/4096 of
+  gravity: 2.39 units up, about 7.7 across at her walking cap. A Quake player
+  leaves at 270 u/s under 800 u/s^2: 45.6 up, about 216 across. So dividing by
+  less than 216/7.7 = **28.2** makes the world too big for its own jumps --
+  at 22, which this defaulted to when it was chosen by feel, a full-length
+  Quake jump is 9.8 units against her 7.7 and the route is simply gone.
+  `unitsPerUnit` now defaults to **28**. 35 would match the architecture
+  exactly (a 56-unit Quake player against Samus's 1.6); anything above 28 only
+  makes jumping easier than the author intended, anything below breaks routes.
 - **Jump pads.** Quake solves a pad's launch velocity at runtime from where it
   points, so the arc is re-solved here under this game's gravity
   (`bipedGravity`, -77/4096 per frame squared at 30 fps). Carrying the velocity

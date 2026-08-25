@@ -15,7 +15,7 @@
   "import": {
     "source": "pak0.pk3",
     "mapName": "q3dm17",
-    "unitsPerUnit": 22,
+    "unitsPerUnit": 28,
     "defaultMaterial": 0,
     "shaderMaterials": {
       "textures/base_floor": 1,

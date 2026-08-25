@@ -14,11 +14,11 @@
   "light2Color": [12, 13, 18],
   "light2Vector": [-0.3, 1, -0.2],
   "pointLimit": 7,
-  "preview": { "position": [94.3, 96, 63.7], "target": [0, 18.9, -41.6] },
+  "preview": { "position": [74.1, 75.4, 50.1], "target": [0, 14.9, -32.7] },
   "import": {
-    "source": "pak1-maps.pk3",
-    "mapName": "wrackdm17",
-    "unitsPerUnit": 22,
+    "source": "wrackdm17.bsp",
+    "textures": "wrackdm17.tex",
+    "unitsPerUnit": 28,
     "defaultMaterial": 0,
     "shaderMaterials": {
       "textures/base_trim": 0,

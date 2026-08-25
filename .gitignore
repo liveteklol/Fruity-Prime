@@ -347,6 +347,8 @@ thumbnails/
 # Server deploy staging (built artifacts, never committed).
 publish/
 
-# Source levels for converted maps: the player brings their own.
+# Source levels for converted maps: the player brings their own, except the
+# one free level that travels with us -- see maps/README.md for whose it is.
 maps/*.pk3
 maps/*.bsp
+!maps/wrackdm17.bsp

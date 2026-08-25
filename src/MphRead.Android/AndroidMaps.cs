@@ -49,7 +49,11 @@ namespace MphRead.Droid
                 Console.WriteLine($"[android] {names.Length} bundled map files -> {directory}");
                 foreach (string name in names)
                 {
-                    if (!name.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+                    // The map files, and the one level that travels with us:
+                    // see maps/README.md for whose it is and under what terms.
+                    if (!name.EndsWith(".json", StringComparison.OrdinalIgnoreCase)
+                        && !name.EndsWith(".bsp", StringComparison.OrdinalIgnoreCase)
+                        && !name.EndsWith(".tex", StringComparison.OrdinalIgnoreCase))
                     {
                         continue;
                     }

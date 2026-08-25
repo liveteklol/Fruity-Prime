@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
@@ -130,7 +131,7 @@ namespace MphRead.Mods.MapGen
             {
                 return null;
             }
-            foreach (string candidate in Candidates())
+            foreach (string candidate in Candidates(Source))
             {
                 if (File.Exists(candidate))
                 {
@@ -140,26 +141,64 @@ namespace MphRead.Mods.MapGen
             return null;
         }
 
-        private IEnumerable<string> Candidates()
+        private static IEnumerable<string> Candidates(string name)
         {
-            yield return Source;
-            if (Path.IsPathRooted(Source))
+            yield return name;
+            if (Path.IsPathRooted(name))
             {
                 yield break;
             }
-            yield return Path.Combine(CustomRooms.MapDirectory, Source);
-            yield return Path.Combine(Mods.Launcher.GameFiles.Root, Source);
+            yield return Path.Combine(CustomRooms.MapDirectory, name);
+            yield return Path.Combine(Mods.Launcher.GameFiles.Root, name);
         }
         public string? MapName { get; set; }
 
         /// <summary>
-        /// Quake 3 units per MPH unit. The honest answer is not one number:
-        /// matching the player's height gives about 32, matching how high he
-        /// jumps gives about 19, and Samus is slower across the ground than a
-        /// Quake player. Somewhere in the low twenties keeps the gaps
-        /// jumpable and the arena from feeling empty.
+        /// Quake 3 units per MPH unit.
+        ///
+        /// The number that matters is the one that keeps the level's routes
+        /// intact: a gap the map's author expected a player to clear must
+        /// still be clearable. Samus jumps 1228/4096 per frame against 77/4096
+        /// of gravity, so 2.39 units up and about 7.7 across at her walking
+        /// cap; a Quake player leaves the ground at 270 u/s under 800 u/s^2,
+        /// so 45.6 up and about 216 across. Dividing by less than 216/7.7 =
+        /// 28.2 makes the world too big for its own jumps, and 22 -- which
+        /// this was, chosen by feel -- puts a full-length Quake jump at 9.8
+        /// units against her 7.7.
+        ///
+        /// 28 is therefore the floor, and it is the default. 35 would match
+        /// the architecture exactly (56-unit Quake player against Samus's
+        /// 1.6), and is worth trying on a map with no long jumps: everything
+        /// above 28 only makes jumping easier than the author intended, while
+        /// anything below it breaks routes.
         /// </summary>
-        public float UnitsPerUnit { get; set; } = 22f;
+        public float UnitsPerUnit { get; set; } = 28f;
+
+        /// <summary>
+        /// A texture pack baked from the level's own art by
+        /// tools/bake-textures.py. With one, the map wears the textures it was
+        /// made with and borrows nothing from a shipped room -- which also
+        /// keeps cartridge data out of the files it generates. Looked for in
+        /// the same places as <see cref="Source"/>.
+        /// </summary>
+        public string? Textures { get; set; }
+
+        /// <summary>Where the texture pack is, or null if there is none here.</summary>
+        public string? ResolveTextures()
+        {
+            if (String.IsNullOrEmpty(Textures))
+            {
+                return null;
+            }
+            foreach (string candidate in Candidates(Textures))
+            {
+                if (File.Exists(candidate))
+                {
+                    return candidate;
+                }
+            }
+            return null;
+        }
 
         /// <summary>Shader name (or any prefix of it) to material index.</summary>
         public Dictionary<string, int> ShaderMaterials { get; set; } = new Dictionary<string, int>();
