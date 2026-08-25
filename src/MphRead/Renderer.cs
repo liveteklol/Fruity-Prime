@@ -114,8 +114,10 @@ namespace MphRead
         // 0 - lines + fill, 1 - lines only, 2 - fill only
         private int _volumeEdges = 0;
         private bool _faceCulling = true;
-        private bool _textureFiltering = false;
-        private bool _lighting = false;
+        // The three the settings own; the debug keys still flip them, and the
+        // settings write them back when they are applied.
+        private bool _textureFiltering = Mods.RenderOptions.TextureFiltering;
+        private bool _lighting = Mods.RenderOptions.Lighting;
         private bool _scanVisor = false;
         private int _showInvisible = 0;
         private bool _showNodeData = false;
@@ -140,7 +142,7 @@ namespace MphRead
         private Vector3 _light2Vector = Vector3.Zero;
         private Vector3 _light2Color = Vector3.Zero;
         private bool _hasFog = false;
-        private bool _showFog = true;
+        private bool _showFog = Mods.RenderOptions.Fog;
         private Vector4 _fogColor = Vector4.Zero;
         private int _fogOffset = 0;
         private int _fogSlope = 0;
@@ -337,7 +339,9 @@ namespace MphRead
                 meta.Light2Color.Green / 31.0f,
                 meta.Light2Color.Blue / 31.0f
             );
-            _lighting = true;
+            // The room turns lighting on; the setting is what says whether it
+            // stays on.
+            _lighting = Mods.RenderOptions.Lighting;
             _hasFog = meta.FogEnabled;
             _fogColor = new Vector4(
                 meta.FogColor.Red / 31f,
@@ -482,17 +486,37 @@ namespace MphRead
         private int _screenTexture = 0;
         private int _renderBuffer = 0;
 
+        /// <summary>
+        /// The size the 3D scene is actually drawn at, which the resolution
+        /// scale may make smaller than the window. The quad that puts it on
+        /// screen stretches it back, and the HUD is drawn after that at full
+        /// size, so nothing readable is ever scaled.
+        /// </summary>
+        public Vector2i RenderSize => new Vector2i(
+            Mods.RenderOptions.Scaled(Size.X), Mods.RenderOptions.Scaled(Size.Y));
+
+        private Vector2i _targetSize;
+
         public void OnResize()
         {
             if (_screenTexture != 0)
             {
+                Vector2i target = RenderSize;
+                _targetSize = target;
                 GL.BindTexture(TextureTarget.Texture2D, _screenTexture);
-                GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgb, Size.X, Size.Y, 0,
+                GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgb, target.X, target.Y, 0,
                     PixelFormat.Rgb, PixelType.UnsignedByte, IntPtr.Zero);
+                // Nearest is the DS look and is right at full size; a stretched
+                // target needs linear or every edge stair-steps.
+                bool upscaling = Mods.RenderOptions.ResolutionScale < 100;
+                GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter,
+                    (int)(upscaling ? TextureMinFilter.Linear : TextureMinFilter.Nearest));
+                GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter,
+                    (int)(upscaling ? TextureMagFilter.Linear : TextureMagFilter.Nearest));
                 GL.BindTexture(TextureTarget.Texture2D, 0);
                 Debug.Assert(_renderBuffer != 0);
                 GL.BindRenderbuffer(RenderbufferTarget.Renderbuffer, _renderBuffer);
-                GL.RenderbufferStorage(RenderbufferTarget.Renderbuffer, RenderbufferStorage.Depth24Stencil8, Size.X, Size.Y);
+                GL.RenderbufferStorage(RenderbufferTarget.Renderbuffer, RenderbufferStorage.Depth24Stencil8, target.X, target.Y);
                 GL.BindRenderbuffer(RenderbufferTarget.Renderbuffer, 0);
             }
         }
@@ -591,11 +615,17 @@ namespace MphRead
             GL.BindFramebuffer(FramebufferTarget.Framebuffer, _frameBuffer);
             _screenTexture = GL.GenTexture();
             _textureCount++;
+            Vector2i renderTarget = RenderSize;
+            _targetSize = renderTarget;
             GL.BindTexture(TextureTarget.Texture2D, _screenTexture);
-            GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgb, Size.X, Size.Y, 0,
+            GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgb, renderTarget.X, renderTarget.Y, 0,
                 PixelFormat.Rgb, PixelType.UnsignedByte, IntPtr.Zero);
-            int minParameter = (int)TextureMinFilter.Nearest;
-            int magParameter = (int)TextureMagFilter.Nearest;
+            // Nearest at full size, which is what the DS looked like; linear
+            // once the scene is being stretched, where nearest is a mess of
+            // stair-stepped edges rather than a soft picture.
+            bool upscaling = Mods.RenderOptions.ResolutionScale < 100;
+            int minParameter = (int)(upscaling ? TextureMinFilter.Linear : TextureMinFilter.Nearest);
+            int magParameter = (int)(upscaling ? TextureMagFilter.Linear : TextureMagFilter.Nearest);
             GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, minParameter);
             GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, magParameter);
             GL.BindTexture(TextureTarget.Texture2D, 0);
@@ -604,7 +634,7 @@ namespace MphRead
 
             _renderBuffer = GL.GenRenderbuffer();
             GL.BindRenderbuffer(RenderbufferTarget.Renderbuffer, _renderBuffer);
-            GL.RenderbufferStorage(RenderbufferTarget.Renderbuffer, RenderbufferStorage.Depth24Stencil8, Size.X, Size.Y);
+            GL.RenderbufferStorage(RenderbufferTarget.Renderbuffer, RenderbufferStorage.Depth24Stencil8, renderTarget.X, renderTarget.Y);
             GL.BindRenderbuffer(RenderbufferTarget.Renderbuffer, 0);
             GL.FramebufferRenderbuffer(FramebufferTarget.Framebuffer, FramebufferAttachment.DepthStencilAttachment,
                 RenderbufferTarget.Renderbuffer, _renderBuffer);
@@ -1148,6 +1178,16 @@ namespace MphRead
         public void OnUpdateFrame()
         {
             GL.BindFramebuffer(FramebufferTarget.Framebuffer, _frameBuffer);
+            // The scene's own target, which the resolution scale may have made
+            // smaller than the window. Reallocated here rather than only on a
+            // window resize, so moving the slider during a match is seen.
+            Vector2i target = RenderSize;
+            if (target != _targetSize)
+            {
+                OnResize();
+                target = _targetSize;
+            }
+            GL.Viewport(0, 0, target.X, target.Y);
             GL.UseProgram(_shaderProgramId);
             LoadAndUnload();
             // todo: FPS stuff
@@ -1363,8 +1403,9 @@ namespace MphRead
 
         public byte[]? ReadSceneTarget(out int width, out int height)
         {
-            width = Size.X;
-            height = Size.Y;
+            Vector2i target = _targetSize;
+            width = target.X;
+            height = target.Y;
             if (_frameBuffer == 0)
             {
                 return null;
@@ -1505,6 +1546,9 @@ namespace MphRead
             }
 
             GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+            // Back to the window: everything from here down -- the quad, the
+            // helmet, the HUD and the fade -- is drawn at full size.
+            GL.Viewport(0, 0, Size.X, Size.Y);
             GL.Clear(ClearBufferMask.ColorBufferBit);
             GL.Disable(EnableCap.DepthTest);
             GL.Enable(EnableCap.Blend);

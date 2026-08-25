@@ -50,7 +50,11 @@ namespace MphRead.Mods.Launcher.Gui
         /// <summary>Raised when this view is finished with, saved or not.</summary>
         public event EventHandler? Closed;
 
-        private ChoiceRow _windowRow = null!;
+        private ChoiceRow? _windowRow;
+        private SliderRow _resolutionScale = null!;
+        private ToggleRow _lightingRow = null!;
+        private ToggleRow _fogRow = null!;
+        private ToggleRow _filteringRow = null!;
         private ToggleRow _helmetRow = null!;
         private SliderRow _helmetOpacity = null!;
         private SliderRow _visorOpacity = null!;
@@ -283,13 +287,33 @@ namespace MphRead.Mods.Launcher.Gui
         private void BuildDisplay()
         {
             StackPanel page = AddSection("Display");
-            Heading(page, "Window");
-            _windowRow = Add(page, new ChoiceRow("Mode",
-                new[] { "Windowed", "Fullscreen (borderless)" },
-                LauncherPrefs.WindowMode == WindowStartMode.BorderlessFullscreen ? 1 : 0));
-            Explain(page, "F11 switches at any time, and so does Alt+Enter. Escape opens the "
-                + "pause menu, which can switch it too, and gives the mouse back so the "
-                + "window can be moved or resized.", GuiTheme.Accent);
+            // A phone has one window, it is already the whole screen, and it
+            // has no F11. Everything in this group is about a desktop window.
+            if (!OperatingSystem.IsAndroid())
+            {
+                Heading(page, "Window");
+                _windowRow = Add(page, new ChoiceRow("Mode",
+                    new[] { "Windowed", "Fullscreen (borderless)" },
+                    LauncherPrefs.WindowMode == WindowStartMode.BorderlessFullscreen ? 1 : 0));
+                Explain(page, "F11 switches at any time, and so does Alt+Enter. Escape opens the "
+                    + "pause menu, which can switch it too, and gives the mouse back so the "
+                    + "window can be moved or resized.", GuiTheme.Accent);
+            }
+
+            Heading(page, "Performance");
+            _resolutionScale = Add(page, new SliderRow("Render scale",
+                RenderOptions.ResolutionScale,
+                v => $"{Math.Max(RenderOptions.MinScale, v)}%"));
+            Explain(page, "The 3D scene is drawn at this fraction of the window and stretched "
+                + "back up; halving it quarters the pixels. The HUD, the helmet and the text "
+                + "are drawn afterwards at full size, so they stay sharp. The one to reach for "
+                + "first on a device that cannot keep up.");
+            _lightingRow = Add(page, new ToggleRow("Lighting", RenderOptions.Lighting));
+            _fogRow = Add(page, new ToggleRow("Fog", RenderOptions.Fog));
+            _filteringRow = Add(page, new ToggleRow("Texture filtering", RenderOptions.TextureFiltering));
+            Explain(page, "The DS had no filtering, so off is both faster and what the game "
+                + "looked like. Lighting and fog take effect on the next room; the render "
+                + "scale takes effect at once. Room and player detail are in Features.");
 
             Heading(page, "Helmet and HUD");
             _helmetRow = Add(page, new ToggleRow("Draw the helmet",
@@ -581,10 +605,18 @@ namespace MphRead.Mods.Launcher.Gui
         private void Commit()
         {
             // Display
-            LauncherPrefs.WindowMode = _windowRow.Index == 1
-                ? WindowStartMode.BorderlessFullscreen
-                : WindowStartMode.Windowed;
-            WindowMode.Startup = LauncherPrefs.WindowMode;
+            if (_windowRow != null)
+            {
+                LauncherPrefs.WindowMode = _windowRow.Index == 1
+                    ? WindowStartMode.BorderlessFullscreen
+                    : WindowStartMode.Windowed;
+                WindowMode.Startup = LauncherPrefs.WindowMode;
+            }
+            _settings.ResolutionScale = Math.Max(RenderOptions.MinScale, _resolutionScale.Value)
+                .ToString(CultureInfo.InvariantCulture);
+            _settings.Lighting = RenderOptions.OnOff(_lightingRow.On);
+            _settings.Fog = RenderOptions.OnOff(_fogRow.On);
+            _settings.TextureFiltering = RenderOptions.OnOff(_filteringRow.On);
             Features.HelmetOpacity = _helmetRow.On ? _helmetOpacity.Value / 100f : 0;
             Features.VisorOpacity = _helmetRow.On ? _visorOpacity.Value / 100f : 0;
             Features.HudOpacity = _hudOpacity.Value / 100f;
