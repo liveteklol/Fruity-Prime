@@ -265,7 +265,61 @@ namespace MphRead.Droid
             {
                 _launcherView.Visibility = ViewStates.Gone;
             }
+            // Not until the rotation has happened.
+            //
+            // Starting from portrait, the surface is created at portrait size,
+            // the room begins loading into it -- seconds, on the GL thread --
+            // and the rotation then destroys and remakes that surface
+            // underneath. On a driver that drops the EGL context with it, the
+            // match dies the moment it finishes loading, which from the outside
+            // is the game crashing on launch. Waiting costs one configuration
+            // change and removes the window entirely.
+            if (IsLandscape)
+            {
+                BeginMatch(plan, input);
+                return;
+            }
+            _pending = (plan, input);
+            // A device that will not rotate -- locked, or a display that has
+            // only one orientation -- must still get its match.
+            _content.PostDelayed(() => StartPending("the display did not rotate"), 1500);
+        }
 
+        private bool IsLandscape =>
+            Resources?.Configuration?.Orientation == Android.Content.Res.Orientation.Landscape;
+
+        private (LaunchPlan Plan, AndroidInput Input)? _pending;
+
+        public override void OnConfigurationChanged(Android.Content.Res.Configuration newConfig)
+        {
+            base.OnConfigurationChanged(newConfig);
+            if (newConfig.Orientation == Android.Content.Res.Orientation.Landscape)
+            {
+                StartPending(null);
+            }
+        }
+
+        private void StartPending(string? note)
+        {
+            if (_pending == null || InMatch)
+            {
+                return;
+            }
+            (LaunchPlan plan, AndroidInput input) = _pending.Value;
+            _pending = null;
+            if (note != null)
+            {
+                Console.WriteLine($"[android] starting the match anyway: {note}");
+            }
+            BeginMatch(plan, input);
+        }
+
+        private void BeginMatch(LaunchPlan plan, AndroidInput input)
+        {
+            if (_content == null)
+            {
+                return;
+            }
             _gameView = new GameView(this, _controls, input,
                 (i, size) => AndroidMatch.Build(i, size, plan, () => RunOnUiThread(EndMatch)),
                 () => RunOnUiThread(EndMatch),
@@ -315,6 +369,7 @@ namespace MphRead.Droid
             {
                 return;
             }
+            _pending = null;
             HideNotice();
             if (_overlay != null)
             {
