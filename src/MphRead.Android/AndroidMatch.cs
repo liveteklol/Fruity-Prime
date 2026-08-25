@@ -92,6 +92,12 @@ namespace MphRead.Droid
                     player.BotLevel = level;
                 }
             }
+            // Which slot the player is actually driving. Worth a line: only
+            // the networked paths move MainPlayerIndex, and when one of them
+            // left it pointing at slot 1 the next local match handed the
+            // camera and the controls to a bot with nothing saying so.
+            Console.WriteLine($"[match] local match, main player = slot "
+                + $"{PlayerEntity.MainPlayerIndex}, bot = {PlayerEntity.Main.IsBot}");
         }
     }
 }
