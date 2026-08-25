@@ -43,7 +43,7 @@ views draw solid. Nothing a player sees uses it.
 
 ## The shaders
 
-`Mods/Render/EsShaders.cs` holds the five shaders of `Shaders.cs` written for
+`Mods/Render/EsShaders.cs` holds the six shaders of `Shaders.cs` written for
 `#version 300 es`. The desktop ones are GLSL 1.20 reading `gl_Vertex`,
 `gl_Color`, `gl_Normal` and `gl_MultiTexCoord0` out of the fixed-function
 pipeline -- which is *why* the desktop build needs a compatibility profile and
@@ -58,20 +58,43 @@ the SHA-256 of the source it was written from and a mismatch throws with the
 name of the shader that moved. Recompute with the extractor in the commit
 message or by hand: normalise CRLF to LF first.
 
-Verified with `glslang` (16.5.0): all three programs -- main, RTT, and the shift
-program that shares the RTT vertex shader -- compile and link clean as GLSL ES
-3.00. That is an offline check of the riskiest file, not a check that the
-picture is right.
+Verified with `glslang` (16.5.0) when they were written, and since then by
+SwiftShader on the emulator, which compiled and linked all four programs --
+main, RTT, the shift program and the cel shading ink pass, the last three
+sharing the RTT vertex shader -- while drawing a room. That is a check that
+they compile, not a check that the picture is right; see the note on
+SwiftShader's own artefacts in `.claude/KNOWN-GAPS.md`.
 
 ## The loop
 
 `GameView` is a `GLSurfaceView`, which supplies what GLFW supplies on the
 desktop: an EGL context, a thread that owns it, and a callback per frame.
 Everything the engine does with GL -- a room's textures, its baked geometry, the
-shaders, the drawing -- happens on that thread, so the scene is *built* inside
-`OnSurfaceChanged` rather than by whoever asked for the match. Loading blocks
-that thread for seconds, which is the right thread to block: the UI thread stays
-free and the loading notice on top keeps drawing.
+shaders, the drawing -- happens on that thread, so the scene is *built* there
+rather than by whoever asked for the match. Loading blocks that thread for
+seconds, which is the right thread to block: the UI thread stays free and the
+loading notice on top keeps drawing.
+
+**But not inside `OnSurfaceChanged`, and not while the window is still moving.**
+`GLSurfaceView.surfaceChanged` runs on the UI thread, hands the new size to the
+GL thread and then *waits for that thread to finish a frame*. So any resize that
+lands while a room is loading freezes the UI thread for the length of the load,
+and Android puts up its own "isn't responding" dialog over the loading screen --
+a white box and a black box with nothing to press, which is what starting a match
+from portrait used to do. Two things keep that from happening:
+
+- `MainActivity.WaitForSteadyWindow` does not create the `GameView` until the
+  content view has held the same size for 250 ms and is landscape (or three
+  seconds have passed and the display clearly will not turn). Waiting for the
+  *configuration change* is not enough: it arrives before the window has been
+  laid out at its new size. The orientation is then pinned with
+  `ScreenOrientation.Locked` for the length of the load and released back to
+  `SensorLandscape` once the match is on screen, so the phone cannot turn end
+  for end mid-load either.
+- `GameView`'s renderer writes the size down in `OnSurfaceChanged` and builds
+  the scene on the *next* `OnDrawFrame`. That one short frame is what lets
+  GLSurfaceView tell the UI thread the resize is dealt with before this thread
+  disappears into the load.
 
 The order is the desktop's: `GameState.ApplyPause()`, `Scene.OnUpdateFrame()`,
 `Scene.OnRenderFrame()`, `Scene.AfterRenderFrame()`.
@@ -287,12 +310,17 @@ SwiftShader implements GL ES 3.0, so it is a real check of the shaders and the
 renderer -- for whoever gets game files onto an emulator, which is the one thing
 that would close the gap below.
 
-## What has not happened
+## What has run and what has not
 
-**No device has run this, and no room has been loaded anywhere.** See `.claude/KNOWN-GAPS.md`. The front screen has been
-driven on an emulator; the shaders are validated offline; the desktop build is
-unaffected. The renderer and the touch controls have never run. The first run should be watched for, in this
-order:
+A room has now been loaded on the emulator: front screen, offline match, the
+touch controls and the HUD, from a cold start in portrait. What the emulator
+cannot answer is what any of it *looks* like -- SwiftShader draws this scene
+with vertical streaks through every surface, with cel shading on and off alike,
+so the pictures are only good for "it ran". The desktop build is where the
+rendering is judged.
+
+See `.claude/KNOWN-GAPS.md`. The first run on a new device should still be
+watched for, in this order:
 
 1. `[gles] shader ... failed to compile` in logcat. The compile status is only
    read under a debugger upstream, so `GlEs.CompileShader` logs it.

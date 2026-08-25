@@ -16,8 +16,8 @@ namespace MphRead.Droid
     /// context, a thread that owns it, and a callback per frame. Everything the
     /// engine does with GL -- loading a room's textures, baking its geometry,
     /// compiling the shaders, drawing -- has to happen on that thread, so the
-    /// scene is built inside <see cref="Renderer.OnSurfaceChanged"/> rather
-    /// than by whoever asked for the match.
+    /// scene is built on the first frame after the surface arrives rather than
+    /// by whoever asked for the match.
     ///
     /// The loop is the desktop's, in the same order: pause, update, render.
     /// What is not the desktop's is the pacing. <c>RenderWindow</c> asks OpenTK
@@ -124,42 +124,37 @@ namespace MphRead.Droid
                     return;
                 }
                 GL.Viewport(0, 0, width, height);
+                _size = new Vector2i(width, height);
                 if (Scene == null)
                 {
-                    // Loading a room takes seconds and blocks this thread. That
-                    // is the right thread to block: the UI thread stays free,
-                    // so the loading notice on top of this view keeps drawing.
-                    try
-                    {
-                        Scene = _build(_input, new Vector2i(width, height));
-                        Scene.OnLoad();
-                    }
-                    catch (Exception ex)
-                    {
-                        // A missing room, a shader the driver would not take, a
-                        // set of game files that is not there. Any of them ends
-                        // the match with what went wrong on screen, rather than
-                        // taking the process down from a thread nobody is
-                        // watching.
-                        Console.WriteLine($"[android] the match could not start: {ex}");
-                        Scene = null;
-                        _ended = true;
-                        _onError(ex.Message);
-                        return;
-                    }
-                    _clock.Start();
-                    _nextFrame = _clock.Elapsed.TotalSeconds;
-                    _onLoaded();
+                    // Not here. GLSurfaceView calls this from the UI thread's
+                    // own resize and then makes that thread wait until this one
+                    // has been all the way round the loop, and loading a room
+                    // takes seconds -- which is an application-not-responding
+                    // dialog rather than a loading screen. So the size is only
+                    // written down, and the room is loaded a frame later, by
+                    // which time the UI thread has been let go.
                     return;
                 }
-                Scene.Size = new Vector2i(width, height);
+                Scene.Size = _size;
                 Scene.OnResize();
             }
+
+            private Vector2i _size;
+            private bool _uiThreadIsFree;
 
             public void OnDrawFrame(IGL10? gl)
             {
                 Scene? scene = Scene;
-                if (scene == null || _ended)
+                if (scene == null)
+                {
+                    if (!_ended)
+                    {
+                        BuildScene();
+                    }
+                    return;
+                }
+                if (_ended)
                 {
                     return;
                 }
@@ -178,6 +173,51 @@ namespace MphRead.Droid
                     return;
                 }
                 scene.AfterRenderFrame();
+            }
+
+            /// <summary>
+            /// Load the room, on this thread, one frame after the surface
+            /// arrived.
+            ///
+            /// The frame in between is the whole point: it is short, it lets
+            /// GLSurfaceView tell the UI thread that the resize has been dealt
+            /// with, and only then does this thread disappear for the length of
+            /// a room load. The loading notice on top of this view keeps
+            /// drawing throughout, because the thread drawing it is free.
+            /// </summary>
+            private void BuildScene()
+            {
+                if (_size.X <= 0 || _size.Y <= 0)
+                {
+                    return;
+                }
+                if (!_uiThreadIsFree)
+                {
+                    // This frame is the notification; the next one loads.
+                    _uiThreadIsFree = true;
+                    return;
+                }
+                try
+                {
+                    Scene = _build(_input, _size);
+                    Scene.OnLoad();
+                }
+                catch (Exception ex)
+                {
+                    // A missing room, a shader the driver would not take, a
+                    // set of game files that is not there. Any of them ends
+                    // the match with what went wrong on screen, rather than
+                    // taking the process down from a thread nobody is
+                    // watching.
+                    Console.WriteLine($"[android] the match could not start: {ex}");
+                    Scene = null;
+                    _ended = true;
+                    _onError(ex.Message);
+                    return;
+                }
+                _clock.Start();
+                _nextFrame = _clock.Elapsed.TotalSeconds;
+                _onLoaded();
             }
 
             private void End(Scene scene)

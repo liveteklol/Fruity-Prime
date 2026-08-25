@@ -265,38 +265,79 @@ namespace MphRead.Droid
             {
                 _launcherView.Visibility = ViewStates.Gone;
             }
-            // Not until the rotation has happened.
-            //
-            // Starting from portrait, the surface is created at portrait size,
-            // the room begins loading into it -- seconds, on the GL thread --
-            // and the rotation then destroys and remakes that surface
-            // underneath. On a driver that drops the EGL context with it, the
-            // match dies the moment it finishes loading, which from the outside
-            // is the game crashing on launch. Waiting costs one configuration
-            // change and removes the window entirely.
-            if (IsLandscape)
-            {
-                BeginMatch(plan, input);
-                return;
-            }
             _pending = (plan, input);
-            // A device that will not rotate -- locked, or a display that has
-            // only one orientation -- must still get its match.
-            _content.PostDelayed(() => StartPending("the display did not rotate"), 1500);
+            _waitingSince = SystemClock.UptimeMillis();
+            _lastSize = ContentSize;
+            _sizeSettledAt = _waitingSince;
+            WaitForSteadyWindow();
         }
 
-        private bool IsLandscape =>
-            Resources?.Configuration?.Orientation == Android.Content.Res.Orientation.Landscape;
-
         private (LaunchPlan Plan, AndroidInput Input)? _pending;
+        private (int Width, int Height) _lastSize;
+        private long _waitingSince;
+        private long _sizeSettledAt;
 
-        public override void OnConfigurationChanged(Android.Content.Res.Configuration newConfig)
+        /// <summary>How long the window has to hold still before a match starts.</summary>
+        private const int SettleMs = 250;
+
+        /// <summary>
+        /// And how long to wait for it to become landscape at all before
+        /// giving up and playing in whatever shape the display is. A device
+        /// can refuse to rotate -- a display with one orientation, or a large
+        /// screen on the Android versions that ignore an app's request.
+        /// </summary>
+        private const int RotateMs = 3000;
+
+        private (int Width, int Height) ContentSize =>
+            _content == null ? (0, 0) : (_content.Width, _content.Height);
+
+        /// <summary>
+        /// Do not create the <see cref="GameView"/> until the window has
+        /// stopped changing shape.
+        ///
+        /// This is the portrait launch bug, and it is worth writing down
+        /// because nothing about it looks like a bug in this file.
+        /// <c>GLSurfaceView.surfaceChanged</c> hands the new size to the GL
+        /// thread and then *blocks the UI thread* until that thread has
+        /// finished a frame. Loading a room takes seconds on the GL thread. So
+        /// a rotation -- or the system bars going away, which resizes the
+        /// window just the same -- landing while the room loads freezes the UI
+        /// thread for as long as the load takes, and Android puts its own "is
+        /// not responding" dialog over the black loading screen. From the
+        /// player's side: a white box and a black box, and nothing to press.
+        ///
+        /// Waiting for the rotation was the first answer to this and only
+        /// covered half of it: the configuration change arrives before the
+        /// window has been laid out at its new size, so the surface was still
+        /// being created mid-rotation. What has to hold still is the window,
+        /// not the configuration, which is what this waits for.
+        /// </summary>
+        private void WaitForSteadyWindow()
         {
-            base.OnConfigurationChanged(newConfig);
-            if (newConfig.Orientation == Android.Content.Res.Orientation.Landscape)
+            if (_pending == null || _content == null || InMatch)
+            {
+                return;
+            }
+            long now = SystemClock.UptimeMillis();
+            (int Width, int Height) size = ContentSize;
+            if (size != _lastSize)
+            {
+                _lastSize = size;
+                _sizeSettledAt = now;
+            }
+            bool landscape = size.Width > size.Height;
+            bool steady = size.Width > 0 && size.Height > 0 && now - _sizeSettledAt >= SettleMs;
+            if (steady && landscape)
             {
                 StartPending(null);
+                return;
             }
+            if (steady && now - _waitingSince >= RotateMs)
+            {
+                StartPending($"the display did not turn landscape in {RotateMs} ms");
+                return;
+            }
+            _content.PostDelayed(WaitForSteadyWindow, 50);
         }
 
         private void StartPending(string? note)
@@ -311,6 +352,12 @@ namespace MphRead.Droid
             {
                 Console.WriteLine($"[android] starting the match anyway: {note}");
             }
+            // Nailed down for the length of the load, for the reason above: a
+            // sensor orientation lets the phone turn end for end while the
+            // room is loading, which is a resize the UI thread would wait out.
+            // Released again the moment the match is on screen, in
+            // MatchLoaded, so the player can still hold the phone either way.
+            RequestedOrientation = ScreenOrientation.Locked;
             BeginMatch(plan, input);
         }
 
@@ -323,8 +370,14 @@ namespace MphRead.Droid
             _gameView = new GameView(this, _controls, input,
                 (i, size) => AndroidMatch.Build(i, size, plan, () => RunOnUiThread(EndMatch)),
                 () => RunOnUiThread(EndMatch),
-                () => RunOnUiThread(HideNotice),
+                () => RunOnUiThread(MatchLoaded),
                 error => RunOnUiThread(() => FailMatch(error)));
+            // The launcher is Avalonia, which draws on a surface of its own,
+            // and two surfaces in one window have no z-order between them
+            // unless one is asked for. Above the other surface and below the
+            // window, so the touch controls and the loading notice -- ordinary
+            // views -- still draw over the game.
+            _gameView.SetZOrderMediaOverlay(true);
             _overlay = new TouchOverlayView(this, _controls);
             _notice = new TextView(this)
             {
@@ -337,6 +390,15 @@ namespace MphRead.Droid
             _content.AddView(_gameView);
             _content.AddView(_overlay);
             _content.AddView(_notice);
+        }
+
+        /// <summary>The room is loaded and the match is drawing.</summary>
+        private void MatchLoaded()
+        {
+            HideNotice();
+            // The load is over, so a resize is one frame's wait rather than a
+            // freeze; the phone can turn end for end again.
+            RequestedOrientation = ScreenOrientation.SensorLandscape;
         }
 
         private void HideNotice()
