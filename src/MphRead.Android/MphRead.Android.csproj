@@ -49,6 +49,13 @@
          around it. Fixing them properly means editing upstream files, which is
          what keeps a pull from NoneGiven/MphRead a fast-forward. -->
     <NoWarn>$(NoWarn);CA1416</NoWarn>
+    <!-- XA0141: Android 16 will want 16 KB page sizes and libSkiaSharp.so does
+         not have them. It is not ours to fix and not ours to move off: Avalonia
+         11.3 binds against SkiaSharp 2.88, 2.88.9 is the last of that line, and
+         the 3.x natives are a different ABI from the managed half we would
+         still be using. The message itself says to inform the package authors.
+         Revisit when Avalonia moves to SkiaSharp 3. -->
+    <NoWarn>$(NoWarn);XA0141</NoWarn>
     <AndroidPackageFormat>apk</AndroidPackageFormat>
     <!-- There is no XAML in this project: every screen here is written in C#.
          The compiler still runs when AvaloniaResource items are present, and on
@@ -107,6 +114,20 @@
          any of it. The enum types they pass are still the desktop ones:
          the same GL constants, which GlEs casts across. -->
     <Using Include="MphRead.Mods.Render.GlEs" Alias="GL" />
+    <!-- And the whole of the sound effects, in two more.
+
+         Same problem, same shape of answer. Every sound effect the engine
+         plays goes through OpenAL, OpenTK ships the bindings only, and the
+         package the desktop gets the native from has runtimes for Windows,
+         Linux and macOS and none for a phone, so Sfx.Load caught the missing
+         library, installed its silent stub, and the game played its music with
+         nothing else. These point `AL` and `ALC` at Mods/Sound/AlEs.cs, which
+         mixes the voices itself and hands them to miniaudio: SoundFlow's, the
+         one already in the APK playing the music. Not one call site in
+         Sound/Sfx.cs or Formats/Movie.cs changes, and the desktop keeps
+         OpenAL Soft. -->
+    <Using Include="MphRead.Mods.Sound.AlEs" Alias="AL" />
+    <Using Include="MphRead.Mods.Sound.AlcEs" Alias="ALC" />
   </ItemGroup>
 
   <ItemGroup>
