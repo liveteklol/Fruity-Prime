@@ -26,10 +26,7 @@ uniform int texgen_mode;
 uniform mat4[32] mtx_stack;
 
 varying vec2 texcoord;
-varying vec4 vtx_shade;
-// How square-on this surface faces the camera, for the ink line cel shading
-// draws around a silhouette.
-varying float facing;
+varying vec4 color;
 
 vec3 light_calc(vec3 light_vec, vec3 light_col, vec3 normal_vec, vec3 dif_col, vec3 amb_col, vec3 spe_col)
 {
@@ -52,7 +49,6 @@ void main()
     gl_Position = proj_mtx * view_mtx * model_mtx * gl_Vertex;
     vec4 vtx_color = show_colors ? gl_Color : vec4(1.0);
     vec3 normal = normalize(mat3(model_mtx) * gl_Normal);
-    facing = abs(normalize(mat3(view_mtx * model_mtx) * gl_Normal).z);
     if (use_light) {
         vec3 dif_current = diffuse;
         vec3 amb_current = ambient;
@@ -63,11 +59,11 @@ void main()
         }
         vec3 col1 = light_calc(light1vec, light1col, normal, dif_current, amb_current, specular);
         vec3 col2 = light_calc(light2vec, light2col, normal, dif_current, amb_current, specular);
-        vtx_shade = vec4(min((col1 + col2 + emission), vec3(1.0, 1.0, 1.0)), 1.0);
+        color = vec4(min((col1 + col2 + emission), vec3(1.0, 1.0, 1.0)), 1.0);
     }
     else {
         // alpha will only be less than 1.0 here if DIF_AMB is used but lighting is disabled
-        vtx_shade = vec4(vtx_color.rgb, 1.0);
+        color = vec4(vtx_color.rgb, 1.0);
     }
     if (use_texture) {
         // texgen mode: 0 - none, 1 - texcoord, 2 - normal, 3 - vertex
@@ -113,34 +109,51 @@ uniform vec4 pal_override_color;
 uniform float mat_alpha;
 uniform int mat_mode;
 uniform vec3[32] toon_table;
-// Cel shading: 0 bands is off. The renderer clears it before the HUD and
-// the helmet, which are drawn through this same program after the scene.
+// Cel shading: 0 bands is off. Only the scene is drawn through this program;
+// the helmet and the HUD go through the RTT one afterwards and are left as
+// they are without anything having to turn this off.
 uniform int cel_bands;
-uniform float cel_edge;
 
 varying vec2 texcoord;
-varying vec4 vtx_shade;
-varying float facing;
+varying vec4 color;
 
 vec4 toon_color(vec4 vtx_color)
 {
     return vec4(toon_table[int(vtx_color.r * 31)], vtx_color.a);
 }
 
+// Brightness to steps, hue left alone: a surface keeps its colour and it is
+// the shading across it that goes flat.
+//
+// The step is softened over the middle third of a band rather than being a
+// hard threshold. A texture's own texel-to-texel variation sits right on a
+// boundary somewhere in every wall, and a hard step turns that variation into
+// speckle -- which is what banding the lighting term alone was avoiding, at
+// the cost of doing nothing at all to a room. Softening it is the way to have
+// both: the band edges are still visible as edges, and noise near one comes
+// out as a gradient a texel wide instead of as salt and pepper.
+vec3 cel_shade(vec3 c)
+{
+    float steps = float(cel_bands);
+    float lum = max(max(c.r, c.g), c.b);
+    if (lum <= 0.0) {
+        return c;
+    }
+    // Levels sit at the middle of each band, so the darkest is not black and
+    // the brightest is not blown out.
+    float scaled = lum * steps - 0.5;
+    float lower = floor(scaled);
+    float level = (lower + 0.5 + smoothstep(0.35, 0.65, scaled - lower)) / steps;
+    vec3 banded = c * (level / lum);
+    // A drawn frame is more saturated than a photograph of the same thing,
+    // and flattening the shading takes some of the apparent colour with it.
+    float grey = dot(banded, vec3(0.299, 0.587, 0.114));
+    return clamp(mix(vec3(grey), banded, 1.25), 0.0, 1.0);
+}
+
 void main()
 {
     // mat_mode: 0 - modulate, 1 - decal, 2 - toon
-    // Cel shading bands the *lighting* before it touches the texture. Banding
-    // the final colour instead quantises the texture's own detail, which comes
-    // out as speckle rather than as shading.
-    vec4 color = vtx_shade;
-    if (cel_bands > 0) {
-        float lum = max(max(color.r, color.g), color.b);
-        if (lum > 0.0) {
-            color.rgb *= ceil(lum * float(cel_bands)) / float(cel_bands) / lum;
-        }
-        color.rgb *= 1.0 - cel_edge * (1.0 - smoothstep(0.0, 0.3, facing));
-    }
     vec4 col;
     if (use_texture) {
         vec4 texcolor = use_pal_override ? vec4(pal_override_color.xyz, texture2D(tex, texcoord).w) : texture2D(tex, texcoord);
@@ -172,6 +185,16 @@ void main()
     else {
         col = mat_mode == 2 ? toon_color(color) : color;
         col.a *= mat_alpha;
+    }
+    // Cel shading, on the finished surface colour -- the texture, the vertex
+    // colours and the lighting together, which is the only place all three
+    // are. Banding the lighting term alone left a room untouched: rooms carry
+    // nearly all of their shading in vertex colours and light almost nothing
+    // dynamically, so the mode was invisible exactly where it should have
+    // shown most. Before the fog, which is atmosphere rather than surface and
+    // reads wrong in steps.
+    if (cel_bands > 0) {
+        col.rgb = cel_shade(col.rgb);
     }
     if (fog_enable) {
         float depth = gl_FragCoord.z;
@@ -231,6 +254,70 @@ void main()
         }
         gl_FragColor.a *= alpha;
     }
+}
+";
+
+        /// <summary>
+        /// The ink line, drawn over the scene once it has been rendered.
+        ///
+        /// A silhouette is not something a fragment can see on its own: it is
+        /// a place where this surface and the one behind it are different, and
+        /// only a pass that can look at its neighbours knows that. So this
+        /// runs over the finished offscreen target, reading the depth the
+        /// scene left behind and darkening the pixels where it steps.
+        ///
+        /// Depth rather than colour. Colour finds every edge in a texture as
+        /// well -- and this game's textures are rubble, panelling and grating,
+        /// so a Sobel over brightness inks in most of a wall and the picture
+        /// comes out scribbled on. What is wanted is the shape of the room,
+        /// which is what the depth buffer holds.
+        ///
+        /// It runs there rather than over the window for two reasons: the
+        /// helmet, the HUD and the fade are drawn afterwards and must not be
+        /// outlined, and the screenshot path reads the offscreen target rather
+        /// than the back buffer, so a line drawn later would be in the game
+        /// and missing from every picture of it.
+        /// </summary>
+        public static string CelFragmentShader { get; } = @"
+#version 120
+
+uniform sampler2D tex;
+uniform sampler2D depth_tex;
+uniform float texel_w;
+uniform float texel_h;
+uniform float outline;
+uniform float near_plane;
+uniform float far_plane;
+
+varying vec2 texcoord;
+
+// How far away this pixel is, in world units rather than in the depth
+// buffer's own scale, which crowds everything past arm's length into the
+// last few values and would make one threshold mean two different things
+// at two distances.
+float view_depth(float dx, float dy)
+{
+    float z = texture2D(depth_tex, texcoord + vec2(dx * texel_w, dy * texel_h)).x * 2.0 - 1.0;
+    return (2.0 * near_plane * far_plane)
+        / (far_plane + near_plane - z * (far_plane - near_plane));
+}
+
+void main()
+{
+    vec3 base = texture2D(tex, texcoord).rgb;
+    float d = view_depth(0.0, 0.0);
+    // The *second* difference, not the first. A floor running away towards
+    // the horizon has an enormous first difference per pixel and no edge on
+    // it anywhere; what a silhouette or a crease has that a flat surface
+    // seen edge-on does not is a kink, and this is zero across any plane at
+    // any angle.
+    float kink = max(
+        abs(view_depth(-1.0, 0.0) + view_depth(1.0, 0.0) - 2.0 * d),
+        abs(view_depth(0.0, -1.0) + view_depth(0.0, 1.0) - 2.0 * d));
+    // Relative to the distance, so a line is drawn as readily across the
+    // room as it is on the weapon in front of the camera.
+    float ink = smoothstep(0.008, 0.03, kink / d) * outline;
+    gl_FragColor = vec4(base * (1.0 - ink), 1.0);
 }
 ";
 
@@ -303,7 +390,11 @@ void main()
         public int Emission { get; set; }
         public int UseFog { get; set; }
         public int CelBands { get; set; }
-        public int CelEdge { get; set; }
+        public int CelOutline { get; set; }
+        public int CelTexelWidth { get; set; }
+        public int CelTexelHeight { get; set; }
+        public int CelNearPlane { get; set; }
+        public int CelFarPlane { get; set; }
         public int FogColor { get; set; }
         public int FogMinDistance { get; set; }
         public int FogMaxDistance { get; set; }

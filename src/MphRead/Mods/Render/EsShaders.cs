@@ -6,7 +6,7 @@ using System.Text;
 namespace MphRead.Mods.Render
 {
     /// <summary>
-    /// The five shaders of <see cref="Shaders"/>, written for OpenGL ES 3.0.
+    /// The six shaders of <see cref="Shaders"/>, written for OpenGL ES 3.0.
     ///
     /// The desktop ones are GLSL 1.20 and read their vertex data out of the
     /// fixed-function pipeline -- <c>gl_Vertex</c>, <c>gl_Color</c>,
@@ -71,10 +71,7 @@ uniform int texgen_mode;
 uniform mat4 mtx_stack[32];
 
 out vec2 texcoord;
-out vec4 vtx_shade;
-// How square-on this surface faces the camera, for the ink line cel shading
-// draws around a silhouette.
-out float facing;
+out vec4 color;
 
 vec3 light_calc(vec3 light_vec, vec3 light_col, vec3 normal_vec, vec3 dif_col, vec3 amb_col, vec3 spe_col)
 {
@@ -98,7 +95,6 @@ void main()
     gl_Position = proj_mtx * view_mtx * model_mtx * a_position;
     vec4 vtx_color = show_colors ? vtx_in_color : vec4(1.0);
     vec3 normal = normalize(mat3(model_mtx) * a_normal);
-    facing = abs(normalize(mat3(view_mtx * model_mtx) * a_normal).z);
     if (use_light) {
         vec3 dif_current = diffuse;
         vec3 amb_current = ambient;
@@ -109,11 +105,11 @@ void main()
         }
         vec3 col1 = light_calc(light1vec, light1col, normal, dif_current, amb_current, specular);
         vec3 col2 = light_calc(light2vec, light2col, normal, dif_current, amb_current, specular);
-        vtx_shade = vec4(min((col1 + col2 + emission), vec3(1.0, 1.0, 1.0)), 1.0);
+        color = vec4(min((col1 + col2 + emission), vec3(1.0, 1.0, 1.0)), 1.0);
     }
     else {
         // alpha will only be less than 1.0 here if DIF_AMB is used but lighting is disabled
-        vtx_shade = vec4(vtx_color.rgb, 1.0);
+        color = vec4(vtx_color.rgb, 1.0);
     }
     texcoord = vec2(0.0, 0.0);
     if (use_texture) {
@@ -161,14 +157,13 @@ uniform int mat_mode;
 uniform vec3 toon_table[32];
 // 0 - off, 1 - pass only alpha == 1, 2 - pass only alpha < 1
 uniform int alpha_test;
-// Cel shading: 0 bands is off. The renderer clears it before the HUD and
-// the helmet, which are drawn through this same program after the scene.
+// Cel shading: 0 bands is off. Only the scene is drawn through this program;
+// the helmet and the HUD go through the RTT one afterwards and are left as
+// they are without anything having to turn this off.
 uniform int cel_bands;
-uniform float cel_edge;
 
 in vec2 texcoord;
-in vec4 vtx_shade;
-in float facing;
+in vec4 color;
 
 out vec4 frag_color;
 
@@ -177,20 +172,38 @@ vec4 toon_color(vec4 vtx_color)
     return vec4(toon_table[int(vtx_color.r * 31.0)], vtx_color.a);
 }
 
+// Brightness to steps, hue left alone: a surface keeps its colour and it is
+// the shading across it that goes flat.
+//
+// The step is softened over the middle third of a band rather than being a
+// hard threshold. A texture's own texel-to-texel variation sits right on a
+// boundary somewhere in every wall, and a hard step turns that variation into
+// speckle -- which is what banding the lighting term alone was avoiding, at
+// the cost of doing nothing at all to a room. Softening it is the way to have
+// both: the band edges are still visible as edges, and noise near one comes
+// out as a gradient a texel wide instead of as salt and pepper.
+vec3 cel_shade(vec3 c)
+{
+    float steps = float(cel_bands);
+    float lum = max(max(c.r, c.g), c.b);
+    if (lum <= 0.0) {
+        return c;
+    }
+    // Levels sit at the middle of each band, so the darkest is not black and
+    // the brightest is not blown out.
+    float scaled = lum * steps - 0.5;
+    float lower = floor(scaled);
+    float level = (lower + 0.5 + smoothstep(0.35, 0.65, scaled - lower)) / steps;
+    vec3 banded = c * (level / lum);
+    // A drawn frame is more saturated than a photograph of the same thing,
+    // and flattening the shading takes some of the apparent colour with it.
+    float grey = dot(banded, vec3(0.299, 0.587, 0.114));
+    return clamp(mix(vec3(grey), banded, 1.25), 0.0, 1.0);
+}
+
 void main()
 {
     // mat_mode: 0 - modulate, 1 - decal, 2 - toon
-    // Cel shading bands the *lighting* before it touches the texture. Banding
-    // the final colour instead quantises the texture's own detail, which comes
-    // out as speckle rather than as shading.
-    vec4 color = vtx_shade;
-    if (cel_bands > 0) {
-        float lum = max(max(color.r, color.g), color.b);
-        if (lum > 0.0) {
-            color.rgb *= ceil(lum * float(cel_bands)) / float(cel_bands) / lum;
-        }
-        color.rgb *= 1.0 - cel_edge * (1.0 - smoothstep(0.0, 0.3, facing));
-    }
     vec4 col;
     if (use_texture) {
         vec4 texcolor = use_pal_override ? vec4(pal_override_color.xyz, texture(tex, texcoord).w) : texture(tex, texcoord);
@@ -222,6 +235,16 @@ void main()
     else {
         col = mat_mode == 2 ? toon_color(color) : color;
         col.a *= mat_alpha;
+    }
+    // Cel shading, on the finished surface colour -- the texture, the vertex
+    // colours and the lighting together, which is the only place all three
+    // are. Banding the lighting term alone left a room untouched: rooms carry
+    // nearly all of their shading in vertex colours and light almost nothing
+    // dynamically, so the mode was invisible exactly where it should have
+    // shown most. Before the fog, which is atmosphere rather than surface and
+    // reads wrong in steps.
+    if (cel_bands > 0) {
+        col.rgb = cel_shade(col.rgb);
     }
     if (fog_enable) {
         float depth = gl_FragCoord.z;
@@ -294,6 +317,51 @@ void main()
         }
         frag_color.a *= alpha;
     }
+}
+";
+
+        public static string CelFragmentShader { get; } = @"#version 300 es
+precision highp float;
+
+uniform sampler2D tex;
+uniform sampler2D depth_tex;
+uniform float texel_w;
+uniform float texel_h;
+uniform float outline;
+uniform float near_plane;
+uniform float far_plane;
+
+in vec2 texcoord;
+
+out vec4 frag_color;
+
+// How far away this pixel is, in world units rather than in the depth
+// buffer's own scale, which crowds everything past arm's length into the
+// last few values and would make one threshold mean two different things
+// at two distances.
+float view_depth(float dx, float dy)
+{
+    float z = texture(depth_tex, texcoord + vec2(dx * texel_w, dy * texel_h)).x * 2.0 - 1.0;
+    return (2.0 * near_plane * far_plane)
+        / (far_plane + near_plane - z * (far_plane - near_plane));
+}
+
+void main()
+{
+    vec3 base = texture(tex, texcoord).rgb;
+    float d = view_depth(0.0, 0.0);
+    // The *second* difference, not the first. A floor running away towards
+    // the horizon has an enormous first difference per pixel and no edge on
+    // it anywhere; what a silhouette or a crease has that a flat surface
+    // seen edge-on does not is a kink, and this is zero across any plane at
+    // any angle.
+    float kink = max(
+        abs(view_depth(-1.0, 0.0) + view_depth(1.0, 0.0) - 2.0 * d),
+        abs(view_depth(0.0, -1.0) + view_depth(0.0, 1.0) - 2.0 * d));
+    // Relative to the distance, so a line is drawn as readily across the
+    // room as it is on the weapon in front of the camera.
+    float ink = smoothstep(0.008, 0.03, kink / d) * outline;
+    frag_color = vec4(base * (1.0 - ink), 1.0);
 }
 ";
 
@@ -377,6 +445,10 @@ void main()
             {
                 return RttFragmentShader;
             }
+            if (ReferenceEquals(desktopSource, Shaders.CelFragmentShader))
+            {
+                return CelFragmentShader;
+            }
             if (ReferenceEquals(desktopSource, Shaders.ShiftFragmentShader))
             {
                 return ShiftFragmentShader;
@@ -398,13 +470,15 @@ void main()
             }
             _checked = true;
             Check("VertexShader", Shaders.VertexShader,
-                "540ee72c59b28f3ec1889635222efa6a3b1ee54783b6edfd8a1c89c40eb22776");
+                "4cf1422bddaa3ece44c9cfbf6dab1ede192ee8c3f4fbed362e7da5eebfdfc428");
             Check("FragmentShader", Shaders.FragmentShader,
-                "283902dd6e89ae8ee99e1d18a2e548668e2b2dff95c74cc66bc56f5efeec4a04");
+                "296f6347af129cb58e938ed366ac307b8b7c435761ffc83a038348224b83dc85");
             Check("RttVertexShader", Shaders.RttVertexShader,
                 "af070f447840bf1fc51d6bba88a339fab067a4e3a01e460351a2549ca9107f4f");
             Check("RttFragmentShader", Shaders.RttFragmentShader,
                 "021b5992926cb3a8c714fb943b0c85e091cf3cd76d2c487950ca0fb03d27c56e");
+            Check("CelFragmentShader", Shaders.CelFragmentShader,
+                "dda28129e0a935503375300ce29ad7fc0be2cc104a80c46d27a1c69f902660ff");
             Check("ShiftFragmentShader", Shaders.ShiftFragmentShader,
                 "2b2511d5506ad9a25d64005b7b9e452f56b550410f96c753a6072a743b3162fa");
         }

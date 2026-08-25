@@ -40,14 +40,16 @@ namespace MphRead.Mods
         public static bool Lighting { get; set; } = true;
 
         /// <summary>
-        /// Cel shading: the lighting goes to hard steps and a dark line is
-        /// drawn where a surface turns away from the camera.
+        /// Cel shading: the picture goes to flat steps of colour and the
+        /// shapes in it are drawn around in ink.
         ///
         /// Not the same thing as turning lighting off, which only flattens
-        /// everything to full brightness. This bands the *brightness* rather
-        /// than each channel, so the textures keep their colours and it is the
-        /// shading that goes to steps -- and the silhouette term is what makes
-        /// it read as drawn rather than merely posterised.
+        /// everything to full brightness. This bands the *brightness* of the
+        /// finished surface rather than each channel, so a wall keeps its
+        /// colour and it is the shading across it that goes to steps; the
+        /// outline is a separate pass over the depth the scene left behind,
+        /// which is the half that makes it read as drawn rather than merely
+        /// posterised.
         /// </summary>
         public static bool CelShading { get; set; }
 
@@ -60,7 +62,11 @@ namespace MphRead.Mods
 
         private static int _celBands = 4;
 
-        /// <summary>How dark the silhouette line goes, 0 to 1.</summary>
+        /// <summary>
+        /// How dark the ink line goes, 0 to 1. Zero is no outline at all, and
+        /// the renderer then leaves the depth in the cheaper buffer that
+        /// cannot be read back.
+        /// </summary>
         public static float CelEdge
         {
             get => _celEdge;

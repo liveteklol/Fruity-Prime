@@ -135,6 +135,7 @@ namespace MphRead
         private int _shaderProgramId = 0;
         private int _rttShaderProgramId = 0;
         private int _shiftShaderProgramId = 0;
+        private int _celShaderProgramId = 0;
         private readonly ShaderLocations _shaderLocations = new ShaderLocations();
 
         private Vector3 _light1Vector = Vector3.Zero;
@@ -485,6 +486,14 @@ namespace MphRead
         private int _frameBuffer = 0;
         private int _screenTexture = 0;
         private int _renderBuffer = 0;
+        // What the ink pass reads. A pass cannot sample the target it is
+        // drawing into, so the finished scene is copied here first.
+        private int _celTexture = 0;
+        // The scene's depth, as a texture rather than as _renderBuffer, which
+        // nothing can read. Only allocated while cel shading is drawing its
+        // outline, and zero when the driver would not take one.
+        private int _depthTexture = 0;
+        private bool _depthTextureRefused = false;
 
         /// <summary>
         /// The size the 3D scene is actually drawn at, which the resolution
@@ -514,10 +523,24 @@ namespace MphRead
                 GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter,
                     (int)(upscaling ? TextureMagFilter.Linear : TextureMagFilter.Nearest));
                 GL.BindTexture(TextureTarget.Texture2D, 0);
+                if (_celTexture != 0)
+                {
+                    GL.BindTexture(TextureTarget.Texture2D, _celTexture);
+                    GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgb, target.X, target.Y, 0,
+                        PixelFormat.Rgb, PixelType.UnsignedByte, IntPtr.Zero);
+                    GL.BindTexture(TextureTarget.Texture2D, 0);
+                }
                 Debug.Assert(_renderBuffer != 0);
                 GL.BindRenderbuffer(RenderbufferTarget.Renderbuffer, _renderBuffer);
                 GL.RenderbufferStorage(RenderbufferTarget.Renderbuffer, RenderbufferStorage.Depth24Stencil8, target.X, target.Y);
                 GL.BindRenderbuffer(RenderbufferTarget.Renderbuffer, 0);
+                if (_depthTexture != 0)
+                {
+                    GL.BindTexture(TextureTarget.Texture2D, _depthTexture);
+                    GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Depth24Stencil8,
+                        target.X, target.Y, 0, PixelFormat.DepthStencil, PixelType.UnsignedInt248, IntPtr.Zero);
+                    GL.BindTexture(TextureTarget.Texture2D, 0);
+                }
             }
         }
 
@@ -613,6 +636,24 @@ namespace MphRead
             GL.DetachShader(_shiftShaderProgramId, vertexShader);
             GL.DetachShader(_shiftShaderProgramId, fragmentShader);
             GL.DeleteShader(fragmentShader);
+
+            // use same vertex shader
+            fragmentShader = GL.CreateShader(ShaderType.FragmentShader);
+            GL.ShaderSource(fragmentShader, Shaders.CelFragmentShader);
+            GL.CompileShader(fragmentShader);
+            GL.GetShader(fragmentShader, ShaderParameter.CompileStatus, out fragmentStatus);
+            if (fragmentStatus == 0)
+            {
+                throw new ProgramException("Failed to compile the cel shading shader."
+                    + $" {GL.GetShaderInfoLog(fragmentShader)}");
+            }
+            _celShaderProgramId = GL.CreateProgram();
+            GL.AttachShader(_celShaderProgramId, vertexShader);
+            GL.AttachShader(_celShaderProgramId, fragmentShader);
+            GL.LinkProgram(_celShaderProgramId);
+            GL.DetachShader(_celShaderProgramId, vertexShader);
+            GL.DetachShader(_celShaderProgramId, fragmentShader);
+            GL.DeleteShader(fragmentShader);
             GL.DeleteShader(vertexShader);
 
             _frameBuffer = GL.GenFramebuffer();
@@ -635,6 +676,19 @@ namespace MphRead
             GL.BindTexture(TextureTarget.Texture2D, 0);
             GL.FramebufferTexture2D(FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment0,
                 TextureTarget.Texture2D, _screenTexture, 0);
+
+            // The ink pass's copy of the scene. Same size and same filtering;
+            // it is only ever sampled texel for texel.
+            _celTexture = GL.GenTexture();
+            _textureCount++;
+            GL.BindTexture(TextureTarget.Texture2D, _celTexture);
+            GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgb, renderTarget.X, renderTarget.Y, 0,
+                PixelFormat.Rgb, PixelType.UnsignedByte, IntPtr.Zero);
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Nearest);
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Nearest);
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
+            GL.BindTexture(TextureTarget.Texture2D, 0);
 
             _renderBuffer = GL.GenRenderbuffer();
             GL.BindRenderbuffer(RenderbufferTarget.Renderbuffer, _renderBuffer);
@@ -671,7 +725,6 @@ namespace MphRead
             _shaderLocations.Emission = GL.GetUniformLocation(_shaderProgramId, "emission");
             _shaderLocations.UseFog = GL.GetUniformLocation(_shaderProgramId, "fog_enable");
             _shaderLocations.CelBands = GL.GetUniformLocation(_shaderProgramId, "cel_bands");
-            _shaderLocations.CelEdge = GL.GetUniformLocation(_shaderProgramId, "cel_edge");
             _shaderLocations.FogColor = GL.GetUniformLocation(_shaderProgramId, "fog_color");
             _shaderLocations.FogMinDistance = GL.GetUniformLocation(_shaderProgramId, "fog_min");
             _shaderLocations.FogMaxDistance = GL.GetUniformLocation(_shaderProgramId, "fog_max");
@@ -689,6 +742,12 @@ namespace MphRead
             _shaderLocations.MatrixStack = GL.GetUniformLocation(_shaderProgramId, "mtx_stack");
             _shaderLocations.ToonTable = GL.GetUniformLocation(_shaderProgramId, "toon_table");
 
+            _shaderLocations.CelOutline = GL.GetUniformLocation(_celShaderProgramId, "outline");
+            _shaderLocations.CelTexelWidth = GL.GetUniformLocation(_celShaderProgramId, "texel_w");
+            _shaderLocations.CelTexelHeight = GL.GetUniformLocation(_celShaderProgramId, "texel_h");
+            _shaderLocations.CelNearPlane = GL.GetUniformLocation(_celShaderProgramId, "near_plane");
+            _shaderLocations.CelFarPlane = GL.GetUniformLocation(_celShaderProgramId, "far_plane");
+
             _shaderLocations.FadeColor = GL.GetUniformLocation(_rttShaderProgramId, "fade_color");
             _shaderLocations.LayerAlpha = GL.GetUniformLocation(_rttShaderProgramId, "alpha");
             _shaderLocations.UseMask = GL.GetUniformLocation(_rttShaderProgramId, "use_mask");
@@ -699,6 +758,10 @@ namespace MphRead
             GL.UseProgram(_rttShaderProgramId);
             GL.Uniform1(texLocation, 0);
             GL.Uniform1(maskLocation, 1);
+
+            GL.UseProgram(_celShaderProgramId);
+            GL.Uniform1(GL.GetUniformLocation(_celShaderProgramId, "tex"), 0);
+            GL.Uniform1(GL.GetUniformLocation(_celShaderProgramId, "depth_tex"), 1);
 
             _shaderLocations.ShiftTable = GL.GetUniformLocation(_shiftShaderProgramId, "shift_table");
             _shaderLocations.ShiftIndex = GL.GetUniformLocation(_shiftShaderProgramId, "shift_idx");
@@ -1193,6 +1256,9 @@ namespace MphRead
                 OnResize();
                 target = _targetSize;
             }
+            // Before the frame is drawn into it, since this swaps what the
+            // depth is drawn into.
+            UpdateDepthAttachment(target);
             GL.Viewport(0, 0, target.X, target.Y);
             GL.UseProgram(_shaderProgramId);
             LoadAndUnload();
@@ -1435,6 +1501,129 @@ namespace MphRead
             _advanceOneFrame = false;
         }
 
+        /// <summary>
+        /// Give the offscreen target a depth buffer the ink pass can read, or
+        /// take it away again.
+        ///
+        /// A renderbuffer is the cheaper attachment and is what the target has
+        /// whenever nothing needs to read the depth back -- which is every
+        /// frame that is not cel shaded, and matters most on a phone, where a
+        /// depth *texture* has to be written out to memory that a tiler would
+        /// otherwise never touch. So the swap follows the setting rather than
+        /// being made once at startup, and turning cel shading on from the
+        /// pause menu grows outlines on the next frame instead of the next
+        /// match.
+        ///
+        /// A driver that will not complete the framebuffer with a depth
+        /// texture gets the renderbuffer back and is not asked again; the
+        /// banding still works, and the alternative is a target that draws
+        /// nothing at all.
+        /// </summary>
+        private void UpdateDepthAttachment(Vector2i target)
+        {
+            bool want = !_depthTextureRefused && Mods.RenderOptions.CelShading
+                && Mods.RenderOptions.CelEdge > 0;
+            if (want == (_depthTexture != 0))
+            {
+                return;
+            }
+            if (!want)
+            {
+                GL.FramebufferRenderbuffer(FramebufferTarget.Framebuffer,
+                    FramebufferAttachment.DepthStencilAttachment, RenderbufferTarget.Renderbuffer,
+                    _renderBuffer);
+                GL.DeleteTexture(_depthTexture);
+                _textureCount--;
+                _depthTexture = 0;
+                return;
+            }
+            _depthTexture = GL.GenTexture();
+            _textureCount++;
+            GL.BindTexture(TextureTarget.Texture2D, _depthTexture);
+            GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Depth24Stencil8,
+                target.X, target.Y, 0, PixelFormat.DepthStencil, PixelType.UnsignedInt248, IntPtr.Zero);
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Nearest);
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Nearest);
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
+            GL.BindTexture(TextureTarget.Texture2D, 0);
+            GL.FramebufferTexture2D(FramebufferTarget.Framebuffer,
+                FramebufferAttachment.DepthStencilAttachment, TextureTarget.Texture2D, _depthTexture, 0);
+            FramebufferErrorCode status = GL.CheckFramebufferStatus(FramebufferTarget.Framebuffer);
+            if (status != FramebufferErrorCode.FramebufferComplete)
+            {
+                Console.WriteLine($"[render] this driver will not read the scene's depth back ({status}); "
+                    + "cel shading keeps its banding and goes without the outline.");
+                _depthTextureRefused = true;
+                GL.FramebufferRenderbuffer(FramebufferTarget.Framebuffer,
+                    FramebufferAttachment.DepthStencilAttachment, RenderbufferTarget.Renderbuffer,
+                    _renderBuffer);
+                GL.DeleteTexture(_depthTexture);
+                _textureCount--;
+                _depthTexture = 0;
+            }
+        }
+
+        /// <summary>
+        /// Draw the ink line over the finished scene, inside the offscreen
+        /// target.
+        ///
+        /// A silhouette is not visible to the fragment that is on it: it is a
+        /// place where this surface and the one behind it differ, which only a
+        /// pass that can look at its neighbours can find. So the scene is
+        /// copied to a texture of its own -- on the GPU, with no round trip
+        /// through the CPU -- and read back a texel at a time by
+        /// <see cref="Shaders.CelFragmentShader"/>.
+        ///
+        /// Inside the target rather than over the window because the helmet,
+        /// the HUD and the fade are drawn after it and must not be outlined,
+        /// and because <see cref="ReadSceneTarget"/> is where every screenshot
+        /// and every map preview comes from: a line drawn later would be in
+        /// the game and missing from all of them.
+        /// </summary>
+        private void DrawCelOutline()
+        {
+            if (!Mods.RenderOptions.CelShading || Mods.RenderOptions.CelEdge <= 0
+                || _celTexture == 0 || _celShaderProgramId == 0 || _depthTexture == 0)
+            {
+                return;
+            }
+            Vector2i target = _targetSize;
+            GL.BindTexture(TextureTarget.Texture2D, _celTexture);
+            GL.CopyTexSubImage2D(TextureTarget.Texture2D, 0, 0, 0, 0, 0, target.X, target.Y);
+            GL.ActiveTexture(TextureUnit.Texture1);
+            GL.BindTexture(TextureTarget.Texture2D, _depthTexture);
+            GL.ActiveTexture(TextureUnit.Texture0);
+            GL.UseProgram(_celShaderProgramId);
+            GL.Uniform1(_shaderLocations.CelTexelWidth, 1f / target.X);
+            GL.Uniform1(_shaderLocations.CelTexelHeight, 1f / target.Y);
+            GL.Uniform1(_shaderLocations.CelOutline, Mods.RenderOptions.CelEdge);
+            GL.Uniform1(_shaderLocations.CelNearPlane, _nearClip);
+            GL.Uniform1(_shaderLocations.CelFarPlane, _useClip ? _farClip : 10000f);
+            GL.Disable(EnableCap.DepthTest);
+            GL.Disable(EnableCap.Blend);
+            GL.Disable(EnableCap.CullFace);
+            GL.Begin(PrimitiveType.TriangleStrip);
+            // top right
+            GL.TexCoord3(1f, 1f, 0f);
+            GL.Vertex3(1f, 1f, 0f);
+            // top left
+            GL.TexCoord3(0f, 1f, 0f);
+            GL.Vertex3(-1f, 1f, 0f);
+            // bottom right
+            GL.TexCoord3(1f, 0f, 0f);
+            GL.Vertex3(1f, -1f, 0f);
+            // bottom left
+            GL.TexCoord3(0f, 0f, 0f);
+            GL.Vertex3(-1f, -1f, 0f);
+            GL.End();
+            GL.BindTexture(TextureTarget.Texture2D, 0);
+            GL.ActiveTexture(TextureUnit.Texture1);
+            GL.BindTexture(TextureTarget.Texture2D, 0);
+            GL.ActiveTexture(TextureUnit.Texture0);
+            GL.Enable(EnableCap.DepthTest);
+        }
+
         public bool OnRenderFrame()
         {
             GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit | ClearBufferMask.StencilBufferBit);
@@ -1530,6 +1719,10 @@ namespace MphRead
                 UnsetHudLayerUniforms();
             }
 
+            // After the weapon, so it is drawn around too, and before the
+            // target is put on screen, so the helmet and the HUD are not.
+            DrawCelOutline();
+
             GL.Disable(EnableCap.CullFace);
             GL.UseProgram(_rttShaderProgramId);
             GL.Uniform1(_shaderLocations.LayerAlpha, 1f);
@@ -1553,10 +1746,9 @@ namespace MphRead
 
             GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
             // Back to the window: everything from here down -- the quad, the
-            // helmet, the HUD and the fade -- is drawn at full size, and none
-            // of it is scene geometry, so cel shading comes off with the
-            // offscreen target.
-            GL.Uniform1(_shaderLocations.CelBands, 0);
+            // helmet, the HUD and the fade -- is drawn at full size through
+            // the RTT program, not the one the scene was drawn with, so cel
+            // shading is already behind us and there is nothing to turn off.
             GL.Viewport(0, 0, Size.X, Size.Y);
             GL.Clear(ClearBufferMask.ColorBufferBit);
             GL.Disable(EnableCap.DepthTest);
@@ -2955,7 +3147,6 @@ namespace MphRead
             GL.Uniform1(_shaderLocations.UseFog, _hasFog && _showFog ? 1 : 0);
             GL.Uniform1(_shaderLocations.CelBands, Mods.RenderOptions.CelShading
                 ? Mods.RenderOptions.CelBands : 0);
-            GL.Uniform1(_shaderLocations.CelEdge, Mods.RenderOptions.CelEdge);
             GL.Uniform1(_shaderLocations.ShowColors, _showColors ? 1 : 0);
             if (ProcessFrame)
             {

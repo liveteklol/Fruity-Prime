@@ -823,6 +823,19 @@ namespace MphRead.Mods.Render
                 (ES.PixelFormat)(int)format, (ES.PixelType)(int)type, pixels);
         }
 
+        /// <summary>
+        /// The framebuffer that is bound for reading, into the texture that is
+        /// bound. Cel shading's ink pass needs a copy of the scene to sample,
+        /// since a pass cannot read the target it is drawing into, and this is
+        /// that copy -- on the GPU, with no round trip through the CPU.
+        /// </summary>
+        public static void CopyTexSubImage2D(TextureTarget target, int level, int xoffset, int yoffset,
+            int x, int y, int width, int height)
+        {
+            ES.GL.CopyTexSubImage2D((ES.TextureTarget2d)(int)target, level, xoffset, yoffset,
+                x, y, width, height);
+        }
+
         public static void ReadPixels<T>(int x, int y, int width, int height, PixelFormat format,
             PixelType type, T[] pixels) where T : struct
         {
