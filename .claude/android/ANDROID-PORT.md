@@ -91,6 +91,35 @@ from portrait used to do. Two things keep that from happening:
   `ScreenOrientation.Locked` for the length of the load and released back to
   `SensorLandscape` once the match is on screen, so the phone cannot turn end
   for end mid-load either.
+
+  **That wait is also the thing that can eat a start, and four ways it could
+  were fixed.** The front screen is hidden the moment `StartMatch` is called
+  and the `GameView` does not exist yet, so anything that delays the start is a
+  black screen with nothing on it -- which is exactly what "it will not start a
+  map" looks like from the player's side. So:
+
+  - The three-second deadline is **no longer conditional on the window having
+    settled**. It used to be `steady && waited >= RotateMs`, and a window that
+    never held still -- system bars coming and going, a device that reshapes
+    the app's area on its own -- left the loop posting itself for ever.
+    Waiting is a nicety; starting is the job.
+  - The loading notice goes up in `StartMatch`, not in `BeginMatch`, so there
+    is never a black screen with nothing on it. `ShowNotice` is shared and
+    `BringToFront`s it once the touch overlay is in.
+  - **Back cancels a pending start** (`CancelPending`) and puts the front
+    screen back, rather than doing nothing because `InMatch` is still false.
+  - **A second `StartMatch` while one is pending is refused.** It used to
+    overwrite `_orientationBefore` with the landscape it had just asked for,
+    so `EndMatch` would restore *that* and leave the front screen stuck
+    sideways for the rest of the session -- and pressing START twice is what a
+    player does when the first press seems to do nothing.
+
+  There is also a hard 8 s give-up for the one case that cannot be started
+  from at all -- a content view that never reports a size, which would build a
+  scene for a zero-pixel window -- and it says so on screen instead of
+  starting something the player can neither see nor leave. Every decision
+  logs one `[android]` line with the sizes involved, so a device that
+  misbehaves says which of these it is.
 - `GameView`'s renderer writes the size down in `OnSurfaceChanged` and builds
   the scene on the *next* `OnDrawFrame`. That one short frame is what lets
   GLSurfaceView tell the UI thread the resize is dealt with before this thread
@@ -313,7 +342,13 @@ that would close the gap below.
 ## What has run and what has not
 
 A room has now been loaded on the emulator: front screen, offline match, the
-touch controls and the HUD, from a cold start in portrait. What the emulator
+touch controls and the HUD, from a cold start in portrait -- repeatedly, and
+including a second match started straight after backing out of the first
+(which is two rotations in quick succession) and a double tap on START. The
+portrait launch could **not** be made to fail here, on API 30 at 1080x2280,
+with auto-rotate both on and off; the hardening above comes from reading the
+wait rather than from reproducing a failure in it, and a device still failing
+should be asked for its `[android]` lines. What the emulator
 cannot answer is what any of it *looks* like -- SwiftShader draws this scene
 with vertical streaks through every surface, with cel shading on and off alike,
 so the pictures are only good for "it ran". The desktop build is where the

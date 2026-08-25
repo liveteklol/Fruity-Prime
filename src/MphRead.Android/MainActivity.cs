@@ -300,6 +300,15 @@ namespace MphRead.Droid
                 _gameView?.Stop();
                 return;
             }
+            if (_pending != null)
+            {
+                // Between the front screen going away and the match being
+                // built there is nothing but the loading line. Back has to
+                // mean something there, or a start that takes longer than the
+                // player expected is an app with no way out of it.
+                CancelPending("the player went back");
+                return;
+            }
             // The same question Escape asks the desktop launcher: close the
             // overlay, or go back one card. Only when the front screen has
             // nothing left to go back to does this leave the app.
@@ -316,6 +325,16 @@ namespace MphRead.Droid
         {
             if (_content == null || InMatch)
             {
+                return;
+            }
+            if (_pending != null)
+            {
+                // A start is already on its way. Taking this again would
+                // overwrite _orientationBefore with the landscape this asked
+                // for, and the front screen would be stuck sideways for the
+                // rest of the session -- and pressing START twice is exactly
+                // what a player does when the first press seems to do nothing.
+                Console.WriteLine("[android] a match is already starting; ignoring");
                 return;
             }
             if (_renderingHere)
@@ -345,6 +364,14 @@ namespace MphRead.Droid
             _waitingSince = SystemClock.UptimeMillis();
             _lastSize = ContentSize;
             _sizeSettledAt = _waitingSince;
+            // Before the wait, not after it. The front screen has just been
+            // hidden and the GameView does not exist yet, so anything that
+            // delays the start -- a rotation, a window that will not hold
+            // still -- is a black screen with nothing on it and nothing to
+            // press. That is indistinguishable from the app having failed.
+            ShowNotice($"Loading {plan.RoomKey}...");
+            Console.WriteLine($"[android] starting {plan.RoomKey} from "
+                + $"{_lastSize.Width}x{_lastSize.Height}");
             WaitForSteadyWindow();
         }
 
@@ -363,6 +390,16 @@ namespace MphRead.Droid
         /// screen on the Android versions that ignore an app's request.
         /// </summary>
         private const int RotateMs = 3000;
+
+        /// <summary>
+        /// The hard deadline, after which the start is abandoned and the
+        /// player is put back on the front screen with a reason.
+        ///
+        /// Only reached if the content view never reports a usable size, which
+        /// is the one case that cannot be started from: the scene would be
+        /// built for a zero-pixel window. Everything else starts at RotateMs.
+        /// </summary>
+        private const int GiveUpMs = 8000;
 
         private (int Width, int Height) ContentSize =>
             _content == null ? (0, 0) : (_content.Width, _content.Height);
@@ -401,19 +438,64 @@ namespace MphRead.Droid
                 _lastSize = size;
                 _sizeSettledAt = now;
             }
+            bool haveSize = size.Width > 0 && size.Height > 0;
             bool landscape = size.Width > size.Height;
-            bool steady = size.Width > 0 && size.Height > 0 && now - _sizeSettledAt >= SettleMs;
+            bool steady = haveSize && now - _sizeSettledAt >= SettleMs;
+            long waited = now - _waitingSince;
             if (steady && landscape)
             {
                 StartPending(null);
                 return;
             }
-            if (steady && now - _waitingSince >= RotateMs)
+            // The deadline is not conditional on the window having settled,
+            // which is what it used to be. A window that never holds still --
+            // system bars coming and going, a device that reshapes the app's
+            // area on its own -- left this loop running for ever with the
+            // front screen already hidden, and that is the failure the player
+            // sees as "it will not start a map". Waiting is a nicety; starting
+            // is the job.
+            if (haveSize && waited >= RotateMs)
             {
-                StartPending($"the display did not turn landscape in {RotateMs} ms");
+                StartPending(landscape
+                    ? $"the window was still moving after {waited} ms"
+                    : $"the display did not turn landscape in {waited} ms");
+                return;
+            }
+            if (waited >= GiveUpMs)
+            {
+                // No size at all. A scene built for this would be a match in a
+                // zero-pixel window, so say so and go back rather than start
+                // something the player cannot see or leave.
+                CancelPending($"the window never took a size ({size.Width}x{size.Height})");
                 return;
             }
             _content.PostDelayed(WaitForSteadyWindow, 50);
+        }
+
+        /// <summary>
+        /// Give up on a start that cannot be made, and put the player back
+        /// where they were rather than on a black screen.
+        /// </summary>
+        private void CancelPending(string reason)
+        {
+            if (_pending == null)
+            {
+                return;
+            }
+            Console.WriteLine($"[android] the match was not started: {reason}");
+            _pending = null;
+            HideNotice();
+            _controls.ReleaseEverything();
+            if (_launcherView != null)
+            {
+                _launcherView.Visibility = ViewStates.Visible;
+            }
+            AndroidApp.Home?.Reset();
+            Window?.ClearFlags(WindowManagerFlags.KeepScreenOn);
+            GoImmersive(false);
+            RequestedOrientation = _orientationBefore;
+            Toast.MakeText(this, $"Could not start the match: {reason}",
+                ToastLength.Long)?.Show();
         }
 
         private void StartPending(string? note)
@@ -428,6 +510,8 @@ namespace MphRead.Droid
             {
                 Console.WriteLine($"[android] starting the match anyway: {note}");
             }
+            Console.WriteLine($"[android] building the match at "
+                + $"{ContentSize.Width}x{ContentSize.Height}");
             // Nailed down for the length of the load, for the reason above: a
             // sensor orientation lets the phone turn end for end while the
             // room is loading, which is a resize the UI thread would wait out.
@@ -455,16 +539,40 @@ namespace MphRead.Droid
             // views -- still draw over the game.
             _gameView.SetZOrderMediaOverlay(true);
             _overlay = new TouchOverlayView(this, _controls);
+            _content.AddView(_gameView);
+            _content.AddView(_overlay);
+            // The notice has been up since StartMatch. The GameView draws
+            // below the window, so an ordinary view still covers it, but the
+            // touch overlay was added after it -- put it back on top so the
+            // player reads the loading line and not the controls behind it.
+            ShowNotice($"Loading {plan.RoomKey}...");
+            _notice?.BringToFront();
+        }
+
+        /// <summary>
+        /// Put a line of text over everything, or change the one that is
+        /// already there. This is the only thing on screen between the front
+        /// screen being hidden and the first frame of the match.
+        /// </summary>
+        private void ShowNotice(string text)
+        {
+            if (_content == null)
+            {
+                return;
+            }
+            if (_notice != null)
+            {
+                _notice.Text = text;
+                return;
+            }
             _notice = new TextView(this)
             {
-                Text = $"Loading {plan.RoomKey}...",
+                Text = text,
                 TextAlignment = Android.Views.TextAlignment.Center
             };
             _notice.SetTextColor(Android.Graphics.Color.Argb(230, 230, 234, 242));
             _notice.SetBackgroundColor(Android.Graphics.Color.Argb(255, 10, 12, 16));
             _notice.Gravity = GravityFlags.Center;
-            _content.AddView(_gameView);
-            _content.AddView(_overlay);
             _content.AddView(_notice);
         }
 

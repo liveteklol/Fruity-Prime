@@ -26,6 +26,20 @@ claiming coverage that isn't there.
   alike, so every picture from it is good for "it ran" and for nothing else.
   Rendering is judged on the desktop. `.claude/android/ANDROID-PORT.md` lists
   what to watch on a first run, in order.
+- **Starting a match from portrait has never been seen to fail here.** The
+  emulator (API 30, 1080x2280, auto-rotate on and off) rotates and loads the
+  room every time, twice in a row, through a double tap on START. So the
+  fixes in `MainActivity.WaitForSteadyWindow` and around it -- an
+  unconditional deadline, a notice from the first moment, Back cancelling,
+  a second start refused -- close holes found by reading the code, not
+  failures reproduced in it. If a real device still will not start a map from
+  portrait, the `[android]` lines it now logs say which stage it stopped at.
+- **The cel shading has only been judged on the desktop.** Flat colours in
+  place of textures and the new depth-kink ink pass were shot across five
+  rooms and a live two-client match at 1600x900, and cel *off* is
+  pixel-identical to before the change. On Android the ES copies compile, link
+  and draw (67% of the pixels differ with the mode on), but SwiftShader's
+  dithered noise means no picture from there says whether it looks right.
 - **A phone is still a different machine** — the emulator is x86_64 with
   SwiftShader, a phone is arm64 with a real driver. That is the ABI and the GL
   implementation both differing from what is tested here.
