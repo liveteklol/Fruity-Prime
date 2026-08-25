@@ -122,6 +122,17 @@ movement, so a swipe turns the same amount on any phone; `GameView.AimScale` is
 the one number to change if it feels wrong, and the player's own mouse
 sensitivity scales it after that.
 
+## Playing online
+
+`AndroidMatch.Build` is the head's half of `MatchStart.Launch`, and it was
+missing the networked half of it: it loaded `plan.RoomKey` and filled the slots
+with local players whatever the plan said. An online plan carries an **empty
+room key on purpose** — the front screen joins before it knows what is running —
+so joining a server failed with *"No room with this name is known"*, which is
+what an empty string is. It now defers to `NetLaunch.ServerRoom()` for the map
+*and the mode*, builds the slots with `NetLaunch.BuildPlayers`, and loads with
+`NetLaunch.RoomPlayerCount` so every client lays out the same world.
+
 ## Game files
 
 The package's own directory is read-only, and the extracted game files are
@@ -138,16 +149,67 @@ entry, since they arrive while it is already up.
 
 ## Sound
 
-Half of it is there by accident of packaging and half is not, and the split is
-worth knowing before someone calls it broken.
+Both halves play, and neither of them the way the desktop does it.
 
 - **Music** goes through SoundFlow, which ships `libminiaudio.so` for Android;
-  it is in the APK. Whether it plays is untested.
-- **SFX** go through OpenAL (`OpenTK.Audio.OpenAL`), and no `libopenal.so` is in
-  the APK. `Sfx.Load` catches the failure and installs the silent stub, the same
-  path a desktop with no audio device takes, so this is quiet rather than fatal.
-  Giving Android sound effects means shipping an OpenAL Soft build for
-  `arm64-v8a`.
+  it is in the APK.
+- **SFX** used to be silent, and the reason is worth keeping: they go through
+  OpenAL, OpenTK ships the bindings only, and `Silk.NET.OpenAL.Soft.Native` —
+  where the desktop gets its native — has runtimes for Windows, Linux and macOS
+  and none for a phone. `Sfx.Load` caught the missing library, installed the
+  silent stub, and the game played its music with nothing else. That is exactly
+  the split a Windows machine with no `oalinst.exe` shows, and it was fixed
+  there the same way it has now been fixed here: give the name something to
+  resolve to.
+
+  **The renderer's trick, again.** Two using aliases in the csproj point `AL`
+  and `ALC` at `Mods/Sound/AlEs.cs`, for every file in the compilation, and not
+  one of the fifty-odd call sites in `Sound/Sfx.cs` and `Formats/Movie.cs`
+  changed. Behind the name is `Mods/Sound/SfxMixer.cs`, which does what OpenAL
+  was doing — buffers, voices, per-source gain and pitch, SOFT loop points,
+  buffer queues, the linear-clamped distance model and stereo placement from
+  the listener's orientation — and hands one block of stereo at a time to
+  miniaudio, on the **music's own playback device** (`MusicPlayer.Engine` and
+  `MusicPlayer.PlaybackDevice` were added for this). A second device would be a
+  second audio callback, a second buffer of latency and one of the two ducked.
+
+  Not emulated, because the engine never asks: HRTF, doppler, velocity, effects.
+
+## Map previews
+
+Rendered on the device from the player's own extracted files, and nothing about
+them is shown. Three things used to be wrong and all three are the same
+mistake — doing it on a `GLSurfaceView`:
+
+- `OffscreenGl.cs` creates an EGL **pbuffer** context on an ordinary thread, so
+  there is no view, nothing on screen, and no forced landscape. The scene never
+  draws to the pbuffer anyway: `Scene.ReadSceneTarget` reads the renderer's own
+  framebuffer object, and EGL simply will not make a context current without a
+  surface.
+- **Several at once, in processes of their own.** A scene is not a local thing —
+  the entity lists, the player roster and the game state are static, so two
+  scenes in one process would be one world with two cameras. The desktop
+  answers that with ten worker processes and so does this: `PreviewService.cs`
+  declares six services with `android:process`, each handed a share of the room
+  list round-robin, each dropping a marker file when it is done. The launcher
+  watches the cache directory rather than talking to them, which needs no IPC
+  and survives a worker being killed for memory. Whatever they could not
+  produce is rendered in-process afterwards, so a device that refuses to start
+  services still gets its pictures.
+- **640x360, not 1600x900.** Every pixel is paid for four times over — fill
+  rate, a `glReadPixels` stall, a managed pixel loop in `AndroidPng`, and a PNG
+  encode — and the launcher shows them in a 248-point band.
+
+### ⚠️ `ThumbnailMode` is process-wide
+
+`Mods/ThumbnailMode.cs` suppresses the HUD and mutes the sound. The desktop
+never had to leave it: every capture is a worker process that exits when its
+picture is written. Android renders previews in the app's own process, so
+entering and never leaving meant **the next match had no HUD and no sound** —
+which is exactly how it was reported. `ThumbnailMode.Exit()` exists for that,
+`PreviewRun` calls it in a `finally`, and `MainActivity.StartMatch` refuses
+while an in-process run is going.
+
 
 ## Building
 
