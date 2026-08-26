@@ -1,8 +1,10 @@
 using System;
 using System.Diagnostics;
+using System.Threading;
 using Android.Content;
+using Android.Graphics;
 using Android.Opengl;
-using Javax.Microedition.Khronos.Opengles;
+using Android.Views;
 using MphRead.Entities;
 using MphRead.Mods.Render;
 using OpenTK.Mathematics;
@@ -10,55 +12,98 @@ using OpenTK.Mathematics;
 namespace MphRead.Droid
 {
     /// <summary>
-    /// The match, on a surface.
+    /// The match, on a surface, with the EGL context and the thread that owns
+    /// it belonging to this class rather than to <c>GLSurfaceView</c>.
     ///
-    /// <c>GLSurfaceView</c> gives what the desktop gets from GLFW: an EGL
-    /// context, a thread that owns it, and a callback per frame. Everything the
+    /// **That is the whole reason this is not a GLSurfaceView.** Everything the
     /// engine does with GL -- loading a room's textures, baking its geometry,
-    /// compiling the shaders, drawing -- has to happen on that thread, so the
-    /// scene is built on the first frame after the surface arrives rather than
-    /// by whoever asked for the match.
+    /// compiling the shaders, drawing -- has to happen on the thread that holds
+    /// the context, so the scene is *built* there, and building it takes
+    /// seconds. GLSurfaceView answers a window event by handing the new size to
+    /// that thread and then **waiting on the UI thread until it has been all
+    /// the way round its loop**: `surfaceChanged`, `onPause` and `onResume` all
+    /// do it. So any window event that landed while a room was loading froze
+    /// the UI thread for the length of the load, and Android put its own "isn't
+    /// responding" dialog over the loading screen -- a white box over a black
+    /// one, with nothing to press, which is what starting a match from portrait
+    /// did.
+    ///
+    /// Waiting for the window to hold still before creating the view made that
+    /// rarer and could not make it impossible: a phone can resize its own
+    /// window at any moment, for the system bars, for insets, for a call. Here
+    /// the callbacks write a field and return, and the loop picks it up when it
+    /// is next between frames. Nothing on the UI thread ever waits for a load.
+    ///
+    /// Two things come free from owning the context. It survives the surface
+    /// going away and coming back, so a match is not lost to it (GLSurfaceView
+    /// only kept it as a favour, through `PreserveEGLContextOnPause`); and
+    /// pausing is a flag rather than a handshake.
     ///
     /// The loop is the desktop's, in the same order: pause, update, render.
     /// What is not the desktop's is the pacing. <c>RenderWindow</c> asks OpenTK
-    /// for 60 updates a second; here the callback arrives once per display
-    /// refresh, which on a modern phone is 90 or 120, and the engine's update
-    /// *is* its frame -- a render with no update in front of it draws nothing,
-    /// because the render item lists are built during the update and cleared
-    /// after the draw. So the thread waits for the next 60 Hz tick instead of
-    /// rendering more often than the game ticks.
+    /// for 60 updates a second; here the buffer swaps at the display's rate,
+    /// which on a modern phone is 90 or 120, and the engine's update *is* its
+    /// frame -- a render with no update in front of it draws nothing, because
+    /// the render item lists are built during the update and cleared after the
+    /// draw. So the thread waits for the next 60 Hz tick instead of rendering
+    /// more often than the game ticks.
     /// </summary>
-    internal sealed class GameView : GLSurfaceView
+    internal sealed class GameView : SurfaceView, ISurfaceHolderCallback
     {
-        private readonly Renderer _renderer;
+        private readonly RenderLoop _loop;
 
         public GameView(Context context, TouchControls controls, AndroidInput input,
             Func<AndroidInput, Vector2i, Scene> build, Action onEnd, Action onLoaded,
             Action<string> onError)
             : base(context)
         {
-            SetEGLContextClientVersion(3);
-            // 8/8/8 colour, 24-bit depth and 8 bits of stencil: the renderer's
-            // translucency passes mark faces in the stencil buffer, and a
-            // config without one draws the transparent surfaces wrong rather
-            // than failing.
-            SetEGLConfigChooser(8, 8, 8, 0, 24, 8);
-            PreserveEGLContextOnPause = true;
-            _renderer = new Renderer(controls, input, build, onEnd, onLoaded, onError);
-            SetRenderer(_renderer);
-            RenderMode = Rendermode.Continuously;
+            _loop = new RenderLoop(controls, input, build, onEnd, onLoaded, onError);
+            Holder?.AddCallback(this);
         }
 
-        public Scene? Scene => _renderer.Scene;
+        public Scene? Scene => _loop.Scene;
 
         public void Stop()
         {
-            _renderer.RequestStop();
+            _loop.RequestStop();
         }
 
-        private sealed class Renderer : Java.Lang.Object, IRenderer
+        public void OnPause()
+        {
+            _loop.SetPaused(true);
+        }
+
+        public void OnResume()
+        {
+            _loop.SetPaused(false);
+        }
+
+        // The three callbacks. None of them waits for the render thread; that
+        // is the point of the class.
+
+        public void SurfaceCreated(ISurfaceHolder holder)
+        {
+            // Nothing to do: surfaceChanged always follows, with the size.
+        }
+
+        public void SurfaceChanged(ISurfaceHolder holder, Format format, int width, int height)
+        {
+            _loop.SurfaceReady(holder, width, height);
+        }
+
+        public void SurfaceDestroyed(ISurfaceHolder holder)
+        {
+            _loop.SurfaceGone();
+        }
+
+        /// <summary>
+        /// The GL context, the thread that owns it, and the game loop that
+        /// runs on it.
+        /// </summary>
+        private sealed class RenderLoop
         {
             private const double FrameSeconds = 1.0 / 60.0;
+
             /// <summary>
             /// Density-independent pixels of drag per unit of mouse movement.
             /// One means a swipe turns as far as a mouse moved the same
@@ -67,6 +112,22 @@ namespace MphRead.Droid
             /// </summary>
             private const float AimScale = 1f;
 
+            // EGL_OPENGL_ES3_BIT_KHR. EGL14 exposes the ES2 bit and stops
+            // there, and an ES2 config will happily give an ES3 context on most
+            // drivers -- but "most" is how a phone gets a context that fails
+            // every call in GlEs with no message.
+            private const int OpenGlEs3Bit = 0x40;
+
+            /// <summary>
+            /// How long <see cref="SurfaceGone"/> will wait for the render
+            /// thread to let go. Android wants the surface unused by the time
+            /// that callback returns, and this is the one place where that is
+            /// worth a wait at all -- but not an unbounded one: the thread
+            /// cannot answer from inside a room load, and hanging the UI thread
+            /// is the thing this class exists to stop.
+            /// </summary>
+            private const int SurfaceReleaseMs = 2000;
+
             private readonly TouchControls _controls;
             private readonly AndroidInput _input;
             private readonly Func<AndroidInput, Vector2i, Scene> _build;
@@ -74,14 +135,27 @@ namespace MphRead.Droid
             private readonly Action _onLoaded;
             private readonly Action<string> _onError;
             private readonly Stopwatch _clock = new Stopwatch();
+            private readonly object _lock = new object();
+            private readonly Thread _thread;
 
-            private double _nextFrame;
+            private ISurfaceHolder? _holder;
+            private Vector2i _wanted;
+            private bool _paused;
             private bool _stopping;
+            private bool _holdingSurface;
             private bool _ended;
+
+            private EGLDisplay? _display;
+            private EGLConfig? _config;
+            private EGLSurface? _eglSurface;
+            private EGLContext? _context;
+            private ISurfaceHolder? _boundTo;
+            private Vector2i _size;
+            private double _nextFrame;
 
             public Scene? Scene { get; private set; }
 
-            public Renderer(TouchControls controls, AndroidInput input,
+            public RenderLoop(TouchControls controls, AndroidInput input,
                 Func<AndroidInput, Vector2i, Scene> build, Action onEnd, Action onLoaded,
                 Action<string> onError)
             {
@@ -91,110 +165,351 @@ namespace MphRead.Droid
                 _onEnd = onEnd;
                 _onLoaded = onLoaded;
                 _onError = onError;
+                _thread = new Thread(Run) { Name = "FruityPrime GL", IsBackground = true };
+                _thread.Start();
             }
 
             public void RequestStop()
             {
-                _stopping = true;
-            }
-
-            public void OnSurfaceCreated(IGL10? gl, Javax.Microedition.Khronos.Egl.EGLConfig? config)
-            {
-                // Function pointers are per-process, but everything GlEs is
-                // holding -- buffers, textures, the shader programs' uniform
-                // locations -- belonged to a context that is gone.
-                EsBindings.Load();
-                GlEs.Reset();
-                if (Scene != null)
+                lock (_lock)
                 {
-                    // The context was lost and remade under a live match. The
-                    // scene still holds the old context's texture names and
-                    // list ids, and there is no honest way to rebuild them from
-                    // here, so the match ends instead of carrying on drawing
-                    // nothing. PreserveEGLContextOnPause makes this rare.
-                    Console.WriteLine("[android] the GL context was lost; ending the match");
                     _stopping = true;
+                    Monitor.PulseAll(_lock);
                 }
             }
 
-            public void OnSurfaceChanged(IGL10? gl, int width, int height)
+            public void SetPaused(bool paused)
+            {
+                lock (_lock)
+                {
+                    _paused = paused;
+                    Monitor.PulseAll(_lock);
+                }
+            }
+
+            public void SurfaceReady(ISurfaceHolder holder, int width, int height)
             {
                 if (width <= 0 || height <= 0)
                 {
                     return;
                 }
-                GL.Viewport(0, 0, width, height);
-                _size = new Vector2i(width, height);
-                if (Scene == null)
+                lock (_lock)
                 {
-                    // Not here. GLSurfaceView calls this from the UI thread's
-                    // own resize and then makes that thread wait until this one
-                    // has been all the way round the loop, and loading a room
-                    // takes seconds -- which is an application-not-responding
-                    // dialog rather than a loading screen. So the size is only
-                    // written down, and the room is loaded a frame later, by
-                    // which time the UI thread has been let go.
-                    return;
+                    _holder = holder;
+                    _wanted = new Vector2i(width, height);
+                    Monitor.PulseAll(_lock);
                 }
-                Scene.Size = _size;
-                Scene.OnResize();
             }
 
-            private Vector2i _size;
-            private bool _uiThreadIsFree;
-
-            public void OnDrawFrame(IGL10? gl)
+            public void SurfaceGone()
             {
-                Scene? scene = Scene;
-                if (scene == null)
+                lock (_lock)
                 {
+                    _holder = null;
+                    Monitor.PulseAll(_lock);
+                    long deadline = Environment.TickCount64 + SurfaceReleaseMs;
+                    while (_holdingSurface)
+                    {
+                        int left = (int)(deadline - Environment.TickCount64);
+                        if (left <= 0)
+                        {
+                            // Mid-load, almost certainly. The thread drops the
+                            // surface the moment it looks up, and a swap
+                            // against a surface the framework has taken back
+                            // fails rather than crashing -- which is handled.
+                            Console.WriteLine("[android] the surface went away while the GL thread "
+                                + "was busy; carrying on without waiting for it");
+                            break;
+                        }
+                        Monitor.Wait(_lock, left);
+                    }
+                }
+            }
+
+            private void Run()
+            {
+                try
+                {
+                    Loop();
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[android] the render thread stopped: {ex}");
                     if (!_ended)
                     {
-                        BuildScene();
+                        _ended = true;
+                        _onError(ex.Message);
                     }
-                    return;
                 }
-                if (_ended)
+                finally
                 {
-                    return;
+                    ReleaseSurface();
+                    DestroyContext();
                 }
-                if (_stopping)
+            }
+
+            private void Loop()
+            {
+                while (true)
+                {
+                    ISurfaceHolder holder;
+                    Vector2i wanted;
+                    lock (_lock)
+                    {
+                        while (!_stopping && (_holder == null || _paused))
+                        {
+                            // Nothing to draw into, or nobody looking. Let go
+                            // of the surface first if it is the former, so
+                            // SurfaceGone is not left waiting on us.
+                            if (_holder == null && _holdingSurface)
+                            {
+                                Monitor.Exit(_lock);
+                                try
+                                {
+                                    ReleaseSurface();
+                                }
+                                finally
+                                {
+                                    Monitor.Enter(_lock);
+                                }
+                                Monitor.PulseAll(_lock);
+                                continue;
+                            }
+                            Monitor.Wait(_lock);
+                        }
+                        if (_stopping)
+                        {
+                            break;
+                        }
+                        holder = _holder!;
+                        wanted = _wanted;
+                    }
+                    if (!BindSurface(holder, wanted))
+                    {
+                        continue;
+                    }
+                    if (Scene == null)
+                    {
+                        if (_ended)
+                        {
+                            break;
+                        }
+                        BuildScene();
+                        continue;
+                    }
+                    if (!DrawFrame())
+                    {
+                        break;
+                    }
+                }
+                Scene? scene = Scene;
+                if (scene != null)
                 {
                     End(scene);
-                    return;
                 }
-                WaitForTick();
-                ApplyInput();
-                GameState.ApplyPause();
-                scene.OnUpdateFrame();
-                if (!scene.OnRenderFrame())
-                {
-                    End(scene);
-                    return;
-                }
-                scene.AfterRenderFrame();
             }
 
             /// <summary>
-            /// Load the room, on this thread, one frame after the surface
-            /// arrived.
-            ///
-            /// The frame in between is the whole point: it is short, it lets
-            /// GLSurfaceView tell the UI thread that the resize has been dealt
-            /// with, and only then does this thread disappear for the length of
-            /// a room load. The loading notice on top of this view keeps
-            /// drawing throughout, because the thread drawing it is free.
+            /// Make sure there is a context, a surface for this holder, and a
+            /// viewport at the size the window last reported.
+            /// </summary>
+            private bool BindSurface(ISurfaceHolder holder, Vector2i wanted)
+            {
+                if (_display == null && !CreateContext())
+                {
+                    return false;
+                }
+                if (!ReferenceEquals(_boundTo, holder) || _eglSurface == null)
+                {
+                    ReleaseSurface();
+                    if (!CreateSurface(holder))
+                    {
+                        return false;
+                    }
+                }
+                if (wanted != _size)
+                {
+                    _size = wanted;
+                    GL.Viewport(0, 0, _size.X, _size.Y);
+                    if (Scene != null)
+                    {
+                        // A resize is one frame's work here and nothing on the
+                        // UI thread is waiting for it.
+                        Scene.Size = _size;
+                        Scene.OnResize();
+                    }
+                }
+                return true;
+            }
+
+            private bool CreateContext()
+            {
+                _display = EGL14.EglGetDisplay(EGL14.EglDefaultDisplay);
+                if (_display == null || _display.Equals(EGL14.EglNoDisplay))
+                {
+                    return Fail("no EGL display");
+                }
+                int[] version = new int[2];
+                if (!EGL14.EglInitialize(_display, version, 0, version, 1))
+                {
+                    return Fail($"eglInitialize failed (0x{EGL14.EglGetError():X})");
+                }
+                // 8/8/8 colour, 24-bit depth and 8 bits of stencil: the
+                // renderer's translucency passes mark faces in the stencil
+                // buffer, and a config without one draws the transparent
+                // surfaces wrong rather than failing.
+                int[] attributes =
+                {
+                    EGL14.EglRenderableType, OpenGlEs3Bit,
+                    EGL14.EglSurfaceType, EGL14.EglWindowBit,
+                    EGL14.EglRedSize, 8,
+                    EGL14.EglGreenSize, 8,
+                    EGL14.EglBlueSize, 8,
+                    EGL14.EglAlphaSize, 0,
+                    EGL14.EglDepthSize, 24,
+                    EGL14.EglStencilSize, 8,
+                    EGL14.EglNone
+                };
+                var configs = new EGLConfig[1];
+                int[] found = new int[1];
+                if (!EGL14.EglChooseConfig(_display, attributes, 0, configs, 0, 1, found, 0)
+                    || found[0] < 1 || configs[0] == null)
+                {
+                    return Fail("no EGL config with a window, depth and stencil");
+                }
+                _config = configs[0];
+                _context = EGL14.EglCreateContext(_display, _config, EGL14.EglNoContext,
+                    new[] { EGL14.EglContextClientVersion, 3, EGL14.EglNone }, 0);
+                if (_context == null || _context.Equals(EGL14.EglNoContext))
+                {
+                    return Fail($"eglCreateContext failed (0x{EGL14.EglGetError():X})");
+                }
+                return true;
+            }
+
+            private bool CreateSurface(ISurfaceHolder holder)
+            {
+                if (_display == null || _config == null || _context == null)
+                {
+                    return false;
+                }
+                Surface? window = holder.Surface;
+                if (window == null || !window.IsValid)
+                {
+                    return false;
+                }
+                _eglSurface = EGL14.EglCreateWindowSurface(_display, _config, window,
+                    new[] { EGL14.EglNone }, 0);
+                if (_eglSurface == null || _eglSurface.Equals(EGL14.EglNoSurface))
+                {
+                    _eglSurface = null;
+                    // Not fatal on its own: the window can be on its way out.
+                    Console.WriteLine("[android] eglCreateWindowSurface failed "
+                        + $"(0x{EGL14.EglGetError():X})");
+                    return false;
+                }
+                if (!EGL14.EglMakeCurrent(_display, _eglSurface, _eglSurface, _context))
+                {
+                    return Fail($"eglMakeCurrent failed (0x{EGL14.EglGetError():X})");
+                }
+                lock (_lock)
+                {
+                    _boundTo = holder;
+                    _holdingSurface = true;
+                }
+                // Function pointers are per-process; everything GlEs holds --
+                // buffers, textures, uniform locations -- belongs to a context.
+                // This one outlives the surface, so the reset only belongs with
+                // a *new* context, which is the first surface after one.
+                if (Scene == null)
+                {
+                    EsBindings.Load();
+                    GlEs.Reset();
+                    // Something rather than whatever was in the buffer, for the
+                    // seconds the room takes to load.
+                    GL.ClearColor(new OpenTK.Mathematics.Color4(10 / 255f, 12 / 255f, 16 / 255f, 1f));
+                    GL.Clear(OpenTK.Graphics.OpenGL.ClearBufferMask.ColorBufferBit);
+                    EGL14.EglSwapBuffers(_display, _eglSurface);
+                }
+                _size = Vector2i.Zero;
+                return true;
+            }
+
+            private void ReleaseSurface()
+            {
+                EGLSurface? surface;
+                lock (_lock)
+                {
+                    surface = _eglSurface;
+                    _eglSurface = null;
+                    _boundTo = null;
+                    _holdingSurface = false;
+                    Monitor.PulseAll(_lock);
+                }
+                if (_display == null || surface == null)
+                {
+                    return;
+                }
+                try
+                {
+                    EGL14.EglMakeCurrent(_display, EGL14.EglNoSurface, EGL14.EglNoSurface,
+                        EGL14.EglNoContext);
+                    EGL14.EglDestroySurface(_display, surface);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[android] releasing the surface failed: {ex.Message}");
+                }
+            }
+
+            private void DestroyContext()
+            {
+                if (_display == null)
+                {
+                    return;
+                }
+                try
+                {
+                    EGL14.EglMakeCurrent(_display, EGL14.EglNoSurface, EGL14.EglNoSurface,
+                        EGL14.EglNoContext);
+                    if (_context != null)
+                    {
+                        EGL14.EglDestroyContext(_display, _context);
+                    }
+                    EGL14.EglTerminate(_display);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[android] tearing the context down failed: {ex.Message}");
+                }
+                _context = null;
+                _config = null;
+                _display = null;
+            }
+
+            private bool Fail(string message)
+            {
+                Console.WriteLine($"[android] {message}");
+                if (!_ended)
+                {
+                    _ended = true;
+                    _onError(message);
+                }
+                lock (_lock)
+                {
+                    _stopping = true;
+                }
+                return false;
+            }
+
+            /// <summary>
+            /// Load the room, on this thread. It takes seconds; nothing is
+            /// waiting on it, which is the difference this class makes.
             /// </summary>
             private void BuildScene()
             {
                 if (_size.X <= 0 || _size.Y <= 0)
                 {
-                    return;
-                }
-                if (!_uiThreadIsFree)
-                {
-                    // This frame is the notification; the next one loads.
-                    _uiThreadIsFree = true;
                     return;
                 }
                 try
@@ -204,20 +519,49 @@ namespace MphRead.Droid
                 }
                 catch (Exception ex)
                 {
-                    // A missing room, a shader the driver would not take, a
-                    // set of game files that is not there. Any of them ends
-                    // the match with what went wrong on screen, rather than
-                    // taking the process down from a thread nobody is
-                    // watching.
+                    // A missing room, a shader the driver would not take, a set
+                    // of game files that is not there. Any of them ends the
+                    // match with what went wrong on screen, rather than taking
+                    // the process down from a thread nobody is watching.
                     Console.WriteLine($"[android] the match could not start: {ex}");
                     Scene = null;
                     _ended = true;
                     _onError(ex.Message);
+                    lock (_lock)
+                    {
+                        _stopping = true;
+                    }
                     return;
                 }
                 _clock.Start();
                 _nextFrame = _clock.Elapsed.TotalSeconds;
                 _onLoaded();
+            }
+
+            /// <summary>One frame. False means the match is over.</summary>
+            private bool DrawFrame()
+            {
+                Scene scene = Scene!;
+                WaitForTick();
+                ApplyInput();
+                GameState.ApplyPause();
+                scene.OnUpdateFrame();
+                if (!scene.OnRenderFrame())
+                {
+                    End(scene);
+                    return false;
+                }
+                scene.AfterRenderFrame();
+                if (_display != null && _eglSurface != null
+                    && !EGL14.EglSwapBuffers(_display, _eglSurface))
+                {
+                    // The framework took the surface back. Let go of it and
+                    // wait for the next one rather than drawing into nothing.
+                    Console.WriteLine("[android] the surface stopped accepting frames; "
+                        + $"waiting for another (0x{EGL14.EglGetError():X})");
+                    ReleaseSurface();
+                }
+                return true;
             }
 
             private void End(Scene scene)
@@ -234,7 +578,7 @@ namespace MphRead.Droid
                 double wait = _nextFrame - now;
                 if (wait > 0.001)
                 {
-                    System.Threading.Thread.Sleep((int)(wait * 1000));
+                    Thread.Sleep((int)(wait * 1000));
                 }
                 _nextFrame += FrameSeconds;
                 if (_nextFrame < now)

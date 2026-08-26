@@ -67,70 +67,100 @@ SwiftShader's own artefacts in `.claude/KNOWN-GAPS.md`.
 
 ## The loop
 
-`GameView` is a `GLSurfaceView`, which supplies what GLFW supplies on the
-desktop: an EGL context, a thread that owns it, and a callback per frame.
-Everything the engine does with GL -- a room's textures, its baked geometry, the
-shaders, the drawing -- happens on that thread, so the scene is *built* there
-rather than by whoever asked for the match. Loading blocks that thread for
-seconds, which is the right thread to block: the UI thread stays free and the
-loading notice on top keeps drawing.
+`GameView` is a **`SurfaceView` with an EGL context and a thread of its own**.
+Everything the engine does with GL -- a room's textures, its baked geometry,
+the shaders, the drawing -- happens on that thread, so the scene is *built*
+there rather than by whoever asked for the match. Loading blocks that thread
+for seconds, which is the right thread to block: the UI thread stays free and
+the loading notice on top keeps drawing.
 
-**But not inside `OnSurfaceChanged`, and not while the window is still moving.**
-`GLSurfaceView.surfaceChanged` runs on the UI thread, hands the new size to the
-GL thread and then *waits for that thread to finish a frame*. So any resize that
-lands while a room is loading freezes the UI thread for the length of the load,
-and Android puts up its own "isn't responding" dialog over the loading screen --
-a white box and a black box with nothing to press, which is what starting a match
-from portrait used to do. Two things keep that from happening:
+### Why not `GLSurfaceView`, which it used to be
 
-- `MainActivity.WaitForSteadyWindow` does not create the `GameView` until the
-  content view has held the same size for 250 ms and is landscape (or three
-  seconds have passed and the display clearly will not turn). Waiting for the
-  *configuration change* is not enough: it arrives before the window has been
-  laid out at its new size. The orientation is then pinned with
-  `ScreenOrientation.Locked` for the length of the load and released back to
-  `SensorLandscape` once the match is on screen, so the phone cannot turn end
-  for end mid-load either.
+**Because `GLSurfaceView` answers a window event by making the UI thread wait
+for the GL thread.** `surfaceChanged` hands the new size over and then blocks
+until that thread has been all the way round its loop; `onPause` and
+`onResume` do the same with a handshake of their own. So any window event that
+landed while a room was loading froze the UI thread for the length of the
+load, and Android put its own "isn't responding" dialog over the black loading
+screen -- a white box over a black one, with nothing to press, which is what
+starting a match from portrait did.
 
-  **That wait is also the thing that can eat a start, and four ways it could
-  were fixed.** The front screen is hidden the moment `StartMatch` is called
-  and the `GameView` does not exist yet, so anything that delays the start is a
-  black screen with nothing on it -- which is exactly what "it will not start a
-  map" looks like from the player's side. So:
+Measured here, with a room load stretched to 12 s and a window resize injected
+into it (`adb shell wm size`), against a heartbeat posted to the UI thread
+every 200 ms:
 
-  - The three-second deadline is **no longer conditional on the window having
-    settled**. It used to be `steady && waited >= RotateMs`, and a window that
-    never held still -- system bars coming and going, a device that reshapes
-    the app's area on its own -- left the loop posting itself for ever.
-    Waiting is a nicety; starting is the job.
-  - The loading notice goes up in `StartMatch`, not in `BeginMatch`, so there
-    is never a black screen with nothing on it. `ShowNotice` is shared and
-    `BringToFront`s it once the touch overlay is in.
-  - **Back cancels a pending start** (`CancelPending`) and puts the front
-    screen back, rather than doing nothing because `InMatch` is still false.
-  - **A second `StartMatch` while one is pending is refused.** It used to
-    overwrite `_orientationBefore` with the landscape it had just asked for,
-    so `EndMatch` would restore *that* and leave the front screen stuck
-    sideways for the rest of the session -- and pressing START twice is what a
-    player does when the first press seems to do nothing.
+| | worst gap on the UI thread |
+|---|---|
+| `GLSurfaceView` | **16,921 ms** |
+| our own EGL and thread | 1,092 ms, and nothing during the load |
 
-  There is also a hard 8 s give-up for the one case that cannot be started
-  from at all -- a content view that never reports a size, which would build a
-  scene for a zero-pixel window -- and it says so on screen instead of
-  starting something the player can neither see nor leave. Every decision
-  logs one `[android]` line with the sizes involved, so a device that
-  misbehaves says which of these it is.
-- `GameView`'s renderer writes the size down in `OnSurfaceChanged` and builds
-  the scene on the *next* `OnDrawFrame`. That one short frame is what lets
-  GLSurfaceView tell the UI thread the resize is dealt with before this thread
-  disappears into the load.
+Android's input-dispatch ANR threshold is 5,000 ms.
+
+Waiting for the window to hold still before creating the view --
+`MainActivity.WaitForSteadyWindow` -- made that *rarer* and could never make it
+impossible: a phone resizes its own window whenever it likes, for the system
+bars, for insets, for a call. Now `surfaceCreated`, `surfaceChanged` and
+`surfaceDestroyed` write a field and return, and the loop picks the change up
+when it is next between frames.
+
+Two things come free from owning the context:
+
+- **It survives the surface going away and coming back**, so a match is not
+  lost to the home button. `GLSurfaceView` only kept it as a favour, through
+  `PreserveEGLContextOnPause`; here nothing destroys it until the match ends.
+- **Pausing is a flag**, not a handshake, so `OnPause` cannot block either.
+
+`surfaceDestroyed` is the one callback that *should* wait -- Android wants the
+surface unused by the time it returns -- and it does, for up to two seconds.
+Not longer: the render thread cannot answer from inside a room load, and
+hanging the UI thread is the thing this class exists to stop. A swap against a
+surface the framework has taken back returns false rather than crashing, which
+is handled by letting go and waiting for the next one.
+
+**The window should still have stopped moving before the match starts.** That
+is no longer what keeps the app from freezing, but a match that starts
+mid-rotation starts at the wrong size and re-lays-out under the player. So
+`MainActivity.WaitForSteadyWindow` does not create the `GameView` until the
+content view has held the same size for 250 ms and is landscape (or three
+seconds have passed and the display clearly will not turn). Waiting for the
+*configuration change* is not enough: it arrives before the window has been
+laid out at its new size. The orientation is then pinned with
+`ScreenOrientation.Locked` for the length of the load and released back to
+`SensorLandscape` once the match is on screen.
+
+**That wait is also the thing that can eat a start, and four ways it could
+were fixed.** The front screen is hidden the moment `StartMatch` is called and
+the `GameView` does not exist yet, so anything that delays the start is a
+black screen with nothing on it -- which is what "it will not start a map"
+looks like from the player's side. So:
+
+- The three-second deadline is **no longer conditional on the window having
+  settled**. It used to be `steady && waited >= RotateMs`, and a window that
+  never held still left the loop posting itself for ever. Waiting is a nicety;
+  starting is the job.
+- The loading notice goes up in `StartMatch`, not in `BeginMatch`, so there is
+  never a black screen with nothing on it. `ShowNotice` is shared and
+  `BringToFront`s it once the touch overlay is in.
+- **Back cancels a pending start** (`CancelPending`) and puts the front screen
+  back, rather than doing nothing because `InMatch` is still false.
+- **A second `StartMatch` while one is pending is refused.** It used to
+  overwrite `_orientationBefore` with the landscape it had just asked for, so
+  `EndMatch` would restore *that* and leave the front screen stuck sideways
+  for the rest of the session -- and pressing START twice is what a player
+  does when the first press seems to do nothing.
+
+There is also a hard 8 s give-up for the one case that cannot be started from
+at all -- a content view that never reports a size, which would build a scene
+for a zero-pixel window -- and it says so on screen instead of starting
+something the player can neither see nor leave. Every decision logs one
+`[android]` line with the sizes involved.
 
 The order is the desktop's: `GameState.ApplyPause()`, `Scene.OnUpdateFrame()`,
-`Scene.OnRenderFrame()`, `Scene.AfterRenderFrame()`.
+`Scene.OnRenderFrame()`, `Scene.AfterRenderFrame()`, then `eglSwapBuffers`.
 
 The pacing is not. `RenderWindow` asks OpenTK for 60 updates a second; here the
-callback arrives once per display refresh, which on a modern phone is 90 or 120.
-**The update is the frame**: the render item lists are built during the update
+buffer swaps at the display's rate, which on a modern phone is 90 or 120, and
+**the update is the frame**: the render item lists are built during the update
 and cleared after the draw, so a render with no update in front of it draws
 nothing. Rendering more often than the game ticks is therefore not an option --
 the thread waits for the next 60 Hz tick instead.

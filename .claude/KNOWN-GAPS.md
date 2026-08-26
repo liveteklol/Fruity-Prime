@@ -26,14 +26,15 @@ claiming coverage that isn't there.
   alike, so every picture from it is good for "it ran" and for nothing else.
   Rendering is judged on the desktop. `.claude/android/ANDROID-PORT.md` lists
   what to watch on a first run, in order.
-- **Starting a match from portrait has never been seen to fail here.** The
-  emulator (API 30, 1080x2280, auto-rotate on and off) rotates and loads the
-  room every time, twice in a row, through a double tap on START. So the
-  fixes in `MainActivity.WaitForSteadyWindow` and around it -- an
-  unconditional deadline, a notice from the first moment, Back cancelling,
-  a second start refused -- close holes found by reading the code, not
-  failures reproduced in it. If a real device still will not start a map from
-  portrait, the `[android]` lines it now logs say which stage it stopped at.
+- **The portrait freeze is reproduced and fixed; the fix is proven by
+  measurement, not by playing.** A room load stretched to 12 s with a window
+  resize injected into it held the UI thread for 16,921 ms under
+  `GLSurfaceView` -- three times Android's ANR threshold, which is the white
+  box over the black loading screen -- and for at most 1,092 ms, none of it
+  during the load, once `GameView` owned its own EGL context and thread. What
+  has *not* been shown is the same fix on a real phone under a real load, and
+  the match has only been driven on this emulator afterwards: it starts from
+  portrait, survives home-and-back, backs out and starts again.
 - **The cel shading has only been judged on the desktop.** Flat colours in
   place of textures and the depth-kink ink pass were shot across five rooms
   and a live two-client match at 1600x900, and cel *off* is pixel-identical to
