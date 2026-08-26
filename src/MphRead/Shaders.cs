@@ -306,6 +306,11 @@ uniform float far_plane;
 // One step of the depth buffer the driver actually gave us, which is not
 // always the one that was asked for. See the note in edge_at.
 uniform float depth_quantum;
+// What the ink must clear before it is believed, measured on this machine
+// rather than assumed. Zero until the first frame has been looked at.
+uniform float ink_floor;
+// 1 draws the measurement instead of the picture, for that one frame.
+uniform int probe;
 
 varying vec2 texcoord;
 
@@ -357,20 +362,32 @@ float raw_depth(float dx, float dy)
 // two differences it is exact, since a difference of two floats within a
 // factor of two of each other always is. That costs nothing and is most of
 // the precision this pass has.
-float edge_at(float d, float r, float unit)
+// The kink at one reach, in the units everything below is measured in.
+float kink_rel(float d, float r, float unit)
 {
     vec2 h = vec2(raw_depth(-r, 0.0) - d, raw_depth(r, 0.0) - d);
     vec2 v = vec2(raw_depth(0.0, -r) - d, raw_depth(0.0, r) - d);
-    float kink = max(abs(h.x + h.y), abs(v.x + v.y)) / r;
-    // What the depth buffer's own steps are worth in the same units. On a
-    // plane running away from the camera those steps fall in straight lines,
-    // so a threshold underneath them does not draw creases -- it draws the
-    // quantisation, as straight black lines all over every wall. Where the
-    // buffer is deep this sits far below the fixed threshold and changes
-    // nothing; where it is not, it is the difference between an outline and a
-    // scribble.
-    float noise = depth_quantum * 4.0 / r / unit;
-    return smoothstep(max(1.1, noise * 1.5), max(3.5, noise * 4.0), kink / unit);
+    return max(abs(h.x + h.y), abs(v.x + v.y)) / r / unit;
+}
+
+float edge_at(float d, float r, float unit)
+{
+    // Two floors, and the threshold is whichever is higher.
+    //
+    // What the depth buffer's own steps are worth here, from the bit depth
+    // the driver admits to. On a plane running away from the camera those
+    // steps fall in straight lines, so a threshold underneath them does not
+    // draw creases -- it draws the quantisation, as black lines all over
+    // every wall.
+    float quantised = depth_quantum * 4.0 / r / unit;
+    // And what this machine's depth *actually* turned out to be worth, which
+    // is the only number that has ever been right: a driver can report
+    // twenty-four bits and interpolate far worse than that, and no amount of
+    // arithmetic in here recovers what never arrived. Renderer.CalibrateInk
+    // measures it from a frame of this very pass and hands it back.
+    float lo = max(max(1.1, quantised * 1.5), ink_floor);
+    float hi = max(max(3.5, quantised * 4.0), ink_floor * 3.0);
+    return smoothstep(lo, hi, kink_rel(d, r, unit));
 }
 
 void main()
@@ -389,7 +406,20 @@ void main()
         // 2 for a right-angled crease and hundreds for a silhouette.
         float scale = far_plane / (far_plane - near_plane) - d;
         float unit = max(scale, 1e-9) * texel_w;
+        if (probe == 1) {
+            // log2 of the kink, -12..+12 into 0..1, and black where nothing
+            // was drawn so the reader can leave those pixels out. Twelve each
+            // way because this has to stay readable from about a thousandth
+            // of the threshold to a thousand times it.
+            float shown = clamp(log2(max(kink_rel(d, 2.0, unit), 1e-6)) / 24.0 + 0.5, 0.004, 1.0);
+            gl_FragColor = vec4(shown, shown, shown, 1.0);
+            return;
+        }
         ink = max(edge_at(d, 2.0, unit), edge_at(d, 3.0, unit)) * outline;
+    }
+    else if (probe == 1) {
+        gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+        return;
     }
     gl_FragColor = vec4(base * (1.0 - ink), 1.0);
 }
@@ -472,6 +502,8 @@ void main()
         public int CelNearPlane { get; set; }
         public int CelFarPlane { get; set; }
         public int CelDepthQuantum { get; set; }
+        public int CelInkFloor { get; set; }
+        public int CelProbe { get; set; }
         public int FogColor { get; set; }
         public int FogMinDistance { get; set; }
         public int FogMaxDistance { get; set; }

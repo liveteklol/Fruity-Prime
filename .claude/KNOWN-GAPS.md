@@ -46,10 +46,14 @@ claiming coverage that isn't there.
   the noise, on a depth field whose large-scale structure is correct -- the
   same per-pixel imprecision that streaks SwiftShader's colour, on its depth.
   Nothing in the shader survives that, and a threshold that did would draw no
-  outline at all. So the emulator says nothing about how the mode behaves on a
-  real phone, in either direction. (An earlier claim here that the ES path had
-  been seen drawing the mode was wrong: those runs had cel shading *off* --
-  see the settings-directory note in `android/ANDROID-PORT.md`.)
+  outline at all -- which is now what happens, on its own:
+  `Renderer.CalibrateInk` measures a flat surface at **1998** there against
+  **0.0159** here and lifts the ink floor to match, so the mode degrades to no
+  outline rather than to a black screen. **What that floor does on a phone
+  whose depth is merely mediocre rather than useless is untested**, and that is
+  the case that matters. (An earlier claim here that the ES path had been seen
+  drawing the mode was wrong: those runs had cel shading *off* -- see the
+  settings-directory note in `android/ANDROID-PORT.md`.)
 - **A phone is still a different machine** — the emulator is x86_64 with
   SwiftShader, a phone is arm64 with a real driver. That is the ABI and the GL
   implementation both differing from what is tested here.

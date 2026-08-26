@@ -775,6 +775,8 @@ namespace MphRead
             _shaderLocations.CelNearPlane = GL.GetUniformLocation(_celShaderProgramId, "near_plane");
             _shaderLocations.CelFarPlane = GL.GetUniformLocation(_celShaderProgramId, "far_plane");
             _shaderLocations.CelDepthQuantum = GL.GetUniformLocation(_celShaderProgramId, "depth_quantum");
+            _shaderLocations.CelInkFloor = GL.GetUniformLocation(_celShaderProgramId, "ink_floor");
+            _shaderLocations.CelProbe = GL.GetUniformLocation(_celShaderProgramId, "probe");
 
             _shaderLocations.FadeColor = GL.GetUniformLocation(_rttShaderProgramId, "fade_color");
             _shaderLocations.LayerAlpha = GL.GetUniformLocation(_rttShaderProgramId, "alpha");
@@ -1755,11 +1757,29 @@ namespace MphRead
                 return;
             }
             Vector2i target = _targetSize;
+            // The scene, kept where the pass can read it. First, because
+            // everything below draws over the target -- including the probe,
+            // which is why it can afford to.
             GL.BindTexture(TextureTarget.Texture2D, _celTexture);
             GL.CopyTexSubImage2D(TextureTarget.Texture2D, 0, 0, 0, 0, 0, target.X, target.Y);
+            if (_calibrateInk)
+            {
+                _calibrateInk = false;
+                CalibrateInk(target);
+            }
+            DrawCelQuad(target, probe: false);
+        }
+
+        /// <summary>
+        /// The pass itself: the finished scene out of <c>_celTexture</c>, the
+        /// depth the scene left behind, and a quad over the whole target.
+        /// </summary>
+        private void DrawCelQuad(Vector2i target, bool probe)
+        {
             GL.ActiveTexture(TextureUnit.Texture1);
             GL.BindTexture(TextureTarget.Texture2D, _depthTexture);
             GL.ActiveTexture(TextureUnit.Texture0);
+            GL.BindTexture(TextureTarget.Texture2D, _celTexture);
             GL.UseProgram(_celShaderProgramId);
             GL.Uniform1(_shaderLocations.CelTexelWidth, 1f / target.X);
             GL.Uniform1(_shaderLocations.CelTexelHeight, 1f / target.Y);
@@ -1767,6 +1787,8 @@ namespace MphRead
             GL.Uniform1(_shaderLocations.CelNearPlane, _nearClip);
             GL.Uniform1(_shaderLocations.CelFarPlane, _useClip ? _farClip : 10000f);
             GL.Uniform1(_shaderLocations.CelDepthQuantum, _depthQuantum);
+            GL.Uniform1(_shaderLocations.CelInkFloor, _inkFloor);
+            GL.Uniform1(_shaderLocations.CelProbe, probe ? 1 : 0);
             // Off the framebuffer for the length of the pass. Sampling a
             // texture that is attached to the framebuffer being drawn into is
             // undefined in OpenGL ES whether or not anything writes to it --
@@ -1802,6 +1824,95 @@ namespace MphRead
             GL.FramebufferTexture2D(FramebufferTarget.Framebuffer,
                 FramebufferAttachment.DepthStencilAttachment, TextureTarget.Texture2D, _depthTexture, 0);
             GL.Enable(EnableCap.DepthTest);
+        }
+
+        /// <summary>
+        /// What the ink has to clear before it is believed, in the pass's own
+        /// units, measured on this machine. Zero until a frame has been looked
+        /// at; the shader's fixed threshold applies until then.
+        /// </summary>
+        private float _inkFloor;
+
+        private bool _calibrateInk = true;
+
+        /// <summary>
+        /// Find out what a flat surface's kink really measures here, and put
+        /// the ink threshold above it.
+        ///
+        /// The pass is looking for a second difference around a millionth of
+        /// the stored depth, so it is only as good as the depth it is handed,
+        /// and how good that is cannot be asked. A driver reports the bits it
+        /// stores; it does not report what its rasteriser's interpolation was
+        /// worth on the way in, and no arithmetic in the shader recovers what
+        /// never arrived. That is the difference between this machine, where a
+        /// flat wall measures 0.004 to 0.009 against a threshold of 1.1, and a
+        /// phone drawing regular lines across every surface in the room.
+        ///
+        /// So it is measured. One frame of this pass in probe mode paints
+        /// log2 of the kink instead of the picture, that frame is read back,
+        /// and the median over what was drawn stands for the flat surfaces:
+        /// most of any frame is flat surface, and an edge measures hundreds,
+        /// so edges sit in the tail where they cannot move a median. Six times
+        /// that becomes the floor.
+        ///
+        /// Once a scene, in the same frame as the real pass and before it, so
+        /// nobody ever sees the probe -- the scene has already been copied out
+        /// to <c>_celTexture</c> by then, and the real pass paints every pixel
+        /// back from it. Colour is read rather than depth because colour is
+        /// what a GL ES driver is required to hand back.
+        /// </summary>
+        private void CalibrateInk(Vector2i target)
+        {
+            // A centred patch: the middle of a frame is the room, and the
+            // edges of one are often sky, or the weapon. Big enough to be a
+            // sample, small enough not to be a stall.
+            int side = Math.Min(384, Math.Min(target.X, target.Y));
+            if (side < 32)
+            {
+                return;
+            }
+            int x = (target.X - side) / 2;
+            int y = (target.Y - side) / 2;
+            var pixels = new byte[side * side * 4];
+            try
+            {
+                DrawCelQuad(target, probe: true);
+                GL.ReadPixels(x, y, side, side, PixelFormat.Rgba, PixelType.UnsignedByte, pixels);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[render] cel outline: could not measure the depth ({ex.Message}); "
+                    + "keeping the fixed threshold");
+                return;
+            }
+            var drawn = new List<byte>(side * side / 4);
+            for (int i = 0; i < pixels.Length; i += 4)
+            {
+                // Zero is "nothing was drawn here", which is not a measurement.
+                if (pixels[i] != 0)
+                {
+                    drawn.Add(pixels[i]);
+                }
+            }
+            if (drawn.Count < side * side / 8)
+            {
+                // Almost nothing in the middle of the frame: a fade, or a wall
+                // in the camera. Leave it for the next scene rather than
+                // calibrate against that.
+                _calibrateInk = true;
+                return;
+            }
+            drawn.Sort();
+            byte median = drawn[drawn.Count / 2];
+            float measured = MathF.Pow(2, (median / 255f - 0.5f) * 24f);
+            _inkFloor = measured * 6f;
+            string howBad = measured < 0.1f ? "which is nothing"
+                : measured < 1.1f ? "which is close"
+                : "which is more than an actual crease, so only silhouettes will ink";
+            Console.WriteLine($"[render] cel outline: a flat surface measures "
+                + $"{measured.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture)}"
+                + $"{(median >= 255 ? " or more" : "")} here against a threshold of 1.1, {howBad}. "
+                + $"Ink floor {_inkFloor.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture)}.");
         }
 
         public bool OnRenderFrame()

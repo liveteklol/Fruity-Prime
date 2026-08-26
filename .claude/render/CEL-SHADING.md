@@ -123,19 +123,49 @@ number says whether they were enough.
   and ES answer `INVALID_OPERATION` for a component size of
   `DEPTH_STENCIL_ATTACHMENT` itself, and SwiftShader will not answer at all.
 
-Two lines of log say where a machine stands, one per scene and one per
-attachment:
+### The one that mattered: measure it, do not ask
+
+**A driver reports the bits it stores. It does not report what its
+rasteriser's interpolation was worth on the way in** -- and if that is coarse
+then every flat wall arrives with a kink on it, the pass inks the lot, and no
+arithmetic in the shader recovers what never arrived. That is a phone drawing
+regular lines across every surface while this machine draws none, with both
+reporting a 24-bit depth buffer.
+
+So `Renderer.CalibrateInk` measures it, once a scene:
+
+1. `DrawCelQuad(target, probe: true)` paints `log2` of the kink instead of the
+   picture, ±12 mapped into 0..1, black where nothing was drawn.
+2. A centred 384x384 patch is read back -- **colour, because that is the one a
+   GL ES driver is required to hand back; `glReadPixels` on depth is desktop
+   only**.
+3. The **median** over the drawn pixels stands for the flat surfaces. Most of
+   any frame is flat surface, and an edge measures hundreds, so edges sit in a
+   tail that cannot move a median.
+4. Six times that becomes `ink_floor`, and `edge_at` takes whichever is higher
+   of it, the fixed 1.1, and what `depth_quantum` implies.
+
+It is free where the depth is good: this machine measures **0.0159**, the
+floor lands at 0.095, the fixed threshold still governs, and the picture is
+pixel-for-pixel what it was. Where the depth is bad the outline retreats to
+the silhouettes instead of scribbling: SwiftShader measures **1998**, the
+floor lands at 11991, and the room is visible again instead of solid black.
+
+The probe runs in the same frame as the real pass and before it, so nobody
+ever sees it -- the scene has already been copied to `_celTexture` by then and
+the real pass paints every pixel back out of it.
+
+Three lines of log say where a machine stands:
 
 ```
 [render] cel shading on, 4 bands, outline 1.00, fog off
 [render] cel outline: the depth buffer is 24 bits
+[render] cel outline: a flat surface measures 0.0159 here against a threshold
+         of 1.1, which is nothing. Ink floor 0.0953.
 ```
 
-To measure the noise itself, make `edge_at` return `kink / unit` unthresholded
-and paint `clamp(log2(kink) / 16 + 0.5, 0, 1)` as grey, then read a patch of
-flat wall back: **0.004 to 0.009 under llvmpipe, against a threshold of 1.1**.
-Anything near or above 1 there means the ink is drawing the buffer's own error
-and no threshold will separate the two. SwiftShader reads 235-256.
+The third is the one to ask for. Anything near or above 1 in it means the ink
+would have been drawing the machine's own error, and now is not.
 
 ## On OpenGL ES
 
