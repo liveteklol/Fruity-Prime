@@ -319,9 +319,25 @@ varying vec2 texcoord;
 // what this pass used to do, throws that away: z itself is not linear in
 // screen space, its second difference over a floor stretching to the far wall
 // is large, and every flat surface seen at an angle came out scribbled over.
+// Where this pixel is, worked out from gl_FragCoord rather than from the
+// interpolated texture coordinate.
+//
+// gl_FragCoord.xy is the pixel centre exactly, so this lands on texel centres
+// exactly and the taps are exactly r texels apart. Coming through a varying
+// they are only as good as the interpolator, and ES promises highp no better
+// than sixteen bits of mantissa -- a fraction of a row of error, which is
+// nothing to a picture and everything to a pass that compares a row with the
+// two either side of it. Getting a neighbour off by a row every so often
+// draws a line straight across the screen wherever it happens, which is what
+// a phone was doing while this machine was not.
+vec2 pixel_uv()
+{
+    return gl_FragCoord.xy * vec2(texel_w, texel_h);
+}
+
 float raw_depth(float dx, float dy)
 {
-    return texture2D(depth_tex, texcoord + vec2(dx * texel_w, dy * texel_h)).x;
+    return texture2D(depth_tex, pixel_uv() + vec2(dx * texel_w, dy * texel_h)).x;
 }
 
 // How much of an edge there is at a given reach, 0 to 1.
@@ -359,7 +375,7 @@ float edge_at(float d, float r, float unit)
 
 void main()
 {
-    vec3 base = texture2D(tex, texcoord).rgb;
+    vec3 base = texture2D(tex, pixel_uv()).rgb;
     float d = raw_depth(0.0, 0.0);
     float ink = 0.0;
     // Nothing was drawn here: the cleared far plane has no shape to draw

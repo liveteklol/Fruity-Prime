@@ -105,6 +105,18 @@ number says whether they were enough.
   the reach and the buffer's error is not, so reaching further is quieter as
   well as wider. Moving up one step is two to three times the margin for a
   line that measures 2-3% different on the desktop and looks identical.
+- **The taps are placed from `gl_FragCoord`, not from the interpolated
+  texture coordinate.** `gl_FragCoord.xy` is the pixel centre exactly, so the
+  samples land on texel centres exactly and are exactly `r` texels apart.
+  Through a varying they are only as good as the interpolator, and ES promises
+  `highp` no better than sixteen bits of mantissa: a fraction of a row of
+  error, which is nothing to a picture and everything to a pass that compares
+  a row against the two either side of it. Getting a neighbour off by a row
+  every so often draws a line **straight across the screen** wherever it
+  happens -- regularly spaced, perfectly horizontal, crossing every surface at
+  the same y, because it is a property of the screen and not of the geometry.
+  That is what a phone was doing while this machine was not, and on this
+  machine the change is pixel-for-pixel invisible.
 - **`depth_quantum`** is asked of the driver per attachment
   (`Renderer.MeasureDepthQuantum`) rather than assumed, and each reach lifts
   its threshold to clear it. Ask the *depth* half of the attachment: both GL
