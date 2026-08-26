@@ -10,7 +10,7 @@ namespace MphRead.Mods.Launcher.Gui
     /// <summary>
     /// The front screen's palette and metrics, in Avalonia terms.
     ///
-    /// The colours are <see cref="LauncherTheme"/>'s, value for value, and are
+    /// The colours are <c>LauncherTheme</c>'s, value for value, and are
     /// meant to stay that way: the two screens are the same product on
     /// different toolkits, and a palette copied by eye would drift the first
     /// time either was adjusted. They are duplicated rather than shared because

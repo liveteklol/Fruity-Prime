@@ -114,8 +114,30 @@ namespace MphRead
         // 0 - lines + fill, 1 - lines only, 2 - fill only
         private int _volumeEdges = 0;
         private bool _faceCulling = true;
-        private bool _textureFiltering = false;
-        private bool _lighting = false;
+        // The three the settings own. Read out of RenderOptions every time
+        // rather than copied into a field when the scene was built: the
+        // settings window opens from the pause menu *during* a match, so a
+        // copy is a fog switch that does nothing until the next room -- which
+        // is exactly how it behaved. The debug keys write to the same place,
+        // so F, L and G still flip them and now agree with what the settings
+        // page says.
+        private bool FilteringOn
+        {
+            get => Mods.RenderOptions.TextureFiltering;
+            set => Mods.RenderOptions.TextureFiltering = value;
+        }
+
+        private bool LightingOn
+        {
+            get => Mods.RenderOptions.Lighting;
+            set => Mods.RenderOptions.Lighting = value;
+        }
+
+        private bool FogOn
+        {
+            get => Mods.RenderOptions.Fog;
+            set => Mods.RenderOptions.Fog = value;
+        }
         private bool _scanVisor = false;
         private int _showInvisible = 0;
         private bool _showNodeData = false;
@@ -133,6 +155,7 @@ namespace MphRead
         private int _shaderProgramId = 0;
         private int _rttShaderProgramId = 0;
         private int _shiftShaderProgramId = 0;
+        private int _celShaderProgramId = 0;
         private readonly ShaderLocations _shaderLocations = new ShaderLocations();
 
         private Vector3 _light1Vector = Vector3.Zero;
@@ -140,7 +163,6 @@ namespace MphRead
         private Vector3 _light2Vector = Vector3.Zero;
         private Vector3 _light2Color = Vector3.Zero;
         private bool _hasFog = false;
-        private bool _showFog = true;
         private Vector4 _fogColor = Vector4.Zero;
         private int _fogOffset = 0;
         private int _fogSlope = 0;
@@ -337,7 +359,6 @@ namespace MphRead
                 meta.Light2Color.Green / 31.0f,
                 meta.Light2Color.Blue / 31.0f
             );
-            _lighting = true;
             _hasFog = meta.FogEnabled;
             _fogColor = new Vector4(
                 meta.FogColor.Red / 31f,
@@ -441,6 +462,15 @@ namespace MphRead
             GL.Enable(EnableCap.DepthTest);
             GL.Enable(EnableCap.Texture2D);
             GL.DepthFunc(DepthFunction.Lequal);
+            // One line a scene, because the machine that has to be asked about
+            // this is always somebody else's: what the render options actually
+            // came out as is the first thing worth knowing when a picture is
+            // wrong on a device nobody here can plug in.
+            Console.WriteLine($"[render] cel shading "
+                + $"{(Mods.RenderOptions.CelShading ? "on" : "off")}, "
+                + $"{Mods.RenderOptions.CelBands} bands, "
+                + $"outline {Mods.RenderOptions.CelEdge.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)}, "
+                + $"fog {Mods.RenderOptions.OnOff(Mods.RenderOptions.Fog)}");
             InitShaders();
             AllocateEffects();
             CollisionDetection.Init();
@@ -469,25 +499,75 @@ namespace MphRead
             }
             OutputStart();
             GC.Collect(generation: 2, GCCollectionMode.Forced, blocking: true, compacting: true);
-            GCSettings.LatencyMode = GCLatencyMode.SustainedLowLatency;
+            // Android's runtime throws PlatformNotSupported for this, which took
+            // every match on that head down before a room had finished loading.
+            // It is a hint to the collector, so going without it costs nothing.
+            if (!OperatingSystem.IsAndroid())
+            {
+                GCSettings.LatencyMode = GCLatencyMode.SustainedLowLatency;
+            }
         }
 
         private int _frameBuffer = 0;
         private int _screenTexture = 0;
         private int _renderBuffer = 0;
+        // What the ink pass reads. A pass cannot sample the target it is
+        // drawing into, so the finished scene is copied here first.
+        private int _celTexture = 0;
+        // The scene's depth, as a texture rather than as _renderBuffer, which
+        // nothing can read. Only allocated while cel shading is drawing its
+        // outline, and zero when the driver would not take one.
+        private int _depthTexture = 0;
+        private bool _depthTextureRefused = false;
+        private int _celFrameBuffer = 0;
+        private int _celFrameBufferColor = 0;
+
+        /// <summary>
+        /// The size the 3D scene is actually drawn at, which the resolution
+        /// scale may make smaller than the window. The quad that puts it on
+        /// screen stretches it back, and the HUD is drawn after that at full
+        /// size, so nothing readable is ever scaled.
+        /// </summary>
+        public Vector2i RenderSize => new Vector2i(
+            Mods.RenderOptions.Scaled(Size.X), Mods.RenderOptions.Scaled(Size.Y));
+
+        private Vector2i _targetSize;
 
         public void OnResize()
         {
             if (_screenTexture != 0)
             {
+                Vector2i target = RenderSize;
+                _targetSize = target;
                 GL.BindTexture(TextureTarget.Texture2D, _screenTexture);
-                GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgb, Size.X, Size.Y, 0,
+                GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgb, target.X, target.Y, 0,
                     PixelFormat.Rgb, PixelType.UnsignedByte, IntPtr.Zero);
+                // Nearest is the DS look and is right at full size; a stretched
+                // target needs linear or every edge stair-steps.
+                bool upscaling = Mods.RenderOptions.ResolutionScale < 100;
+                GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter,
+                    (int)(upscaling ? TextureMinFilter.Linear : TextureMinFilter.Nearest));
+                GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter,
+                    (int)(upscaling ? TextureMagFilter.Linear : TextureMagFilter.Nearest));
                 GL.BindTexture(TextureTarget.Texture2D, 0);
+                if (_celTexture != 0)
+                {
+                    GL.BindTexture(TextureTarget.Texture2D, _celTexture);
+                    GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgb, target.X, target.Y, 0,
+                        PixelFormat.Rgb, PixelType.UnsignedByte, IntPtr.Zero);
+                    GL.BindTexture(TextureTarget.Texture2D, 0);
+                }
                 Debug.Assert(_renderBuffer != 0);
                 GL.BindRenderbuffer(RenderbufferTarget.Renderbuffer, _renderBuffer);
-                GL.RenderbufferStorage(RenderbufferTarget.Renderbuffer, RenderbufferStorage.Depth24Stencil8, Size.X, Size.Y);
+                GL.RenderbufferStorage(RenderbufferTarget.Renderbuffer, RenderbufferStorage.Depth24Stencil8, target.X, target.Y);
                 GL.BindRenderbuffer(RenderbufferTarget.Renderbuffer, 0);
+                if (_depthTexture != 0)
+                {
+                    GL.BindTexture(TextureTarget.Texture2D, _depthTexture);
+                    GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Depth24Stencil8,
+                        target.X, target.Y, 0, PixelFormat.DepthStencil, PixelType.UnsignedInt248, IntPtr.Zero);
+                    GL.BindTexture(TextureTarget.Texture2D, 0);
+                }
             }
         }
 
@@ -514,7 +594,11 @@ namespace MphRead
             }
             if (vertexStatus == 0 || fragmentStatus == 0)
             {
-                throw new ProgramException("Failed to compile main shaders.");
+                // The driver's own message. Without it a shader that will not
+                // compile is one sentence with nothing in it to act on.
+                throw new ProgramException("Failed to compile main shaders."
+                    + $" vertex: {GL.GetShaderInfoLog(vertexShader)}"
+                    + $" fragment: {GL.GetShaderInfoLog(fragmentShader)}");
             }
 
             _shaderProgramId = GL.CreateProgram();
@@ -579,26 +663,63 @@ namespace MphRead
             GL.DetachShader(_shiftShaderProgramId, vertexShader);
             GL.DetachShader(_shiftShaderProgramId, fragmentShader);
             GL.DeleteShader(fragmentShader);
+
+            // use same vertex shader
+            fragmentShader = GL.CreateShader(ShaderType.FragmentShader);
+            GL.ShaderSource(fragmentShader, Shaders.CelFragmentShader);
+            GL.CompileShader(fragmentShader);
+            GL.GetShader(fragmentShader, ShaderParameter.CompileStatus, out fragmentStatus);
+            if (fragmentStatus == 0)
+            {
+                throw new ProgramException("Failed to compile the cel shading shader."
+                    + $" {GL.GetShaderInfoLog(fragmentShader)}");
+            }
+            _celShaderProgramId = GL.CreateProgram();
+            GL.AttachShader(_celShaderProgramId, vertexShader);
+            GL.AttachShader(_celShaderProgramId, fragmentShader);
+            GL.LinkProgram(_celShaderProgramId);
+            GL.DetachShader(_celShaderProgramId, vertexShader);
+            GL.DetachShader(_celShaderProgramId, fragmentShader);
+            GL.DeleteShader(fragmentShader);
             GL.DeleteShader(vertexShader);
 
             _frameBuffer = GL.GenFramebuffer();
             GL.BindFramebuffer(FramebufferTarget.Framebuffer, _frameBuffer);
             _screenTexture = GL.GenTexture();
             _textureCount++;
+            Vector2i renderTarget = RenderSize;
+            _targetSize = renderTarget;
             GL.BindTexture(TextureTarget.Texture2D, _screenTexture);
-            GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgb, Size.X, Size.Y, 0,
+            GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgb, renderTarget.X, renderTarget.Y, 0,
                 PixelFormat.Rgb, PixelType.UnsignedByte, IntPtr.Zero);
-            int minParameter = (int)TextureMinFilter.Nearest;
-            int magParameter = (int)TextureMagFilter.Nearest;
+            // Nearest at full size, which is what the DS looked like; linear
+            // once the scene is being stretched, where nearest is a mess of
+            // stair-stepped edges rather than a soft picture.
+            bool upscaling = Mods.RenderOptions.ResolutionScale < 100;
+            int minParameter = (int)(upscaling ? TextureMinFilter.Linear : TextureMinFilter.Nearest);
+            int magParameter = (int)(upscaling ? TextureMagFilter.Linear : TextureMagFilter.Nearest);
             GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, minParameter);
             GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, magParameter);
             GL.BindTexture(TextureTarget.Texture2D, 0);
             GL.FramebufferTexture2D(FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment0,
                 TextureTarget.Texture2D, _screenTexture, 0);
 
+            // The ink pass's copy of the scene. Same size and same filtering;
+            // it is only ever sampled texel for texel.
+            _celTexture = GL.GenTexture();
+            _textureCount++;
+            GL.BindTexture(TextureTarget.Texture2D, _celTexture);
+            GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgb, renderTarget.X, renderTarget.Y, 0,
+                PixelFormat.Rgb, PixelType.UnsignedByte, IntPtr.Zero);
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Nearest);
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Nearest);
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
+            GL.BindTexture(TextureTarget.Texture2D, 0);
+
             _renderBuffer = GL.GenRenderbuffer();
             GL.BindRenderbuffer(RenderbufferTarget.Renderbuffer, _renderBuffer);
-            GL.RenderbufferStorage(RenderbufferTarget.Renderbuffer, RenderbufferStorage.Depth24Stencil8, Size.X, Size.Y);
+            GL.RenderbufferStorage(RenderbufferTarget.Renderbuffer, RenderbufferStorage.Depth24Stencil8, renderTarget.X, renderTarget.Y);
             GL.BindRenderbuffer(RenderbufferTarget.Renderbuffer, 0);
             GL.FramebufferRenderbuffer(FramebufferTarget.Framebuffer, FramebufferAttachment.DepthStencilAttachment,
                 RenderbufferTarget.Renderbuffer, _renderBuffer);
@@ -630,6 +751,9 @@ namespace MphRead
             _shaderLocations.Specular = GL.GetUniformLocation(_shaderProgramId, "specular");
             _shaderLocations.Emission = GL.GetUniformLocation(_shaderProgramId, "emission");
             _shaderLocations.UseFog = GL.GetUniformLocation(_shaderProgramId, "fog_enable");
+            _shaderLocations.CelBands = GL.GetUniformLocation(_shaderProgramId, "cel_bands");
+            _shaderLocations.UseFlat = GL.GetUniformLocation(_shaderProgramId, "use_flat");
+            _shaderLocations.FlatColor = GL.GetUniformLocation(_shaderProgramId, "flat_color");
             _shaderLocations.FogColor = GL.GetUniformLocation(_shaderProgramId, "fog_color");
             _shaderLocations.FogMinDistance = GL.GetUniformLocation(_shaderProgramId, "fog_min");
             _shaderLocations.FogMaxDistance = GL.GetUniformLocation(_shaderProgramId, "fog_max");
@@ -647,6 +771,14 @@ namespace MphRead
             _shaderLocations.MatrixStack = GL.GetUniformLocation(_shaderProgramId, "mtx_stack");
             _shaderLocations.ToonTable = GL.GetUniformLocation(_shaderProgramId, "toon_table");
 
+            _shaderLocations.CelOutline = GL.GetUniformLocation(_celShaderProgramId, "outline");
+            _shaderLocations.CelTexelWidth = GL.GetUniformLocation(_celShaderProgramId, "texel_w");
+            _shaderLocations.CelTexelHeight = GL.GetUniformLocation(_celShaderProgramId, "texel_h");
+            _shaderLocations.CelNearPlane = GL.GetUniformLocation(_celShaderProgramId, "near_plane");
+            _shaderLocations.CelFarPlane = GL.GetUniformLocation(_celShaderProgramId, "far_plane");
+            _shaderLocations.CelDepthQuantum = GL.GetUniformLocation(_celShaderProgramId, "depth_quantum");
+            _shaderLocations.CelProbe = GL.GetUniformLocation(_celShaderProgramId, "probe");
+
             _shaderLocations.FadeColor = GL.GetUniformLocation(_rttShaderProgramId, "fade_color");
             _shaderLocations.LayerAlpha = GL.GetUniformLocation(_rttShaderProgramId, "alpha");
             _shaderLocations.UseMask = GL.GetUniformLocation(_rttShaderProgramId, "use_mask");
@@ -657,6 +789,10 @@ namespace MphRead
             GL.UseProgram(_rttShaderProgramId);
             GL.Uniform1(texLocation, 0);
             GL.Uniform1(maskLocation, 1);
+
+            GL.UseProgram(_celShaderProgramId);
+            GL.Uniform1(GL.GetUniformLocation(_celShaderProgramId, "tex"), 0);
+            GL.Uniform1(GL.GetUniformLocation(_celShaderProgramId, "depth_tex"), 1);
 
             _shaderLocations.ShiftTable = GL.GetUniformLocation(_shiftShaderProgramId, "shift_table");
             _shaderLocations.ShiftIndex = GL.GetUniformLocation(_shiftShaderProgramId, "shift_idx");
@@ -793,7 +929,7 @@ namespace MphRead
                         uint ab = (rgb >> 26) & 0x1F;
                         var diffuse = new Vector4(dr / 31.0f, dg / 31.0f, db / 31.0f, 1.0f);
                         var ambient = new Vector4(ar / 31.0f, ag / 31.0f, ab / 31.0f, 1.0f);
-                        // shader - if (_lighting)
+                        // shader - if (LightingOn)
                         // MPH only calls this with zero ambient, and we need to rely on that in order to
                         // use GL.Color to smuggle in the diffuse, since setting uniforms here doesn't work
                         Debug.Assert(ambient.X == 0 && ambient.Y == 0 && ambient.Z == 0);
@@ -1071,17 +1207,82 @@ namespace MphRead
             _textureCount++;
             bool onlyOpaque = true;
             var pixels = new List<uint>();
+            var average = new FlatColor();
             foreach (ColorRgba pixel in model.GetPixels(textureId, paletteId, recolorId))
             {
                 pixels.Add(pixel.ToUint());
                 onlyOpaque &= pixel.Alpha == 255;
+                average.Add(pixel);
             }
             Texture texture = model.Recolors[recolorId].Textures[textureId];
             GL.BindTexture(TextureTarget.Texture2D, _textureCount);
             GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba, texture.Width, texture.Height, 0,
                 PixelFormat.Rgba, PixelType.UnsignedByte, pixels.ToArray());
             GL.BindTexture(TextureTarget.Texture2D, 0);
+            _flatColors[_textureCount] = average.Result;
             return onlyOpaque;
+        }
+
+        /// <summary>
+        /// The one colour each bound texture averages to, by binding ID.
+        ///
+        /// Cel shading paints surfaces in a flat colour instead of in their
+        /// texture, and this is the colour it uses. Worked out once, as the
+        /// texels go to the card, because it is a property of the texture and
+        /// not of the frame -- and there is no other moment when this code has
+        /// the pixels in hand.
+        /// </summary>
+        private readonly Dictionary<int, Vector3> _flatColors = new Dictionary<int, Vector3>();
+
+        /// <summary>
+        /// A texture's average colour, weighted by alpha.
+        ///
+        /// Weighted because a cut-out texture -- a grate, a decal, a sprite --
+        /// is mostly transparent, and the transparent texels usually carry
+        /// black or whatever happened to be in that corner of the sheet.
+        /// Averaging those in drags every such surface towards black, which is
+        /// the one colour an outline pass needs to keep for itself.
+        /// </summary>
+        private struct FlatColor
+        {
+            private float _red;
+            private float _green;
+            private float _blue;
+            private float _weight;
+            private float _count;
+            private float _plainRed;
+            private float _plainGreen;
+            private float _plainBlue;
+
+            public void Add(ColorRgba pixel)
+            {
+                float alpha = pixel.Alpha / 255f;
+                _red += pixel.Red * alpha;
+                _green += pixel.Green * alpha;
+                _blue += pixel.Blue * alpha;
+                _weight += alpha;
+                _plainRed += pixel.Red;
+                _plainGreen += pixel.Green;
+                _plainBlue += pixel.Blue;
+                _count++;
+            }
+
+            public Vector3 Result
+            {
+                get
+                {
+                    if (_weight > 0.01f)
+                    {
+                        return new Vector3(_red, _green, _blue) / _weight / 255f;
+                    }
+                    // fully transparent: nothing is drawn with it anyway
+                    if (_count > 0)
+                    {
+                        return new Vector3(_plainRed, _plainGreen, _plainBlue) / _count / 255f;
+                    }
+                    return Vector3.One;
+                }
+            }
         }
 
         public int BindGetTexture(IReadOnlyList<ColorRgba> data, int width, int height)
@@ -1091,6 +1292,7 @@ namespace MphRead
             GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba, width, height, 0,
                 PixelFormat.Rgba, PixelType.UnsignedByte, data.ToArray());
             GL.BindTexture(TextureTarget.Texture2D, 0);
+            _flatColors[_textureCount] = AverageOf(data);
             return _textureCount;
         }
 
@@ -1100,6 +1302,18 @@ namespace MphRead
             GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba, width, height, 0,
                 PixelFormat.Rgba, PixelType.UnsignedByte, data.ToArray());
             GL.BindTexture(TextureTarget.Texture2D, 0);
+            // this binding may already have had a different picture in it
+            _flatColors[bindingId] = AverageOf(data);
+        }
+
+        private static Vector3 AverageOf(IReadOnlyList<ColorRgba> data)
+        {
+            var average = new FlatColor();
+            for (int i = 0; i < data.Count; i++)
+            {
+                average.Add(data[i]);
+            }
+            return average.Result;
         }
 
         public void UpdateMaterials(Model model, int recolorId)
@@ -1142,6 +1356,19 @@ namespace MphRead
         public void OnUpdateFrame()
         {
             GL.BindFramebuffer(FramebufferTarget.Framebuffer, _frameBuffer);
+            // The scene's own target, which the resolution scale may have made
+            // smaller than the window. Reallocated here rather than only on a
+            // window resize, so moving the slider during a match is seen.
+            Vector2i target = RenderSize;
+            if (target != _targetSize)
+            {
+                OnResize();
+                target = _targetSize;
+            }
+            // Before the frame is drawn into it, since this swaps what the
+            // depth is drawn into.
+            UpdateDepthAttachment(target);
+            GL.Viewport(0, 0, target.X, target.Y);
             GL.UseProgram(_shaderProgramId);
             LoadAndUnload();
             // todo: FPS stuff
@@ -1357,8 +1584,9 @@ namespace MphRead
 
         public byte[]? ReadSceneTarget(out int width, out int height)
         {
-            width = Size.X;
-            height = Size.Y;
+            Vector2i target = _targetSize;
+            width = target.X;
+            height = target.Y;
             if (_frameBuffer == 0)
             {
                 return null;
@@ -1382,8 +1610,445 @@ namespace MphRead
             _advanceOneFrame = false;
         }
 
+        /// <summary>
+        /// Give the offscreen target a depth buffer the ink pass can read, or
+        /// take it away again.
+        ///
+        /// A renderbuffer is the cheaper attachment and is what the target has
+        /// whenever nothing needs to read the depth back -- which is every
+        /// frame that is not cel shaded, and matters most on a phone, where a
+        /// depth *texture* has to be written out to memory that a tiler would
+        /// otherwise never touch. So the swap follows the setting rather than
+        /// being made once at startup, and turning cel shading on from the
+        /// pause menu grows outlines on the next frame instead of the next
+        /// match.
+        ///
+        /// A driver that will not complete the framebuffer with a depth
+        /// texture gets the renderbuffer back and is not asked again; the
+        /// banding still works, and the alternative is a target that draws
+        /// nothing at all.
+        /// </summary>
+        private void UpdateDepthAttachment(Vector2i target)
+        {
+            bool want = !_depthTextureRefused && Mods.RenderOptions.CelShading
+                && Mods.RenderOptions.CelEdge > 0;
+            if (want == (_depthTexture != 0))
+            {
+                return;
+            }
+            if (!want)
+            {
+                GL.FramebufferRenderbuffer(FramebufferTarget.Framebuffer,
+                    FramebufferAttachment.DepthStencilAttachment, RenderbufferTarget.Renderbuffer,
+                    _renderBuffer);
+                GL.DeleteTexture(_depthTexture);
+                _textureCount--;
+                _depthTexture = 0;
+                return;
+            }
+            _depthTexture = GL.GenTexture();
+            _textureCount++;
+            GL.BindTexture(TextureTarget.Texture2D, _depthTexture);
+            GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Depth24Stencil8,
+                target.X, target.Y, 0, PixelFormat.DepthStencil, PixelType.UnsignedInt248, IntPtr.Zero);
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Nearest);
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Nearest);
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
+            GL.BindTexture(TextureTarget.Texture2D, 0);
+            GL.FramebufferTexture2D(FramebufferTarget.Framebuffer,
+                FramebufferAttachment.DepthStencilAttachment, TextureTarget.Texture2D, _depthTexture, 0);
+            _claimedQuantum = MeasureDepthQuantum();
+            // Until a frame has been looked at, the driver's own answer is the
+            // best there is.
+            _depthQuantum = _claimedQuantum;
+            FramebufferErrorCode status = GL.CheckFramebufferStatus(FramebufferTarget.Framebuffer);
+            if (status != FramebufferErrorCode.FramebufferComplete)
+            {
+                Console.WriteLine($"[render] this driver will not read the scene's depth back ({status}); "
+                    + "cel shading keeps its banding and goes without the outline.");
+                _depthTextureRefused = true;
+                GL.FramebufferRenderbuffer(FramebufferTarget.Framebuffer,
+                    FramebufferAttachment.DepthStencilAttachment, RenderbufferTarget.Renderbuffer,
+                    _renderBuffer);
+                GL.DeleteTexture(_depthTexture);
+                _textureCount--;
+                _depthTexture = 0;
+            }
+        }
+
+        /// <summary>
+        /// One step of the depth buffer, as the ink pass has to treat it.
+        ///
+        /// Asked for rather than assumed. `Depth24Stencil8` is what this code
+        /// requests, but a driver is free to satisfy it with less, and the ink
+        /// pass is looking for a second difference around a millionth of the
+        /// stored value -- so being wrong about this by a factor of two
+        /// hundred is the difference between an outline and straight black
+        /// lines drawn along every step of the buffer, on every flat wall.
+        ///
+        /// The depth *half* of the attachment is what gets asked: both GL and
+        /// ES answer `INVALID_OPERATION` for a component size of
+        /// `DEPTH_STENCIL_ATTACHMENT` itself. Anything unexpected falls back
+        /// to the 24 bits that were requested, which is what this assumed
+        /// before it asked at all.
+        /// </summary>
+        private float MeasureDepthQuantum()
+        {
+            const int requested = 24;
+            int bits = requested;
+            bool answered = false;
+            try
+            {
+                while (GL.GetError() != OpenTK.Graphics.OpenGL.ErrorCode.NoError)
+                {
+                }
+                GL.GetFramebufferAttachmentParameter(FramebufferTarget.Framebuffer,
+                    FramebufferAttachment.DepthAttachment,
+                    FramebufferParameterName.FramebufferAttachmentDepthSize, out int answer);
+                if (GL.GetError() == OpenTK.Graphics.OpenGL.ErrorCode.NoError
+                    && answer >= 8 && answer <= 32)
+                {
+                    bits = answer;
+                    answered = true;
+                }
+            }
+            catch (Exception)
+            {
+                // A driver that will not answer is not a reason to stop drawing.
+            }
+            if (!_saidDepthSize)
+            {
+                // Once a process, and always rather than only when it
+                // surprises: this is the one number that says whether the ink
+                // pass has anything to work with, and the machine that needs
+                // to be asked is the one nobody here can plug in.
+                _saidDepthSize = true;
+                Console.WriteLine(answered
+                    ? $"[render] cel outline: the depth buffer is {bits} bits"
+                    : $"[render] cel outline: the driver would not say how deep the depth "
+                        + $"buffer is; assuming the {requested} that were asked for");
+            }
+            return 1f / (MathF.Pow(2, bits) - 1);
+        }
+
+        private static bool _saidDepthSize;
+
+        /// <summary>
+        /// One step of the depth buffer as the driver reports it, and the same
+        /// thing as a frame of the ink pass found it to be. They are not the
+        /// same number: a driver reports the bits it stores and says nothing
+        /// about what its rasteriser's interpolation was worth on the way in,
+        /// and the second is the one the threshold has to clear.
+        /// </summary>
+        private float _claimedQuantum = 1f / (MathF.Pow(2, 24) - 1);
+
+        private float _depthQuantum = 1f / (MathF.Pow(2, 24) - 1);
+
+        /// <summary>
+        /// Draw the ink line over the finished scene, inside the offscreen
+        /// target.
+        ///
+        /// A silhouette is not visible to the fragment that is on it: it is a
+        /// place where this surface and the one behind it differ, which only a
+        /// pass that can look at its neighbours can find. So the scene is
+        /// copied to a texture of its own -- on the GPU, with no round trip
+        /// through the CPU -- and read back a texel at a time by
+        /// <see cref="Shaders.CelFragmentShader"/>.
+        ///
+        /// Inside the target rather than over the window because the helmet,
+        /// the HUD and the fade are drawn after it and must not be outlined,
+        /// and because <see cref="ReadSceneTarget"/> is where every screenshot
+        /// and every map preview comes from: a line drawn later would be in
+        /// the game and missing from all of them.
+        /// </summary>
+        private void DrawCelOutline()
+        {
+            if (!Mods.RenderOptions.CelShading || Mods.RenderOptions.CelEdge <= 0
+                || _celTexture == 0 || _celShaderProgramId == 0 || _depthTexture == 0)
+            {
+                return;
+            }
+            Vector2i target = _targetSize;
+            // The scene, kept where the pass can read it. First, because
+            // everything below draws over the target -- including the probe,
+            // which is why it can afford to.
+            GL.BindTexture(TextureTarget.Texture2D, _celTexture);
+            GL.CopyTexSubImage2D(TextureTarget.Texture2D, 0, 0, 0, 0, 0, target.X, target.Y);
+            if (_calibrateInk)
+            {
+                _calibrateInk = false;
+                CalibrateInk(target);
+            }
+            DrawCelQuad(target, probe: false);
+        }
+
+        /// <summary>
+        /// The ink pass's own target: the scene's colour texture and nothing
+        /// else.
+        ///
+        /// Built once and kept. The colour attachment is refreshed only if the
+        /// texture it names ever changes -- a resize does not change it, since
+        /// <see cref="OnResize"/> re-specifies the same texture name rather
+        /// than making a new one, so in practice this is one attachment call
+        /// for the life of the renderer.
+        /// </summary>
+        private int CelFrameBuffer()
+        {
+            if (_celFrameBuffer == 0)
+            {
+                _celFrameBuffer = GL.GenFramebuffer();
+            }
+            if (_celFrameBufferColor != _screenTexture)
+            {
+                GL.BindFramebuffer(FramebufferTarget.Framebuffer, _celFrameBuffer);
+                GL.FramebufferTexture2D(FramebufferTarget.Framebuffer,
+                    FramebufferAttachment.ColorAttachment0, TextureTarget.Texture2D,
+                    _screenTexture, 0);
+                _celFrameBufferColor = _screenTexture;
+            }
+            return _celFrameBuffer;
+        }
+
+        /// <summary>
+        /// The pass itself: the finished scene out of <c>_celTexture</c>, the
+        /// depth the scene left behind, and a quad over the whole target.
+        /// </summary>
+        private void DrawCelQuad(Vector2i target, bool probe)
+        {
+            GL.ActiveTexture(TextureUnit.Texture1);
+            GL.BindTexture(TextureTarget.Texture2D, _depthTexture);
+            GL.ActiveTexture(TextureUnit.Texture0);
+            GL.BindTexture(TextureTarget.Texture2D, _celTexture);
+            GL.UseProgram(_celShaderProgramId);
+            GL.Uniform1(_shaderLocations.CelTexelWidth, 1f / target.X);
+            GL.Uniform1(_shaderLocations.CelTexelHeight, 1f / target.Y);
+            GL.Uniform1(_shaderLocations.CelOutline, Mods.RenderOptions.CelEdge);
+            GL.Uniform1(_shaderLocations.CelNearPlane, _nearClip);
+            GL.Uniform1(_shaderLocations.CelFarPlane, _useClip ? _farClip : 10000f);
+            GL.Uniform1(_shaderLocations.CelDepthQuantum, _depthQuantum);
+            GL.Uniform1(_shaderLocations.CelProbe, probe ? 1 : 0);
+            // Off the framebuffer for the length of the pass. Sampling a
+            // texture that is attached to the framebuffer being drawn into is
+            // undefined in OpenGL ES whether or not anything writes to it --
+            // desktop GL forgives the read-only case and ES does not -- and
+            // this reads the depth while drawing colour into the same target.
+            // Two calls a frame; the depth is already in memory as a texture,
+            // so there is nothing here for a tiler to resolve that it was not
+            // resolving anyway.
+            // Draw through a target that does not have the depth attached,
+            // rather than taking the depth off the one that does.
+            //
+            // Sampling a texture attached to the framebuffer being drawn into
+            // is undefined in OpenGL ES whether or not anything writes to it,
+            // and this reads the depth while drawing colour -- so the two had
+            // to be separated somehow. Detaching and reattaching was the first
+            // way and it is the expensive one: changing an attachment on a
+            // bound framebuffer makes a tile-based GPU flush the tile buffer
+            // and load it back, twice a frame, over the whole screen. Measured
+            // on a Mali-G78 at 2400x1080 that alone was 32 ms a frame -- cel
+            // shading cost 58 ms a frame against 25 ms without it, and 26 ms
+            // once this replaced it. Practically the entire cost of the
+            // feature was the two calls, not the pass.
+            //
+            // An ordinary framebuffer switch is a path every driver expects.
+            // The colour attachment is the same texture, so the pass still
+            // paints the scene the rest of the frame is drawing into.
+            GL.BindFramebuffer(FramebufferTarget.Framebuffer, CelFrameBuffer());
+            GL.Disable(EnableCap.DepthTest);
+            GL.Disable(EnableCap.Blend);
+            GL.Disable(EnableCap.CullFace);
+            GL.Begin(PrimitiveType.TriangleStrip);
+            // top right
+            GL.TexCoord3(1f, 1f, 0f);
+            GL.Vertex3(1f, 1f, 0f);
+            // top left
+            GL.TexCoord3(0f, 1f, 0f);
+            GL.Vertex3(-1f, 1f, 0f);
+            // bottom right
+            GL.TexCoord3(1f, 0f, 0f);
+            GL.Vertex3(1f, -1f, 0f);
+            // bottom left
+            GL.TexCoord3(0f, 0f, 0f);
+            GL.Vertex3(-1f, -1f, 0f);
+            GL.End();
+            GL.BindTexture(TextureTarget.Texture2D, 0);
+            GL.ActiveTexture(TextureUnit.Texture1);
+            GL.BindTexture(TextureTarget.Texture2D, 0);
+            GL.ActiveTexture(TextureUnit.Texture0);
+            // Back to the target the rest of the frame is drawn into, before
+            // anything else can find the wrong one bound.
+            GL.BindFramebuffer(FramebufferTarget.Framebuffer, _frameBuffer);
+            GL.Enable(EnableCap.DepthTest);
+        }
+
+        /// <summary>
+        /// What the ink has to clear before it is believed, in the pass's own
+        /// units, measured on this machine. Zero until a frame has been looked
+        /// at; the shader's fixed threshold applies until then.
+        /// </summary>
+        private bool _calibrateInk = true;
+
+        /// <summary>
+        /// Find out what a flat surface's kink really measures here, and put
+        /// the ink threshold above it.
+        ///
+        /// The pass is looking for a second difference around a millionth of
+        /// the stored depth, so it is only as good as the depth it is handed,
+        /// and how good that is cannot be asked. A driver reports the bits it
+        /// stores; it does not report what its rasteriser's interpolation was
+        /// worth on the way in, and no arithmetic in the shader recovers what
+        /// never arrived. That is the difference between this machine, where a
+        /// flat wall measures 0.004 to 0.009 against a threshold of 1.1, and a
+        /// phone drawing regular lines across every surface in the room.
+        ///
+        /// So it is measured. One frame of this pass in probe mode paints
+        /// log2 of the kink instead of the picture, that frame is read back,
+        /// and the median over what was drawn stands for the flat surfaces:
+        /// most of any frame is flat surface, and an edge measures hundreds,
+        /// so edges sit in the tail where they cannot move a median. Six times
+        /// that becomes the floor.
+        ///
+        /// Once a scene, in the same frame as the real pass and before it, so
+        /// nobody ever sees the probe -- the scene has already been copied out
+        /// to <c>_celTexture</c> by then, and the real pass paints every pixel
+        /// back from it. Colour is read rather than depth because colour is
+        /// what a GL ES driver is required to hand back.
+        /// </summary>
+        private void CalibrateInk(Vector2i target)
+        {
+            // A centred patch: the middle of a frame is the room, and the
+            // edges of one are often sky, or the weapon. Big enough to be a
+            // sample, small enough not to be a stall.
+            int side = Math.Min(384, Math.Min(target.X, target.Y));
+            if (side < 32)
+            {
+                return;
+            }
+            int x = (target.X - side) / 2;
+            int y = (target.Y - side) / 2;
+            var pixels = new byte[side * side * 4];
+            try
+            {
+                DrawCelQuad(target, probe: true);
+                GL.ReadPixels(x, y, side, side, PixelFormat.Rgba, PixelType.UnsignedByte, pixels);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[render] cel outline: could not measure the depth ({ex.Message}); "
+                    + "keeping the fixed threshold");
+                return;
+            }
+            var drawn = new List<byte>(side * side / 4);
+            for (int i = 0; i < pixels.Length; i += 4)
+            {
+                // Zero is "nothing was drawn here", which is not a measurement.
+                if (pixels[i] != 0)
+                {
+                    drawn.Add(pixels[i]);
+                }
+            }
+            if (drawn.Count < side * side / 8)
+            {
+                // Almost nothing in the middle of the frame: a fade, or a wall
+                // in the camera. Leave it for the next scene rather than
+                // calibrate against that.
+                _calibrateInk = true;
+                return;
+            }
+            // Only the pixels that measured *something*.
+            //
+            // This is the part that has to be got right, and the median over
+            // everything gets it wrong: a depth error is a step, so it shows
+            // up only where a step boundary falls, and on this phone that is
+            // about one pixel in thirty. The other twenty-nine measure exactly
+            // zero -- two neighbours rounded to the same value as the middle
+            // one -- so a median over all of them is zero however coarse the
+            // buffer is, and reports a perfect machine on the one that is not.
+            //
+            // Among the pixels that did measure something, the typical value
+            // is the step itself. Measured on a Mali-G78 it came out at
+            // 2.4e-4 over the walls, the middle distance and the floor alike,
+            // against the 6e-8 the same driver says it stores: the same number
+            // wherever the camera pointed, which is what a property of the
+            // machine should look like and what the median of everything
+            // never showed.
+            var kinks = new List<byte>(drawn.Count / 8);
+            foreach (byte value in drawn)
+            {
+                // 1 is the shader's clamp floor, which means "no kink here".
+                if (value > 1)
+                {
+                    kinks.Add(value);
+                }
+            }
+            if (kinks.Count < 64)
+            {
+                // A machine whose depth arrives intact, or a frame with no
+                // surface in it to judge by. Either way the driver's own
+                // answer is the best there is.
+                Console.WriteLine("[render] cel outline: the depth arrives intact here; "
+                    + "keeping the buffer's own step.");
+                return;
+            }
+            kinks.Sort();
+            byte median = kinks[kinks.Count / 2];
+            // The probe paints log2 of the kink in the depth buffer's own
+            // units, -32..0 over the byte. Most of a frame is flat surface and
+            // a real edge measures orders of magnitude more, so the median is
+            // what a flat surface costs here -- which is the depth error
+            // itself, and the number the shader wants.
+            float measured = MathF.Pow(2, (median / 255f - 1f) * 32f);
+            // Never below what the buffer stores: the median can land under
+            // one step of it on a frame of surfaces that happen to face the
+            // camera, and a floor under the truth protects nothing.
+            _depthQuantum = MathF.Max(_claimedQuantum, measured);
+            float ratio = measured / _claimedQuantum;
+            string howBad = ratio < 2f ? "which is what the buffer stores"
+                : ratio < 64f ? "which is coarser than it stores, and the ink threshold rises to match"
+                : "which is far coarser than it stores; only strong creases and silhouettes will ink";
+            Console.WriteLine($"[render] cel outline: a flat surface's depth is off by "
+                + $"{measured.ToString("0.#######e+0", System.Globalization.CultureInfo.InvariantCulture)} "
+                + $"here, {ratio.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)}x "
+                + $"the {_claimedQuantum.ToString("0.#######e+0", System.Globalization.CultureInfo.InvariantCulture)} "
+                + $"the driver stores -- {howBad}.");
+        }
+
+        /// <summary>
+        /// Frames a second, over the half second just gone.
+        ///
+        /// Measured here rather than in either head because both heads drive
+        /// the same method: the desktop from its window's render callback and
+        /// Android from the render thread's own loop. One number, measured the
+        /// same way, so the two are worth comparing with each other -- which
+        /// is most of what a counter is for.
+        ///
+        /// Wall clock, not the frame the engine thinks it is on: the point is
+        /// to catch the frames that took too long, and a fixed-step counter
+        /// cannot.
+        /// </summary>
+        public float FramesPerSecond { get; private set; }
+
+        private readonly Stopwatch _fpsClock = Stopwatch.StartNew();
+        private int _fpsFrames;
+
+        private void CountFrame()
+        {
+            _fpsFrames++;
+            double elapsed = _fpsClock.Elapsed.TotalSeconds;
+            // Long enough to be steady, short enough to answer "is it this
+            // corridor?" while you are still standing in it.
+            if (elapsed >= 0.5)
+            {
+                FramesPerSecond = (float)(_fpsFrames / elapsed);
+                _fpsFrames = 0;
+                _fpsClock.Restart();
+            }
+        }
+
         public bool OnRenderFrame()
         {
+            CountFrame();
             GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit | ClearBufferMask.StencilBufferBit);
             GL.ClearStencil(0);
 
@@ -1477,6 +2142,10 @@ namespace MphRead
                 UnsetHudLayerUniforms();
             }
 
+            // After the weapon, so it is drawn around too, and before the
+            // target is put on screen, so the helmet and the HUD are not.
+            DrawCelOutline();
+
             GL.Disable(EnableCap.CullFace);
             GL.UseProgram(_rttShaderProgramId);
             GL.Uniform1(_shaderLocations.LayerAlpha, 1f);
@@ -1499,6 +2168,11 @@ namespace MphRead
             }
 
             GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+            // Back to the window: everything from here down -- the quad, the
+            // helmet, the HUD and the fade -- is drawn at full size through
+            // the RTT program, not the one the scene was drawn with, so cel
+            // shading is already behind us and there is nothing to turn off.
+            GL.Viewport(0, 0, Size.X, Size.Y);
             GL.Clear(ClearBufferMask.ColorBufferBit);
             GL.Disable(EnableCap.DepthTest);
             GL.Enable(EnableCap.Blend);
@@ -2893,7 +3567,9 @@ namespace MphRead
         private void UpdateUniforms()
         {
             UseRoomLights();
-            GL.Uniform1(_shaderLocations.UseFog, _hasFog && _showFog ? 1 : 0);
+            GL.Uniform1(_shaderLocations.UseFog, _hasFog && FogOn ? 1 : 0);
+            GL.Uniform1(_shaderLocations.CelBands, Mods.RenderOptions.CelShading
+                ? Mods.RenderOptions.CelBands : 0);
             GL.Uniform1(_shaderLocations.ShowColors, _showColors ? 1 : 0);
             if (ProcessFrame)
             {
@@ -3494,6 +4170,12 @@ namespace MphRead
             GL.Uniform1(_shaderLocations.UseOverride, 0);
             GL.Uniform1(_shaderLocations.UsePaletteOverride, 0);
             GL.Uniform1(_shaderLocations.UseFog, 0);
+            // The damage flash, the locator icons and the intro filter are HUD
+            // drawn through the scene's program because they are models. They
+            // are not part of the world, so they are not flattened and not
+            // banded; UpdateUniforms puts the bands back next frame.
+            GL.Uniform1(_shaderLocations.UseFlat, 0);
+            GL.Uniform1(_shaderLocations.CelBands, 0);
             if (_faceCulling)
             {
                 GL.Enable(EnableCap.CullFace);
@@ -3560,7 +4242,15 @@ namespace MphRead
             GL.BindTexture(TextureTarget.Texture2D, 0);
         }
 
-        public void DrawHudObject(HudObjectInstance inst, int mode = 0)
+        /// <param name="scale">
+        /// Multiplies the size the object is drawn at, without touching the
+        /// size it is *cut out* at. Those are the same field on the instance --
+        /// Width and Height say how big a glyph is in the character data as
+        /// well as how big it lands on screen -- so shrinking text by setting
+        /// them re-cuts the font at the wrong size and draws confetti. This is
+        /// the destination, and only the destination.
+        /// </param>
+        public void DrawHudObject(HudObjectInstance inst, int mode = 0, float scale = 1)
         {
             if (!inst.Enabled)
             {
@@ -3600,6 +4290,11 @@ namespace MphRead
                 float aspect = width / height;
                 width = width / 256 * viewWidth;
                 height = width / aspect;
+            }
+            if (scale != 1)
+            {
+                width *= scale;
+                height *= scale;
             }
             float viewLeft = -viewWidth / 2;
             float viewTop = viewHeight / 2;
@@ -3752,7 +4447,7 @@ namespace MphRead
 
         private void DoMaterial(RenderItem item)
         {
-            GL.Uniform1(_shaderLocations.UseLight, _lighting && item.Lighting ? 1 : 0);
+            GL.Uniform1(_shaderLocations.UseLight, LightingOn && item.Lighting ? 1 : 0);
             // MPH applies the material colors initially by calling DIF_AMB with bit 15 set,
             // so the diffuse color is always set as the vertex color to start
             // (the emission color is set to white if lighting is disabled or black if lighting is enabled; we can just ignore that)
@@ -3771,8 +4466,8 @@ namespace MphRead
             if (item.HasTexture)
             {
                 GL.BindTexture(TextureTarget.Texture2D, item.TextureBindingId);
-                int minParameter = _textureFiltering ? (int)TextureMinFilter.Linear : (int)TextureMinFilter.Nearest;
-                int magParameter = _textureFiltering ? (int)TextureMagFilter.Linear : (int)TextureMagFilter.Nearest;
+                int minParameter = FilteringOn ? (int)TextureMinFilter.Linear : (int)TextureMinFilter.Nearest;
+                int magParameter = FilteringOn ? (int)TextureMagFilter.Linear : (int)TextureMagFilter.Nearest;
                 GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, minParameter);
                 GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, magParameter);
                 switch (item.XRepeat)
@@ -3810,6 +4505,7 @@ namespace MphRead
                 GL.UniformMatrix4(_shaderLocations.TextureMatrix, transpose: false, ref texcoordMatrix);
             }
             GL.Uniform1(_shaderLocations.UseTexture, item.HasTexture && _showTextures ? 1 : 0);
+            SetFlatColor(item.HasTexture && _showTextures ? item.TextureBindingId : -1);
             Vector4? overrideColor = item.OverrideColor;
             if (overrideColor != null)
             {
@@ -3830,6 +4526,28 @@ namespace MphRead
             else
             {
                 GL.Uniform1(_shaderLocations.UsePaletteOverride, 0);
+            }
+        }
+
+        /// <summary>
+        /// Tell the fragment shader which flat colour stands in for the
+        /// texture about to be drawn, or that it should use the texture.
+        ///
+        /// Off unless cel shading is on, and off for anything whose binding
+        /// was never seen going to the card -- there is no average for it, and
+        /// a wrong flat colour is far worse than a texture.
+        /// </summary>
+        private void SetFlatColor(int bindingId)
+        {
+            if (Mods.RenderOptions.CelShading && bindingId != -1
+                && _flatColors.TryGetValue(bindingId, out Vector3 flat))
+            {
+                GL.Uniform1(_shaderLocations.UseFlat, 1);
+                GL.Uniform3(_shaderLocations.FlatColor, flat);
+            }
+            else
+            {
+                GL.Uniform1(_shaderLocations.UseFlat, 0);
             }
         }
 
@@ -4231,11 +4949,11 @@ namespace MphRead
             }
             else if (e.Key == Keys.F)
             {
-                _textureFiltering = !_textureFiltering;
+                FilteringOn = !FilteringOn;
             }
             else if (e.Key == Keys.L)
             {
-                _lighting = !_lighting;
+                LightingOn = !LightingOn;
             }
             else if (e.Key == Keys.Z)
             {
@@ -4268,7 +4986,7 @@ namespace MphRead
                 }
                 else
                 {
-                    _showFog = !_showFog;
+                    FogOn = !FogOn;
                 }
             }
             else if (e.Key == Keys.N)
@@ -4706,9 +5424,9 @@ namespace MphRead
             _sb.AppendLine($" - Ctrl+C toggles vertex colors ({OnOff(_showColors)})");
             _sb.AppendLine($" - Ctrl+Q toggles wireframe ({OnOff(_wireframe)})");
             _sb.AppendLine($" - B toggles face culling ({OnOff(_faceCulling)})");
-            _sb.AppendLine($" - F toggles texture filtering ({OnOff(_textureFiltering)})");
-            _sb.AppendLine($" - L toggles lighting ({OnOff(_lighting)})");
-            _sb.AppendLine($" - G toggles fog ({OnOff(_showFog)})");
+            _sb.AppendLine($" - F toggles texture filtering ({OnOff(FilteringOn)})");
+            _sb.AppendLine($" - L toggles lighting ({OnOff(LightingOn)})");
+            _sb.AppendLine($" - G toggles fog ({OnOff(FogOn)})");
             _sb.AppendLine($" - Shift+E toggles Scan Visor ({OnOff(_scanVisor)})");
             _sb.AppendLine($" - I toggles invisible entities ({invisible})");
             _sb.AppendLine($" - Z toggles volume display ({volume})");

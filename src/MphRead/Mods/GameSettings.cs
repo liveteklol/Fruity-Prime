@@ -62,6 +62,21 @@ namespace MphRead.Mods
                 // console path makes the same substitution.
                 Scene.Language = Paths.MphKey == "AMHK0" ? Language.Japanese : language;
             }
+            // Read by the renderer as it builds each scene, so a change here
+            // reaches the next match; the resolution scale reaches the current
+            // one on its next resize.
+            RenderOptions.ResolutionScale = RenderOptions.ParseScale(settings.ResolutionScale,
+                RenderOptions.ResolutionScale);
+            RenderOptions.Lighting = RenderOptions.ParseOnOff(settings.Lighting, RenderOptions.Lighting);
+            RenderOptions.Fog = RenderOptions.ParseOnOff(settings.Fog, RenderOptions.Fog);
+            RenderOptions.TextureFiltering = RenderOptions.ParseOnOff(settings.TextureFiltering,
+                RenderOptions.TextureFiltering);
+            RenderOptions.ShowFps = RenderOptions.ParseOnOff(settings.ShowFps, RenderOptions.ShowFps);
+            RenderOptions.CelShading = RenderOptions.ParseOnOff(settings.CelShading,
+                RenderOptions.CelShading);
+            RenderOptions.CelBands = RenderOptions.ParseInt(settings.CelBands, RenderOptions.CelBands);
+            RenderOptions.CelEdge = RenderOptions.ParseInt(settings.CelEdge,
+                (int)Math.Round(RenderOptions.CelEdge * 100)) / 100f;
         }
 
         /// <summary>

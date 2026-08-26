@@ -487,6 +487,12 @@ namespace MphRead.Entities
             }
             PlayerCount = 0;
             PlayersCreated = 0;
+            // Only the networked paths ever move this, and nothing moved it
+            // back: a client that joined a server on slot 1 kept pointing at
+            // slot 1 for the rest of the process, so the next offline match
+            // made Main a bot -- the player watched the AI play and their
+            // input went to its controls.
+            MainPlayerIndex = 0;
         }
 
         public static PlayerEntity? Create(Hunter hunter, int recolor)

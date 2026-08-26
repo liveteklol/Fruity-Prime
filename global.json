@@ -1,0 +1,7 @@
+{
+  "//": "Build with the SDK this repository targets. Every project here is net9.0, and a runner image carries a newer SDK as well as the one setup-dotnet installs -- so CI was installing 9.0.x and then building with 10.0.400, which is both a different compiler from the one anyone tests with and where 'the workload net9.0-android is out of support' (NETSDK1202) came from. latestFeature rather than a pinned patch: any 9.0.x will do, a 10.x will not.",
+  "sdk": {
+    "version": "9.0.100",
+    "rollForward": "latestFeature"
+  }
+}

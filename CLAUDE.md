@@ -25,7 +25,7 @@ area is the one being touched.
 | Path | What |
 |---|---|
 | `~/MphRead-dev` | the source. Upstream is NoneGiven/MphRead; everything added lives under `src/MphRead/Mods/` so pulling upstream stays a fast-forward |
-| `src/MphRead.Android/` | the Android head: the same sources, an APK, and a front screen. No match yet |
+| `src/MphRead.Android/` | the Android head: the same sources, an APK, a front screen and a match, over GL ES and touch controls |
 | `src/MphRead/Mods/Network/` | the whole multiplayer feature |
 | `src/MphRead/Mods/Launcher/` | the launcher: `Gui/` is every window (Avalonia, all platforms), `Portable/` is the logic and the text screen |
 | `~/mph-net-test/` | the test rig: a copy of the build in `bin/`, extracted game files, `run-check.sh`, `compare-reports.py` |
@@ -87,7 +87,9 @@ export ALSOFT_DRIVERS=null PULSE_SERVER=   # else ALSA retries stall frames
 | `~/mph-net-test/run-lag.sh MS SECONDS hunter...` | the same check against a loopback server behind `udp-lag.py`, which holds every datagram for `MS` before passing it on. A latency bug reproduced at a number you chose, rather than at whatever the internet is doing -- and the Pi answers in 7-17 ms, so it is the *worse* instrument for one |
 | `MphRead -maptest "ROOM" -players 8 -seconds 22` | load one room with a full house, drive every player, and report what the map holds and whether it survived |
 | `MphRead -maptest "ROOM" -players 8 -bots` | the same, but AI bots instead of the scripted tour -- a different code path, the only one that finds what only `PlayerAi` touches |
-| `MphRead -rooms` | list every multiplayer room, one per line, for a shell loop |
+| `MphRead -rooms` | list every multiplayer room, one per line, for a shell loop. **27** is the whole cartridge and the right answer with an empty `maps/`; anything more is a custom map |
+| `MphRead -mapgen ["NAME"]` | generate the room binaries for the custom maps in `maps/`, from the player's own textures. **Nothing ships there** -- the folder is the hook, not a map pack. `-mapmaterials "ROOM"` prints what textures a room can lend. A map is a JSON file; the `.bin` it produces is never committed. `.claude/mapgen/MAP-PIPELINE.md` |
+| `MphRead -cel on\|off [-celbands N] [-celedge N]` / `-fog on\|off` | render options for every path that never opens a launcher, which is every screenshot command. `.claude/render/CEL-SHADING.md` |
 | `MphRead -mechanics` | print the catalogue in `MECHANICS.md`, generated from the game's own tables |
 | `MphRead` (no arguments, Windows or macOS) | the front screen. The Windows build is a GUI binary, so double-clicking it opens the launcher with no terminal behind it |
 | `MphRead -menu` | the console menu, for people who typed something |
@@ -100,8 +102,8 @@ export ALSOFT_DRIVERS=null PULSE_SERVER=   # else ALSA retries stall frames
 
 ## The launcher
 
-**One launcher, in Avalonia, on Windows, Linux, macOS and (front screen only)
-Android** — one thread, one toolkit setup per process
+**One launcher, in Avalonia, on Windows, Linux, macOS and Android** — one
+thread, one toolkit setup per process
 (`GuiLauncher.EnsureSetup`), each visit a nested dispatcher loop. `-launcher`
 opens a front screen, not a settings dialog: a map picture on the left, the
 things you can do on the right.
@@ -137,6 +139,27 @@ Gotchas worth keeping in view without opening another file:
 Deep dive (UI components, settings window, first-run/extraction, macOS/Android):
 `.claude/launcher/LAUNCHER-OVERVIEW.md`, `LAUNCHER-DESIGN.md`,
 `LAUNCHER-SETTINGS.md`, `LAUNCHER-FIRSTRUN.md`.
+
+## Android
+
+The head builds a playable APK. The engine's `GL` is redirected to OpenGL ES 3.0
+by **one using alias** in the Android csproj, pointing the name at
+`Mods/Render/GlEs.cs`, which emulates the four things ES does not have —
+immediate mode, display lists, the current colour and the alpha test — so not
+one call site in upstream's renderer changed. Input is the same trick from the
+other end: `AndroidInput` hands the scene a keyboard and a mouse of its own and
+presses whatever the player has bound, which is why rebinding, aim sensitivity
+and the DS weapon wheel all work without touching `ProcessAllInput`.
+
+**The front screen runs; the match has never been loaded.** An emulator (API
+30, x86_64, software CPU and GL) shows the screen and the game-files card; what
+that box cannot do is load a room, having no extracted game files, so the
+renderer and the touch controls are still unmeasured. Two traps that killed the
+app before any of this project's code ran — an activity theme that was not an
+AppCompat descendant, and a Debug APK that carries no managed code unless
+`EmbedAssembliesIntoApk=true` — are written up with the rest in
+`.claude/android/ANDROID-PORT.md`, along with the build recipe, the game-files
+directory, and how to run an emulator here.
 
 ## Updating
 

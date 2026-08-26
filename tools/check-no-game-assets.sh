@@ -20,7 +20,10 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 ALLOW_FILE="tools/asset-guard-allow.txt"
 # Extensions that only ever come from the game's files, plus the picture
 # formats a preview would be saved as.
-BANNED_EXT='nds|bin|arc|narc|sdat|sbin|spc|wav|mp3|ogg|brstm|png|jpg|jpeg|gif|bmp|tga|dds'
+# pk3 is here for the map importer's sake: a Quake archive in the repository
+# is somebody's copy of a game they bought, and the one level that does travel
+# with us is a stripped .bsp small enough to read (see maps/README.md).
+BANNED_EXT='nds|bin|arc|narc|sdat|sbin|spc|wav|mp3|ogg|brstm|png|jpg|jpeg|gif|bmp|tga|dds|pk3'
 # Directories the extraction and the preview cache write into.
 BANNED_PATH='(^|/)(thumbnails|files|_archives|Savedata|netcheck-shots)/|(^|/)paths\.txt$|(^|/)netlog-[^/]*\.txt$'
 # Nothing *tracked by git* should be this big; an asset dump would be. Build

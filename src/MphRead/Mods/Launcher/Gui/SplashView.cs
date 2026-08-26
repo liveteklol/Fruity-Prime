@@ -45,8 +45,6 @@ namespace MphRead.Mods.Launcher.Gui
         });
 
         private Bitmap? _image;
-        private string _caption = "";
-        private string _note = "";
         private double _bottomInset;
 
         /// <summary>
@@ -72,10 +70,8 @@ namespace MphRead.Mods.Launcher.Gui
         }
 
         /// <summary>Show a map's preview, or the title card when there is none.</summary>
-        public void ShowRoom(string? roomKey, string note = "")
+        public void ShowRoom(string? roomKey)
         {
-            _caption = roomKey ?? "";
-            _note = note;
             Bitmap? next = null;
             if (roomKey != null && roomKey.Length > 0)
             {
@@ -150,18 +146,33 @@ namespace MphRead.Mods.Launcher.Gui
                 }
             }, new Rect(0, body.Height - 90 - _bottomInset, body.Width, 90 + _bottomInset));
 
-            if (_caption.Length > 0)
+            DrawBrand(context, body, _bottomInset);
+        }
+
+        /// <summary>
+        /// The wordmark over the picture, where the map's name used to be.
+        ///
+        /// The name and the word Ready under it said nothing a person needed:
+        /// which map is about to load is what the card beside this already
+        /// says, and Ready was true of every state the screen was ever in. The
+        /// logo is cut with its own transparency, so the picture behind it
+        /// shows through and the wash above keeps it legible over a bright one.
+        /// </summary>
+        private static void DrawBrand(DrawingContext context, Rect body, double bottomInset)
+        {
+            Bitmap? brand = _brand.Value;
+            if (brand == null || body.Width < 80)
             {
-                var caption = new FormattedText(_caption, CultureInfo.InvariantCulture,
-                    FlowDirection.LeftToRight, GuiTheme.Face(true), 20, GuiTheme.TextBrush);
-                context.DrawText(caption, new Point(24, body.Height - 58 - _bottomInset));
+                return;
             }
-            if (_note.Length > 0)
-            {
-                var note = new FormattedText(_note, CultureInfo.InvariantCulture,
-                    FlowDirection.LeftToRight, GuiTheme.Face(false), 13, GuiTheme.TextDimBrush);
-                context.DrawText(note, new Point(24, body.Height - 32 - _bottomInset));
-            }
+            // Never wider than the panel it sits in, never blown up past its
+            // own resolution, and never so wide that it becomes the picture
+            // rather than a mark on it.
+            double width = Math.Min(Math.Min(body.Width - 48, 320), brand.Size.Width);
+            double height = width * brand.Size.Height / brand.Size.Width;
+            context.DrawImage(brand,
+                new Rect(0, 0, brand.Size.Width, brand.Size.Height),
+                new Rect(24, body.Height - 26 - height - bottomInset, width, height));
         }
 
         /// <summary>Fill the panel, cropping the overflow, rather than letterboxing.</summary>

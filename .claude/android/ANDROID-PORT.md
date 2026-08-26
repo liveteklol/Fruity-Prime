@@ -1,0 +1,420 @@
+# Android — the renderer and the touch controls
+
+The head is `src/MphRead.Android/`. It compiles the same sources as the desktop
+project with `ANDROID` defined, and it now builds a match, not just a screen.
+Two things had to be answered to get there: the engine draws through OpenTK's
+desktop GL, and it reads a keyboard and a mouse. Neither exists on a phone.
+
+## The renderer: one alias
+
+The engine calls `GL.Something` from about 250 places in files that are
+upstream's. Rewriting those was not an option -- everything this project adds
+lives under `Mods/` so a pull from NoneGiven/MphRead stays a fast-forward. So
+the Android head points the *name* somewhere else, in one line of its csproj:
+
+```xml
+<Using Include="MphRead.Mods.Render.GlEs" Alias="GL" />
+```
+
+A global using alias is resolved before the `using OpenTK.Graphics.OpenGL;` at
+the top of those files, in every namespace of the compilation (checked: it wins
+in `MphRead` and in `MphRead.Formats` alike). Not one call site changed, and the
+desktop build never sees it. The enum types the call sites pass are still the
+desktop ones -- they are the same GL constants -- and `GlEs` casts them across
+to `OpenTK.Graphics.ES30`.
+
+`Mods/Render/GlEs.cs` then answers the four things ES 3.0 does not have:
+
+| Missing | Answer |
+|---|---|
+| Immediate mode | `Begin`/`Vertex3`/`End` accumulate into a vertex buffer. Quads, quad strips, triangle strips and fans become indexed triangles; `LineLoop` becomes lines |
+| Display lists | `NewList`/`EndList` bake that buffer into a VBO, an IBO and a VAO. `CallList` is one `glDrawElements` -- the same trade the display list was making |
+| The current colour | A vertex with no colour of its own takes the colour current at *execution* time, which is the `GL.Color3(item.Diffuse)` `DoMaterial` issues per render item. Vertices carry a flag; the ones without their own colour read the `imm_color` uniform |
+| `glAlphaFunc` | The engine asks for exactly two comparisons, Equal 1.0 and Less 1.0. The fragment shader discards on them |
+
+And one thing that is bookkeeping rather than emulation: the engine binds
+texture names it made up itself (`_textureCount++`), which a compatibility
+profile allows and ES does not. `GlEs` keeps a map from those to real names and
+creates one on first bind, with a single high-water counter so `GenTexture`
+keeps handing out the next number in the engine's own sequence.
+
+**What is lost:** `glPolygonMode`, so the wireframe and collision-volume debug
+views draw solid. Nothing a player sees uses it.
+
+## The shaders
+
+`Mods/Render/EsShaders.cs` holds the six shaders of `Shaders.cs` written for
+`#version 300 es`. The desktop ones are GLSL 1.20 reading `gl_Vertex`,
+`gl_Color`, `gl_Normal` and `gl_MultiTexCoord0` out of the fixed-function
+pipeline -- which is *why* the desktop build needs a compatibility profile and
+`MESA_GL_VERSION_OVERRIDE=4.5COMPAT`. The ES ones declare those four as
+attributes at fixed locations 0-4 and are otherwise the same program, expression
+for expression, plus `imm_color`/`a_color_set` and `alpha_test`.
+
+`GlEs.ShaderSource` substitutes them by reference as the engine compiles. They
+do not follow a change to `Shaders.cs` on their own, and a silent divergence
+would be a rendering bug with no message anywhere, so each is checked against
+the SHA-256 of the source it was written from and a mismatch throws with the
+name of the shader that moved. Recompute with the extractor in the commit
+message or by hand: normalise CRLF to LF first.
+
+Verified with `glslang` (16.5.0) when they were written, and since then by
+SwiftShader on the emulator, which compiled and linked all four programs --
+main, RTT, the shift program and the cel shading ink pass, the last three
+sharing the RTT vertex shader -- while drawing a room. That is a check that
+they compile, not a check that the picture is right; see the note on
+SwiftShader's own artefacts in `.claude/KNOWN-GAPS.md`.
+
+## The loop
+
+`GameView` is a **`SurfaceView` with an EGL context and a thread of its own**.
+Everything the engine does with GL -- a room's textures, its baked geometry,
+the shaders, the drawing -- happens on that thread, so the scene is *built*
+there rather than by whoever asked for the match. Loading blocks that thread
+for seconds, which is the right thread to block: the UI thread stays free and
+the loading notice on top keeps drawing.
+
+### Why not `GLSurfaceView`, which it used to be
+
+**Because `GLSurfaceView` answers a window event by making the UI thread wait
+for the GL thread.** `surfaceChanged` hands the new size over and then blocks
+until that thread has been all the way round its loop; `onPause` and
+`onResume` do the same with a handshake of their own. So any window event that
+landed while a room was loading froze the UI thread for the length of the
+load, and Android put its own "isn't responding" dialog over the black loading
+screen -- a white box over a black one, with nothing to press, which is what
+starting a match from portrait did.
+
+Measured here, with a room load stretched to 12 s and a window resize injected
+into it (`adb shell wm size`), against a heartbeat posted to the UI thread
+every 200 ms:
+
+| | worst gap on the UI thread |
+|---|---|
+| `GLSurfaceView` | **16,921 ms** |
+| our own EGL and thread | 1,092 ms, and nothing during the load |
+
+Android's input-dispatch ANR threshold is 5,000 ms.
+
+Waiting for the window to hold still before creating the view --
+`MainActivity.WaitForSteadyWindow` -- made that *rarer* and could never make it
+impossible: a phone resizes its own window whenever it likes, for the system
+bars, for insets, for a call. Now `surfaceCreated`, `surfaceChanged` and
+`surfaceDestroyed` write a field and return, and the loop picks the change up
+when it is next between frames.
+
+Two things come free from owning the context:
+
+- **It survives the surface going away and coming back**, so a match is not
+  lost to the home button. `GLSurfaceView` only kept it as a favour, through
+  `PreserveEGLContextOnPause`; here nothing destroys it until the match ends.
+- **Pausing is a flag**, not a handshake, so `OnPause` cannot block either.
+
+`surfaceDestroyed` is the one callback that *should* wait -- Android wants the
+surface unused by the time it returns -- and it does, for up to two seconds.
+Not longer: the render thread cannot answer from inside a room load, and
+hanging the UI thread is the thing this class exists to stop. A swap against a
+surface the framework has taken back returns false rather than crashing, which
+is handled by letting go and waiting for the next one.
+
+**The window should still have stopped moving before the match starts.** That
+is no longer what keeps the app from freezing, but a match that starts
+mid-rotation starts at the wrong size and re-lays-out under the player. So
+`MainActivity.WaitForSteadyWindow` does not create the `GameView` until the
+content view has held the same size for 250 ms and is landscape (or three
+seconds have passed and the display clearly will not turn). Waiting for the
+*configuration change* is not enough: it arrives before the window has been
+laid out at its new size. The orientation is then pinned with
+`ScreenOrientation.Locked` for the length of the load and released back to
+`SensorLandscape` once the match is on screen.
+
+**That wait is also the thing that can eat a start, and four ways it could
+were fixed.** The front screen is hidden the moment `StartMatch` is called and
+the `GameView` does not exist yet, so anything that delays the start is a
+black screen with nothing on it -- which is what "it will not start a map"
+looks like from the player's side. So:
+
+- The three-second deadline is **no longer conditional on the window having
+  settled**. It used to be `steady && waited >= RotateMs`, and a window that
+  never held still left the loop posting itself for ever. Waiting is a nicety;
+  starting is the job.
+- The loading notice goes up in `StartMatch`, not in `BeginMatch`, so there is
+  never a black screen with nothing on it. `ShowNotice` is shared and
+  `BringToFront`s it once the touch overlay is in.
+- **Back cancels a pending start** (`CancelPending`) and puts the front screen
+  back, rather than doing nothing because `InMatch` is still false.
+- **A second `StartMatch` while one is pending is refused.** It used to
+  overwrite `_orientationBefore` with the landscape it had just asked for, so
+  `EndMatch` would restore *that* and leave the front screen stuck sideways
+  for the rest of the session -- and pressing START twice is what a player
+  does when the first press seems to do nothing.
+
+There is also a hard 8 s give-up for the one case that cannot be started from
+at all -- a content view that never reports a size, which would build a scene
+for a zero-pixel window -- and it says so on screen instead of starting
+something the player can neither see nor leave. Every decision logs one
+`[android]` line with the sizes involved.
+
+The order is the desktop's: `GameState.ApplyPause()`, `Scene.OnUpdateFrame()`,
+`Scene.OnRenderFrame()`, `Scene.AfterRenderFrame()`, then `eglSwapBuffers`.
+
+The pacing is not. `RenderWindow` asks OpenTK for 60 updates a second; here the
+buffer swaps at the display's rate, which on a modern phone is 90 or 120, and
+**the update is the frame**: the render item lists are built during the update
+and cleared after the draw, so a render with no update in front of it draws
+nothing. Rendering more often than the game ticks is therefore not an option --
+the thread waits for the next 60 Hz tick instead.
+
+## The controls
+
+No hook in the engine's input path, and none needed. `ProcessAllInput` reads a
+`KeyboardState` and a `MouseState` once a frame and turns them into the
+`Keybind` flags the player code reads. `AndroidInput` hands the scene a keyboard
+and a mouse of its own and presses the keys the player has bound. OpenTK does
+not let anyone else build those two types, so the constructors and setters are
+reached by reflection, once, into delegates.
+
+Three things come free from doing it that way:
+
+- **Rebinding works.** A thumb on FIRE presses whatever `Controls.Shoot` says,
+  key or mouse button.
+- **Sensitivity and inverted aim work**, because aiming moves a pointer and the
+  engine reads the same delta it always did.
+- **The weapon wheel works**, because it was a touchscreen mechanic on the DS:
+  `UpdateWeaponSelect` reads the pointer's absolute position. While WEAPON is
+  held the pointer *is* the finger; the rest of the time it accumulates drag.
+
+Layout (`TouchControls`, drawn by `TouchOverlayView` with a Canvas rather than
+in GL -- it is a dozen circles that change when touched):
+
+| Control | Bind |
+|---|---|
+| Floating stick, left half | `MoveUp/Down/Left/Right` **and** `RollUp/Down/Left/Right`, eight-way. Both sets, because walking reads one and the morph ball the other |
+| FIRE | `Shoot` |
+| JUMP | `Jump` **and** `Boost` -- one button on the DS, and the same key by default: jumping on foot is boosting in the ball |
+| MORPH | `Morph` |
+| ALT | `AltAttack` |
+| WEAPON | `WeaponMenu`, held, with the pointer following the finger |
+| ZOOM | `Zoom` |
+| MENU | `Pause` |
+| Anywhere else on the right | aim |
+
+Drag is converted to density-independent pixels before it becomes pointer
+movement, so a swipe turns the same amount on any phone; `GameView.AimScale` is
+the one number to change if it feels wrong, and the player's own mouse
+sensitivity scales it after that.
+
+## Playing online
+
+`AndroidMatch.Build` is the head's half of `MatchStart.Launch`, and it was
+missing the networked half of it: it loaded `plan.RoomKey` and filled the slots
+with local players whatever the plan said. An online plan carries an **empty
+room key on purpose** — the front screen joins before it knows what is running —
+so joining a server failed with *"No room with this name is known"*, which is
+what an empty string is. It now defers to `NetLaunch.ServerRoom()` for the map
+*and the mode*, builds the slots with `NetLaunch.BuildPlayers`, and loads with
+`NetLaunch.RoomPlayerCount` so every client lays out the same world.
+
+## Game files
+
+The package's own directory is read-only, and the extracted game files are
+hundreds of megabytes the player has to copy onto the device themselves. So both
+`LauncherPrefs.Directory` and `GameFiles.Root` (added for this) point at
+`GetExternalFilesDir(null)` -- the directory reachable over USB under
+`Android/data/fr.livetek.fruityprime/files` without the app asking for a storage
+permission -- and that is made the working directory, because upstream's `Paths`
+reads `paths.txt` relative to it.
+
+Extract on a desktop, then copy `paths.txt` and the extracted folders there. The
+front screen says so when they are missing and has a "Check for game files"
+entry, since they arrive while it is already up.
+
+## Sound
+
+Both halves play, and neither of them the way the desktop does it.
+
+- **Music** goes through SoundFlow, which ships `libminiaudio.so` for Android;
+  it is in the APK.
+- **SFX** used to be silent, and the reason is worth keeping: they go through
+  OpenAL, OpenTK ships the bindings only, and `Silk.NET.OpenAL.Soft.Native` —
+  where the desktop gets its native — has runtimes for Windows, Linux and macOS
+  and none for a phone. `Sfx.Load` caught the missing library, installed the
+  silent stub, and the game played its music with nothing else. That is exactly
+  the split a Windows machine with no `oalinst.exe` shows, and it was fixed
+  there the same way it has now been fixed here: give the name something to
+  resolve to.
+
+  **The renderer's trick, again.** Two using aliases in the csproj point `AL`
+  and `ALC` at `Mods/Sound/AlEs.cs`, for every file in the compilation, and not
+  one of the fifty-odd call sites in `Sound/Sfx.cs` and `Formats/Movie.cs`
+  changed. Behind the name is `Mods/Sound/SfxMixer.cs`, which does what OpenAL
+  was doing — buffers, voices, per-source gain and pitch, SOFT loop points,
+  buffer queues, the linear-clamped distance model and stereo placement from
+  the listener's orientation — and hands one block of stereo at a time to
+  miniaudio, on the **music's own playback device** (`MusicPlayer.Engine` and
+  `MusicPlayer.PlaybackDevice` were added for this). A second device would be a
+  second audio callback, a second buffer of latency and one of the two ducked.
+
+  Not emulated, because the engine never asks: HRTF, doppler, velocity, effects.
+
+## Map previews
+
+Rendered on the device from the player's own extracted files, and nothing about
+them is shown. Three things used to be wrong and all three are the same
+mistake — doing it on a `GLSurfaceView`:
+
+- `OffscreenGl.cs` creates an EGL **pbuffer** context on an ordinary thread, so
+  there is no view, nothing on screen, and no forced landscape. The scene never
+  draws to the pbuffer anyway: `Scene.ReadSceneTarget` reads the renderer's own
+  framebuffer object, and EGL simply will not make a context current without a
+  surface.
+- **Several at once, in processes of their own.** A scene is not a local thing —
+  the entity lists, the player roster and the game state are static, so two
+  scenes in one process would be one world with two cameras. The desktop
+  answers that with ten worker processes and so does this: `PreviewService.cs`
+  declares six services with `android:process`, each handed a share of the room
+  list round-robin, each dropping a marker file when it is done. The launcher
+  watches the cache directory rather than talking to them, which needs no IPC
+  and survives a worker being killed for memory. Whatever they could not
+  produce is rendered in-process afterwards, so a device that refuses to start
+  services still gets its pictures.
+- **640x360, not 1600x900.** Every pixel is paid for four times over — fill
+  rate, a `glReadPixels` stall, a managed pixel loop in `AndroidPng`, and a PNG
+  encode — and the launcher shows them in a 248-point band.
+
+### ⚠️ The settings file follows `ChooseRoot`, and it is not always the SD card
+
+`GameState`'s save folder is the relative path `Savedata`, resolved against
+the working directory, which `CustomizeAppBuilder` sets to whatever
+`ChooseRoot` picked. Both candidate roots can end up holding a `paths.txt`
+from earlier runs, and the one that wins is then the only one the game reads.
+An emulator here chose the **internal** directory
+(`/data/user/0/fr.livetek.fruityprime/files`) while a hand-written
+`settings.json` sat unread in the external one, and three rounds of "the ES
+renderer draws cel shading fine" were measured with cel shading off.
+
+`[android] N bundled map files -> <path>` names the root it chose, in the
+first seconds of every launch. Read it before trusting anything pushed with
+`adb push`, and push to that path.
+
+### ⚠️ `ThumbnailMode` is process-wide
+
+`Mods/ThumbnailMode.cs` suppresses the HUD and mutes the sound. The desktop
+never had to leave it: every capture is a worker process that exits when its
+picture is written. Android renders previews in the app's own process, so
+entering and never leaving meant **the next match had no HUD and no sound** —
+which is exactly how it was reported. `ThumbnailMode.Exit()` exists for that,
+`PreviewRun` calls it in a `finally`, and `MainActivity.StartMatch` refuses
+while an in-process run is going.
+
+
+## Building
+
+```bash
+export PATH="$HOME/.dotnet:$PATH"
+export JAVA_HOME=$HOME/jdk17            # a JDK 17; the workload does not bring one
+export DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1   # or install libicu
+dotnet workload install android
+dotnet build src/MphRead.Android/MphRead.Android.csproj -c Debug \
+  -p:AndroidSdkDirectory=$HOME/android-sdk
+```
+
+The SDK needs `platforms;android-35` and `build-tools;35.0.0` to match the
+`net9.0-android35.0` target; `sdkmanager --sdk_root=$HOME/android-sdk` installs
+them. `EnableAvaloniaXamlCompilation=false` is deliberate and explained in the
+csproj.
+
+The APK lands in `bin/Debug/net9.0-android35.0/fr.livetek.fruityprime-Signed.apk`
+(~20 MB; a Release publish is ~45 MB, being every ABI with the trimmer run).
+`adb install -r` it.
+
+Nobody has to do any of that to get one, though: `build.yml` has an `android`
+job on every push, and its **FruityPrime-android** artifact holds a release APK,
+an untrimmed debug APK beside it, and an INSTALL.txt. `release.yml` puts
+`FruityPrime-<tag>-android.apk` in a tagged release. Both are signed with the
+SDK's debug key -- enough to install, not enough for a store.
+
+**The trimmer is why `Properties/TrimmerRoots.xml` exists.** A Release publish
+really does run ILLink over this app, and every use of `KeyboardState` and
+`MouseState` is through a `MethodInfo`, so without the descriptor the touch
+controls work in Debug and throw on the first frame of a release APK. Checked,
+not assumed: the members survive in
+`obj/Release/.../android-arm64/linked/OpenTK.Windowing.GraphicsLibraryFramework.dll`.
+
+## Two traps that cost a release each
+
+Both were found by running the APK, and neither is visible from a build log.
+
+**The activity's theme must be an AppCompat descendant.** Avalonia's
+`AvaloniaMainActivity` is an AndroidX `AppCompatActivity`, and AppCompat throws
+`IllegalStateException: You need to use a Theme.AppCompat theme (or descendant)
+with this activity` out of `onCreate` under anything else. The head shipped with
+`@android:style/Theme.Material.NoActionBar`, a framework theme that looks right
+and can never work: the app died before a line of this project's code ran, every
+time, on every device. `Resources/values/styles.xml` holds the theme now.
+
+**A Debug APK built by `dotnet build` contains no managed code.** Debug defaults
+`EmbedAssembliesIntoApk` to false and expects `dotnet build -t:Run` to push the
+assemblies over adb afterwards. Install that APK by hand and it aborts at
+startup with *"No assemblies found in .../.__override__/<abi>. Assuming this is
+part of Fast Deployment."* The build succeeds, the APK installs, and it is
+hollow. `-p:EmbedAssembliesIntoApk=true` is what makes a debug APK someone can
+be handed; it is ~110 MB rather than 20.
+
+## Testing it here
+
+An emulator runs this without a device, and without KVM -- which WSL does not
+grant unless the user is in the `kvm` group:
+
+```bash
+sdkmanager --sdk_root=$HOME/android-sdk "emulator" "system-images;android-30;default;x86_64"
+avdmanager create avd -n fruity -k "system-images;android-30;default;x86_64" -d pixel_4
+$ANDROID_HOME/emulator/emulator -avd fruity -no-window -no-audio -no-boot-anim \
+  -gpu swiftshader_indirect -accel off -memory 4096 -cores 4
+```
+
+`-accel off` is software CPU emulation: it boots in about five minutes and the
+system UI shows "isn't responding" dialogs of its own, which are the emulator
+and not this app. `adb install -r`, `adb shell am start -n
+fr.livetek.fruityprime/crc64e2a07749a868b9fd.MainActivity`, and `adb shell
+screencap` are enough to see the front screen. With KVM it would be seconds
+rather than minutes.
+
+SwiftShader implements GL ES 3.0, so it is a real check that the shaders
+compile, link and run. It is **not** a check of any picture, and there is now a
+number for how far off it is: the cel outline pass measures a flat surface's
+depth kink at 0.004-0.009 under llvmpipe on the desktop and at 235-256 here,
+against a threshold of 1.1. The large-scale depth field is right -- the room's
+shape is plainly visible in a `fract(d * 64.0)` probe -- and the per-pixel
+values are not, which is the same defect that streaks its colour. Anything
+that reads neighbouring pixels and compares them will be nonsense on this
+renderer.
+
+## What has run and what has not
+
+A room has now been loaded on the emulator: front screen, offline match, the
+touch controls and the HUD, from a cold start in portrait -- repeatedly, and
+including a second match started straight after backing out of the first
+(which is two rotations in quick succession) and a double tap on START. The
+portrait launch could **not** be made to fail here, on API 30 at 1080x2280,
+with auto-rotate both on and off; the hardening above comes from reading the
+wait rather than from reproducing a failure in it, and a device still failing
+should be asked for its `[android]` lines. What the emulator
+cannot answer is what any of it *looks* like -- SwiftShader draws this scene
+with vertical streaks through every surface, with cel shading on and off alike,
+so the pictures are only good for "it ran". The desktop build is where the
+rendering is judged.
+
+See `.claude/KNOWN-GAPS.md`. The first run on a new device should still be
+watched for, in this order:
+
+1. `[gles] shader ... failed to compile` in logcat. The compile status is only
+   read under a debugger upstream, so `GlEs.CompileShader` logs it.
+2. `Scene.FramebufferStatus` -- the offscreen target is an unsized `GL_RGB`
+   colour texture with a `DEPTH24_STENCIL8` renderbuffer. RGB8 is
+   colour-renderable in ES 3.0, but a driver that disagrees makes the whole
+   picture black while every other signal looks fine.
+3. Geometry that is inside out or missing: that is the strip/quad/fan winding in
+   `GlEs.EmitIndices`, which is the one piece of this with no test behind it.
+4. Untextured or wrongly-coloured meshes: that is the `imm_color`/`a_color_set`
+   path, i.e. a mesh whose display list never set a colour of its own.

@@ -109,6 +109,15 @@ uniform vec4 pal_override_color;
 uniform float mat_alpha;
 uniform int mat_mode;
 uniform vec3[32] toon_table;
+// Cel shading: 0 bands is off. Only the scene is drawn through this program;
+// the helmet and the HUD go through the RTT one afterwards and are left as
+// they are without anything having to turn this off.
+uniform int cel_bands;
+// The one colour the bound texture averages to, and whether to use it in
+// place of the texture's own. Set per render item by the renderer, which
+// works the average out once when the texture is uploaded.
+uniform bool use_flat;
+uniform vec3 flat_color;
 
 varying vec2 texcoord;
 varying vec4 color;
@@ -118,12 +127,51 @@ vec4 toon_color(vec4 vtx_color)
     return vec4(toon_table[int(vtx_color.r * 31)], vtx_color.a);
 }
 
+// Brightness to steps, hue left alone: a surface keeps its colour and it is
+// the shading across it that goes flat.
+//
+// The step used to be softened over the middle third of a band, because the
+// texture was still there underneath and its texel-to-texel variation sat on
+// a band boundary somewhere in every wall, which a hard step turned into
+// speckle. There is no texture under this any more -- use_flat has already
+// replaced it with one colour -- so the softening is down to the width that
+// keeps the boundary from crawling as the camera moves, and a band is a band
+// rather than a gradient.
+vec3 cel_shade(vec3 c)
+{
+    float steps = float(cel_bands);
+    float lum = max(max(c.r, c.g), c.b);
+    if (lum <= 0.0) {
+        return c;
+    }
+    // Levels sit at the middle of each band, so the darkest is not black and
+    // the brightest is not blown out.
+    float scaled = lum * steps - 0.5;
+    float lower = floor(scaled);
+    float level = (lower + 0.5 + smoothstep(0.46, 0.54, scaled - lower)) / steps;
+    vec3 banded = c * (level / lum);
+    // A drawn frame is more saturated than a photograph of the same thing,
+    // and flattening the shading takes some of the apparent colour with it.
+    float grey = dot(banded, vec3(0.299, 0.587, 0.114));
+    return clamp(mix(vec3(grey), banded, 1.35), 0.0, 1.0);
+}
+
 void main()
 {
     // mat_mode: 0 - modulate, 1 - decal, 2 - toon
     vec4 col;
     if (use_texture) {
         vec4 texcolor = use_pal_override ? vec4(pal_override_color.xyz, texture2D(tex, texcoord).w) : texture2D(tex, texcoord);
+        // Cel shading takes the picture off the texture rather than banding
+        // it. The texel's alpha is kept, so a grate is still a grate and a
+        // decal is still cut to shape, but its colour is replaced by the one
+        // colour the whole texture averages to. Banding a photograph of
+        // rubble only ever produces banded rubble; what makes a picture read
+        // as drawn is that the surface is one colour and the line around it
+        // carries the shape.
+        if (use_flat && !use_pal_override) {
+            texcolor.rgb = flat_color;
+        }
         if (mat_mode == 1) {
             col = vec4(
                 (texcolor.r * texcolor.a + color.r * (1 - texcolor.a)),
@@ -152,6 +200,16 @@ void main()
     else {
         col = mat_mode == 2 ? toon_color(color) : color;
         col.a *= mat_alpha;
+    }
+    // Cel shading, on the finished surface colour -- the texture, the vertex
+    // colours and the lighting together, which is the only place all three
+    // are. Banding the lighting term alone left a room untouched: rooms carry
+    // nearly all of their shading in vertex colours and light almost nothing
+    // dynamically, so the mode was invisible exactly where it should have
+    // shown most. Before the fog, which is atmosphere rather than surface and
+    // reads wrong in steps.
+    if (cel_bands > 0) {
+        col.rgb = cel_shade(col.rgb);
     }
     if (fog_enable) {
         float depth = gl_FragCoord.z;
@@ -211,6 +269,172 @@ void main()
         }
         gl_FragColor.a *= alpha;
     }
+}
+";
+
+        /// <summary>
+        /// The ink line, drawn over the scene once it has been rendered.
+        ///
+        /// A silhouette is not something a fragment can see on its own: it is
+        /// a place where this surface and the one behind it are different, and
+        /// only a pass that can look at its neighbours knows that. So this
+        /// runs over the finished offscreen target, reading the depth the
+        /// scene left behind and darkening the pixels where it steps.
+        ///
+        /// Depth rather than colour. Colour finds every edge in a texture as
+        /// well -- and this game's textures are rubble, panelling and grating,
+        /// so a Sobel over brightness inks in most of a wall and the picture
+        /// comes out scribbled on. What is wanted is the shape of the room,
+        /// which is what the depth buffer holds.
+        ///
+        /// It runs there rather than over the window for two reasons: the
+        /// helmet, the HUD and the fade are drawn afterwards and must not be
+        /// outlined, and the screenshot path reads the offscreen target rather
+        /// than the back buffer, so a line drawn later would be in the game
+        /// and missing from every picture of it.
+        /// </summary>
+        public static string CelFragmentShader { get; } = @"
+#version 120
+
+uniform sampler2D tex;
+uniform sampler2D depth_tex;
+uniform float texel_w;
+uniform float texel_h;
+uniform float outline;
+uniform float near_plane;
+uniform float far_plane;
+// One step of the depth buffer the driver actually gave us, which is not
+// always the one that was asked for. See the note in edge_at.
+uniform float depth_quantum;
+// What the ink must clear before it is believed, measured on this machine
+// rather than assumed. Zero until the first frame has been looked at.
+// 1 draws the measurement instead of the picture, for that one frame.
+uniform int probe;
+
+varying vec2 texcoord;
+
+// The depth buffer's own value, not a distance in world units.
+//
+// That is the whole trick. Window-space depth is an affine function of 1/z,
+// and 1/z is *linear across the screen* for any plane at any angle -- that is
+// what makes perspective-correct interpolation work at all. So the second
+// difference of this number is exactly zero on a flat surface however steeply
+// it runs away from the camera. Linearising it to world units first, which is
+// what this pass used to do, throws that away: z itself is not linear in
+// screen space, its second difference over a floor stretching to the far wall
+// is large, and every flat surface seen at an angle came out scribbled over.
+// Where this pixel is, worked out from gl_FragCoord rather than from the
+// interpolated texture coordinate.
+//
+// gl_FragCoord.xy is the pixel centre exactly, so this lands on texel centres
+// exactly and the taps are exactly r texels apart. Coming through a varying
+// they are only as good as the interpolator, and ES promises highp no better
+// than sixteen bits of mantissa -- a fraction of a row of error, which is
+// nothing to a picture and everything to a pass that compares a row with the
+// two either side of it. Getting a neighbour off by a row every so often
+// draws a line straight across the screen wherever it happens, which is what
+// a phone was doing while this machine was not.
+vec2 pixel_uv()
+{
+    return gl_FragCoord.xy * vec2(texel_w, texel_h);
+}
+
+float raw_depth(float dx, float dy)
+{
+    return texture2D(depth_tex, pixel_uv() + vec2(dx * texel_w, dy * texel_h)).x;
+}
+
+// How much of an edge there is at a given reach, 0 to 1.
+//
+// Reach does two things. It widens the line -- a pixel three away from an
+// edge still sees it, so the ink comes out three or four pixels wide instead
+// of the one pixel a drawn line never is -- and, because the kink is divided
+// by it while whatever the depth buffer got wrong is not, it is also
+// *quieter*. Reaching two and three rather than one and two is two to three
+// times the margin over a noisy depth buffer for a line that looks the same,
+// and each reach carries its own floor rather than the two being maxed
+// together and taking the noisier one's noise with them.
+//
+// The neighbours are subtracted from the centre before being added to each
+// other. Written as a sum of three samples it is three roundings of numbers
+// close to 1, and the signal here is around a millionth of that; written as
+// two differences it is exact, since a difference of two floats within a
+// factor of two of each other always is. That costs nothing and is most of
+// the precision this pass has.
+// The kink at one reach, in the units everything below is measured in.
+// The kink in the depth buffer's own units -- what the pass actually looks
+// at, before anything is made of it. Per unit of reach, so the reaches are
+// comparable with each other and with a measurement taken at one of them.
+float kink_abs(float d, float r)
+{
+    vec2 h = vec2(raw_depth(-r, 0.0) - d, raw_depth(r, 0.0) - d);
+    vec2 v = vec2(raw_depth(0.0, -r) - d, raw_depth(0.0, r) - d);
+    return max(abs(h.x + h.y), abs(v.x + v.y)) / r;
+}
+
+float kink_rel(float d, float r, float unit)
+{
+    return kink_abs(d, r) / unit;
+}
+
+float edge_at(float d, float r, float unit)
+{
+    // What this machine's depth is worth here, in this pixel's units.
+    //
+    // depth_quantum is an error in the *depth buffer's* units -- one step of
+    // it, or worse where the driver interpolates worse than it stores, which
+    // Renderer.CalibrateInk measures rather than takes on trust. Dividing it
+    // by the same unit the kink is divided by is the whole point: unit shrinks
+    // with distance and with grazing angle, so a fixed error is worth more and
+    // more in these units the further away and the flatter-on the surface is.
+    // A floor that did not do this was the bug -- it was a constant, measured
+    // once in the middle of a frame where unit was large, and it protected
+    // exactly the surfaces that never needed protecting. A floor stretching
+    // away from the camera got no protection at all, and drew the depth
+    // buffer's own steps as regular black stripes across itself.
+    float quantised = depth_quantum * 4.0 / r / unit;
+    float lo = max(1.1, quantised * 1.5);
+    float hi = max(3.5, quantised * 4.0);
+    return smoothstep(lo, hi, kink_rel(d, r, unit));
+}
+
+void main()
+{
+    vec3 base = texture2D(tex, pixel_uv()).rgb;
+    float d = raw_depth(0.0, 0.0);
+    float ink = 0.0;
+    // Nothing was drawn here: the cleared far plane has no shape to draw
+    // around, and the normalisation below divides by nearly zero on it.
+    // The silhouette against it is still found, from the geometry's side.
+    if (d < 0.9999995) {
+        // far/(far-near) - d is (far*near/(far-near))/z, so dividing by it
+        // takes the distance out and leaves a pure change of slope; dividing
+        // by the texel width takes the resolution out, so the same threshold
+        // means the same corner at 640x360 and at 4K. What is left is about
+        // 2 for a right-angled crease and hundreds for a silhouette.
+        float scale = far_plane / (far_plane - near_plane) - d;
+        float unit = max(scale, 1e-9) * texel_w;
+        if (probe == 1) {
+            // log2 of the kink in depth units, -32..0 into 0..1, and black
+            // where nothing was drawn so the reader can leave those pixels
+            // out. Depth units, not this pixel's units, because what is being
+            // measured is a property of the machine rather than of wherever
+            // the camera happened to be pointing: a flat surface's kink in
+            // these units is the depth error itself, and it is the same number
+            // across the frame. Thirty-two powers of two below one covers a
+            // buffer from eight bits to well past the twenty-four this asks
+            // for.
+            float shown = clamp(log2(max(kink_abs(d, 2.0), 1e-10)) / 32.0 + 1.0, 0.004, 1.0);
+            gl_FragColor = vec4(shown, shown, shown, 1.0);
+            return;
+        }
+        ink = max(edge_at(d, 2.0, unit), edge_at(d, 3.0, unit)) * outline;
+    }
+    else if (probe == 1) {
+        gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+        return;
+    }
+    gl_FragColor = vec4(base * (1.0 - ink), 1.0);
 }
 ";
 
@@ -282,6 +506,16 @@ void main()
         public int Specular { get; set; }
         public int Emission { get; set; }
         public int UseFog { get; set; }
+        public int CelBands { get; set; }
+        public int UseFlat { get; set; }
+        public int FlatColor { get; set; }
+        public int CelOutline { get; set; }
+        public int CelTexelWidth { get; set; }
+        public int CelTexelHeight { get; set; }
+        public int CelNearPlane { get; set; }
+        public int CelFarPlane { get; set; }
+        public int CelDepthQuantum { get; set; }
+        public int CelProbe { get; set; }
         public int FogColor { get; set; }
         public int FogMinDistance { get; set; }
         public int FogMaxDistance { get; set; }

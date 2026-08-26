@@ -8,20 +8,20 @@
        and a different kind of output. Nothing here is a copy: the glob below
        is the same files, compiled a second time with ANDROID defined.
 
-       WHAT THIS BUILDS TODAY: the whole codebase, and a front screen that runs
-       on a phone. WHAT IT DOES NOT BUILD: a playable match. The engine's window
-       and input come from GLFW through OpenTK, which is desktop-only; giving it
-       a mobile renderer and touch controls is a separate piece of work, and the
-       screen says so rather than offering a button that cannot work.
+       WHAT THIS BUILDS TODAY: the whole codebase, a front screen, and a match.
+       The engine's window and input come from GLFW through OpenTK, which is
+       desktop-only, so this head supplies both: Mods/Render/GlEs.cs stands in
+       for the desktop GL bindings (see the Using alias below) and the touch
+       controls beside this file stand in for the keyboard and mouse.
 
        It is deliberately NOT in MphRead.sln: building it needs the Android
        workload and an SDK, and a solution that will not build without them is
        a solution that stops everybody who is not working on this.
 
-       The value of this project before that work is done is that it is a
-       compile: every time the shared code grows something desktop-only (a
-       System.Drawing type, a Windows API, a process it expects to be able to
-       start) this stops building, at the commit that did it. -->
+       It is also a compile check on the shared sources: every time they grow
+       something desktop-only (a System.Drawing type, a Windows API, a process
+       they expect to be able to start) this stops building, at the commit that
+       did it. -->
 
   <PropertyGroup>
     <TargetFramework>net9.0-android35.0</TargetFramework>
@@ -40,6 +40,22 @@
     <!-- The shared sources are globbed in by hand below, so the SDK must not
          also add this directory's .cs files twice. -->
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <!-- CA1416: upstream's console menu, extractor and memory viewer call
+         Console.ReadKey/ReadLine/Clear, which Android does not support. They
+         are compiled here because this head compiles the whole codebase, and
+         none of them is reachable: the entry point is an activity, not Main.
+         The one exception is Extract.Setup's "update this path?" prompt, which
+         GameFiles.RunSetupHere calls with the console redirected and a catch
+         around it. Fixing them properly means editing upstream files, which is
+         what keeps a pull from NoneGiven/MphRead a fast-forward. -->
+    <NoWarn>$(NoWarn);CA1416</NoWarn>
+    <!-- XA0141: Android 16 will want 16 KB page sizes and libSkiaSharp.so does
+         not have them. It is not ours to fix and not ours to move off: Avalonia
+         11.3 binds against SkiaSharp 2.88, 2.88.9 is the last of that line, and
+         the 3.x natives are a different ABI from the managed half we would
+         still be using. The message itself says to inform the package authors.
+         Revisit when Avalonia moves to SkiaSharp 3. -->
+    <NoWarn>$(NoWarn);XA0141</NoWarn>
     <AndroidPackageFormat>apk</AndroidPackageFormat>
     <!-- There is no XAML in this project: every screen here is written in C#.
          The compiler still runs when AvaloniaResource items are present, and on
@@ -58,19 +74,68 @@
     <Compile Include="..\MphRead\**\*.cs"
              Exclude="..\MphRead\bin\**;..\MphRead\obj\**" />
     <AndroidResource Include="Resources\**\*.xml" />
+    <!-- The launcher icon: the cherry mark out of src/MphRead/Assets, scaled
+         to the five densities plus an adaptive foreground. Committed rather
+         than generated at build time so that a build needs no image tooling,
+         and allowed past the asset guard in tools/asset-guard-allow.txt,
+         being our logo rather than anything out of the cartridge. -->
+    <AndroidResource Include="Resources\**\*.png" />
+    <!-- See the file: the two types the touch controls reach by reflection. -->
+    <TrimmerRootDescriptor Include="Properties\TrimmerRoots.xml" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Avalonia" Version="11.2.3" />
-    <PackageReference Include="Avalonia.Android" Version="11.2.3" />
-    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.2.3" />
-    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.2.3" />
+    <PackageReference Include="Avalonia" Version="11.3.11" />
+    <PackageReference Include="Avalonia.Android" Version="11.3.11" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.11" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.11" />
     <PackageReference Include="OpenTK" Version="4.9.4" />
-    <PackageReference Include="ReFuel.StbImage" Version="2.1.1" />
+    <!-- The managed binding only. The package's natives are built for Linux and
+         Windows, so they are dead weight in an APK and the only thing they do
+         there is make the build warn that they are not 16 KB page aligned.
+         Nothing on this head calls STB: exporting images and movies is a
+         desktop feature, and preview capture goes through AndroidPng. -->
+    <PackageReference Include="ReFuel.StbImage" Version="2.1.1" ExcludeAssets="native" />
+    <!-- The custom maps. They are text; the room binaries they describe are
+         built on the device from the player's own extracted files, and never
+         travel in the package. AndroidAsset rather than a content file because
+         nothing in an APK is a file the runtime can enumerate: see
+         AndroidMaps.cs, which unpacks these into the external directory the
+         game files already use. -->
+    <AndroidAsset Include="..\..\maps\*.json;..\..\maps\*.bsp;..\..\maps\*.tex"
+                  Link="Assets\maps\%(Filename)%(Extension)" />
     <AvaloniaResource Include="..\MphRead\Assets\fruity-prime-logo.png"
                       Link="Assets\fruity-prime-logo.png" />
     <AvaloniaResource Include="..\MphRead\Assets\fruity-prime-mark.png"
                       Link="Assets\fruity-prime-mark.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The whole of the ES port, in one line.
+
+         The engine calls OpenTK's desktop `GL` from 200-odd places in files
+         that are upstream's, and a compatibility profile is not something
+         Android has. This alias points the name at `Mods/Render/GlEs.cs`
+         instead, for every file in this compilation: a using alias is resolved
+         before the `using OpenTK.Graphics.OpenGL;` at the top of those files,
+         so the call sites do not change and the desktop build does not see
+         any of it. The enum types they pass are still the desktop ones:
+         the same GL constants, which GlEs casts across. -->
+    <Using Include="MphRead.Mods.Render.GlEs" Alias="GL" />
+    <!-- And the whole of the sound effects, in two more.
+
+         Same problem, same shape of answer. Every sound effect the engine
+         plays goes through OpenAL, OpenTK ships the bindings only, and the
+         package the desktop gets the native from has runtimes for Windows,
+         Linux and macOS and none for a phone, so Sfx.Load caught the missing
+         library, installed its silent stub, and the game played its music with
+         nothing else. These point `AL` and `ALC` at Mods/Sound/AlEs.cs, which
+         mixes the voices itself and hands them to miniaudio: SoundFlow's, the
+         one already in the APK playing the music. Not one call site in
+         Sound/Sfx.cs or Formats/Movie.cs changes, and the desktop keeps
+         OpenAL Soft. -->
+    <Using Include="MphRead.Mods.Sound.AlEs" Alias="AL" />
+    <Using Include="MphRead.Mods.Sound.AlcEs" Alias="ALC" />
   </ItemGroup>
 
   <ItemGroup>

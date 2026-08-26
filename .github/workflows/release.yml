@@ -68,6 +68,16 @@ jobs:
         with:
           dotnet-version: '9.0.x'
 
+      # For the Android package. The workload brings the .NET side of that
+      # toolchain and not a JDK, and the Android SDK's build tools are Java.
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: install the android workload
+        run: dotnet workload install android
+
       - name: nothing from the game is tracked
         run: tools/check-no-game-assets.sh
 
@@ -100,6 +110,27 @@ jobs:
           dotnet publish src/MphRead/MphRead.csproj -c Release -r linux-arm64 \
             -p:MphReadServer=true $stamp --self-contained true \
             -p:PublishSingleFile=true -o publish/linux-arm64
+
+      # The phone, from the same tag and stamped with the same version -- the
+      # updater compares that against the tag on GitHub, and an APK that is not
+      # stamped is one that can never know it is out of date.
+      #
+      # InstallAndroidDependencies rather than named sdkmanager packages: it
+      # asks for whatever the project's TargetFramework declares, so bumping
+      # net9.0-android35.0 does not silently leave this behind.
+      - name: publish the APK
+        env:
+          VERSION: ${{ steps.name.outputs.version }}
+        run: |
+          set -euo pipefail
+          proj=src/MphRead.Android/MphRead.Android.csproj
+          sdk=( -p:AndroidSdkDirectory="$ANDROID_HOME" -p:JavaSdkDirectory="$JAVA_HOME" )
+          dotnet build "$proj" -t:InstallAndroidDependencies "${sdk[@]}" \
+            -p:AcceptAndroidSDKLicenses=True
+          dotnet publish "$proj" -c Release -p:AndroidPackageFormat=apk "${sdk[@]}" \
+            -p:Version="$VERSION" -p:InformationalVersion="$VERSION" \
+            -p:ApplicationDisplayVersion="$VERSION" \
+            -o publish/android
 
       - name: nothing from the game is in the output
         run: >
@@ -295,6 +326,11 @@ jobs:
             FruityPrimeServer.exe -servers
           NOTE
           ( cd publish/win-x64-server && zip -qr "../../dist/FruityPrime-$TAG-server-win-x64.zip" . )
+
+          # The APK goes out on its own rather than in an archive: what a phone
+          # wants is a file it can be handed. It is signed with the SDK's debug
+          # key, which installs and is not a store upload.
+          cp publish/android/*-Signed.apk "dist/FruityPrime-$TAG-android.apk"
           ls -la dist
 
       - name: release
@@ -304,5 +340,5 @@ jobs:
         run: |
           gh release create "$TAG" dist/* \
             --title "Fruity Prime $TAG" \
-            --notes "Built from ${{ github.sha }}. No game data is included: the launcher unpacks it from your own cartridge dump on first run." \
+            --notes "Built from ${{ github.sha }}. No game data is included: the launcher unpacks it from your own cartridge dump on first run. The Android APK is new and has had far less use than the desktop builds -- game files go in Android/data/fr.livetek.fruityprime/files." \
             --verify-tag || gh release upload "$TAG" dist/* --clobber

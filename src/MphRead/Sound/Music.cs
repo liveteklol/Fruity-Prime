@@ -758,6 +758,22 @@ namespace MphRead
         /// </summary>
         public static bool Available { get; private set; }
 
+        /// <summary>
+        /// The one output the process mixes into, for anything else that has
+        /// to share it.
+        ///
+        /// Android has no OpenAL native, so the sound effects there are mixed
+        /// by <c>Mods.Sound.AlEs</c> and handed to this same device rather than
+        /// opening a second one: two playback devices on a phone is two audio
+        /// callbacks, two buffers of latency, and whichever one the system
+        /// decides to duck.
+        /// </summary>
+        public static MiniAudioEngine? Engine => Available ? _audioEngine : null;
+
+        public static AudioPlaybackDevice? PlaybackDevice => Available ? _playbackDevice : null;
+
+        public static AudioFormat Format => _format;
+
         static MusicPlayer()
         {
             _format = new AudioFormat()

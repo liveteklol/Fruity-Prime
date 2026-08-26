@@ -72,7 +72,7 @@ namespace MphRead.Utility
         }
     }
 
-    public static class RepackCollision
+    public static partial class RepackCollision
     {
         public static byte[] RepackMphRoom(string room)
         {

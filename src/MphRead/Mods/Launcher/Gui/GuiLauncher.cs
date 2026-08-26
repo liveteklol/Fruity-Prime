@@ -89,6 +89,7 @@ namespace MphRead.Mods.Launcher.Gui
                 // has no desktop backend to detect. Nothing here runs there:
                 // this whole class is the desktop launcher loop, and the head
                 // in src/MphRead.Android is the entry point instead.
+                _setUp = false;
                 return false;
 #else
                 AppBuilder.Configure<LauncherApp>()

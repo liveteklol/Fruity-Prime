@@ -80,10 +80,10 @@
   </ItemGroup>
 
   <ItemGroup Condition="'$(MphReadAvalonia)' == 'true'">
-    <PackageReference Include="Avalonia" Version="11.2.3" />
-    <PackageReference Include="Avalonia.Desktop" Version="11.2.3" />
-    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.2.3" />
-    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.2.3" />
+    <PackageReference Include="Avalonia" Version="11.3.11" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.11" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.11" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.11" />
     <!-- Loaded at runtime through avares://, Avalonia's own asset scheme: a
          plain EmbeddedResource is not visible to AssetLoader. The wordmark
          is the splash screen's default picture; the mark is the window icon. -->
@@ -157,6 +157,15 @@
 
   <ItemGroup>
     <None Update="paths.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <!-- Custom map sources. These are text: the room binaries they describe are
+       generated on the player's machine from the player's own extracted files
+       and never travel with the build. -->
+  <ItemGroup>
+    <None Include="..\..\maps\*.json;..\..\maps\*.bsp;..\..\maps\*.tex" Link="maps\%(Filename)%(Extension)">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>

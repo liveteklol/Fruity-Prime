@@ -29,9 +29,13 @@ namespace MphRead.Mods
         public const int ThumbnailWidth = 1600;
         public const int ThumbnailHeight = 900;
 
-        /// <summary>Cache directory, beside the executable so it travels with the install.</summary>
+        /// <summary>
+        /// Cache directory, beside the game files so it travels with the
+        /// install. That is beside the executable everywhere but Android, where
+        /// the package's own directory is read-only -- see GameFiles.Root.
+        /// </summary>
         public static string CacheDirectory =>
-            Path.Combine(AppContext.BaseDirectory, "thumbnails");
+            Path.Combine(Launcher.GameFiles.Root, "thumbnails");
 
         public static string PathFor(string roomKey)
         {
@@ -42,7 +46,14 @@ namespace MphRead.Mods
             return Path.Combine(CacheDirectory, $"{safe}.png");
         }
 
-        public static bool Exists(string roomKey) => File.Exists(PathFor(roomKey));
+        public static bool Exists(string roomKey)
+        {
+            // Zero bytes is what a failed encode leaves behind -- the file was
+            // created before the encoder threw -- and counting it as a preview
+            // is how a room gets skipped for ever after one bad run.
+            var file = new FileInfo(PathFor(roomKey));
+            return file.Exists && file.Length > 0;
+        }
 
         /// <summary>
         /// Multiplayer rooms a launcher would offer.
@@ -67,10 +78,68 @@ namespace MphRead.Mods
                 {
                     continue;
                 }
+                if (!HasPlayerSpawn(entry.Key, entry.Value))
+                {
+                    continue;
+                }
                 rooms.Add(entry.Key);
             }
             rooms.Sort(StringComparer.OrdinalIgnoreCase);
             return rooms;
+        }
+
+        private static readonly Dictionary<string, bool> _spawnCache =
+            new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Whether a match in this room would have anywhere to put anybody.
+        ///
+        /// The six Biodefense Chambers carry the multiplayer flag and no
+        /// entity file at all: no player spawns, so a match there strands
+        /// everybody at the origin and a preview is a picture of somewhere
+        /// nobody can go. They are dropped from the room list itself rather
+        /// than from any one screen, so the launcher, the map grid, the host
+        /// menu, -rooms and the previews all lose them together.
+        ///
+        /// Only the entity file is read -- no models, no collision, no GL.
+        /// </summary>
+        private static bool HasPlayerSpawn(string roomKey, RoomMetadata meta)
+        {
+            if (_spawnCache.TryGetValue(roomKey, out bool known))
+            {
+                return known;
+            }
+            bool found = false;
+            try
+            {
+                if (meta.EntityPath != null)
+                {
+                    int layerId = Metadata.GetMultiplayerEntityLayer(GameMode.Battle,
+                        Network.NetLaunch.RoomPlayerCount);
+                    foreach (Entity entity in Read.GetEntities(meta.EntityPath, layerId, meta.FirstHunt))
+                    {
+                        if (entity.Type != EntityType.PlayerSpawn && entity.Type != EntityType.FhPlayerSpawn)
+                        {
+                            continue;
+                        }
+                        if (((Entity<PlayerSpawnEntityData>)entity).Data.Active != 0)
+                        {
+                            found = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                // A reader that cannot answer must not delist a room that may
+                // be perfectly playable: a bad match is worse than a missing
+                // one only until the launcher has no maps left in it.
+                Console.WriteLine($"[rooms] could not read the spawns in {roomKey}: {ex.Message}");
+                found = true;
+            }
+            _spawnCache[roomKey] = found;
+            return found;
         }
 
         /// <summary>True when First Hunt's extracted files are present.</summary>

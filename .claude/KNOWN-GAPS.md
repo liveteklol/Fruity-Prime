@@ -16,9 +16,47 @@ claiming coverage that isn't there.
   proven on the menu's side (flags, windows, the pump) and unproven on the
   game's.
 - **macOS is cross-compiled and unrun.** See `.claude/launcher/LAUNCHER-OVERVIEW.md`.
-- **Android builds and shows a screen; it does not play.** See
-  `.claude/launcher/LAUNCHER-OVERVIEW.md` — the value today is that it fails
-  the build at the commit that adds anything desktop-only to shared code.
+- **The Android match runs on an emulator; how it *looks* there proves
+  nothing.** With the game files copied onto the device, an emulator (API 30,
+  x86_64, software CPU and SwiftShader) has been driven front screen → offline
+  match → first person with the HUD, from a cold start in portrait. So
+  `Mods/Render/GlEs.cs` — immediate mode, display lists, the current colour,
+  the alpha test — does load a room and draw it. But SwiftShader puts vertical
+  streaks through every surface in that build, with cel shading on and off
+  alike, so every picture from it is good for "it ran" and for nothing else.
+  Rendering is judged on the desktop. `.claude/android/ANDROID-PORT.md` lists
+  what to watch on a first run, in order.
+- **The portrait freeze is reproduced and fixed; the fix is proven by
+  measurement, not by playing.** A room load stretched to 12 s with a window
+  resize injected into it held the UI thread for 16,921 ms under
+  `GLSurfaceView` -- three times Android's ANR threshold, which is the white
+  box over the black loading screen -- and for at most 1,092 ms, none of it
+  during the load, once `GameView` owned its own EGL context and thread. What
+  has *not* been shown is the same fix on a real phone under a real load, and
+  the match has only been driven on this emulator afterwards: it starts from
+  portrait, survives home-and-back, backs out and starts again.
+- **The cel shading has only been judged on the desktop.** Flat colours in
+  place of textures and the depth-kink ink pass were shot across five rooms
+  and a live two-client match at 1600x900, and cel *off* is pixel-identical to
+  before the change.
+
+  On the emulator the mode is **unusable, and the reason is measured**: the
+  ink pass reads a flat surface's kink at 0.004-0.009 under llvmpipe and at
+  235-256 under SwiftShader, against a threshold of 1.1. Thirty thousand times
+  the noise, on a depth field whose large-scale structure is correct -- the
+  same per-pixel imprecision that streaks SwiftShader's colour, on its depth.
+  Nothing in the shader survives that, and a threshold that did would draw no
+  outline at all -- which is now what happens, on its own:
+  `Renderer.CalibrateInk` measures a flat surface at **1998** there against
+  **0.0159** here and lifts the ink floor to match, so the mode degrades to no
+  outline rather than to a black screen. **What that floor does on a phone
+  whose depth is merely mediocre rather than useless is untested**, and that is
+  the case that matters. (An earlier claim here that the ES path had been seen
+  drawing the mode was wrong: those runs had cel shading *off* -- see the
+  settings-directory note in `android/ANDROID-PORT.md`.)
+- **A phone is still a different machine** — the emulator is x86_64 with
+  SwiftShader, a phone is arm64 with a real driver. That is the ABI and the GL
+  implementation both differing from what is tested here.
 - **The update check has never seen a release of this repository.** Tested
   against upstream NoneGiven/MphRead instead, which has releases: the check,
   version comparison, "update available" line and page URL were all

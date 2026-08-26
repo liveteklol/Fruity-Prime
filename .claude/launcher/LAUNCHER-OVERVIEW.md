@@ -64,17 +64,25 @@ macOS and Android
   thread, which the one-thread launcher arrangement is designed for and no
   Mac has confirmed.
 - **Android** is `src/MphRead.Android/`, a head project compiling the same
-  sources with `ANDROID` defined. What runs today is a front screen only --
-  the server directory's list with a live status query per server -- because
-  the engine draws through OpenTK and reads input from GLFW, neither of which
-  exists on Android. The value today is that the head **stops building** the
-  moment shared code grows something desktop-only; it already forced out
+  sources with `ANDROID` defined. It now builds a front screen **and a
+  match**: the engine's desktop GL is redirected to OpenGL ES 3.0 by a single
+  using alias pointing `GL` at `Mods/Render/GlEs.cs`, and the keyboard and
+  mouse it reads are synthesised from on-screen controls, so no call site in
+  the renderer or the input path changed. Full account:
+  `.claude/android/ANDROID-PORT.md`. The front screen has been run on an
+  emulator; **the match has not been loaded anywhere** -- see
+  `.claude/KNOWN-GAPS.md`.
+- The head is still a compile check on shared code: it **stops building** the
+  moment that code grows something desktop-only. It already forced out
   `LauncherPrefs.Directory` (an Android package's directory is read-only, so
-  the head points `launcher.txt` at the app's data directory) and the
-  `ANDROID` guard in `GuiLauncher` (Android stands the toolkit up from its
-  activity, with no desktop backend to detect).
-- Building Android needs the workload and an SDK:
+  the head points `launcher.txt` at the app's data directory), the matching
+  `GameFiles.Root` for `paths.txt`, and the `ANDROID` guard in `GuiLauncher`
+  (Android stands the toolkit up from its activity, with no desktop backend
+  to detect).
+- Building Android needs the workload, a JDK 17 and an SDK with
+  `platforms;android-35`:
   ```bash
+  export JAVA_HOME=$HOME/jdk17
   dotnet workload install android
   dotnet build src/MphRead.Android/MphRead.Android.csproj -c Debug \
     -p:AndroidSdkDirectory=$HOME/android-sdk

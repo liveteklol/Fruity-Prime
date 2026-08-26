@@ -37,6 +37,7 @@ namespace MphRead.Mods
             // here because this runs for every invocation, launcher or not.
             InputSettings.Load();
             Update.Updater.Disabled = HasFlag(args, "noupdate");
+            ApplyRenderOverrides(args);
 
             if (HasFlag(args, "credits"))
             {
@@ -347,6 +348,17 @@ namespace MphRead.Mods
         {
             (int width, int height) = ParseSize(args);
 
+            // Custom maps are registered as rooms from their JSON at startup,
+            // but a room whose binaries are not on disk crashes the moment
+            // something tries to load it. Generating what is missing here --
+            // the one place every entry point passes through, launcher
+            // included, and after the game-file check -- means a map file is
+            // enough to have a working room.
+            if (!HasFlag(args, "mapgen"))
+            {
+                MapGen.CustomRooms.GenerateMissing();
+            }
+
             // Opt-in per-second report of what this process believes about a
             // networked session -- slot occupancy, scoreboard count, which
             // remote slots have state. The failure worth catching is not
@@ -431,6 +443,85 @@ namespace MphRead.Mods
                 Environment.ExitCode = Network.WeaponDps.Run(dpsTest, dpsHunter, dpsBeam, dpsSeconds, dpsDistance);
                 return true;
             }
+            // Generate the binaries for the custom maps in `maps/`. The
+            // textures come out of the player's own extracted files, so this
+            // has to run here rather than at build time, and what ships in the
+            // repository is the JSON, never the .bin.
+            if (HasFlag(args, "mapgen"))
+            {
+                string? only = ValueAfter(args, "mapgen");
+                bool force = HasFlag(args, "force");
+                int count = 0;
+                int failed = 0;
+                foreach (MapGen.MapDefinition def in MapGen.CustomRooms.Definitions)
+                {
+                    if (only != null && !only.Equals(def.Name, StringComparison.OrdinalIgnoreCase)
+                        && !only.Equals("all", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+                    // one map at a time: a map that cannot be built -- most
+                    // often one whose source level is not where it says --
+                    // must not stop the others from being generated
+                    try
+                    {
+                        MapGen.MapPacker.Generate(def, MapGen.CustomRooms.ArchiveDirectory(def),
+                            MapGen.CustomRooms.EntityDirectory(), verbose: true);
+                        count++;
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"{def.Name}: {ex.Message}");
+                        failed++;
+                    }
+                }
+                if (count == 0 && failed == 0)
+                {
+                    Console.WriteLine($"No maps to generate. Put a map JSON in {MapGen.CustomRooms.MapDirectory}.");
+                }
+                Environment.ExitCode = failed == 0 ? 0 : 1;
+                return true;
+            }
+
+            // What levels are in a .pk3, so a conversion knows what to ask
+            // for. Reads the archive's index only -- nothing is extracted.
+            string? q3Maps = ValueAfter(args, "q3maps");
+            if (q3Maps != null)
+            {
+                try
+                {
+                    foreach (string name in MapGen.Q3Bsp.ListMaps(q3Maps))
+                    {
+                        Console.WriteLine(name);
+                    }
+                    Environment.ExitCode = 0;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Could not read {q3Maps}: {ex.Message}");
+                    Environment.ExitCode = 1;
+                }
+                return true;
+            }
+
+            // What a level draws with, commonest first, so a conversion knows
+            // which shaders are worth mapping to a borrowed texture.
+            string? q3Shaders = ValueAfter(args, "q3shaders");
+            if (q3Shaders != null)
+            {
+                Environment.ExitCode = MapGen.MapReport.ListShaders(q3Shaders, ValueAfter(args, "map"));
+                return true;
+            }
+
+            // List a room's materials, with the texture each one uses, so a
+            // map can say which of them it wants to borrow.
+            string? mapMaterials = ValueAfter(args, "mapmaterials");
+            if (mapMaterials != null)
+            {
+                Environment.ExitCode = MapGen.MapReport.ListMaterials(mapMaterials);
+                return true;
+            }
+
             string? mapTest = ValueAfter(args, "maptest");
             if (mapTest != null)
             {
@@ -613,6 +704,45 @@ namespace MphRead.Mods
         {
             string? value = ValueAfter(args, "recolor");
             return value != null && Int32.TryParse(value, out int recolor) ? recolor : 0;
+        }
+
+        /// <summary>
+        /// Render-option overrides from the command line, applied for every
+        /// invocation before anything draws.
+        ///
+        /// The settings file is the launcher's, and the paths that never open
+        /// one -- <c>-thumbnail</c>, <c>-maptest</c>, <c>-connect</c> -- had no
+        /// way to ask for cel shading at all. That made the one mode whose
+        /// whole point is what the picture looks like the one mode no
+        /// screenshot command could turn on.
+        /// </summary>
+        private static void ApplyRenderOverrides(string[] args)
+        {
+            string? cel = ValueAfter(args, "cel");
+            if (cel != null && !cel.StartsWith('-'))
+            {
+                RenderOptions.CelShading = RenderOptions.ParseOnOff(cel, RenderOptions.CelShading);
+            }
+            else if (HasFlag(args, "cel"))
+            {
+                // a bare -cel, with the next word belonging to another option
+                RenderOptions.CelShading = true;
+            }
+            string? fog = ValueAfter(args, "fog");
+            if (fog != null && !fog.StartsWith('-'))
+            {
+                RenderOptions.Fog = RenderOptions.ParseOnOff(fog, RenderOptions.Fog);
+            }
+            string? bands = ValueAfter(args, "celbands");
+            if (bands != null && Int32.TryParse(bands, out int bandCount))
+            {
+                RenderOptions.CelBands = bandCount;
+            }
+            string? edge = ValueAfter(args, "celedge");
+            if (edge != null && Int32.TryParse(edge.TrimEnd('%'), out int edgePercent))
+            {
+                RenderOptions.CelEdge = edgePercent / 100f;
+            }
         }
 
         private static bool HasFlag(string[] args, string name)

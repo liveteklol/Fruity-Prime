@@ -1155,6 +1155,13 @@ namespace MphRead.Entities
             {
                 return;
             }
+            // Before the pause check, not after it: a frame rate you cannot
+            // read while the settings window is open -- which is where the
+            // switch for it is -- would be a switch with no feedback.
+            if (Mods.RenderOptions.ShowFps)
+            {
+                DrawFps();
+            }
             if (GameState.MenuPause)
             {
                 return;
@@ -2745,11 +2752,57 @@ namespace MphRead.Entities
             return font;
         }
 
+        /// <summary>
+        /// The frame rate, in the corner of the DS's own screen.
+        ///
+        /// Formatted into a stack buffer rather than a string, because this
+        /// runs every frame and a counter that allocates every frame is
+        /// measuring itself. Not shifted by <c>_objShiftX</c>, which is the
+        /// idle sway: the rest of the HUD drifts on purpose and a number you
+        /// are trying to read should not.
+        /// </summary>
+        private const float NumberX = 30;
+        private const float NumberY = 6;
+        private const float NumberScale = 0.5f;
+        private const float UnitScale = 0.34f;
+
+        private void DrawFps()
+        {
+            Span<char> buffer = stackalloc char[12];
+            if (!_scene.FramesPerSecond.TryFormat(buffer, out int written, "0"))
+            {
+                return;
+            }
+            var color = new ColorRgba(0x3FEF);
+            // Clear of the top-left corner on purpose: Android draws its MENU
+            // button there, over the scene and outside it, so a counter in the
+            // corner itself is legible on the desktop and sitting under a
+            // translucent circle on a phone.
+            //
+            // The unit is drawn smaller than the number rather than in
+            // lowercase, because the DS shipped one alphabet and it is
+            // capitals: a lowercase f in the string comes out as a capital F
+            // whatever we do. Smaller is what makes it read as a unit instead
+            // of as three more digits.
+            Vector2 end = DrawText2D(NumberX, NumberY, Align.Left, palette: 0,
+                buffer[..written], color, fontSpacing: 8, scale: NumberScale);
+            // A glyph is placed from its top, so the smaller run has to come
+            // down by the difference in height to sit on the same baseline.
+            DrawText2D(end.X + 1, NumberY + (NumberScale - UnitScale) * 8, Align.Left,
+                palette: 0, "fps", color, fontSpacing: 8, scale: UnitScale);
+        }
+
         private float _textSpacingY = 0;
 
         // todo: size/shape (seemingly only used by the bottom screen rank, which is 16x16/square instead of 8x8/square)
+        /// <param name="scale">
+        /// Glyph size, 1 being the 8x8 the DS drew. Honoured by
+        /// <see cref="Align.Left"/> only: the other alignments measure the run
+        /// first to place it, and none of them has a caller that wants this.
+        /// </param>
         private Vector2 DrawText2D(float x, float y, Align type, int palette, ReadOnlySpan<char> text,
-            ColorRgba? color = null, float alpha = 1, float fontSpacing = -1, int maxLength = -1)
+            ColorRgba? color = null, float alpha = 1, float fontSpacing = -1, int maxLength = -1,
+            float scale = 1)
         {
             int padAfter = maxLength;
             if (type == Align.PadCenter)
@@ -2775,9 +2828,37 @@ namespace MphRead.Entities
             }
             Font font = SetUpFont(text[0], set: true);
             _textInst.Alpha = alpha;
+            // A DS unit is square, and it has to stay square on any screen.
+            //
+            // Everything below lays text out in the DS's own 256x192 space,
+            // which is 4:3, and a position in it reaches the screen as
+            // x / 256 * viewWidth and y / 192 * viewHeight. On a 4:3 window
+            // those two are the same number of pixels per unit and the text is
+            // the shape it was drawn as. On anything wider they are not: at
+            // 2400x1080 a unit is 9.375 pixels across and 5.625 down, so every
+            // run came out two thirds wider than it should be and overran the
+            // boxes around it -- which are drawn aspect-correct, off the
+            // height, and so kept their shape while the text did not.
+            //
+            // This is the ratio between the two, applied to horizontal
+            // *offsets from the anchor* and never to the anchor itself: the
+            // HUD is meant to spread to the edges of a wide screen, and only
+            // the shape of each run is wrong. It comes out at exactly 1 on 4:3,
+            // so the DS proportions are preserved rather than approximated.
+            // Nothing here is per-platform: the desktop is 16:9 more often
+            // than not and had the same defect, a third as strong.
+            float aspectFix = 1;
+            if (_scene.Size.X > 0 && _scene.Size.Y > 0)
+            {
+                aspectFix = _scene.Size.Y / 192f * (256f / _scene.Size.X);
+            }
             float spacingY = _textSpacingY == 0 ? (fontSpacing == -1 ? 12 : fontSpacing) : _textSpacingY;
             if (type == Align.Left)
             {
+                if (scale != 1)
+                {
+                    spacingY *= scale;
+                }
                 float startX = x;
                 for (int i = 0; i < length; i++)
                 {
@@ -2795,7 +2876,7 @@ namespace MphRead.Entities
                     else
                     {
                         int index = ch - font.MinCharacter;
-                        float offset = font.Offsets[index] + y;
+                        float offset = font.Offsets[index] * scale + y;
                         if (orig != ' ')
                         {
                             _textInst.PositionX = x / 256f;
@@ -2808,9 +2889,9 @@ namespace MphRead.Entities
                             {
                                 _textInst.SetData(index, palette, _scene);
                             }
-                            _scene.DrawHudObject(_textInst, mode: 2);
+                            _scene.DrawHudObject(_textInst, mode: 1, scale: scale);
                         }
-                        x += font.Widths[index];
+                        x += font.Widths[index] * scale * aspectFix;
                     }
                 }
             }
@@ -2840,7 +2921,7 @@ namespace MphRead.Entities
                             ch = text[++i] & 0x3F | ((ch & 0x1F) << 6);
                         }
                         int index = ch - font.MinCharacter;
-                        x -= font.Widths[index];
+                        x -= font.Widths[index] * aspectFix;
                         float offset = font.Offsets[index] + y;
                         if (orig != ' ')
                         {
@@ -2854,7 +2935,7 @@ namespace MphRead.Entities
                             {
                                 _textInst.SetData(index, palette, _scene);
                             }
-                            _scene.DrawHudObject(_textInst);
+                            _scene.DrawHudObject(_textInst, mode: 1);
                         }
                     }
                     if (end != length)
@@ -2900,7 +2981,7 @@ namespace MphRead.Entities
                     }
                     // character widths include their rightmost empty pixel, leading to a slight overestimation of the total width before the line break,
                     // making the text shift to the left instead of being centered. fix by flooring (which the game does implicitly with integer division).
-                    x = startX - MathF.Floor(width / 2);
+                    x = startX - MathF.Floor(width / 2) * aspectFix;
                     for (int i = start; i < end; i++)
                     {
                         int ch = text[i];
@@ -2925,10 +3006,10 @@ namespace MphRead.Entities
                                 {
                                     _textInst.SetData(index, palette, _scene);
                                 }
-                                _scene.DrawHudObject(_textInst);
+                                _scene.DrawHudObject(_textInst, mode: 1);
                             }
                         }
-                        x += font.Widths[index];
+                        x += font.Widths[index] * aspectFix;
                     }
                     if (end != length)
                     {

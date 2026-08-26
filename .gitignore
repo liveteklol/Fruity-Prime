@@ -346,3 +346,9 @@ thumbnails/
 
 # Server deploy staging (built artifacts, never committed).
 publish/
+
+# Source levels for converted maps, and the texture packs baked from them:
+# the player brings their own, and none of it belongs in the repository.
+maps/*.pk3
+maps/*.bsp
+maps/*.tex

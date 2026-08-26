@@ -380,7 +380,21 @@ namespace MphRead
             {
                 // possible bug: in-game, if w == 0, dest is not written, but the caller's condition for using the value is w >= 0
                 // if w was ever exactly 0, garbage data from the stack location of dest would be read for the screen coordinates
-                Debug.Assert(w != 0);
+                //
+                // Which is why dest is written here and the retail behaviour is
+                // not reproduced. There used to be a Debug.Assert(w != 0) on
+                // this line as well, and it was wrong: exactly zero is not a
+                // freak value, it is what this returns whenever the position
+                // being projected is the camera's own. The transformed vector
+                // is then (0, 0, 0) and w reduces to projectionMtx.Row3.W,
+                // which a perspective matrix leaves at exactly 0.
+                //
+                // Two players standing in the same spot does it, and eight of
+                // them entering a small map on the same frame is enough to
+                // make it likely: PlayerAi.UpdateAggro projects every other
+                // player into this one's view. So a debug build aborted about
+                // a second into a seven-bot match on MP3 Proving Ground, on a
+                // path that was already handling the case correctly.
                 dest = Vector2.Zero;
                 return w;
             }

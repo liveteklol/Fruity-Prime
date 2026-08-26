@@ -111,6 +111,45 @@ namespace MphRead.Mods.Launcher.Gui
             Height = subtitle.Length > 0 ? 54 : 42;
         }
 
+        /// <summary>
+        /// How wide this wants to be when nothing says.
+        ///
+        /// A bare Control measures to nothing, and Height was the only size
+        /// this ever set. Down a column that is correct: the parent hands the
+        /// width down and the entry fills it. A *horizontal* StackPanel
+        /// measures its children with an infinite width, so every entry in a
+        /// row asked for nothing and the whole row was laid out on top of the
+        /// first one, at the left edge.
+        ///
+        /// That is the settings on a phone. Below a certain width the rail of
+        /// sections turns into a strip across the top, and the strip was eight
+        /// section names printed over each other in the same place.
+        /// </summary>
+        protected override Size MeasureOverride(Size availableSize)
+        {
+            Size size = base.MeasureOverride(availableSize);
+            double tracking = Primary ? 2 : 1;
+            double width = TrackedText.Measure(Title.ToUpperInvariant(), _titleSize, tracking);
+            if (Subtitle.Length > 0)
+            {
+                width = Math.Max(width, TrackedText.Measure(Subtitle, 12, tracking: 0));
+            }
+            // The bar down the left edge and the gap after it, which Render
+            // uses, and as much again on the right so that two entries side by
+            // side are not touching.
+            const double padding = 3 + 14 + 14;
+            // Asked for in every case, not only when the width is unconstrained.
+            //
+            // Reporting it only against an infinite width covered a horizontal
+            // StackPanel and nothing else: a WrapPanel measures each child
+            // against what is left of the line, which is a real number, so the
+            // entries went back to asking for nothing and stacking up on each
+            // other. Down a column this changes nothing -- a control that
+            // stretches is stretched to the parent whatever it asked for -- and
+            // it is the honest answer to the question either way.
+            return new Size(Math.Min(width + padding, availableSize.Width), size.Height);
+        }
+
         protected override void OnPointerEntered(PointerEventArgs e)
         {
             InvalidateVisual();
@@ -128,6 +167,10 @@ namespace MphRead.Mods.Launcher.Gui
         {
             _pressed = true;
             Focus();
+            // Captured, the way a stock Button does it: without it a touch
+            // release is routed by a fresh hit test rather than to the row that
+            // was pressed, and the press is simply lost.
+            e.Pointer.Capture(this);
             InvalidateVisual();
             base.OnPointerPressed(e);
         }
@@ -137,11 +180,31 @@ namespace MphRead.Mods.Launcher.Gui
             bool wasPressed = _pressed;
             _pressed = false;
             InvalidateVisual();
+            if (ReferenceEquals(e.Pointer.Captured, this))
+            {
+                e.Pointer.Capture(null);
+            }
             base.OnPointerReleased(e);
-            if (wasPressed && IsEnabled && IsPointerOver)
+            // Where the release landed, not IsPointerOver: a finger hovers
+            // nothing, so on a touchscreen the pointer is already gone from the
+            // row by the time it lets go -- which is every button on Android
+            // doing nothing when pressed.
+            Point p = e.GetPosition(this);
+            bool inside = p.X >= 0 && p.Y >= 0
+                && p.X <= Bounds.Width && p.Y <= Bounds.Height;
+            if (wasPressed && IsEnabled && inside)
             {
                 Click?.Invoke(this, EventArgs.Empty);
             }
+        }
+
+        protected override void OnPointerCaptureLost(PointerCaptureLostEventArgs e)
+        {
+            // A drag that turned into a scroll takes the pointer away; the row
+            // must not still think it is being pressed.
+            _pressed = false;
+            InvalidateVisual();
+            base.OnPointerCaptureLost(e);
         }
 
         protected override void OnGotFocus(GotFocusEventArgs e)
@@ -175,6 +238,9 @@ namespace MphRead.Mods.Launcher.Gui
             bool lit = (IsPointerOver || IsFocused) && IsEnabled;
             bool marked = lit || (Selected && IsEnabled);
             var body = new Rect(0, 0, Bounds.Width, Bounds.Height);
+            // Avalonia hit-tests what was drawn, not the bounds: without this
+            // the row only answers the pointer over its glyphs.
+            context.FillRectangle(Brushes.Transparent, body);
             if (Primary)
             {
                 RenderPrimary(context, body, lit);

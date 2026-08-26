@@ -37,7 +37,7 @@ namespace MphRead.Mods
         // The intro sequence needs to start and the match-start fade
         // (20/30s, set by GameState) to clear before the frame is worth
         // keeping.
-        private const int SettleFrames = 45;
+        private const int SettleFrames = 12;
         private const int RetryFrames = 20;
         private const int MaxAttempts = 3;
         private int _attempts;
@@ -125,10 +125,41 @@ namespace MphRead.Mods
 
         private static bool _describedContext;
 
+        /// <summary>
+        /// A custom map has no intro sequence to borrow a viewpoint from, so
+        /// if it named one, use it -- every frame, since the roam camera is
+        /// otherwise left wherever the scene put it.
+        /// </summary>
+        private void ApplyPreviewCamera()
+        {
+            foreach (MapGen.MapDefinition def in MapGen.CustomRooms.Definitions)
+            {
+                if (def.Preview != null && def.Name.Equals(_roomKey, StringComparison.OrdinalIgnoreCase))
+                {
+                    Scene.SetPreviewCamera(
+                        new Vector3(def.Preview.Position[0], def.Preview.Position[1], def.Preview.Position[2]),
+                        new Vector3(def.Preview.Target[0], def.Preview.Target[1], def.Preview.Target[2]));
+                    return;
+                }
+            }
+        }
+
         protected override void OnRenderFrame(FrameEventArgs args)
         {
             GameState.ApplyPause();
             Scene.OnUpdateFrame();
+            ApplyPreviewCamera();
+            bool capturing = !_captured && _settleFrames-- <= 0;
+            if (!capturing)
+            {
+                // The intro camera advances on the update, not on the draw,
+                // and the update clears and rebuilds the render lists either
+                // way -- so the forty-odd frames that exist only to let the
+                // camera reach its mark need not be drawn at all. They were
+                // 2367 ms of a 5336 ms capture.
+                base.OnRenderFrame(args);
+                return;
+            }
             if (!Scene.OnRenderFrame())
             {
                 return;
@@ -137,53 +168,49 @@ namespace MphRead.Mods
             // touches GL, so what it reports belongs to the frame that was
             // just rendered.
             _frameError = Scene.DrainGlError();
-            bool capturing = !_captured && _settleFrames-- <= 0;
             bool giveUp = false;
-            if (capturing)
+            ThumbnailGenerator.EnsureCacheDirectory();
+            // The result decides, rather than the attempt. Saving refuses
+            // an all-black frame, and reporting that as a capture is what
+            // let a run of thirty rooms announce success and leave thirty
+            // black pictures behind.
+            _captured = ScreenCapture.Save(Scene, ThumbnailGenerator.PathFor(_roomKey));
+            if (_captured)
             {
-                ThumbnailGenerator.EnsureCacheDirectory();
-                // The result decides, rather than the attempt. Saving refuses
-                // an all-black frame, and reporting that as a capture is what
-                // let a run of thirty rooms announce success and leave thirty
-                // black pictures behind.
-                _captured = ScreenCapture.Save(Scene, ThumbnailGenerator.PathFor(_roomKey));
-                if (_captured)
+                ThumbnailLog.Write($"{_roomKey}: captured at {Scene.Size.X}x{Scene.Size.Y}"
+                    + (_attempts > 0 ? $" on attempt {_attempts + 1}, window shown" : ""));
+            }
+            if (!_captured)
+            {
+                ThumbnailLog.Write($"{_roomKey}: attempt {_attempts + 1} produced nothing usable "
+                    + $"(target {Scene.FramebufferStatus}, first GL error this frame {_frameError})");
+                // Show the window and try again.
+                //
+                // A capture window is never displayed -- there is nothing
+                // to look at and thirty-three of them flashing would be
+                // worse than useless. But a driver is entitled to do
+                // nothing at all for a window with no visible surface,
+                // and some do: an Intel Iris Xe on a compatibility 3.2
+                // context rendered every one of thirty-three rooms at
+                // 0.00% lit while the game itself ran fine on the same
+                // machine. Mesa has the mirror image of this, recorded in
+                // CLAUDE.md -- a hidden window there has no usable back
+                // buffer, which is why captures read the offscreen target
+                // in the first place.
+                //
+                // So it stays hidden for the attempt that costs nothing,
+                // and only a machine that needs the window sees it.
+                if (!IsVisible)
                 {
-                    ThumbnailLog.Write($"{_roomKey}: captured at {Scene.Size.X}x{Scene.Size.Y}"
-                        + (_attempts > 0 ? $" on attempt {_attempts + 1}, window shown" : ""));
+                    IsVisible = true;
+                    ThumbnailLog.Write($"{_roomKey}: showing the window and retrying -- "
+                        + "this driver appears not to render to a hidden one");
                 }
-                if (!_captured)
-                {
-                    ThumbnailLog.Write($"{_roomKey}: attempt {_attempts + 1} produced nothing usable "
-                        + $"(target {Scene.FramebufferStatus}, first GL error this frame {_frameError})");
-                    // Show the window and try again.
-                    //
-                    // A capture window is never displayed -- there is nothing
-                    // to look at and thirty-three of them flashing would be
-                    // worse than useless. But a driver is entitled to do
-                    // nothing at all for a window with no visible surface,
-                    // and some do: an Intel Iris Xe on a compatibility 3.2
-                    // context rendered every one of thirty-three rooms at
-                    // 0.00% lit while the game itself ran fine on the same
-                    // machine. Mesa has the mirror image of this, recorded in
-                    // CLAUDE.md -- a hidden window there has no usable back
-                    // buffer, which is why captures read the offscreen target
-                    // in the first place.
-                    //
-                    // So it stays hidden for the attempt that costs nothing,
-                    // and only a machine that needs the window sees it.
-                    if (!IsVisible)
-                    {
-                        IsVisible = true;
-                        ThumbnailLog.Write($"{_roomKey}: showing the window and retrying -- "
-                            + "this driver appears not to render to a hidden one");
-                    }
-                    // A few more frames in case the first one simply came too
-                    // early, then stop: if the context cannot draw, no number
-                    // of frames will change that.
-                    _settleFrames = RetryFrames;
-                    giveUp = ++_attempts >= MaxAttempts;
-                }
+                // A few more frames in case the first one simply came too
+                // early, then stop: if the context cannot draw, no number
+                // of frames will change that.
+                _settleFrames = RetryFrames;
+                giveUp = ++_attempts >= MaxAttempts;
             }
             SwapBuffers();
             Scene.AfterRenderFrame();

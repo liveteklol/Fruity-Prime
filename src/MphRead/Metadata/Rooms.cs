@@ -113,8 +113,10 @@ namespace MphRead
 
     public static partial class Metadata
     {
+        // custom maps are appended to both tables below: a room's ID is its
+        // index here, so the two have to grow together and in this order
         private static readonly IReadOnlyList<string> _roomIds
-            = new List<string>()
+            = Mods.MapGen.CustomRooms.AppendIds(new List<string>()
             {
                 /*   0 */ "UNIT1_CX",
                 /*   1 */ "UNIT1_CX",
@@ -257,7 +259,7 @@ namespace MphRead
                 /* 135, 7 */ "Level MP5",
                 /* 136, 8 */ "Level MP1b",
                 /* 137, 9 */ "E3 level"
-            };
+            });
 
         // todo: unused?
         // unit3_rm5_Ent.bin
@@ -265,7 +267,8 @@ namespace MphRead
         // bigeyeroom_Ent.bin, cylinderroom_Ent.bin, Cylinder_C1_Ent.bin
         // nodedata: ctf1_dm1.bin, unit3_Land_dm1_CTF_node.bin, others?
         // FH leftovers: morphBall_Ent.bin, regulator_Ent.bin, survivor_Ent.bin
-        public static readonly IReadOnlyList<RoomMetadata> RoomList = new List<RoomMetadata>()
+        public static readonly IReadOnlyList<RoomMetadata> RoomList
+            = Mods.MapGen.CustomRooms.AppendRooms(new List<RoomMetadata>()
         {
             new RoomMetadata(
                 id: 0,
@@ -4078,7 +4081,7 @@ namespace MphRead
                 size: RoomSize.SinglePlayer,
                 multiplayer: true,
                 firstHunt: true)
-        };
+        });
 
         public static readonly FrozenDictionary<string, RoomMetadata> RoomMetadata = RoomList.ToFrozenDictionary(d => d.Name);
 

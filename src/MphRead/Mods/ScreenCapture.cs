@@ -18,6 +18,17 @@ namespace MphRead.Mods
     /// </summary>
     public static class ScreenCapture
     {
+        /// <summary>
+        /// How a PNG gets written: the pixels bottom-up in RGB, the width, the
+        /// height and the path.
+        ///
+        /// STB everywhere but Android, where the package ships natives for
+        /// Linux and Windows and none for a phone -- the room rendered and the
+        /// frame read back fine, and then the encoder's type initializer threw.
+        /// The head there sets this to Android's own encoder.
+        /// </summary>
+        public static Action<byte[], int, int, string>? PngWriter { get; set; }
+
         public static bool Save(Scene scene, string path)
         {
             try
@@ -46,6 +57,12 @@ namespace MphRead.Mods
                 if (!string.IsNullOrEmpty(directory))
                 {
                     Directory.CreateDirectory(directory);
+                }
+                Action<byte[], int, int, string>? writer = PngWriter;
+                if (writer != null)
+                {
+                    writer(pixels, width, height, path);
+                    return true;
                 }
                 using FileStream stream = File.Create(path);
                 StbImage.FlipVerticallyOnSave = true;

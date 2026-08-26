@@ -30,6 +30,14 @@ namespace MphRead
         public string Language { get; set; } = "English";
         public string SfxVolume { get; set; } = "0.35";
         public string MusicVolume { get; set; } = "0.50";
+        public string ResolutionScale { get; set; } = "100";
+        public string Lighting { get; set; } = "on";
+        public string Fog { get; set; } = "on";
+        public string TextureFiltering { get; set; } = "off";
+        public string ShowFps { get; set; } = "off";
+        public string CelShading { get; set; } = "off";
+        public string CelBands { get; set; } = "4";
+        public string CelEdge { get; set; } = "100";
         public string PointGoal { get; set; } = "7";
         public string TimeLimit { get; set; } = "7:00";
         public string TimeGoal { get; set; } = "1:30";
