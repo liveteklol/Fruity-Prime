@@ -54,10 +54,10 @@ namespace MphRead.Droid
 
         public GameView(Context context, TouchControls controls, AndroidInput input,
             Func<AndroidInput, Vector2i, Scene> build, Action onEnd, Action onLoaded,
-            Action<string> onError)
+            Action<string> onError, Action onPauseMenu)
             : base(context)
         {
-            _loop = new RenderLoop(controls, input, build, onEnd, onLoaded, onError);
+            _loop = new RenderLoop(controls, input, build, onEnd, onLoaded, onError, onPauseMenu);
             Holder?.AddCallback(this);
         }
 
@@ -144,6 +144,9 @@ namespace MphRead.Droid
             private bool _stopping;
             private bool _holdingSurface;
             private bool _ended;
+            private bool _dialogClickDown;
+            private readonly Action _onPauseMenu;
+            private bool _menuWasHeld;
 
             private EGLDisplay? _display;
             private EGLConfig? _config;
@@ -157,8 +160,9 @@ namespace MphRead.Droid
 
             public RenderLoop(TouchControls controls, AndroidInput input,
                 Func<AndroidInput, Vector2i, Scene> build, Action onEnd, Action onLoaded,
-                Action<string> onError)
+                Action<string> onError, Action onPauseMenu)
             {
+                _onPauseMenu = onPauseMenu;
                 _controls = controls;
                 _input = input;
                 _build = build;
@@ -569,6 +573,21 @@ namespace MphRead.Droid
                 _ended = true;
                 scene.DoCleanup();
                 Scene = null;
+                // Whatever the session asked to have saved, before anything
+                // else can run and before the front screen comes back. This is
+                // the desktop's line after its render loop returns; nothing is
+                // written unless the match was the story, so every other kind
+                // of match passes straight through.
+                try
+                {
+                    AndroidMatch.Finish();
+                }
+                catch (Exception ex)
+                {
+                    // A save that cannot be written is not a reason to leave
+                    // the player on a dead view.
+                    Console.WriteLine($"[android] the save could not be written: {ex}");
+                }
                 _onEnd();
             }
 
@@ -624,8 +643,55 @@ namespace MphRead.Droid
                 _input.Apply(controls.Morph, _controls.IsHeld(TouchAction.Morph));
                 _input.Apply(controls.AltAttack, _controls.IsHeld(TouchAction.AltAttack));
                 _input.Apply(controls.Zoom, _controls.IsHeld(TouchAction.Zoom));
-                _input.Apply(controls.Pause, _controls.IsHeld(TouchAction.Pause));
+                // The DS pause button -- map and status on foot, scoreboard
+                // while it is held in a match -- is SCORE now. MENU is the
+                // app's own menu, which is the thing a player looks for first
+                // and had no way to reach at all.
+                _input.Apply(controls.Pause, _controls.IsHeld(TouchAction.Scoreboard));
+                bool menu = _controls.IsHeld(TouchAction.Pause);
+                if (menu && !_menuWasHeld)
+                {
+                    // On the press, not the release, and once per press: the
+                    // menu is a view swap on the UI thread and this is the GL
+                    // thread, so it is asked for rather than done here.
+                    _onPauseMenu();
+                }
+                _menuWasHeld = menu;
 
+                // A dialog box waiting to be dismissed reads a click position
+                // and nothing else: PlayerDialog.CheckButtonPressed compares
+                // Input.ClickX/Y against the button rectangle, and on this
+                // platform nothing ever set them. The pointer was only ever
+                // *moved*, for aiming, and no touch ever pressed the left
+                // mouse button -- so the OK button could not be pressed at all,
+                // and a scan or a prompt could only be left by quitting.
+                //
+                // While one is up, the screen is the DS's touch screen: a
+                // finger is a position and holding it is holding the button.
+                if (GameState.DialogPause)
+                {
+                    _controls.PointerIsAbsolute = true;
+                    (bool Down, float X, float Y) tap = _controls.AimPosition();
+                    if (tap.Down)
+                    {
+                        _input.PlacePointer(tap.X, tap.Y);
+                    }
+                    _input.SetButton(OpenTK.Windowing.GraphicsLibraryFramework.MouseButton.Left, tap.Down);
+                    _dialogClickDown = tap.Down;
+                    // Swallowed, so the aim does not lurch by however far the
+                    // finger travelled once the box is gone.
+                    _controls.TakeAimDelta();
+                    return;
+                }
+                _controls.PointerIsAbsolute = false;
+                if (_dialogClickDown)
+                {
+                    // Released explicitly rather than left to the next tap:
+                    // the box can close on the same frame the finger is still
+                    // down, and a mouse button stuck down outlives the dialog.
+                    _input.SetButton(OpenTK.Windowing.GraphicsLibraryFramework.MouseButton.Left, false);
+                    _dialogClickDown = false;
+                }
                 bool weaponMenu = _controls.IsHeld(TouchAction.WeaponMenu);
                 _input.Apply(controls.WeaponMenu, weaponMenu);
                 if (weaponMenu)

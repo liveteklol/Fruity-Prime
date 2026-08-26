@@ -59,9 +59,13 @@ namespace MphRead.Mods.Launcher.Gui
         private Control _homeCard = null!;
         private Control _setupCard = null!;
         private Control _onlineCard = null!;
-        private Control _matchCard = null!;
+        private Control _hostCard = null!;
+        private StackPanel _hostAdventure = null!;
+        private StackPanel _hostBattle = null!;
+        private ChoiceRow _hostMode = null!;
+        private ChoiceRow _hostWhere = null!;
+        private ToggleRow _hostCoop = null!;
         private Control _browseCard = null!;
-        private Control _adventureCard = null!;
         private Control? _current;
         private Control? _browseReturn;
 
@@ -111,20 +115,6 @@ namespace MphRead.Mods.Launcher.Gui
 
             Background = GuiTheme.PanelBrush;
 
-            // Small, dim, and in the corner: an acknowledgement, not a
-            // feature. The full list is -credits.
-            var credits = new TextBlock
-            {
-                Text = Mods.Credits.Compact,
-                FontFamily = GuiTheme.Display,
-                FontSize = 10,
-                Foreground = new SolidColorBrush(Color.FromRgb(78, 86, 102)),
-                TextWrapping = TextWrapping.Wrap,
-                TextAlignment = TextAlignment.Right,
-                HorizontalAlignment = HorizontalAlignment.Right,
-                VerticalAlignment = VerticalAlignment.Bottom,
-                Margin = new Thickness(0, 14, 0, 0)
-            };
             // The cards scroll: on a phone a card of a dozen rows is taller
             // than the screen, and on the desktop this costs nothing because
             // nothing overflows.
@@ -133,11 +123,12 @@ namespace MphRead.Mods.Launcher.Gui
                 Content = _cards,
                 HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
             };
-            var stack = new Grid { RowDefinitions = new RowDefinitions("*,Auto") };
+            // The credits are a section of the settings now. A wall of names
+            // under every card was the first thing the eye landed on and the
+            // last thing anybody needed while choosing a match.
+            var stack = new Grid { RowDefinitions = new RowDefinitions("*") };
             Grid.SetRow(scroll, 0);
-            Grid.SetRow(credits, 1);
             stack.Children.Add(scroll);
-            stack.Children.Add(credits);
             _panel = new Border
             {
                 Background = GuiTheme.PanelBrush,
@@ -168,9 +159,8 @@ namespace MphRead.Mods.Launcher.Gui
             _homeCard = BuildHomeCard();
             _setupCard = BuildSetupCard();
             _onlineCard = BuildOnlineCard();
-            _matchCard = BuildMatchCard();
+            _hostCard = BuildHostCard();
             _browseCard = BuildBrowseCard();
-            _adventureCard = BuildAdventureCard();
 
             _setupBack.IsVisible = GameFiles.Ready;
             ShowCard(GameFiles.Ready ? _homeCard : _setupCard);
@@ -322,6 +312,38 @@ namespace MphRead.Mods.Launcher.Gui
             return done.Task;
         }
 
+        /// <summary>
+        /// The pause menu, over a running match.
+        ///
+        /// The platform with no windows takes this path; the desktop opens
+        /// <see cref="PauseMenuWindow"/>, which is a real window over the game
+        /// window. Both show the same <see cref="PauseMenuView"/>, so the menu
+        /// cannot drift into being two menus.
+        ///
+        /// The settings come back to this rather than dropping the player into
+        /// the match: they were reached from the pause menu and that is where
+        /// closing them should land.
+        /// </summary>
+        public void ShowPauseMenu(Action onResume, Action onLeave, Action onQuit)
+        {
+            var view = new PauseMenuView(offerWindowMode: false);
+            EventHandler? closed = null;
+            void Close()
+            {
+                closed?.Invoke(view, EventArgs.Empty);
+            }
+            view.Resumed += (_, _) => { Close(); onResume(); };
+            view.LeaveRequested += (_, _) => { Close(); onLeave(); };
+            view.QuitRequested += (_, _) => { Close(); onQuit(); };
+            view.SettingsRequested += async (_, _) =>
+            {
+                await OpenSettings();
+                ShowPauseMenu(onResume, onLeave, onQuit);
+            };
+            _ = ShowOverlay(view, handler => closed += handler);
+            view.FocusResume();
+        }
+
         private void CloseOverlay()
         {
             _overlay.IsVisible = false;
@@ -367,10 +389,8 @@ namespace MphRead.Mods.Launcher.Gui
 
         private readonly UpdateBadge _updateBadge = new();
         private MenuEntry _onlineEntry = null!;
-        private MenuEntry _offlineEntry = null!;
         private MenuEntry _hostEntry = null!;
-        private MenuEntry _filesEntry = null!;
-        private MenuEntry _adventureEntry = null!;
+        private const string _hostBlurb = "The story, or a match you run";
         private ChoiceRow _adventureSlot = null!;
         private ChoiceRow _adventureHunter = null!;
         private Note _adventureNote = null!;
@@ -380,29 +400,19 @@ namespace MphRead.Mods.Launcher.Gui
         private Control BuildHomeCard()
         {
             var card = Card();
-            _adventureEntry = new MenuEntry("Adventure", "The story, from a save slot");
-            _adventureEntry.Click += (_, _) => OpenAdventure();
-            _onlineEntry = new MenuEntry("Play online", "Join a server");
-            _onlineEntry.Click += (_, _) => ShowCard(_onlineCard);
-            _offlineEntry = new MenuEntry("Play offline", "A match against bots");
-            _offlineEntry.Click += (_, _) => OpenMatch(LaunchKind.Offline);
-            _hostEntry = new MenuEntry("Host a game", "Run a server and play on it");
-            _hostEntry.Click += (_, _) => OpenMatch(LaunchKind.Host);
+            _hostEntry = new MenuEntry("Host", _hostBlurb);
+            _hostEntry.Click += (_, _) => OpenHost();
+            _onlineEntry = new MenuEntry("Join", "Play on a server somebody else is running");
+            _onlineEntry.Click += (_, _) => OpenJoin();
             var settings = new MenuEntry("Settings",
-                "Display, audio, controls, match rules, cheats");
+                "Display, audio, controls, game files, credits");
             settings.Click += async (_, _) => await OpenSettings();
-            _filesEntry = new MenuEntry("Game files", GameFiles.Describe());
-            _filesEntry.Click += (_, _) => ShowCard(_setupCard);
             var quit = new MenuEntry("Quit");
             quit.Click += (_, _) => Finish(default);
 
-            card.Children.Add(new Caption(Mods.Branding.NameAndVersion));
-            card.Children.Add(_adventureEntry);
-            card.Children.Add(_onlineEntry);
-            card.Children.Add(_offlineEntry);
             card.Children.Add(_hostEntry);
+            card.Children.Add(_onlineEntry);
             card.Children.Add(settings);
-            card.Children.Add(_filesEntry);
             card.Children.Add(quit);
             return card;
         }
@@ -443,11 +453,14 @@ namespace MphRead.Mods.Launcher.Gui
         {
             bool ready = GameFiles.Ready;
             _onlineEntry.IsEnabled = ready;
-            _offlineEntry.IsEnabled = ready;
             _hostEntry.IsEnabled = ready;
-            _adventureEntry.IsEnabled = ready;
-            _filesEntry.Subtitle = GameFiles.Describe();
-            _filesEntry.SubtitleColor = ready ? GuiTheme.Good : GuiTheme.Warm;
+            // Game files moved into the settings, so there is no row here to
+            // colour any more. What the front screen can still say about a
+            // missing extract is that the two entries needing one are dead and
+            // why -- and the setup card is what it shows instead of this one
+            // until there is an extract at all.
+            _hostEntry.Subtitle = ready ? _hostBlurb : GameFiles.Describe();
+            _hostEntry.SubtitleColor = ready ? GuiTheme.TextDim : GuiTheme.Warm;
         }
 
         // --------------------------------------------------------------- setup
@@ -694,7 +707,6 @@ namespace MphRead.Mods.Launcher.Gui
 
         // -------------------------------------------------------------- online
 
-        private FieldRow _onlineName = null!;
         private ChoiceRow _onlineHunter = null!;
         private FieldRow _onlineAddress = null!;
         private Note _onlineStatus = null!;
@@ -703,7 +715,6 @@ namespace MphRead.Mods.Launcher.Gui
         private Control BuildOnlineCard()
         {
             var card = Card();
-            _onlineName = new FieldRow("Your name", LauncherPrefs.PlayerName);
             _onlineHunter = new ChoiceRow("Hunter", _hunters,
                 Array.IndexOf(_hunters, LauncherPrefs.LastHunter.ToString()));
             _onlineAddress = new FieldRow("Server",
@@ -711,24 +722,20 @@ namespace MphRead.Mods.Launcher.Gui
             _onlineStatus = new Note("Checking...");
             _onlineAddress.Box.LostFocus += (_, _) => QueryStatusSoon();
 
-            var find = new MenuEntry("Find a server", "See who is up right now", titleSize: 15);
-            find.Click += (_, _) =>
-            {
-                _browseReturn = _onlineCard;
-                ShowCard(_browseCard);
-                ReloadServers();
-            };
             _connect = new MenuEntry("Connect", titleSize: 16) { Primary = true, Height = 44 };
             _connect.Click += async (_, _) => await Connect();
 
-            card.Children.Add(new Caption("Play online"));
-            card.Children.Add(_onlineName);
+            // There is no "find a server" entry any more: Join opens the list
+            // itself, so this is the page a server has already been picked on
+            // and all that is left to choose is the hunter. Back goes to the
+            // list rather than to the front screen, because somebody who
+            // picked the wrong server is trying to reach the list.
+            card.Children.Add(new Caption("Join"));
             card.Children.Add(_onlineHunter);
             card.Children.Add(_onlineAddress);
             card.Children.Add(_onlineStatus);
-            card.Children.Add(find);
             card.Children.Add(_connect);
-            card.Children.Add(Back(() => ShowCard(_homeCard)));
+            card.Children.Add(Back(OpenJoin));
             return card;
         }
 
@@ -786,7 +793,7 @@ namespace MphRead.Mods.Launcher.Gui
                     {
                         _onlineStatus.Text = Describe(status);
                         _onlineStatus.Foreground = GuiTheme.GoodBrush;
-                        _splash.ShowRoom(status.RoomKey, Describe(status));
+                        _splash.ShowRoom(status.RoomKey);
                     }
                     else
                     {
@@ -812,7 +819,7 @@ namespace MphRead.Mods.Launcher.Gui
         private async Task Connect()
         {
             (string host, int port) = OnlineEndpoint();
-            string name = _onlineName.Value.Length > 0 ? _onlineName.Value : "Player";
+            string name = PlayerName();
             var hunter = (Hunter)Enum.Parse(typeof(Hunter), _onlineHunter.Value);
             StopStatusPolling();
             _connect.IsEnabled = false;
@@ -854,23 +861,37 @@ namespace MphRead.Mods.Launcher.Gui
         // --------------------------------------------------------- offline/host
 
         private LaunchKind _matchKind = LaunchKind.Offline;
-        private Caption _matchCaption = null!;
         private ChoiceRow _matchMap = null!;
         private ChoiceRow _matchMode = null!;
         private ChoiceRow _matchHunter = null!;
         private ChoiceRow _matchBots = null!;
         private ChoiceRow _matchSkill = null!;
-        private FieldRow _matchName = null!;
         private FieldRow _matchPort = null!;
         private ToggleRow _matchOnMaster = null!;
         private ToggleRow _matchListed = null!;
         private MenuEntry _matchStart = null!;
         private Note _matchNote = null!;
 
-        private Control BuildMatchCard()
+        /// <summary>
+        /// The battle half of the host card: everything a match of your own
+        /// needs, whether it runs here or on a server this machine puts up.
+        ///
+        /// A group rather than a card of its own, because choosing between the
+        /// story and a match is one decision and the things it decides between
+        /// belong under it.
+        /// </summary>
+        private StackPanel BuildBattleGroup()
         {
             var card = Card();
-            _matchCaption = new Caption("Play offline");
+            // Local or online is what used to be two separate entries on the
+            // front screen -- "play offline" and "host a game" -- which is the
+            // same match with a server in front of it. One row says which.
+            _hostWhere = new ChoiceRow("Where", new[] { "Local", "Online" }, 0);
+            _hostWhere.Changed += (_, _) =>
+            {
+                _matchKind = _hostWhere.Index == 1 ? LaunchKind.Host : LaunchKind.Offline;
+                RefreshMatchCard();
+            };
             _matchMap = new ChoiceRow("Map", _playable,
                 Math.Max(0, _playable.IndexOf(_settings.RoomKey)));
             _matchMap.Changed += (_, _) => RefreshSplash();
@@ -882,7 +903,9 @@ namespace MphRead.Mods.Launcher.Gui
                 Accent = GuiTheme.TextDim
             };
             browseMaps.Click += async (_, _) => await BrowseMaps();
-            _matchMode = new ChoiceRow("Mode", _modes.Select(m => m.Label).ToArray());
+            // Not "Mode": the row above it already says Adventure or Battle, and
+            // two rows called Mode under each other is a card nobody can read.
+            _matchMode = new ChoiceRow("Match type", _modes.Select(m => m.Label).ToArray());
             _matchHunter = new ChoiceRow("Hunter", _hunters,
                 Array.IndexOf(_hunters, LauncherPrefs.LastHunter.ToString()));
             _matchBots = new ChoiceRow("Bots",
@@ -891,32 +914,38 @@ namespace MphRead.Mods.Launcher.Gui
                 LauncherPrefs.Bots);
             _matchSkill = new ChoiceRow("Bot skill", new[] { "Easy", "Normal", "Hard" },
                 LauncherPrefs.BotLevel);
-            _matchName = new FieldRow("Your name", LauncherPrefs.PlayerName);
+            // An online match is always run by the directory, and this build
+            // never opens a port on the player's own machine.
+            //
+            // It used to offer the choice: a toggle for who runs it, a port
+            // box, and a "list it" switch. Every one of them is a question
+            // about the player's router, asked of somebody who wanted to play
+            // a game -- and answered wrongly it produces a server nobody can
+            // reach and no way of telling why from in here. Running one on
+            // your own machine is a real thing to want, and it has its own
+            // program: the dedicated server, which can be pointed at a port
+            // and left running, rather than a phone that goes in a pocket.
+            //
+            // The rows are kept and set rather than deleted because the code
+            // that starts a match reads them, and one place deciding this
+            // beats the same constant written in four.
             _matchPort = new FieldRow("Port",
                 LauncherPrefs.HostPort.ToString(CultureInfo.InvariantCulture), boxWidth: 90);
-            _matchOnMaster = new ToggleRow("Let the directory run it",
-                LauncherPrefs.HostOnMaster);
-            _matchOnMaster.Changed += (_, _) => RefreshMatchCard();
-            _matchListed = new ToggleRow("List it so others can find it",
-                LauncherPrefs.ListHostedGame);
+            _matchOnMaster = new ToggleRow("Let the directory run it", on: true);
+            _matchListed = new ToggleRow("List it so others can find it", on: true);
             _matchNote = new Note("");
             _matchStart = new MenuEntry("Start", titleSize: 16) { Primary = true, Height = 44 };
             _matchStart.Click += async (_, _) => await StartMatch();
 
-            card.Children.Add(_matchCaption);
+            card.Children.Add(_hostWhere);
             card.Children.Add(_matchMap);
             card.Children.Add(browseMaps);
             card.Children.Add(_matchMode);
             card.Children.Add(_matchHunter);
             card.Children.Add(_matchBots);
             card.Children.Add(_matchSkill);
-            card.Children.Add(_matchName);
-            card.Children.Add(_matchOnMaster);
-            card.Children.Add(_matchPort);
-            card.Children.Add(_matchListed);
             card.Children.Add(_matchNote);
             card.Children.Add(_matchStart);
-            card.Children.Add(Back(() => ShowCard(_homeCard)));
             return card;
         }
 
@@ -929,7 +958,7 @@ namespace MphRead.Mods.Launcher.Gui
         /// <see cref="AdventureSave"/>, and Menu.SaveSlot, which is 0 until
         /// something sets it and writes nothing while it is.
         /// </summary>
-        private Control BuildAdventureCard()
+        private StackPanel BuildAdventureGroup()
         {
             var card = Card();
             var slots = new string[AdventureSave.SlotCount];
@@ -951,20 +980,62 @@ namespace MphRead.Mods.Launcher.Gui
             _adventureNew = new MenuEntry("New game");
             _adventureNew.Click += (_, _) => StartAdventure(newGame: true);
 
-            card.Children.Add(new Caption("Adventure"));
             card.Children.Add(_adventureSlot);
             card.Children.Add(_adventureNote);
             card.Children.Add(_adventureHunter);
             card.Children.Add(_adventureStart);
             card.Children.Add(_adventureNew);
+            return card;
+        }
+
+        /// <summary>
+        /// The whole of Host: the story or a match, and whichever one is
+        /// chosen showing its own options underneath.
+        /// </summary>
+        private Control BuildHostCard()
+        {
+            var card = Card();
+            _hostMode = new ChoiceRow("Mode", new[] { "Adventure", "Battle" }, 0);
+            _hostMode.Changed += (_, _) => RefreshHostCard();
+            // Announced rather than hidden. The work is not done, and a menu
+            // that simply does not mention co-op tells somebody looking for it
+            // that it was never considered; this says it is coming and refuses
+            // to pretend it works.
+            _hostCoop = new ToggleRow("Online co-op (coming soon!)", false);
+            _hostCoop.Changed += (_, _) => RefreshAdventureCard();
+            _hostAdventure = BuildAdventureGroup();
+            _hostAdventure.Children.Insert(0, _hostCoop);
+            _hostBattle = BuildBattleGroup();
+            card.Children.Add(new Caption("Host"));
+            card.Children.Add(_hostMode);
+            card.Children.Add(_hostAdventure);
+            card.Children.Add(_hostBattle);
             card.Children.Add(Back(() => ShowCard(_homeCard)));
             return card;
         }
 
-        private void OpenAdventure()
+        /// <summary>Open Host on the story, which is what it defaults to.</summary>
+        private void OpenHost()
         {
-            RefreshAdventureCard();
-            ShowCard(_adventureCard);
+            RefreshHostCard();
+            ShowCard(_hostCard);
+            RefreshSplash();
+        }
+
+        private void RefreshHostCard()
+        {
+            bool adventure = _hostMode.Index == 0;
+            _hostAdventure.IsVisible = adventure;
+            _hostBattle.IsVisible = !adventure;
+            if (adventure)
+            {
+                RefreshAdventureCard();
+            }
+            else
+            {
+                _matchKind = _hostWhere.Index == 1 ? LaunchKind.Host : LaunchKind.Offline;
+                RefreshMatchCard();
+            }
         }
 
         private void RefreshAdventureCard()
@@ -976,6 +1047,16 @@ namespace MphRead.Mods.Launcher.Gui
             // means anything there is the one that starts a game.
             _adventureStart.Title = info.Used ? "Continue" : "Start a new game";
             _adventureNew.IsVisible = info.Used;
+            // Nothing starts while co-op is ticked: the mode does not exist
+            // yet, and a button that starts a single-player game after being
+            // asked for a co-op one is worse than a button that will not go.
+            bool ready = !_hostCoop.On;
+            _adventureStart.IsEnabled = ready;
+            _adventureNew.IsEnabled = ready;
+            if (!ready)
+            {
+                _adventureNote.Text = "Online co-op is not built yet. Untick it to play.";
+            }
         }
 
         private byte CurrentSlot()
@@ -1012,8 +1093,6 @@ namespace MphRead.Mods.Launcher.Gui
         /// </summary>
         private void RefreshPrefRows()
         {
-            _onlineName.Value = LauncherPrefs.PlayerName;
-            _matchName.Value = LauncherPrefs.PlayerName;
             _onlineAddress.Value =
                 $"{LauncherPrefs.ServerAddress}:{LauncherPrefs.ServerPort}";
             int hunter = Array.IndexOf(_hunters, LauncherPrefs.LastHunter.ToString());
@@ -1055,33 +1134,49 @@ namespace MphRead.Mods.Launcher.Gui
             }
         }
 
-        private void OpenMatch(LaunchKind kind)
+        /// <summary>
+        /// The name to play under, which the settings own now.
+        ///
+        /// It used to be a row on the online card and another on the match
+        /// card, which is the same answer asked for twice and two places for
+        /// it to disagree.
+        /// </summary>
+        private static string PlayerName()
         {
-            _matchKind = kind;
-            RefreshMatchCard();
-            ShowCard(_matchCard);
-            RefreshSplash();
+            string name = LauncherPrefs.PlayerName.Trim();
+            return name.Length > 0 ? name : "Player";
+        }
+
+        /// <summary>
+        /// Join: the list of servers, straight away.
+        ///
+        /// It used to be a page with an address box and a "find a server"
+        /// entry under it, which is one press between the player and the only
+        /// answer most people have. The list is the page now; the address box
+        /// is on the page a server has been chosen on, for anybody typing one
+        /// in by hand.
+        /// </summary>
+        private void OpenJoin()
+        {
+            _browseReturn = _homeCard;
+            ShowCard(_browseCard);
+            ReloadServers();
         }
 
         private void RefreshMatchCard()
         {
             bool host = _matchKind == LaunchKind.Host;
-            _matchCaption.IsVisible = true;
             _matchBots.IsVisible = !host;
             _matchSkill.IsVisible = !host;
-            _matchName.IsVisible = host;
-            _matchOnMaster.IsVisible = host;
+            _matchOnMaster.On = true;
             // Only meaningful when this machine is the one running the server:
             // a match the directory runs is on the directory's port, on the
             // directory's machine, and neither is this screen's to choose.
-            _matchPort.IsVisible = host && !_matchOnMaster.On;
-            _matchListed.IsVisible = host && !_matchOnMaster.On;
+            _matchListed.On = true;
             _matchNote.Text = host
-                ? (_matchOnMaster.On
-                    ? "The directory runs the match, so nothing here needs a "
-                        + "forwarded port."
-                    : "Runs on this machine. Friends can only reach it if UDP on "
-                        + "this port is forwarded to you.")
+                ? "The directory runs the match, so nothing here needs a "
+                    + "forwarded port. To run one on your own machine, use the "
+                    + "dedicated server."
                 : "";
             _matchNote.IsVisible = _matchNote.Text.Length > 0;
         }
@@ -1119,7 +1214,7 @@ namespace MphRead.Mods.Launcher.Gui
                 return;
             }
 
-            string name = _matchName.Value.Length > 0 ? _matchName.Value : "Player";
+            string name = PlayerName();
             LauncherPrefs.PlayerName = name;
             LauncherPrefs.HostOnMaster = _matchOnMaster.On;
             LauncherPrefs.ListHostedGame = _matchListed.On;
@@ -1193,7 +1288,7 @@ namespace MphRead.Mods.Launcher.Gui
             var refresh = new MenuEntry("Refresh", titleSize: 15);
             refresh.Click += (_, _) => ReloadServers();
 
-            card.Children.Add(new Caption("Find a server"));
+            card.Children.Add(new Caption("Join"));
             card.Children.Add(_browseNote);
             card.Children.Add(new ScrollViewer
             {
@@ -1254,6 +1349,7 @@ namespace MphRead.Mods.Launcher.Gui
             {
                 _onlineAddress.Value = $"{listing.Address}:{listing.Port}";
                 ShowCard(_onlineCard);
+                QueryStatusSoon();
             };
             _browseList.Children.Add(entry);
             Task.Run(() =>
@@ -1286,6 +1382,11 @@ namespace MphRead.Mods.Launcher.Gui
             try
             {
                 var view = new SettingsView(_settings);
+                // Noted while the settings are up and acted on once they are
+                // down: showing a card behind a window that is still open is
+                // how you end up on a screen you cannot see.
+                bool gameFiles = false;
+                view.GameFilesRequested += (_, _) => gameFiles = true;
                 Window? owner = OwnerWindow;
                 if (owner != null)
                 {
@@ -1295,6 +1396,11 @@ namespace MphRead.Mods.Launcher.Gui
                 else
                 {
                     await ShowOverlay(view, handler => view.Closed += handler);
+                }
+                if (gameFiles)
+                {
+                    ShowCard(_setupCard);
+                    return;
                 }
             }
             catch (Exception ex)
@@ -1333,7 +1439,7 @@ namespace MphRead.Mods.Launcher.Gui
             {
                 room = null;
             }
-            _splash.ShowRoom(room, room != null ? "Ready" : "");
+            _splash.ShowRoom(room);
         }
 
         /// <summary>

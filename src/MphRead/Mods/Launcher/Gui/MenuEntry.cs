@@ -111,6 +111,45 @@ namespace MphRead.Mods.Launcher.Gui
             Height = subtitle.Length > 0 ? 54 : 42;
         }
 
+        /// <summary>
+        /// How wide this wants to be when nothing says.
+        ///
+        /// A bare Control measures to nothing, and Height was the only size
+        /// this ever set. Down a column that is correct: the parent hands the
+        /// width down and the entry fills it. A *horizontal* StackPanel
+        /// measures its children with an infinite width, so every entry in a
+        /// row asked for nothing and the whole row was laid out on top of the
+        /// first one, at the left edge.
+        ///
+        /// That is the settings on a phone. Below a certain width the rail of
+        /// sections turns into a strip across the top, and the strip was eight
+        /// section names printed over each other in the same place.
+        /// </summary>
+        protected override Size MeasureOverride(Size availableSize)
+        {
+            Size size = base.MeasureOverride(availableSize);
+            double tracking = Primary ? 2 : 1;
+            double width = TrackedText.Measure(Title.ToUpperInvariant(), _titleSize, tracking);
+            if (Subtitle.Length > 0)
+            {
+                width = Math.Max(width, TrackedText.Measure(Subtitle, 12, tracking: 0));
+            }
+            // The bar down the left edge and the gap after it, which Render
+            // uses, and as much again on the right so that two entries side by
+            // side are not touching.
+            const double padding = 3 + 14 + 14;
+            // Asked for in every case, not only when the width is unconstrained.
+            //
+            // Reporting it only against an infinite width covered a horizontal
+            // StackPanel and nothing else: a WrapPanel measures each child
+            // against what is left of the line, which is a real number, so the
+            // entries went back to asking for nothing and stacking up on each
+            // other. Down a column this changes nothing -- a control that
+            // stretches is stretched to the parent whatever it asked for -- and
+            // it is the honest answer to the question either way.
+            return new Size(Math.Min(width + padding, availableSize.Width), size.Height);
+        }
+
         protected override void OnPointerEntered(PointerEventArgs e)
         {
             InvalidateVisual();

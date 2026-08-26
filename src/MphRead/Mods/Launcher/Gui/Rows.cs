@@ -20,11 +20,27 @@ namespace MphRead.Mods.Launcher.Gui
             Height = 26;
         }
 
-        public override void Render(DrawingContext context)
+        /// <summary>
+        /// Its own width when nothing constrains it, for the same reason
+        /// <see cref="MenuEntry.MeasureOverride"/> has one: in a row, a
+        /// control that measures to nothing is drawn on top of its neighbours.
+        /// </summary>
+        protected override Size MeasureOverride(Size availableSize)
         {
-            var text = new FormattedText(_text.ToUpperInvariant(), CultureInfo.InvariantCulture,
+            Size size = base.MeasureOverride(availableSize);
+            return new Size(Math.Min(Label().Width + 8, availableSize.Width), size.Height);
+        }
+
+        private FormattedText Label()
+        {
+            return new FormattedText(_text.ToUpperInvariant(), CultureInfo.InvariantCulture,
                 FlowDirection.LeftToRight, GuiTheme.Face(bold: true), 11,
                 GuiTheme.TextDimBrush);
+        }
+
+        public override void Render(DrawingContext context)
+        {
+            FormattedText text = Label();
             context.DrawText(text, new Point(0, Bounds.Height - text.Height - 4));
             double y = Bounds.Height - 2;
             context.DrawLine(new Pen(GuiTheme.EdgeBrush, 1),

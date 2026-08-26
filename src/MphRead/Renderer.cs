@@ -519,6 +519,8 @@ namespace MphRead
         // outline, and zero when the driver would not take one.
         private int _depthTexture = 0;
         private bool _depthTextureRefused = false;
+        private int _celFrameBuffer = 0;
+        private int _celFrameBufferColor = 0;
 
         /// <summary>
         /// The size the 3D scene is actually drawn at, which the resolution
@@ -775,7 +777,6 @@ namespace MphRead
             _shaderLocations.CelNearPlane = GL.GetUniformLocation(_celShaderProgramId, "near_plane");
             _shaderLocations.CelFarPlane = GL.GetUniformLocation(_celShaderProgramId, "far_plane");
             _shaderLocations.CelDepthQuantum = GL.GetUniformLocation(_celShaderProgramId, "depth_quantum");
-            _shaderLocations.CelInkFloor = GL.GetUniformLocation(_celShaderProgramId, "ink_floor");
             _shaderLocations.CelProbe = GL.GetUniformLocation(_celShaderProgramId, "probe");
 
             _shaderLocations.FadeColor = GL.GetUniformLocation(_rttShaderProgramId, "fade_color");
@@ -1657,7 +1658,10 @@ namespace MphRead
             GL.BindTexture(TextureTarget.Texture2D, 0);
             GL.FramebufferTexture2D(FramebufferTarget.Framebuffer,
                 FramebufferAttachment.DepthStencilAttachment, TextureTarget.Texture2D, _depthTexture, 0);
-            _depthQuantum = MeasureDepthQuantum();
+            _claimedQuantum = MeasureDepthQuantum();
+            // Until a frame has been looked at, the driver's own answer is the
+            // best there is.
+            _depthQuantum = _claimedQuantum;
             FramebufferErrorCode status = GL.CheckFramebufferStatus(FramebufferTarget.Framebuffer);
             if (status != FramebufferErrorCode.FramebufferComplete)
             {
@@ -1730,6 +1734,15 @@ namespace MphRead
 
         private static bool _saidDepthSize;
 
+        /// <summary>
+        /// One step of the depth buffer as the driver reports it, and the same
+        /// thing as a frame of the ink pass found it to be. They are not the
+        /// same number: a driver reports the bits it stores and says nothing
+        /// about what its rasteriser's interpolation was worth on the way in,
+        /// and the second is the one the threshold has to clear.
+        /// </summary>
+        private float _claimedQuantum = 1f / (MathF.Pow(2, 24) - 1);
+
         private float _depthQuantum = 1f / (MathF.Pow(2, 24) - 1);
 
         /// <summary>
@@ -1771,6 +1784,33 @@ namespace MphRead
         }
 
         /// <summary>
+        /// The ink pass's own target: the scene's colour texture and nothing
+        /// else.
+        ///
+        /// Built once and kept. The colour attachment is refreshed only if the
+        /// texture it names ever changes -- a resize does not change it, since
+        /// <see cref="OnResize"/> re-specifies the same texture name rather
+        /// than making a new one, so in practice this is one attachment call
+        /// for the life of the renderer.
+        /// </summary>
+        private int CelFrameBuffer()
+        {
+            if (_celFrameBuffer == 0)
+            {
+                _celFrameBuffer = GL.GenFramebuffer();
+            }
+            if (_celFrameBufferColor != _screenTexture)
+            {
+                GL.BindFramebuffer(FramebufferTarget.Framebuffer, _celFrameBuffer);
+                GL.FramebufferTexture2D(FramebufferTarget.Framebuffer,
+                    FramebufferAttachment.ColorAttachment0, TextureTarget.Texture2D,
+                    _screenTexture, 0);
+                _celFrameBufferColor = _screenTexture;
+            }
+            return _celFrameBuffer;
+        }
+
+        /// <summary>
         /// The pass itself: the finished scene out of <c>_celTexture</c>, the
         /// depth the scene left behind, and a quad over the whole target.
         /// </summary>
@@ -1787,7 +1827,6 @@ namespace MphRead
             GL.Uniform1(_shaderLocations.CelNearPlane, _nearClip);
             GL.Uniform1(_shaderLocations.CelFarPlane, _useClip ? _farClip : 10000f);
             GL.Uniform1(_shaderLocations.CelDepthQuantum, _depthQuantum);
-            GL.Uniform1(_shaderLocations.CelInkFloor, _inkFloor);
             GL.Uniform1(_shaderLocations.CelProbe, probe ? 1 : 0);
             // Off the framebuffer for the length of the pass. Sampling a
             // texture that is attached to the framebuffer being drawn into is
@@ -1797,8 +1836,25 @@ namespace MphRead
             // Two calls a frame; the depth is already in memory as a texture,
             // so there is nothing here for a tiler to resolve that it was not
             // resolving anyway.
-            GL.FramebufferTexture2D(FramebufferTarget.Framebuffer,
-                FramebufferAttachment.DepthStencilAttachment, TextureTarget.Texture2D, 0, 0);
+            // Draw through a target that does not have the depth attached,
+            // rather than taking the depth off the one that does.
+            //
+            // Sampling a texture attached to the framebuffer being drawn into
+            // is undefined in OpenGL ES whether or not anything writes to it,
+            // and this reads the depth while drawing colour -- so the two had
+            // to be separated somehow. Detaching and reattaching was the first
+            // way and it is the expensive one: changing an attachment on a
+            // bound framebuffer makes a tile-based GPU flush the tile buffer
+            // and load it back, twice a frame, over the whole screen. Measured
+            // on a Mali-G78 at 2400x1080 that alone was 32 ms a frame -- cel
+            // shading cost 58 ms a frame against 25 ms without it, and 26 ms
+            // once this replaced it. Practically the entire cost of the
+            // feature was the two calls, not the pass.
+            //
+            // An ordinary framebuffer switch is a path every driver expects.
+            // The colour attachment is the same texture, so the pass still
+            // paints the scene the rest of the frame is drawing into.
+            GL.BindFramebuffer(FramebufferTarget.Framebuffer, CelFrameBuffer());
             GL.Disable(EnableCap.DepthTest);
             GL.Disable(EnableCap.Blend);
             GL.Disable(EnableCap.CullFace);
@@ -1820,9 +1876,9 @@ namespace MphRead
             GL.ActiveTexture(TextureUnit.Texture1);
             GL.BindTexture(TextureTarget.Texture2D, 0);
             GL.ActiveTexture(TextureUnit.Texture0);
-            // Back on, before anything else can find the target without one.
-            GL.FramebufferTexture2D(FramebufferTarget.Framebuffer,
-                FramebufferAttachment.DepthStencilAttachment, TextureTarget.Texture2D, _depthTexture, 0);
+            // Back to the target the rest of the frame is drawn into, before
+            // anything else can find the wrong one bound.
+            GL.BindFramebuffer(FramebufferTarget.Framebuffer, _frameBuffer);
             GL.Enable(EnableCap.DepthTest);
         }
 
@@ -1831,8 +1887,6 @@ namespace MphRead
         /// units, measured on this machine. Zero until a frame has been looked
         /// at; the shader's fixed threshold applies until then.
         /// </summary>
-        private float _inkFloor;
-
         private bool _calibrateInk = true;
 
         /// <summary>
@@ -1902,21 +1956,99 @@ namespace MphRead
                 _calibrateInk = true;
                 return;
             }
-            drawn.Sort();
-            byte median = drawn[drawn.Count / 2];
-            float measured = MathF.Pow(2, (median / 255f - 0.5f) * 24f);
-            _inkFloor = measured * 6f;
-            string howBad = measured < 0.1f ? "which is nothing"
-                : measured < 1.1f ? "which is close"
-                : "which is more than an actual crease, so only silhouettes will ink";
-            Console.WriteLine($"[render] cel outline: a flat surface measures "
-                + $"{measured.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture)}"
-                + $"{(median >= 255 ? " or more" : "")} here against a threshold of 1.1, {howBad}. "
-                + $"Ink floor {_inkFloor.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture)}.");
+            // Only the pixels that measured *something*.
+            //
+            // This is the part that has to be got right, and the median over
+            // everything gets it wrong: a depth error is a step, so it shows
+            // up only where a step boundary falls, and on this phone that is
+            // about one pixel in thirty. The other twenty-nine measure exactly
+            // zero -- two neighbours rounded to the same value as the middle
+            // one -- so a median over all of them is zero however coarse the
+            // buffer is, and reports a perfect machine on the one that is not.
+            //
+            // Among the pixels that did measure something, the typical value
+            // is the step itself. Measured on a Mali-G78 it came out at
+            // 2.4e-4 over the walls, the middle distance and the floor alike,
+            // against the 6e-8 the same driver says it stores: the same number
+            // wherever the camera pointed, which is what a property of the
+            // machine should look like and what the median of everything
+            // never showed.
+            var kinks = new List<byte>(drawn.Count / 8);
+            foreach (byte value in drawn)
+            {
+                // 1 is the shader's clamp floor, which means "no kink here".
+                if (value > 1)
+                {
+                    kinks.Add(value);
+                }
+            }
+            if (kinks.Count < 64)
+            {
+                // A machine whose depth arrives intact, or a frame with no
+                // surface in it to judge by. Either way the driver's own
+                // answer is the best there is.
+                Console.WriteLine("[render] cel outline: the depth arrives intact here; "
+                    + "keeping the buffer's own step.");
+                return;
+            }
+            kinks.Sort();
+            byte median = kinks[kinks.Count / 2];
+            // The probe paints log2 of the kink in the depth buffer's own
+            // units, -32..0 over the byte. Most of a frame is flat surface and
+            // a real edge measures orders of magnitude more, so the median is
+            // what a flat surface costs here -- which is the depth error
+            // itself, and the number the shader wants.
+            float measured = MathF.Pow(2, (median / 255f - 1f) * 32f);
+            // Never below what the buffer stores: the median can land under
+            // one step of it on a frame of surfaces that happen to face the
+            // camera, and a floor under the truth protects nothing.
+            _depthQuantum = MathF.Max(_claimedQuantum, measured);
+            float ratio = measured / _claimedQuantum;
+            string howBad = ratio < 2f ? "which is what the buffer stores"
+                : ratio < 64f ? "which is coarser than it stores, and the ink threshold rises to match"
+                : "which is far coarser than it stores; only strong creases and silhouettes will ink";
+            Console.WriteLine($"[render] cel outline: a flat surface's depth is off by "
+                + $"{measured.ToString("0.#######e+0", System.Globalization.CultureInfo.InvariantCulture)} "
+                + $"here, {ratio.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)}x "
+                + $"the {_claimedQuantum.ToString("0.#######e+0", System.Globalization.CultureInfo.InvariantCulture)} "
+                + $"the driver stores -- {howBad}.");
+        }
+
+        /// <summary>
+        /// Frames a second, over the half second just gone.
+        ///
+        /// Measured here rather than in either head because both heads drive
+        /// the same method: the desktop from its window's render callback and
+        /// Android from the render thread's own loop. One number, measured the
+        /// same way, so the two are worth comparing with each other -- which
+        /// is most of what a counter is for.
+        ///
+        /// Wall clock, not the frame the engine thinks it is on: the point is
+        /// to catch the frames that took too long, and a fixed-step counter
+        /// cannot.
+        /// </summary>
+        public float FramesPerSecond { get; private set; }
+
+        private readonly Stopwatch _fpsClock = Stopwatch.StartNew();
+        private int _fpsFrames;
+
+        private void CountFrame()
+        {
+            _fpsFrames++;
+            double elapsed = _fpsClock.Elapsed.TotalSeconds;
+            // Long enough to be steady, short enough to answer "is it this
+            // corridor?" while you are still standing in it.
+            if (elapsed >= 0.5)
+            {
+                FramesPerSecond = (float)(_fpsFrames / elapsed);
+                _fpsFrames = 0;
+                _fpsClock.Restart();
+            }
         }
 
         public bool OnRenderFrame()
         {
+            CountFrame();
             GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit | ClearBufferMask.StencilBufferBit);
             GL.ClearStencil(0);
 
@@ -4110,7 +4242,15 @@ namespace MphRead
             GL.BindTexture(TextureTarget.Texture2D, 0);
         }
 
-        public void DrawHudObject(HudObjectInstance inst, int mode = 0)
+        /// <param name="scale">
+        /// Multiplies the size the object is drawn at, without touching the
+        /// size it is *cut out* at. Those are the same field on the instance --
+        /// Width and Height say how big a glyph is in the character data as
+        /// well as how big it lands on screen -- so shrinking text by setting
+        /// them re-cuts the font at the wrong size and draws confetti. This is
+        /// the destination, and only the destination.
+        /// </param>
+        public void DrawHudObject(HudObjectInstance inst, int mode = 0, float scale = 1)
         {
             if (!inst.Enabled)
             {
@@ -4150,6 +4290,11 @@ namespace MphRead
                 float aspect = width / height;
                 width = width / 256 * viewWidth;
                 height = width / aspect;
+            }
+            if (scale != 1)
+            {
+                width *= scale;
+                height *= scale;
             }
             float viewLeft = -viewWidth / 2;
             float viewTop = viewHeight / 2;

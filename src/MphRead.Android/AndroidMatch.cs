@@ -30,6 +30,16 @@ namespace MphRead.Droid
             // one place that is guaranteed to run before a room is loaded, so
             // a map added since the last launch is built rather than missing.
             AndroidMaps.EnsureBuilt();
+            if (plan.Kind == LaunchKind.Adventure)
+            {
+                // Its own path, for the reason MatchStart has one: the story
+                // takes its room from the save slot rather than from the plan,
+                // and it is the one kind of match that may write a save. Going
+                // through the multiplayer path below is what this did before,
+                // and an adventure plan carries an empty room key on purpose
+                // -- so the story ended at "No room with this name is known."
+                return BuildAdventure(input, size, plan, close);
+            }
             // No slot means nothing can be written, which is what a match
             // needs -- the same reason MatchStart gives.
             Menu.SaveSlot = 0;
@@ -45,6 +55,55 @@ namespace MphRead.Droid
                 scene.AddRoom(plan.RoomKey, plan.Mode);
             }
             return scene;
+        }
+
+        /// <summary>
+        /// The story, from a save slot -- the half of
+        /// <see cref="MatchStart"/>'s adventure path that is not a window.
+        ///
+        /// Everything decided here is decided there too, and for the same
+        /// reasons: the slot is chosen before the save is read, because
+        /// <see cref="GameState.CommitSave"/> writes nothing while
+        /// <see cref="Menu.SaveSlot"/> is 0; the cap goes back to the four a
+        /// DS game had, since an offline match in the same session may have
+        /// raised it and the story's setup counts on the retail number; and
+        /// one player is added, because the bot filling that the multiplayer
+        /// path does means nothing here.
+        ///
+        /// The room comes out of <see cref="AdventureSave.Begin"/>: the
+        /// slot's own checkpoint, or the Celestial Archives landing site for a
+        /// new game.
+        /// </summary>
+        private static Scene BuildAdventure(AndroidInput input, Vector2i size,
+            LaunchPlan plan, Action close)
+        {
+            string roomKey = AdventureSave.Begin(plan.SaveSlot, plan.NewGame);
+            if (roomKey.Length == 0)
+            {
+                throw new ProgramException("That save slot does not name a room to load.");
+            }
+            GameState.Mode = GameMode.SinglePlayer;
+            PlayerEntity.MaxPlayers = 4;
+            var scene = new Scene(size, input.Keyboard, input.Mouse, _ => { }, close);
+            scene.AddPlayer(plan.Hunter, recolor: 0, team: -1);
+            scene.AddRoom(roomKey, GameMode.SinglePlayer);
+            Console.WriteLine($"[match] adventure, slot {plan.SaveSlot}, "
+                + $"{(plan.NewGame ? "new game" : "continued")}, room {roomKey}");
+            return scene;
+        }
+
+        /// <summary>
+        /// Write the save the session asked for, once the match is over.
+        ///
+        /// The desktop does this on the line after its render loop returns;
+        /// this platform has no such line, so the render thread calls it as it
+        /// tears the scene down. Safe to call after any match: it is
+        /// <see cref="MatchStart.CommitAdventureSave"/>, which writes nothing
+        /// unless a slot is selected, and only the story selects one.
+        /// </summary>
+        public static void Finish()
+        {
+            MatchStart.CommitAdventureSave();
         }
 
         /// <summary>

@@ -142,8 +142,13 @@ namespace MphRead.Mods.Launcher
         /// ask on, and the two settings that reach here already carry the
         /// answer that matters: leaving through the ship asks (so it saves),
         /// and quitting outright defaults to Never (so it does not).
+        ///
+        /// Public because Android has the same problem and must not grow a
+        /// second answer to it: there the render thread calls this as it tears
+        /// the scene down, which is the same moment as the line below the
+        /// render loop here.
         /// </summary>
-        private static void CommitAdventureSave()
+        public static void CommitAdventureSave()
         {
             if (Menu.NeededSave != SaveWhen.Never && Menu.SaveSlot != 0)
             {

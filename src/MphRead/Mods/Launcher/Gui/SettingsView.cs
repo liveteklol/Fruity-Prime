@@ -35,10 +35,22 @@ namespace MphRead.Mods.Launcher.Gui
         private readonly MenuSettings _settings;
         private readonly bool _inGame;
         private readonly StackPanel _rail = new() { Spacing = 2 };
+
+        /// <summary>
+        /// The same section buttons, wrapped over as many lines as they need.
+        ///
+        /// A narrow screen used to put them in a row inside a horizontal
+        /// scroller, and the row could not be scrolled with a finger: every
+        /// button in it takes the pointer for itself, so the drag never
+        /// reached the scroller and the sections past the fourth were simply
+        /// unreachable on a phone. Wrapping needs no gesture at all.
+        /// </summary>
+        private readonly WrapPanel _railWrap = new();
         private readonly Panel _pages = new();
         private readonly List<(MenuEntry Button, Control Page)> _sections = new();
         private readonly Grid _grid = new();
         private readonly Border _railPanel;
+        private Caption? _heading;
         private readonly Border _footerPanel;
         private readonly ScrollViewer _railScroll;
         private bool _narrow;
@@ -50,12 +62,21 @@ namespace MphRead.Mods.Launcher.Gui
         /// <summary>Raised when this view is finished with, saved or not.</summary>
         public event EventHandler? Closed;
 
+        /// <summary>
+        /// The player asked for the game-files screen, which lives on the
+        /// front screen because extracting a ROM is a thing you do before
+        /// there is anything to configure. Raised, not acted on: this view
+        /// does not know what is behind it.
+        /// </summary>
+        public event EventHandler? GameFilesRequested;
+
         private ChoiceRow? _windowRow;
         private SliderRow _resolutionScale = null!;
         private ToggleRow _lightingRow = null!;
         private ToggleRow _fogRow = null!;
         private ToggleRow _filteringRow = null!;
         private ToggleRow _celRow = null!;
+        private ToggleRow _fpsRow = null!;
         private SliderRow _celBands = null!;
         private SliderRow _celEdge = null!;
         private ToggleRow _helmetRow = null!;
@@ -129,8 +150,13 @@ namespace MphRead.Mods.Launcher.Gui
             Content = _grid;
             SizeChanged += (_, e) => ApplyLayout(e.NewSize.Width < _narrowWidth);
 
-            _rail.Children.Add(new Caption("Settings") { Height = 34 });
+            _heading = new Caption("Settings") { Height = 34 };
+            _rail.Children.Add(_heading);
             BuildPages();
+            // The sections did not exist when the first layout ran, so the one
+            // that is wanted is chosen again now that they do.
+            _laidOut = false;
+            ApplyLayout(_narrow);
             ShowPage(_sections[0].Page);
         }
 
@@ -153,8 +179,9 @@ namespace MphRead.Mods.Launcher.Gui
             {
                 _grid.ColumnDefinitions = new ColumnDefinitions("*");
                 _grid.RowDefinitions = new RowDefinitions("Auto,*,Auto");
-                _rail.Orientation = Orientation.Horizontal;
-                _railScroll.HorizontalScrollBarVisibility = ScrollBarVisibility.Auto;
+                MoveSections(_railWrap);
+                _railScroll.Content = _railWrap;
+                _railScroll.HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled;
                 _railScroll.VerticalScrollBarVisibility = ScrollBarVisibility.Disabled;
                 _railPanel.Width = Double.NaN;
                 _railPanel.Padding = new Thickness(12, 8, 12, 6);
@@ -167,7 +194,8 @@ namespace MphRead.Mods.Launcher.Gui
             }
             _grid.ColumnDefinitions = new ColumnDefinitions("Auto,*");
             _grid.RowDefinitions = new RowDefinitions("*,Auto");
-            _rail.Orientation = Orientation.Vertical;
+            MoveSections(_rail);
+            _railScroll.Content = _rail;
             _railScroll.HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled;
             _railScroll.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
             _railPanel.Width = _railWidth;
@@ -177,6 +205,35 @@ namespace MphRead.Mods.Launcher.Gui
             Place(_railPanel, 0, 0, rowSpan: 1);
             Place(_footerPanel, 1, 0, rowSpan: 1);
             Place(_pages, 0, 1, rowSpan: 2);
+        }
+
+        /// <summary>
+        /// Put the section buttons in one panel or the other.
+        ///
+        /// One set of buttons moved between two panels rather than two sets
+        /// kept in step: a section added to <see cref="BuildPages"/> turns up
+        /// in both shapes without anybody having to remember it twice, which
+        /// is the same reason the pages themselves are shared.
+        ///
+        /// The heading goes with them only down the column. Across the top it
+        /// would be a fifth thing on the first line that is not a section.
+        /// </summary>
+        private void MoveSections(Panel target)
+        {
+            if (_sections.Count == 0 || ReferenceEquals(_sections[0].Button.Parent, target))
+            {
+                return;
+            }
+            _rail.Children.Clear();
+            _railWrap.Children.Clear();
+            if (ReferenceEquals(target, _rail) && _heading != null)
+            {
+                _rail.Children.Add(_heading);
+            }
+            foreach ((MenuEntry button, Control _) in _sections)
+            {
+                target.Children.Add(button);
+            }
         }
 
         private static void Place(Control control, int row, int column, int rowSpan)
@@ -283,6 +340,33 @@ namespace MphRead.Mods.Launcher.Gui
             BuildToggles("Bugfixes", typeof(Bugfixes),
                 "Corrections to original-game bugs. Off restores what the retail "
                 + "game shipped with.");
+            BuildCredits();
+        }
+
+        /// <summary>
+        /// Who this is built on, in full.
+        ///
+        /// It used to be four dim lines in the corner of the front screen,
+        /// where it was the first thing the eye landed on and the last thing
+        /// anybody needed while choosing a match. Here it is out of the way
+        /// and, being a page rather than a corner, it can say what each person
+        /// actually did.
+        /// </summary>
+        private void BuildCredits()
+        {
+            StackPanel page = AddSection("Credits");
+            Heading(page, "Credits");
+            Explain(page, Mods.Credits.Summary);
+            foreach (Mods.Credits.Entry entry in Mods.Credits.Entries)
+            {
+                page.Children.Add(new Caption(entry.Who));
+                string what = entry.What;
+                if (entry.Where.Length > 0)
+                {
+                    what += "\n" + entry.Where;
+                }
+                page.Children.Add(new Note(what));
+            }
         }
 
         // ------------------------------------------------------------- display
@@ -314,9 +398,12 @@ namespace MphRead.Mods.Launcher.Gui
             _lightingRow = Add(page, new ToggleRow("Lighting", RenderOptions.Lighting));
             _fogRow = Add(page, new ToggleRow("Fog", RenderOptions.Fog));
             _filteringRow = Add(page, new ToggleRow("Texture filtering", RenderOptions.TextureFiltering));
+            _fpsRow = Add(page, new ToggleRow("FPS counter", RenderOptions.ShowFps));
             Explain(page, "The DS had no filtering, so off is both faster and what the game "
                 + "looked like. Lighting and fog take effect on the next room; the render "
-                + "scale takes effect at once. Room and player detail are in Features.");
+                + "scale takes effect at once. Room and player detail are in Features. The "
+                + "FPS counter draws in the top left and takes effect at once, this match "
+                + "included.");
 
             Heading(page, "Cel shading");
             _celRow = Add(page, new ToggleRow("Cel shading", RenderOptions.CelShading));
@@ -497,12 +584,25 @@ namespace MphRead.Mods.Launcher.Gui
                 $"{LauncherPrefs.ServerAddress}:{LauncherPrefs.ServerPort}", boxWidth: 220));
             _masterRow = Add(page, new FieldRow("Server directory",
                 $"{LauncherPrefs.MasterHost}:{LauncherPrefs.MasterPort}", boxWidth: 220));
-            Explain(page, "host, or host:port. The directory is what \"find a server\" asks, "
-                + "and what runs a hosted match for you when your own port is not open.");
+            Explain(page, "host, or host:port. The directory is what Join lists, and what "
+                + "runs an online match for you: this build never opens a port on your "
+                + "own machine. To run a server yourself, use the dedicated server.");
             _autoUpdate = Add(page, new ToggleRow("Check for updates on startup",
                 LauncherPrefs.AutoUpdate));
             Explain(page, "Asks GitHub whether there is a newer release and says so. It "
                 + "downloads and installs nothing.");
+
+            Heading(page, "Game files");
+            var files = new MenuEntry("Game files", GameFiles.Describe(), titleSize: 15);
+            files.SubtitleColor = GameFiles.Ready ? GuiTheme.Good : GuiTheme.Warm;
+            files.Click += (_, _) =>
+            {
+                GameFilesRequested?.Invoke(this, EventArgs.Empty);
+                Close();
+            };
+            page.Children.Add(files);
+            Explain(page, "Where the extracted ROM lives, and how to point the game at a "
+                + "different one. Nothing else here works without it.");
         }
 
         /// <summary>host, or host:port. Leaves both alone on anything else, so a
@@ -633,6 +733,7 @@ namespace MphRead.Mods.Launcher.Gui
             _settings.Lighting = RenderOptions.OnOff(_lightingRow.On);
             _settings.Fog = RenderOptions.OnOff(_fogRow.On);
             _settings.TextureFiltering = RenderOptions.OnOff(_filteringRow.On);
+            _settings.ShowFps = RenderOptions.OnOff(_fpsRow.On);
             _settings.CelShading = RenderOptions.OnOff(_celRow.On);
             _settings.CelBands = Math.Clamp(_celBands.Value / 10, 2, 8)
                 .ToString(CultureInfo.InvariantCulture);

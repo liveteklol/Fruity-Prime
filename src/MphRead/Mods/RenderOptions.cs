@@ -58,6 +58,17 @@ namespace MphRead.Mods
         /// </summary>
         public static bool CelShading { get; set; }
 
+        /// <summary>
+        /// Draw the frame rate over the game.
+        ///
+        /// Read every frame rather than copied when a scene is built, for the
+        /// reason <see cref="Fog"/> and <see cref="Lighting"/> are: the
+        /// settings window opens from the pause menu during a match, and a
+        /// counter you cannot turn on while you are looking at the stutter is
+        /// the wrong tool.
+        /// </summary>
+        public static bool ShowFps { get; set; }
+
         /// <summary>How many steps the shading is banded into, 2 to 8.</summary>
         public static int CelBands
         {

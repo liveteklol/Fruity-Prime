@@ -308,7 +308,6 @@ uniform float far_plane;
 uniform float depth_quantum;
 // What the ink must clear before it is believed, measured on this machine
 // rather than assumed. Zero until the first frame has been looked at.
-uniform float ink_floor;
 // 1 draws the measurement instead of the picture, for that one frame.
 uniform int probe;
 
@@ -363,30 +362,39 @@ float raw_depth(float dx, float dy)
 // factor of two of each other always is. That costs nothing and is most of
 // the precision this pass has.
 // The kink at one reach, in the units everything below is measured in.
-float kink_rel(float d, float r, float unit)
+// The kink in the depth buffer's own units -- what the pass actually looks
+// at, before anything is made of it. Per unit of reach, so the reaches are
+// comparable with each other and with a measurement taken at one of them.
+float kink_abs(float d, float r)
 {
     vec2 h = vec2(raw_depth(-r, 0.0) - d, raw_depth(r, 0.0) - d);
     vec2 v = vec2(raw_depth(0.0, -r) - d, raw_depth(0.0, r) - d);
-    return max(abs(h.x + h.y), abs(v.x + v.y)) / r / unit;
+    return max(abs(h.x + h.y), abs(v.x + v.y)) / r;
+}
+
+float kink_rel(float d, float r, float unit)
+{
+    return kink_abs(d, r) / unit;
 }
 
 float edge_at(float d, float r, float unit)
 {
-    // Two floors, and the threshold is whichever is higher.
+    // What this machine's depth is worth here, in this pixel's units.
     //
-    // What the depth buffer's own steps are worth here, from the bit depth
-    // the driver admits to. On a plane running away from the camera those
-    // steps fall in straight lines, so a threshold underneath them does not
-    // draw creases -- it draws the quantisation, as black lines all over
-    // every wall.
+    // depth_quantum is an error in the *depth buffer's* units -- one step of
+    // it, or worse where the driver interpolates worse than it stores, which
+    // Renderer.CalibrateInk measures rather than takes on trust. Dividing it
+    // by the same unit the kink is divided by is the whole point: unit shrinks
+    // with distance and with grazing angle, so a fixed error is worth more and
+    // more in these units the further away and the flatter-on the surface is.
+    // A floor that did not do this was the bug -- it was a constant, measured
+    // once in the middle of a frame where unit was large, and it protected
+    // exactly the surfaces that never needed protecting. A floor stretching
+    // away from the camera got no protection at all, and drew the depth
+    // buffer's own steps as regular black stripes across itself.
     float quantised = depth_quantum * 4.0 / r / unit;
-    // And what this machine's depth *actually* turned out to be worth, which
-    // is the only number that has ever been right: a driver can report
-    // twenty-four bits and interpolate far worse than that, and no amount of
-    // arithmetic in here recovers what never arrived. Renderer.CalibrateInk
-    // measures it from a frame of this very pass and hands it back.
-    float lo = max(max(1.1, quantised * 1.5), ink_floor);
-    float hi = max(max(3.5, quantised * 4.0), ink_floor * 3.0);
+    float lo = max(1.1, quantised * 1.5);
+    float hi = max(3.5, quantised * 4.0);
     return smoothstep(lo, hi, kink_rel(d, r, unit));
 }
 
@@ -407,11 +415,16 @@ void main()
         float scale = far_plane / (far_plane - near_plane) - d;
         float unit = max(scale, 1e-9) * texel_w;
         if (probe == 1) {
-            // log2 of the kink, -12..+12 into 0..1, and black where nothing
-            // was drawn so the reader can leave those pixels out. Twelve each
-            // way because this has to stay readable from about a thousandth
-            // of the threshold to a thousand times it.
-            float shown = clamp(log2(max(kink_rel(d, 2.0, unit), 1e-6)) / 24.0 + 0.5, 0.004, 1.0);
+            // log2 of the kink in depth units, -32..0 into 0..1, and black
+            // where nothing was drawn so the reader can leave those pixels
+            // out. Depth units, not this pixel's units, because what is being
+            // measured is a property of the machine rather than of wherever
+            // the camera happened to be pointing: a flat surface's kink in
+            // these units is the depth error itself, and it is the same number
+            // across the frame. Thirty-two powers of two below one covers a
+            // buffer from eight bits to well past the twenty-four this asks
+            // for.
+            float shown = clamp(log2(max(kink_abs(d, 2.0), 1e-10)) / 32.0 + 1.0, 0.004, 1.0);
             gl_FragColor = vec4(shown, shown, shown, 1.0);
             return;
         }
@@ -502,7 +515,6 @@ void main()
         public int CelNearPlane { get; set; }
         public int CelFarPlane { get; set; }
         public int CelDepthQuantum { get; set; }
-        public int CelInkFloor { get; set; }
         public int CelProbe { get; set; }
         public int FogColor { get; set; }
         public int FogMinDistance { get; set; }

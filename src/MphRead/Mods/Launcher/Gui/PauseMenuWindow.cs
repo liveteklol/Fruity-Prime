@@ -27,8 +27,7 @@ namespace MphRead.Mods.Launcher.Gui
     internal sealed class PauseMenuWindow : Window
     {
         private static PauseMenuWindow? _open;
-        private readonly MenuEntry _windowEntry;
-        private readonly MenuEntry _resume;
+        private readonly PauseMenuView _view;
         private bool _settingsOpen;
 
         /// <summary>Open the menu, or bring the one already up to the front.</summary>
@@ -96,31 +95,21 @@ namespace MphRead.Mods.Launcher.Gui
                 WindowStartupLocation = WindowStartupLocation.CenterScreen;
             }
 
-            var stack = new StackPanel { Spacing = 4 };
-            stack.Children.Add(new Caption("Paused") { Height = 34 });
-            _resume = Add(stack, "Resume", "Escape", Close);
-            _windowEntry = new MenuEntry(WindowLabel(), "F11 or Alt+Enter", titleSize: 17);
-            _windowEntry.Click += (_, _) =>
+            // The entries themselves live in PauseMenuView, which Android
+            // shows through an overlay because it has no windows to put this
+            // in. What is left here is the window and what the entries mean on
+            // a desktop.
+            _view = new PauseMenuView(offerWindowMode: true);
+            _view.Resumed += (_, _) => Close();
+            _view.FullscreenRequested += (_, _) =>
             {
                 PauseMenu.RequestFullscreenToggle();
-                // The game thread does it on the next frame; reflect it here
-                // straight away so the label is not a lie for 16 milliseconds.
-                _windowEntry.Title = WindowMode.IsFullscreen ? "Windowed" : "Fullscreen";
                 Close();
             };
-            stack.Children.Add(_windowEntry);
-            Add(stack, "Settings", "Controls, display, audio", OpenSettings);
-            Add(stack, "Leave match", "Back to the launcher",
-                () => { PauseMenu.RequestLeave(); Close(); });
-            Add(stack, "Quit", $"Close {Mods.Branding.Name}",
-                () => { PauseMenu.RequestQuit(); Close(); });
-
-            Content = new Border
-            {
-                Background = GuiTheme.PanelBrush,
-                Padding = new Thickness(22, 18, 22, 18),
-                Child = stack
-            };
+            _view.SettingsRequested += (_, _) => OpenSettings();
+            _view.LeaveRequested += (_, _) => { PauseMenu.RequestLeave(); Close(); };
+            _view.QuitRequested += (_, _) => { PauseMenu.RequestQuit(); Close(); };
+            Content = _view;
         }
 
         private static string WindowLabel()
@@ -179,10 +168,7 @@ namespace MphRead.Mods.Launcher.Gui
         protected override void OnOpened(EventArgs e)
         {
             base.OnOpened(e);
-            // Resume takes the keyboard: somebody who just pressed Escape in a
-            // match is looking at five entries and expects Enter to mean the
-            // top one.
-            Dispatcher.UIThread.Post(() => _resume.Focus(), DispatcherPriority.Background);
+            _view.FocusResume();
         }
 
         protected override void OnKeyDown(KeyEventArgs e)

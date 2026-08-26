@@ -278,7 +278,33 @@ namespace MphRead.Droid
         protected override void OnResume()
         {
             base.OnResume();
+            // Immersive whether or not a match is running.
+            //
+            // It used to be turned on for a match and off again for the front
+            // screen, which left the status bar and the gesture pill over the
+            // launcher -- and the system puts them back on its own after a
+            // rotation or a swipe from the edge, so this is asked for again on
+            // every resume rather than once at startup.
+            GoImmersive(true);
             _gameView?.OnResume();
+        }
+
+        /// <summary>
+        /// Ask for immersive again whenever the window becomes ours.
+        ///
+        /// OnResume is too early: the toolkit sets the window up after it and
+        /// the bars come back. The system also brings them back by itself
+        /// after a swipe from the edge, a rotation, or a notification shade
+        /// being pulled down and let go, and each of those ends with focus
+        /// returning here. This is the one callback that fires for all of it.
+        /// </summary>
+        public override void OnWindowFocusChanged(bool hasFocus)
+        {
+            base.OnWindowFocusChanged(hasFocus);
+            if (hasFocus)
+            {
+                GoImmersive(true);
+            }
         }
 
         protected override void OnDestroy()
@@ -297,7 +323,12 @@ namespace MphRead.Droid
         {
             if (InMatch)
             {
-                _gameView?.Stop();
+                // Back used to end the match outright, which is a gesture a
+                // phone makes by accident and an hour of adventure mode thrown
+                // away. It is what Escape is on the desktop now: the menu,
+                // which offers leaving as one of four things rather than as
+                // the only one.
+                TogglePauseMenu();
                 return;
             }
             if (_pending != null)
@@ -356,10 +387,6 @@ namespace MphRead.Droid
             RequestedOrientation = ScreenOrientation.SensorLandscape;
             Window?.AddFlags(WindowManagerFlags.KeepScreenOn);
             GoImmersive(true);
-            if (_launcherView != null)
-            {
-                _launcherView.Visibility = ViewStates.Gone;
-            }
             _pending = (plan, input);
             _waitingSince = SystemClock.UptimeMillis();
             _lastSize = ContentSize;
@@ -369,7 +396,12 @@ namespace MphRead.Droid
             // delays the start -- a rotation, a window that will not hold
             // still -- is a black screen with nothing on it and nothing to
             // press. That is indistinguishable from the app having failed.
-            ShowNotice($"Loading {plan.RoomKey}...");
+            // An adventure plan carries no room key -- the slot decides the
+            // room -- so naming it would leave "Loading ..." on screen for the
+            // length of the load.
+            ShowNotice(plan.RoomKey.Length > 0
+                ? $"Loading {plan.RoomKey}..."
+                : "Loading your game...");
             Console.WriteLine($"[android] starting {plan.RoomKey} from "
                 + $"{_lastSize.Width}x{_lastSize.Height}");
             WaitForSteadyWindow();
@@ -492,7 +524,7 @@ namespace MphRead.Droid
             }
             AndroidApp.Home?.Reset();
             Window?.ClearFlags(WindowManagerFlags.KeepScreenOn);
-            GoImmersive(false);
+            GoImmersive(true);
             RequestedOrientation = _orientationBefore;
             Toast.MakeText(this, $"Could not start the match: {reason}",
                 ToastLength.Long)?.Show();
@@ -506,6 +538,10 @@ namespace MphRead.Droid
             }
             (LaunchPlan plan, AndroidInput input) = _pending.Value;
             _pending = null;
+            if (_launcherView != null)
+            {
+                _launcherView.Visibility = ViewStates.Gone;
+            }
             if (note != null)
             {
                 Console.WriteLine($"[android] starting the match anyway: {note}");
@@ -531,7 +567,8 @@ namespace MphRead.Droid
                 (i, size) => AndroidMatch.Build(i, size, plan, () => RunOnUiThread(EndMatch)),
                 () => RunOnUiThread(EndMatch),
                 () => RunOnUiThread(MatchLoaded),
-                error => RunOnUiThread(() => FailMatch(error)));
+                error => RunOnUiThread(() => FailMatch(error)),
+                () => RunOnUiThread(TogglePauseMenu));
             // The launcher is Avalonia, which draws on a surface of its own,
             // and two surfaces in one window have no z-order between them
             // unless one is asked for. Above the other surface and below the
@@ -608,6 +645,85 @@ namespace MphRead.Droid
             _content?.PostDelayed(EndMatch, 4000);
         }
 
+        private bool _pauseMenuOpen;
+
+        /// <summary>
+        /// The app's own menu, over a running match: resume, settings, leave,
+        /// quit.
+        ///
+        /// The match keeps running behind it, which is the desktop's choice
+        /// too and the honest one -- a networked match cannot be paused, and
+        /// pretending otherwise is worse than showing it.
+        ///
+        /// The launcher's surface is what draws the menu, so it comes back
+        /// into view and the game's surface gives up the z-order it was given
+        /// to sit above it. The touch controls go away with it: they are
+        /// ordinary views over the game and would otherwise be pressable
+        /// through the menu.
+        /// </summary>
+        internal void TogglePauseMenu()
+        {
+            if (!InMatch)
+            {
+                return;
+            }
+            if (_pauseMenuOpen)
+            {
+                ClosePauseMenu();
+                return;
+            }
+            _pauseMenuOpen = true;
+            _controls.ReleaseEverything();
+            if (_overlay != null)
+            {
+                _overlay.Visibility = ViewStates.Gone;
+            }
+            // The game's surface goes away rather than being drawn over.
+            //
+            // Two surfaces in one window have no z-order between them except
+            // the one asked for when they are attached, and asking again later
+            // does nothing -- SetZOrderMediaOverlay is read when the surface is
+            // created, so a menu on the launcher's surface simply never
+            // appeared. Hiding the game's surface is the way round it, and it
+            // costs nothing: the render loop already survives losing its
+            // surface, because that is what happens every time the app goes to
+            // the background, and it keeps the loaded scene while it waits.
+            // The match resumes on the frame the surface comes back.
+            if (_gameView != null)
+            {
+                _gameView.Visibility = ViewStates.Gone;
+            }
+            if (_launcherView != null)
+            {
+                _launcherView.Visibility = ViewStates.Visible;
+            }
+            GoImmersive(true);
+            AndroidApp.Home?.ShowPauseMenu(ClosePauseMenu, EndMatch, () => Finish());
+        }
+
+        private void ClosePauseMenu()
+        {
+            if (!_pauseMenuOpen)
+            {
+                return;
+            }
+            _pauseMenuOpen = false;
+            if (_launcherView != null)
+            {
+                _launcherView.Visibility = ViewStates.Gone;
+            }
+            if (_gameView != null)
+            {
+                _gameView.Visibility = ViewStates.Visible;
+            }
+            if (_overlay != null)
+            {
+                _overlay.Visibility = ViewStates.Visible;
+            }
+            _controls.ReleaseEverything();
+            GoImmersive(true);
+        }
+
         /// <summary>Back to the front screen.</summary>
         internal void EndMatch()
         {
@@ -616,6 +732,7 @@ namespace MphRead.Droid
                 return;
             }
             _pending = null;
+            _pauseMenuOpen = false;
             HideNotice();
             if (_overlay != null)
             {
@@ -639,7 +756,7 @@ namespace MphRead.Droid
             NetSession.Stop();
             NetHostSession.Stop();
             Window?.ClearFlags(WindowManagerFlags.KeepScreenOn);
-            GoImmersive(false);
+            GoImmersive(true);
             RequestedOrientation = _orientationBefore;
         }
 

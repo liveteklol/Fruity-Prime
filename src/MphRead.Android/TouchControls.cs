@@ -12,7 +12,14 @@ namespace MphRead.Droid
         AltAttack,
         WeaponMenu,
         Zoom,
-        Pause
+        Pause,
+        /// <summary>
+        /// The DS's own pause button, which is the map and status screen on
+        /// foot and the scoreboard while it is held in a match. MENU stopped
+        /// being that when it became the way to the app's own menu, and it is
+        /// still worth reaching.
+        /// </summary>
+        Scoreboard
     }
 
     internal sealed class TouchButton
@@ -75,7 +82,8 @@ namespace MphRead.Droid
             new TouchButton(TouchAction.AltAttack, "ALT"),
             new TouchButton(TouchAction.WeaponMenu, "WEAPON"),
             new TouchButton(TouchAction.Zoom, "ZOOM"),
-            new TouchButton(TouchAction.Pause, "MENU")
+            new TouchButton(TouchAction.Pause, "MENU"),
+            new TouchButton(TouchAction.Scoreboard, "SCORE")
         };
 
         public float Width { get; private set; }
@@ -123,6 +131,7 @@ namespace MphRead.Droid
                 Place(TouchAction.WeaponMenu, width - 0.12f * h, 0.15f * h, 0.075f * h);
                 Place(TouchAction.Zoom, width - 0.33f * h, 0.12f * h, 0.065f * h);
                 Place(TouchAction.Pause, 0.11f * h, 0.12f * h, 0.060f * h);
+                Place(TouchAction.Scoreboard, 0.28f * h, 0.12f * h, 0.060f * h);
             }
         }
 
@@ -165,6 +174,19 @@ namespace MphRead.Droid
             }
         }
 
+        /// <summary>
+        /// Treat the whole screen as a place to point at, rather than the left
+        /// half as a stick.
+        ///
+        /// The DS had a touch screen and parts of this game still read a
+        /// position off it -- the dialog boxes and their OK button among them.
+        /// Those parts are drawn across the middle of the screen, which is the
+        /// seam between the stick and the aim, so half of an OK button lands on
+        /// a thumbstick that is not being used: the game is paused behind the
+        /// box. While one of those is up the split does more harm than good.
+        /// </summary>
+        public bool PointerIsAbsolute { get; set; }
+
         /// <summary>Where the aiming finger is, for the parts that read a position.</summary>
         public (bool Down, float X, float Y) AimPosition()
         {
@@ -198,7 +220,7 @@ namespace MphRead.Droid
                         return;
                     }
                 }
-                if (x < Width / 2 && _stickPointer == -1)
+                if (!PointerIsAbsolute && x < Width / 2 && _stickPointer == -1)
                 {
                     _stickPointer = pointerId;
                     StickActive = true;
