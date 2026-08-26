@@ -35,11 +35,20 @@ claiming coverage that isn't there.
   failures reproduced in it. If a real device still will not start a map from
   portrait, the `[android]` lines it now logs say which stage it stopped at.
 - **The cel shading has only been judged on the desktop.** Flat colours in
-  place of textures and the new depth-kink ink pass were shot across five
-  rooms and a live two-client match at 1600x900, and cel *off* is
-  pixel-identical to before the change. On Android the ES copies compile, link
-  and draw (67% of the pixels differ with the mode on), but SwiftShader's
-  dithered noise means no picture from there says whether it looks right.
+  place of textures and the depth-kink ink pass were shot across five rooms
+  and a live two-client match at 1600x900, and cel *off* is pixel-identical to
+  before the change.
+
+  On the emulator the mode is **unusable, and the reason is measured**: the
+  ink pass reads a flat surface's kink at 0.004-0.009 under llvmpipe and at
+  235-256 under SwiftShader, against a threshold of 1.1. Thirty thousand times
+  the noise, on a depth field whose large-scale structure is correct -- the
+  same per-pixel imprecision that streaks SwiftShader's colour, on its depth.
+  Nothing in the shader survives that, and a threshold that did would draw no
+  outline at all. So the emulator says nothing about how the mode behaves on a
+  real phone, in either direction. (An earlier claim here that the ES path had
+  been seen drawing the mode was wrong: those runs had cel shading *off* --
+  see the settings-directory note in `android/ANDROID-PORT.md`.)
 - **A phone is still a different machine** — the emulator is x86_64 with
   SwiftShader, a phone is arm64 with a real driver. That is the ABI and the GL
   implementation both differing from what is tested here.

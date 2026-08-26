@@ -303,6 +303,9 @@ uniform float texel_h;
 uniform float outline;
 uniform float near_plane;
 uniform float far_plane;
+// One step of the depth buffer the driver actually gave us, which is not
+// always the one that was asked for. See the note in edge_at.
+uniform float depth_quantum;
 
 varying vec2 texcoord;
 
@@ -321,15 +324,37 @@ float raw_depth(float dx, float dy)
     return texture2D(depth_tex, texcoord + vec2(dx * texel_w, dy * texel_h)).x;
 }
 
-// The kink at a given reach, divided by that reach so the two comparisons
-// mean the same thing. Reaching further is what gives the line its width: a
-// pixel two away from an edge still sees it, so the ink comes out three or
-// four pixels wide instead of the one pixel a drawn line never is.
-float kink_at(float d, float r)
+// How much of an edge there is at a given reach, 0 to 1.
+//
+// Reach does two things. It widens the line -- a pixel three away from an
+// edge still sees it, so the ink comes out three or four pixels wide instead
+// of the one pixel a drawn line never is -- and, because the kink is divided
+// by it while whatever the depth buffer got wrong is not, it is also
+// *quieter*. Reaching two and three rather than one and two is two to three
+// times the margin over a noisy depth buffer for a line that looks the same,
+// and each reach carries its own floor rather than the two being maxed
+// together and taking the noisier one's noise with them.
+//
+// The neighbours are subtracted from the centre before being added to each
+// other. Written as a sum of three samples it is three roundings of numbers
+// close to 1, and the signal here is around a millionth of that; written as
+// two differences it is exact, since a difference of two floats within a
+// factor of two of each other always is. That costs nothing and is most of
+// the precision this pass has.
+float edge_at(float d, float r, float unit)
 {
-    return max(
-        abs(raw_depth(-r, 0.0) + raw_depth(r, 0.0) - 2.0 * d),
-        abs(raw_depth(0.0, -r) + raw_depth(0.0, r) - 2.0 * d)) / r;
+    vec2 h = vec2(raw_depth(-r, 0.0) - d, raw_depth(r, 0.0) - d);
+    vec2 v = vec2(raw_depth(0.0, -r) - d, raw_depth(0.0, r) - d);
+    float kink = max(abs(h.x + h.y), abs(v.x + v.y)) / r;
+    // What the depth buffer's own steps are worth in the same units. On a
+    // plane running away from the camera those steps fall in straight lines,
+    // so a threshold underneath them does not draw creases -- it draws the
+    // quantisation, as straight black lines all over every wall. Where the
+    // buffer is deep this sits far below the fixed threshold and changes
+    // nothing; where it is not, it is the difference between an outline and a
+    // scribble.
+    float noise = depth_quantum * 4.0 / r / unit;
+    return smoothstep(max(1.1, noise * 1.5), max(3.5, noise * 4.0), kink / unit);
 }
 
 void main()
@@ -341,15 +366,14 @@ void main()
     // around, and the normalisation below divides by nearly zero on it.
     // The silhouette against it is still found, from the geometry's side.
     if (d < 0.9999995) {
-        float kink = max(kink_at(d, 1.0), kink_at(d, 2.0));
         // far/(far-near) - d is (far*near/(far-near))/z, so dividing by it
         // takes the distance out and leaves a pure change of slope; dividing
         // by the texel width takes the resolution out, so the same threshold
         // means the same corner at 640x360 and at 4K. What is left is about
         // 2 for a right-angled crease and hundreds for a silhouette.
         float scale = far_plane / (far_plane - near_plane) - d;
-        float rel = kink / max(scale, 1e-9) / texel_w;
-        ink = smoothstep(1.1, 3.5, rel) * outline;
+        float unit = max(scale, 1e-9) * texel_w;
+        ink = max(edge_at(d, 2.0, unit), edge_at(d, 3.0, unit)) * outline;
     }
     gl_FragColor = vec4(base * (1.0 - ink), 1.0);
 }
@@ -431,6 +455,7 @@ void main()
         public int CelTexelHeight { get; set; }
         public int CelNearPlane { get; set; }
         public int CelFarPlane { get; set; }
+        public int CelDepthQuantum { get; set; }
         public int FogColor { get; set; }
         public int FogMinDistance { get; set; }
         public int FogMaxDistance { get; set; }

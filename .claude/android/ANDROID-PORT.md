@@ -252,6 +252,21 @@ mistake — doing it on a `GLSurfaceView`:
   rate, a `glReadPixels` stall, a managed pixel loop in `AndroidPng`, and a PNG
   encode — and the launcher shows them in a 248-point band.
 
+### ⚠️ The settings file follows `ChooseRoot`, and it is not always the SD card
+
+`GameState`'s save folder is the relative path `Savedata`, resolved against
+the working directory, which `CustomizeAppBuilder` sets to whatever
+`ChooseRoot` picked. Both candidate roots can end up holding a `paths.txt`
+from earlier runs, and the one that wins is then the only one the game reads.
+An emulator here chose the **internal** directory
+(`/data/user/0/fr.livetek.fruityprime/files`) while a hand-written
+`settings.json` sat unread in the external one, and three rounds of "the ES
+renderer draws cel shading fine" were measured with cel shading off.
+
+`[android] N bundled map files -> <path>` names the root it chose, in the
+first seconds of every launch. Read it before trusting anything pushed with
+`adb push`, and push to that path.
+
 ### ⚠️ `ThumbnailMode` is process-wide
 
 `Mods/ThumbnailMode.cs` suppresses the HUD and mutes the sound. The desktop
@@ -335,9 +350,15 @@ fr.livetek.fruityprime/crc64e2a07749a868b9fd.MainActivity`, and `adb shell
 screencap` are enough to see the front screen. With KVM it would be seconds
 rather than minutes.
 
-SwiftShader implements GL ES 3.0, so it is a real check of the shaders and the
-renderer -- for whoever gets game files onto an emulator, which is the one thing
-that would close the gap below.
+SwiftShader implements GL ES 3.0, so it is a real check that the shaders
+compile, link and run. It is **not** a check of any picture, and there is now a
+number for how far off it is: the cel outline pass measures a flat surface's
+depth kink at 0.004-0.009 under llvmpipe on the desktop and at 235-256 here,
+against a threshold of 1.1. The large-scale depth field is right -- the room's
+shape is plainly visible in a `fract(d * 64.0)` probe -- and the per-pixel
+values are not, which is the same defect that streaks its colour. Anything
+that reads neighbouring pixels and compares them will be nonsense on this
+renderer.
 
 ## What has run and what has not
 

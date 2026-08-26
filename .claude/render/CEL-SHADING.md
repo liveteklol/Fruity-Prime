@@ -84,6 +84,56 @@ Two details that matter:
 
 `CelEdge` defaults to **1**, a line of solid black. It was 0.75 back when the
 pass inked most of every wall and full strength would have been unreadable.
+The default lives in **two** places and both have to say it: `RenderOptions`
+holds the engine's, and `MenuSettings` in `Menu.cs` holds the settings file's,
+which wins on every path that loads settings -- which is every path a player
+takes. Changing only the first changes nothing anybody sees.
+
+## What the pass needs from the depth buffer, and how to check it
+
+The kink it is looking for is around a millionth of the stored value, so this
+pass is only as good as the depth it reads. Two things protect that, and one
+number says whether they were enough.
+
+- **The neighbours are subtracted from the centre before being added to each
+  other.** As a sum of three samples near 1.0 it is three roundings against a
+  signal a millionth their size; as two differences it is exact, because a
+  difference of two floats within a factor of two of each other always is.
+  This matters more on a phone than here: `highp` in an ES fragment shader is
+  only promised sixteen bits of mantissa.
+- **The reaches are two and three, not one and two.** The kink is divided by
+  the reach and the buffer's error is not, so reaching further is quieter as
+  well as wider. Moving up one step is two to three times the margin for a
+  line that measures 2-3% different on the desktop and looks identical.
+- **`depth_quantum`** is asked of the driver per attachment
+  (`Renderer.MeasureDepthQuantum`) rather than assumed, and each reach lifts
+  its threshold to clear it. Ask the *depth* half of the attachment: both GL
+  and ES answer `INVALID_OPERATION` for a component size of
+  `DEPTH_STENCIL_ATTACHMENT` itself, and SwiftShader will not answer at all.
+
+Two lines of log say where a machine stands, one per scene and one per
+attachment:
+
+```
+[render] cel shading on, 4 bands, outline 1.00, fog off
+[render] cel outline: the depth buffer is 24 bits
+```
+
+To measure the noise itself, make `edge_at` return `kink / unit` unthresholded
+and paint `clamp(log2(kink) / 16 + 0.5, 0, 1)` as grey, then read a patch of
+flat wall back: **0.004 to 0.009 under llvmpipe, against a threshold of 1.1**.
+Anything near or above 1 there means the ink is drawing the buffer's own error
+and no threshold will separate the two. SwiftShader reads 235-256.
+
+## On OpenGL ES
+
+`Renderer.DrawCelOutline` **detaches the depth texture for the length of the
+pass** and puts it back afterwards. Sampling a texture that is attached to the
+framebuffer being drawn into is undefined in ES whether or not anything writes
+to it -- desktop GL forgives the read-only case and ES does not -- and this
+reads the depth while drawing colour into the same target. Two calls a frame,
+and the depth is already in memory as a texture, so there is nothing extra for
+a tiler to resolve.
 
 ## Testing it
 

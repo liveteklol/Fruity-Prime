@@ -885,6 +885,20 @@ namespace MphRead.Mods.Render
                 renderbuffer);
         }
 
+        /// <summary>
+        /// Asked once per depth attachment, so the ink pass knows how many
+        /// bits it is actually differencing. A driver may answer a request for
+        /// a 24-bit depth texture with fewer, and the pass is looking for a
+        /// difference far below one step of a coarse one.
+        /// </summary>
+        public static void GetFramebufferAttachmentParameter(FramebufferTarget target,
+            FramebufferAttachment attachment, FramebufferParameterName pname, out int result)
+        {
+            ES.GL.GetFramebufferAttachmentParameter((ES.FramebufferTarget)(int)target,
+                (ES.FramebufferAttachment)(int)attachment,
+                (ES.FramebufferParameterName)(int)pname, out result);
+        }
+
         public static FramebufferErrorCode CheckFramebufferStatus(FramebufferTarget target)
         {
             return (FramebufferErrorCode)(int)ES.GL.CheckFramebufferStatus((ES.FramebufferTarget)(int)target);
