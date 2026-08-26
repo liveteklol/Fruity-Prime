@@ -107,7 +107,15 @@ namespace MphRead.Mods
             // pending change before Location/ClientSize are set below.
             GLFW.PollEvents();
             window.Location = monitor.ClientArea.Min;
-            window.ClientSize = new Vector2i(monitor.ClientArea.Size.X, monitor.ClientArea.Size.Y);
+            // One pixel short of the monitor, not an exact match: a
+            // borderless window that covers a display exactly is what
+            // Windows' fullscreen optimizations key off to promote it into
+            // an exclusive-like mode, which then refuses to show *any* other
+            // window above it -- Topmost included, which is the only thing
+            // that puts the pause menu over this window at all (see
+            // PauseMenuWindow). One pixel is not visible and keeps that from
+            // triggering.
+            window.ClientSize = new Vector2i(monitor.ClientArea.Size.X, monitor.ClientArea.Size.Y - 1);
             IsFullscreen = true;
         }
 

@@ -526,6 +526,10 @@ namespace MphRead.Mods.Network
             player.ModSetWeapon((BeamType)state.CurrentWeapon);
             player.EquipInfo.Zoomed = (state.Flags & PlayerState.FlagZoomed) != 0;
             ApplyForm(player, (state.Flags & PlayerState.FlagAltForm) != 0);
+            // Hidden and non-solid on this machine too, not just the one
+            // whose input is frozen -- Quake 3's spectator, not a player who
+            // merely stopped moving.
+            player.ModSetSpectating((state.Flags & PlayerState.FlagSpectating) != 0);
         }
 
         /// <summary>

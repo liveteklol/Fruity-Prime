@@ -119,6 +119,33 @@ namespace MphRead.Mods.Network
         }
 
         /// <summary>
+        /// A session that never actually talks to anyone: fed only from a
+        /// recorded demo file, played back through <see cref="DemoPlayback"/>.
+        ///
+        /// Deliberately not <see cref="StartClient"/> minus the address --
+        /// <see cref="_hostEndPoint"/> stays null for the whole session,
+        /// which is what keeps every send in this class a no-op (each one
+        /// already guards on it), and <see cref="LocalSlot"/> stays -1
+        /// forever instead of resolving from a Welcome packet, since a demo
+        /// only ever starts recording after the real join already happened.
+        /// </summary>
+        public static void StartPlayback()
+        {
+            Stop();
+            _transport = new NetTransport(0);
+            Role = NetRole.Client;
+            LocalSlot = -1;
+            NetFrame = 0;
+            LastError = null;
+        }
+
+        /// <summary>Hands a packet read back from a demo file to this session as if it had just arrived.</summary>
+        public static void InjectPlaybackPacket(byte[] data, int length)
+        {
+            _transport?.EnqueueForPlayback(data, length);
+        }
+
+        /// <summary>
         /// Turn a hostname or literal address into an IPv4 endpoint address.
         /// IPv4 specifically: the transport binds an InterNetwork socket, so
         /// handing it a v6 address would fail at send time instead of here.
@@ -145,6 +172,7 @@ namespace MphRead.Mods.Network
         {
             NetPlayerSetup.Reset();
             SpectatorMode.Reset();
+            DemoRecorder.Stop();
             NetMatchSync.Reset();
             NetSlotManager.Reset();
             NetDamage.Reset();
@@ -251,6 +279,7 @@ namespace MphRead.Mods.Network
             NetFrame++;
             foreach (ReceivedPacket packet in _transport.Drain())
             {
+                DemoRecorder.Record(packet);
                 Handle(packet, time);
             }
             if (Role == NetRole.Host)
@@ -665,6 +694,16 @@ namespace MphRead.Mods.Network
             intent.Frame = NetFrame;
             intent.Write(_scratch);
             _transport.Send(_hostEndPoint, PacketType.Intent, _scratch.AsSpan(0, IntentPacket.Size));
+            // A demo only ever contains what this client *received* -- and
+            // this client never receives its own SlotIntent back, since it
+            // already knows what it pressed. Without this, playback shows
+            // every remote player's shooting/morphing/alt-attack animation
+            // correctly (their SlotIntent really was received and recorded)
+            // and never this player's own, because nothing ever told it to.
+            if (LocalSlot >= 0)
+            {
+                DemoRecorder.RecordOwnIntent(LocalSlot, _scratch.AsSpan(0, IntentPacket.Size));
+            }
         }
 
         /// <summary>
@@ -725,7 +764,8 @@ namespace MphRead.Mods.Network
                     Flags = (byte)(PlayerState.FlagActive
                         | (player.IsAltForm ? PlayerState.FlagAltForm : 0)
                         | (player.ModIsInPlay ? PlayerState.FlagSpawned : 0)
-                        | (player.EquipInfo.Zoomed ? PlayerState.FlagZoomed : 0)),
+                        | (player.EquipInfo.Zoomed ? PlayerState.FlagZoomed : 0)
+                        | (player.Flags2.TestFlag(PlayerFlags2.Spectating) ? PlayerState.FlagSpectating : 0)),
                     Position = player.Position,
                     Speed = player.Speed,
                     Facing = player.FacingVector,

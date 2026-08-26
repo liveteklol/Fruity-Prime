@@ -507,7 +507,17 @@ namespace MphRead.Entities
                 _dialogFrameInst.SetPaletteData(dialogFrame.PaletteData, _scene);
                 _dialogFrameInst.Enabled = true;
             }
+            HudReady = true;
         }
+
+        /// <summary>
+        /// Whether <see cref="SetUpHud"/> has run for this player. Only ever
+        /// true at spawn for whoever was <see cref="Main"/> at the time --
+        /// every other player's HUD fields are left null, which is fine
+        /// until something (spectating) points <see cref="MainPlayerIndex"/>
+        /// at one of them and tries to draw a HUD nothing built.
+        /// </summary>
+        public bool HudReady { get; private set; }
 
         private RulesInfo _rulesInfo = null!;
         private readonly string?[] _rulesLines = new string[8];
@@ -960,9 +970,22 @@ namespace MphRead.Entities
                     _smallReticle = false;
                 }
             }
-            Matrix.ProjectPosition(_aimPosition, _scene.ViewMatrix, _scene.PerspectiveMatrix, out Vector2 pos);
-            _targetCircleInst.PositionX = MathF.Round(pos.X, 5);
-            _targetCircleInst.PositionY = MathF.Round(pos.Y, 5);
+            if (Features.FixedCrosshair)
+            {
+                // Screen-dead-centre, not reprojected from _aimPosition: aim
+                // and camera facing are smoothed at different rates (see
+                // UpdateAimVecs), so the reprojected point visibly drifts
+                // off-centre on its own even with the fire animation off.
+                // Quake's crosshair doesn't do that.
+                _targetCircleInst.PositionX = 0.5f;
+                _targetCircleInst.PositionY = 0.5f;
+            }
+            else
+            {
+                Matrix.ProjectPosition(_aimPosition, _scene.ViewMatrix, _scene.PerspectiveMatrix, out Vector2 pos);
+                _targetCircleInst.PositionX = MathF.Round(pos.X, 5);
+                _targetCircleInst.PositionY = MathF.Round(pos.Y, 5);
+            }
             _targetCircleInst.Enabled = true;
             _targetCircleInst.ProcessAnimation(_scene);
         }

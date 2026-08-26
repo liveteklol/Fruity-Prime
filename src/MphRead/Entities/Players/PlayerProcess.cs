@@ -1558,10 +1558,23 @@ namespace MphRead.Entities
                 + Fixed.ToFloat(Values.FieldB4) * up;
             float cos = MathF.Cos(MathHelper.DegreesToRadians(_gunViewBob));
             _gunDrawPos.Y += Fixed.ToFloat(20) * cos;
-            _aimVec = _aimPosition - _gunDrawPos;
-            float dot = Vector3.Dot(_aimVec, facing);
-            Vector3 vec = facing * dot;
-            _aimVec = (_aimVec + (vec - _aimVec) / 2).Normalized();
+            if (Features.FixedWeapon)
+            {
+                // Rides rigidly with the camera instead of lagging half a
+                // step behind the aim point -- Quake's static weapon, rather
+                // than the DS game's drifting one. Shot direction is
+                // unaffected: it's recomputed from _aimPosition - _muzzlePos
+                // wherever a beam actually fires (PlayerInput.cs:1014), and
+                // this only moves the muzzle offset point by a few units.
+                _aimVec = facing;
+            }
+            else
+            {
+                _aimVec = _aimPosition - _gunDrawPos;
+                float dot = Vector3.Dot(_aimVec, facing);
+                Vector3 vec = facing * dot;
+                _aimVec = (_aimVec + (vec - _aimVec) / 2).Normalized();
+            }
             _muzzlePos = _gunDrawPos + _aimVec * Fixed.ToFloat(Values.MuzzleOffset);
         }
 

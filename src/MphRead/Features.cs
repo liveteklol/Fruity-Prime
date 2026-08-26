@@ -91,6 +91,8 @@ namespace MphRead
         public static bool CustomCrosshair { get; set; } = false;
         /// <summary>The acquired-weapons-and-ammo panel on the right edge of the HUD.</summary>
         public static bool ModernHud { get; set; } = false;
+        /// <summary>Rides rigidly with the camera instead of lagging behind aim, and stops the mouse-driven HUD shift too -- Quake's static weapon.</summary>
+        public static bool FixedWeapon { get; set; } = false;
 
         public static void Load(IReadOnlyDictionary<string, string> values)
         {
@@ -122,6 +124,10 @@ namespace MphRead
             {
                 ModernHud = boolean;
             }
+            if (values.TryGetValue(nameof(FixedWeapon), out value) && Boolean.TryParse(value, out boolean))
+            {
+                FixedWeapon = boolean;
+            }
         }
 
         /// <summary>
@@ -142,7 +148,8 @@ namespace MphRead
                 new(nameof(ReticleOpacity), ReticleOpacity.ToString(CultureInfo.InvariantCulture)),
                 new(nameof(FixedCrosshair), FixedCrosshair.ToString().ToLower()),
                 new(nameof(CustomCrosshair), CustomCrosshair.ToString().ToLower()),
-                new(nameof(ModernHud), ModernHud.ToString().ToLower())
+                new(nameof(ModernHud), ModernHud.ToString().ToLower()),
+                new(nameof(FixedWeapon), FixedWeapon.ToString().ToLower())
             ]);
         }
     }

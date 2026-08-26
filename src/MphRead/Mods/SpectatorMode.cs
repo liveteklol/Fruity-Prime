@@ -37,7 +37,16 @@ namespace MphRead.Mods
                 return;
             }
             IsSpectating = true;
-            PlayerEntity.MainPlayerIndex = next;
+            // Hidden and non-solid on every client, like Quake 3's
+            // spectator -- not just a body left standing still. Set on the
+            // real local entity (not whoever Main points at); NetSession
+            // reads this flag into the outgoing snapshot for everyone else.
+            int localSlot = Network.NetHooks.LocalSlot;
+            if (localSlot >= 0 && localSlot < PlayerEntity.Players.Count)
+            {
+                PlayerEntity.Players[localSlot].ModSetSpectating(true);
+            }
+            Switch(next);
         }
 
         /// <summary>Left click, while spectating: move on to the next connected player.</summary>
@@ -50,8 +59,26 @@ namespace MphRead.Mods
             int next = FindNextActiveSlot(PlayerEntity.MainPlayerIndex);
             if (next != -1)
             {
-                PlayerEntity.MainPlayerIndex = next;
+                Switch(next);
             }
+        }
+
+        /// <summary>
+        /// SetUpHud only ever ran, at spawn, for whoever was Main at the
+        /// time -- every bot and every other connected player's HUD fields
+        /// are still null. Build them here, once, the first time anyone
+        /// points the camera at that player, rather than trying to build
+        /// a HUD for all eight slots up front for players nobody may ever
+        /// spectate.
+        /// </summary>
+        private static void Switch(int slot)
+        {
+            PlayerEntity target = PlayerEntity.Players[slot];
+            if (!target.HudReady)
+            {
+                target.SetUpHud();
+            }
+            PlayerEntity.MainPlayerIndex = slot;
         }
 
         /// <summary>
@@ -71,6 +98,7 @@ namespace MphRead.Mods
             IsSpectating = false;
             if (localSlot >= 0 && localSlot < GameState.Points.Length)
             {
+                PlayerEntity.Players[localSlot].ModSetSpectating(false);
                 GameState.Points[localSlot] = 0;
                 GameState.Kills[localSlot] = 0;
                 GameState.Deaths[localSlot] = 0;

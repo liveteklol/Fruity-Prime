@@ -84,6 +84,7 @@ namespace MphRead.Mods.Launcher.Gui
         private ToggleRow _fixedCrosshair = null!;
         private ToggleRow _customCrosshair = null!;
         private ToggleRow _modernHud = null!;
+        private ToggleRow _fixedWeapon = null!;
         private SliderRow _sfxVolume = null!;
         private SliderRow _musicVolume = null!;
         private ChoiceRow _languageRow = null!;
@@ -436,6 +437,12 @@ namespace MphRead.Mods.Launcher.Gui
             _modernHud = Add(page, new ToggleRow("Enable modern HUD", Features.ModernHud));
             Explain(page, "A panel on the right edge listing every weapon you have picked up "
                 + "and its ammo, with the equipped one boxed.");
+
+            Heading(page, "Weapon");
+            _fixedWeapon = Add(page, new ToggleRow("Fixed weapon", Features.FixedWeapon));
+            Explain(page, "Stops the gun and the HUD drifting when you move the mouse -- "
+                + "the gun rides square with the camera instead of lagging behind it, "
+                + "like Quake's weapon.");
         }
 
         private void UpdateHelmetRows()
@@ -707,6 +714,7 @@ namespace MphRead.Mods.Launcher.Gui
             Features.FixedCrosshair = _fixedCrosshair.On;
             Features.CustomCrosshair = _customCrosshair.On;
             Features.ModernHud = _modernHud.On;
+            Features.FixedWeapon = _fixedWeapon.On;
             // Audio
             _settings.SfxVolume = (_sfxVolume.Value / 100f).ToString(CultureInfo.InvariantCulture);
             _settings.MusicVolume = (_musicVolume.Value / 100f).ToString(CultureInfo.InvariantCulture);

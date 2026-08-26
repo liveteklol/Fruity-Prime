@@ -1389,7 +1389,15 @@ namespace MphRead
                 {
                     PlayerEntity.Main.Controls.ClearAll();
                 }
+                Mods.Network.DemoPlayback.PumpFrame();
                 Mods.Network.NetSession.Update(_globalElapsedTime);
+                if (Mods.Network.DemoPlayback.IsActive && !Mods.SpectatorMode.IsSpectating)
+                {
+                    // No local player to spawn as during playback -- watch
+                    // as soon as anyone recorded becomes available, rather
+                    // than sitting on an empty room waiting for Escape.
+                    Mods.SpectatorMode.Start();
+                }
                 PlayerEntity.ProcessInput(_keyboardState, _mouseState,
                     _inputMode == InputMode.CameraOnly || Mods.PauseMenu.Open);
                 Mods.Network.NetHooks.AfterInput(this);
@@ -4253,8 +4261,8 @@ namespace MphRead
         /// </summary>
         public void DrawCustomCrosshair(Vector3 color)
         {
-            const float armLength = 6f;
-            const float armThickness = 2f;
+            const float armLength = 9f;
+            const float armThickness = 3f;
             const float gap = 3f;
             float halfW = Size.X / 2f;
             float halfH = Size.Y / 2f;
@@ -4619,6 +4627,49 @@ namespace MphRead
             _cameraRight = Vector3.UnitX;
         }
 
+        /// <summary>
+        /// Space, during demo playback: an independent free no-clip camera
+        /// with no HUD, instead of following whoever spectator mode has the
+        /// camera on. Reuses the same Roam camera the room/model viewer
+        /// tooling already has -- WASD and the arrow keys already move and
+        /// turn it in <see cref="OnKeyHeld"/>, and the HUD draw calls
+        /// already gate on <c>CameraMode == CameraMode.Player</c>, so
+        /// switching to Roam gets "no HUD" for free rather than needing a
+        /// separate suppression somewhere.
+        /// </summary>
+        /// <summary>
+        /// True while the demo free camera specifically (as opposed to the
+        /// room/model viewer's own Roam camera, which is CameraMode.Roam
+        /// too) is up -- lets <see cref="OnMouseMove"/> turn it without
+        /// requiring the viewer tool's held-left-click gesture, since this
+        /// is meant to feel like the game's ordinary first-person look.
+        /// </summary>
+        private bool _demoFreeCam;
+        public bool IsDemoFreeCam => _demoFreeCam;
+
+        public void ToggleDemoFreeCamera()
+        {
+            if (_cameraMode == CameraMode.Roam)
+            {
+                _cameraMode = CameraMode.Player;
+                _inputMode = InputMode.All;
+                _demoFreeCam = false;
+                return;
+            }
+            _cameraPosition = PlayerEntity.Main.CameraInfo.Position;
+            _cameraFacing = PlayerEntity.Main.CameraInfo.Facing;
+            if (_cameraFacing.LengthSquared < 0.0001f)
+            {
+                _cameraFacing = -Vector3.UnitZ;
+            }
+            _cameraFacing = _cameraFacing.Normalized();
+            _cameraRight = Vector3.Cross(_cameraFacing, Vector3.UnitY);
+            _cameraUp = Vector3.Cross(_cameraRight, _cameraFacing);
+            _cameraMode = CameraMode.Roam;
+            _inputMode = InputMode.CameraOnly;
+            _demoFreeCam = true;
+        }
+
         public void OnMouseClick(bool down)
         {
             if (_inputMode != InputMode.PlayerOnly)
@@ -4629,7 +4680,7 @@ namespace MphRead
 
         public void OnMouseMove(float deltaX, float deltaY)
         {
-            if (_leftMouse && AllowCameraMovement && _inputMode != InputMode.PlayerOnly)
+            if ((_leftMouse || _demoFreeCam) && AllowCameraMovement && _inputMode != InputMode.PlayerOnly)
             {
                 if (_cameraMode == CameraMode.Pivot)
                 {
@@ -5826,7 +5877,7 @@ namespace MphRead
         protected override void OnRenderFrame(FrameEventArgs args)
         {
             // The pause menu wants the pointer back.
-            CursorState = Scene.CameraMode == CameraMode.Player && !Scene.FrameAdvance
+            CursorState = (Scene.CameraMode == CameraMode.Player || Scene.IsDemoFreeCam) && !Scene.FrameAdvance
                 && !Mods.PauseMenu.Open
                 && !Scene.ShowCursor && !GameState.DialogPause && !GameState.MenuPause
                 ? CursorState.Grabbed
@@ -5904,11 +5955,24 @@ namespace MphRead
                 base.OnKeyDown(e);
                 return;
             }
+            // Space, during demo playback only: free no-clip camera instead
+            // of following whoever spectator mode has the camera on. Not a
+            // real control during a real match -- every player's input is
+            // frozen for the whole session while watching a demo, so there
+            // is nothing this could conflict with.
+            if (e.Key == Keys.Space && Mods.Network.DemoPlayback.IsActive)
+            {
+                Scene.ToggleDemoFreeCamera();
+                base.OnKeyDown(e);
+                return;
+            }
             // Escape opens the pause menu while a player is being driven --
             // the mouse comes back, the window can be resized, and the
             // settings are reachable without leaving the match. Everywhere
-            // else it still means "close this".
-            if (e.Key == Keys.Escape && Scene.CameraMode == CameraMode.Player
+            // else it still means "close this" -- except the demo free
+            // camera, which is CameraMode.Roam and would otherwise fall
+            // through to that and quit the game instead of pausing it.
+            if (e.Key == Keys.Escape && (Scene.CameraMode == CameraMode.Player || Scene.IsDemoFreeCam)
                 && Mods.PauseMenu.HandleEscape(this))
             {
                 base.OnKeyDown(e);

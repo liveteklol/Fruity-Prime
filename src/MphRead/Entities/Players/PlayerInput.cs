@@ -282,6 +282,16 @@ namespace MphRead.Entities
 
         private void UpdateAimFacing()
         {
+            if (Features.FixedCrosshair)
+            {
+                // The camera's own facing is normally eased 10%/frame toward
+                // the raw aim direction (a DS-camera holdover) -- with the
+                // crosshair pinned to screen-centre there's nothing crisp
+                // left to mask that lag, so it reads as sluggish mouse-look
+                // instead. 1:1 here removes it.
+                _facingVector = _gunVec1;
+                return;
+            }
             float dot = Vector3.Dot(_gunVec1, _facingVector);
             if (dot < Fixed.ToFloat(3956))
             {
@@ -400,7 +410,7 @@ namespace MphRead.Entities
                     _pastAimY[i + 1] = past;
                 }
                 _pastAimY[0] = amount;
-                if (Features.HudSway)
+                if (Features.HudSway && !Features.FixedWeapon)
                 {
                     float average = (sum + amount) / 8;
                     _hudShiftY = Math.Clamp(-MathF.Round(average), -8, 8);
@@ -425,7 +435,7 @@ namespace MphRead.Entities
                     _pastAimX[i + 1] = past;
                 }
                 _pastAimX[0] = amount;
-                if (Features.HudSway)
+                if (Features.HudSway && !Features.FixedWeapon)
                 {
                     float average = (sum + amount) / 8;
                     _hudShiftX = Math.Clamp(MathF.Round(average), -8, 8);

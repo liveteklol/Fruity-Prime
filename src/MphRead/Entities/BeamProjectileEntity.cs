@@ -388,7 +388,7 @@ namespace MphRead.Entities
             // todo: visualize player collision (and rename some "pickup" fields)
             foreach (PlayerEntity player in _scene.GetPlayerEntities())
             {
-                if (player.Health == 0)
+                if (player.Health == 0 || player.Flags2.TestFlag(PlayerFlags2.Spectating))
                 {
                     continue;
                 }

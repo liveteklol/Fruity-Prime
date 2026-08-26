@@ -5,6 +5,7 @@ using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Threading;
 using MphRead.Mods;
+using MphRead.Mods.Network;
 
 namespace MphRead.Mods.Launcher.Gui
 {
@@ -109,6 +110,19 @@ namespace MphRead.Mods.Launcher.Gui
             _view.SettingsRequested += (_, _) => OpenSettings();
             _view.SpectateRequested += (_, _) => { SpectatorMode.Start(); Close(); };
             _view.RejoinRequested += (_, _) => { SpectatorMode.Rejoin(); Close(); };
+            _view.RecordToggleRequested += (_, _) =>
+            {
+                if (DemoRecorder.IsRecording)
+                {
+                    Console.WriteLine($"[demo] recording saved to {DemoRecorder.CurrentPath}");
+                    DemoRecorder.Stop();
+                }
+                else
+                {
+                    DemoRecorder.Start();
+                }
+                Close();
+            };
             _view.LeaveRequested += (_, _) => { PauseMenu.RequestLeave(); Close(); };
             _view.QuitRequested += (_, _) => { PauseMenu.RequestQuit(); Close(); };
             Content = _view;

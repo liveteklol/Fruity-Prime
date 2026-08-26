@@ -13,8 +13,17 @@ namespace MphRead.Mods.Network
         /// <summary>
         /// Which slot this machine drives. 0 when offline, so the single
         /// upstream call site reads the same in both cases.
+        ///
+        /// -1 during demo playback specifically, rather than falling through
+        /// to 0 the way "connected but the Welcome hasn't landed yet" does:
+        /// that fallback assumes the gap is momentary and about to resolve
+        /// to a real slot, which is true for a live client but never happens
+        /// during playback -- <see cref="NetSession.StartPlayback"/> leaves
+        /// LocalSlot at -1 for the whole session, on purpose, because there
+        /// is no local player to misidentify slot 0 as.
         /// </summary>
-        public static int LocalSlot => NetSession.Active && NetSession.LocalSlot >= 0
+        public static int LocalSlot => DemoPlayback.IsActive ? -1
+            : NetSession.Active && NetSession.LocalSlot >= 0
             ? NetSession.LocalSlot
             : 0;
 

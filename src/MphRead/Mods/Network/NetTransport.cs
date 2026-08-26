@@ -172,6 +172,28 @@ namespace MphRead.Mods.Network
             }
         }
 
+        private static readonly IPEndPoint _playbackSender = new(IPAddress.Loopback, 0);
+
+        /// <summary>
+        /// Feeds a packet read back from a demo file into the same queue a
+        /// real receive would have used, so <see cref="Drain"/> and
+        /// everything downstream of it (<c>NetSession.Handle</c> and every
+        /// packet-type handler) runs completely unchanged during playback --
+        /// the sender endpoint is never checked by any of it, only the
+        /// bytes. The socket this transport opened is never used for real
+        /// traffic in that mode; it exists only because the constructor
+        /// always binds one.
+        /// </summary>
+        public void EnqueueForPlayback(byte[] data, int length)
+        {
+            if (Volatile.Read(ref _inboxCount) >= MaxQueuedPackets)
+            {
+                return;
+            }
+            Interlocked.Increment(ref _inboxCount);
+            _inbox.Enqueue(new ReceivedPacket(_playbackSender, data, length));
+        }
+
         public void Send(IPEndPoint target, PacketType type, ReadOnlySpan<byte> payload)
         {
             Span<byte> buffer = stackalloc byte[NetConfig.MaxPacketSize];

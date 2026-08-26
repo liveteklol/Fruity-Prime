@@ -3,6 +3,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Threading;
+using MphRead.Mods.Network;
 
 namespace MphRead.Mods.Launcher.Gui
 {
@@ -31,6 +32,7 @@ namespace MphRead.Mods.Launcher.Gui
         public event EventHandler? FullscreenRequested;
         public event EventHandler? SpectateRequested;
         public event EventHandler? RejoinRequested;
+        public event EventHandler? RecordToggleRequested;
 
         private readonly MenuEntry _resume;
 
@@ -59,15 +61,24 @@ namespace MphRead.Mods.Launcher.Gui
             }
             Add(stack, "Settings", "Controls, display, audio",
                 () => SettingsRequested?.Invoke(this, EventArgs.Empty));
-            if (SpectatorMode.IsSpectating)
+            if (!DemoPlayback.IsActive)
             {
-                Add(stack, "Rejoin match", "Score resets to 0",
-                    () => RejoinRequested?.Invoke(this, EventArgs.Empty));
-            }
-            else if (SpectatorMode.CanSpectate)
-            {
-                Add(stack, "Spectate", "Watch another player",
-                    () => SpectateRequested?.Invoke(this, EventArgs.Empty));
+                if (SpectatorMode.IsSpectating)
+                {
+                    Add(stack, "Rejoin match", "Score resets to 0",
+                        () => RejoinRequested?.Invoke(this, EventArgs.Empty));
+                }
+                else if (SpectatorMode.CanSpectate)
+                {
+                    Add(stack, "Spectate", "Watch another player",
+                        () => SpectateRequested?.Invoke(this, EventArgs.Empty));
+                }
+                if (NetSession.Active)
+                {
+                    Add(stack, DemoRecorder.IsRecording ? "Stop recording" : "Record demo",
+                        DemoRecorder.IsRecording ? "Saving to a file" : "Watch it back later, like Quake",
+                        () => RecordToggleRequested?.Invoke(this, EventArgs.Empty));
+                }
             }
             Add(stack, "Leave match", "Back to the launcher",
                 () => LeaveRequested?.Invoke(this, EventArgs.Empty));

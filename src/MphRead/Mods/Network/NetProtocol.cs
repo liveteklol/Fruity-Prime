@@ -789,6 +789,11 @@ namespace MphRead.Mods.Network
         /// the player holding it and 92 on everyone watching.
         /// </summary>
         public const byte FlagZoomed = 1 << 3;
+        /// <summary>
+        /// Spectating: hidden and non-solid on every client, not just the
+        /// one whose local input is frozen. See <see cref="Mods.SpectatorMode"/>.
+        /// </summary>
+        public const byte FlagSpectating = 1 << 4;
 
         public void Write(Span<byte> dest)
         {

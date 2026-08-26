@@ -15,7 +15,7 @@ namespace MphRead.Entities
             {
                 DrawScanModels();
             }
-            if (Flags2.TestFlag(PlayerFlags2.HideModel))
+            if (Flags2.TestFlag(PlayerFlags2.HideModel) || Flags2.TestFlag(PlayerFlags2.Spectating))
             {
                 return;
             }
