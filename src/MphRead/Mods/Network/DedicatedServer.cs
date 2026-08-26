@@ -121,6 +121,15 @@ namespace MphRead.Mods.Network
         /// </summary>
         public MasterReporter? Reporter { get; set; }
 
+        /// <summary>
+        /// Whether same-team damage counts, for the whole session. This is
+        /// the server's call, broadcast in every <see cref="MatchStatePacket"/>
+        /// so every client applies the same rule -- each client's own local
+        /// setting used to be what decided this, which meant the host turning
+        /// it on in Match rules never reached anyone else.
+        /// </summary>
+        public bool FriendlyFire { get; set; }
+
         public DedicatedServer(int port = NetConfig.DefaultPort, int maxPlayers = 4,
                                MapRotation? rotation = null)
         {
@@ -291,7 +300,8 @@ namespace MphRead.Mods.Network
                     : Math.Max(0, entry.TimeLimit - elapsed),
                 TimeElapsed = elapsed,
                 PlayerCount = (byte)_peers.Count,
-                Flags = ending ? MatchStatePacket.FlagEnding : MatchStatePacket.FlagInProgress,
+                Flags = (byte)((ending ? MatchStatePacket.FlagEnding : MatchStatePacket.FlagInProgress)
+                    | (FriendlyFire ? MatchStatePacket.FlagFriendlyFire : 0)),
                 PointGoal = (ushort)Math.Clamp(entry.PointGoal, 0, UInt16.MaxValue),
                 MatchId = _matchId,
                 RoomKey = entry.RoomKey,

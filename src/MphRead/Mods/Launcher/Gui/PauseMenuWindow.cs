@@ -107,6 +107,8 @@ namespace MphRead.Mods.Launcher.Gui
                 Close();
             };
             _view.SettingsRequested += (_, _) => OpenSettings();
+            _view.SpectateRequested += (_, _) => { SpectatorMode.Start(); Close(); };
+            _view.RejoinRequested += (_, _) => { SpectatorMode.Rejoin(); Close(); };
             _view.LeaveRequested += (_, _) => { PauseMenu.RequestLeave(); Close(); };
             _view.QuitRequested += (_, _) => { PauseMenu.RequestQuit(); Close(); };
             Content = _view;

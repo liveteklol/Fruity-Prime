@@ -74,9 +74,11 @@ namespace MphRead.Mods
             RenderOptions.ShowFps = RenderOptions.ParseOnOff(settings.ShowFps, RenderOptions.ShowFps);
             RenderOptions.CelShading = RenderOptions.ParseOnOff(settings.CelShading,
                 RenderOptions.CelShading);
-            RenderOptions.CelBands = RenderOptions.ParseInt(settings.CelBands, RenderOptions.CelBands);
-            RenderOptions.CelEdge = RenderOptions.ParseInt(settings.CelEdge,
-                (int)Math.Round(RenderOptions.CelEdge * 100)) / 100f;
+            // Steps and outline strength are no longer player-configurable --
+            // locked at 8 steps / 50%, regardless of what an old settings.json
+            // (from before this was locked down) still has saved.
+            RenderOptions.CelBands = 8;
+            RenderOptions.CelEdge = 0.5f;
         }
 
         /// <summary>

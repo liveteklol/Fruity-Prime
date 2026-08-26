@@ -77,12 +77,13 @@ namespace MphRead.Mods.Launcher.Gui
         private ToggleRow _filteringRow = null!;
         private ToggleRow _celRow = null!;
         private ToggleRow _fpsRow = null!;
-        private SliderRow _celBands = null!;
-        private SliderRow _celEdge = null!;
         private ToggleRow _helmetRow = null!;
         private SliderRow _helmetOpacity = null!;
         private SliderRow _visorOpacity = null!;
         private SliderRow _hudOpacity = null!;
+        private ToggleRow _fixedCrosshair = null!;
+        private ToggleRow _customCrosshair = null!;
+        private ToggleRow _modernHud = null!;
         private SliderRow _sfxVolume = null!;
         private SliderRow _musicVolume = null!;
         private ChoiceRow _languageRow = null!;
@@ -101,7 +102,6 @@ namespace MphRead.Mods.Launcher.Gui
         private FieldRow _serverRow = null!;
         private FieldRow _masterRow = null!;
         private ToggleRow _autoUpdate = null!;
-        private readonly List<(PropertyInfo Property, ToggleRow Row)> _toggles = new();
         private Note _saveError = null!;
 
         private const double _railWidth = 216;
@@ -332,14 +332,6 @@ namespace MphRead.Mods.Launcher.Gui
             BuildControls();
             BuildMatch();
             BuildLauncher();
-            BuildToggles("Features", typeof(Features),
-                "Behaviour changes and quality-of-life tweaks.");
-            BuildToggles("Cheats", typeof(Cheats),
-                "Applied when a session starts, and turned off outright while "
-                + "you are connected to a server.");
-            BuildToggles("Bugfixes", typeof(Bugfixes),
-                "Corrections to original-game bugs. Off restores what the retail "
-                + "game shipped with.");
             BuildCredits();
         }
 
@@ -407,16 +399,11 @@ namespace MphRead.Mods.Launcher.Gui
 
             Heading(page, "Cel shading");
             _celRow = Add(page, new ToggleRow("Cel shading", RenderOptions.CelShading));
-            _celBands = Add(page, new SliderRow("Steps", RenderOptions.CelBands * 10,
-                v => $"{Math.Clamp(v / 10, 2, 8)}"));
-            _celEdge = Add(page, new SliderRow("Outline",
-                (int)Math.Round(RenderOptions.CelEdge * 100)));
             Explain(page, "Every surface is painted in one flat colour -- the one its "
                 + "texture averages to -- and the shapes in the room are drawn around in "
                 + "ink. Not the same as turning lighting off, which only flattens "
                 + "everything: a wall keeps its own colour and it is the shading across it "
-                + "that goes to steps. Steps is how many, outline is how dark the line. "
-                + "The line follows silhouettes and creases only, never a flat wall.");
+                + "that goes to steps.");
 
             Heading(page, "Helmet and HUD");
             _helmetRow = Add(page, new ToggleRow("Draw the helmet",
@@ -435,6 +422,20 @@ namespace MphRead.Mods.Launcher.Gui
                 (int)Math.Round(Features.HudOpacity * 100)));
             Explain(page, "Energy, ammo, the radar and the rest. Separate from the helmet.");
             UpdateHelmetRows();
+
+            Heading(page, "Crosshair");
+            _fixedCrosshair = Add(page, new ToggleRow("Fixed crosshair", Features.FixedCrosshair));
+            Explain(page, "Stops the reticle shrinking when you fire -- it stays one size, "
+                + "like Quake's.");
+            _customCrosshair = Add(page, new ToggleRow("Custom crosshair", Features.CustomCrosshair));
+            Explain(page, "Replaces the reticle with a plain cross at the centre of the "
+                + "screen, coloured by your current HP: green above 60, orange down to 33, "
+                + "red below that. Also shown with the modern HUD, below.");
+
+            Heading(page, "Modern HUD");
+            _modernHud = Add(page, new ToggleRow("Enable modern HUD", Features.ModernHud));
+            Explain(page, "A panel on the right edge listing every weapon you have picked up "
+                + "and its ammo, with the equipped one boxed.");
         }
 
         private void UpdateHelmetRows()
@@ -564,7 +565,7 @@ namespace MphRead.Mods.Launcher.Gui
         /// </summary>
         private void BuildLauncher()
         {
-            StackPanel page = AddSection("Launcher");
+            StackPanel page = AddSection("Profile");
             Heading(page, "You");
             _playerName = Add(page, new FieldRow("Your name", LauncherPrefs.PlayerName,
                 boxWidth: 200));
@@ -631,24 +632,6 @@ namespace MphRead.Mods.Launcher.Gui
             return true;
         }
 
-        private void BuildToggles(string name, Type type, string blurb)
-        {
-            StackPanel page = AddSection(name);
-            Heading(page, name);
-            Explain(page, blurb);
-            foreach (PropertyInfo property in type.GetProperties(
-                BindingFlags.Public | BindingFlags.Static))
-            {
-                if (property.PropertyType != typeof(bool) || !property.CanRead || !property.CanWrite)
-                {
-                    continue;
-                }
-                var row = Add(page, new ToggleRow(Humanize(property.Name),
-                    (bool)(property.GetValue(null) ?? false)));
-                _toggles.Add((property, row));
-            }
-        }
-
         // -------------------------------------------------------------- footer
 
         private Control BuildFooter()
@@ -676,25 +659,6 @@ namespace MphRead.Mods.Launcher.Gui
             footer.Children.Add(cancel);
             footer.Children.Add(_saveError);
             return footer;
-        }
-
-        private static string Humanize(string name)
-        {
-            var builder = new System.Text.StringBuilder(name.Length + 8);
-            for (int i = 0; i < name.Length; i++)
-            {
-                char c = name[i];
-                if (i > 0 && Char.IsUpper(c) && !Char.IsUpper(name[i - 1]))
-                {
-                    builder.Append(' ');
-                    builder.Append(Char.ToLowerInvariant(c));
-                }
-                else
-                {
-                    builder.Append(i == 0 ? Char.ToUpperInvariant(c) : c);
-                }
-            }
-            return builder.ToString();
         }
 
         /// <summary>
@@ -735,12 +699,14 @@ namespace MphRead.Mods.Launcher.Gui
             _settings.TextureFiltering = RenderOptions.OnOff(_filteringRow.On);
             _settings.ShowFps = RenderOptions.OnOff(_fpsRow.On);
             _settings.CelShading = RenderOptions.OnOff(_celRow.On);
-            _settings.CelBands = Math.Clamp(_celBands.Value / 10, 2, 8)
-                .ToString(CultureInfo.InvariantCulture);
-            _settings.CelEdge = _celEdge.Value.ToString(CultureInfo.InvariantCulture);
+            _settings.CelBands = "8";
+            _settings.CelEdge = "50";
             Features.HelmetOpacity = _helmetRow.On ? _helmetOpacity.Value / 100f : 0;
             Features.VisorOpacity = _helmetRow.On ? _visorOpacity.Value / 100f : 0;
             Features.HudOpacity = _hudOpacity.Value / 100f;
+            Features.FixedCrosshair = _fixedCrosshair.On;
+            Features.CustomCrosshair = _customCrosshair.On;
+            Features.ModernHud = _modernHud.On;
             // Audio
             _settings.SfxVolume = (_sfxVolume.Value / 100f).ToString(CultureInfo.InvariantCulture);
             _settings.MusicVolume = (_musicVolume.Value / 100f).ToString(CultureInfo.InvariantCulture);
@@ -760,11 +726,6 @@ namespace MphRead.Mods.Launcher.Gui
             _settings.FriendlyFire = _friendlyFire.On ? "on" : "off";
             _settings.HunterRadar = _radar.On ? "on" : "off";
             _settings.AffinityWeapons = _affinity.On ? "on" : "off";
-            // Features, cheats, bugfixes
-            foreach ((PropertyInfo property, ToggleRow row) in _toggles)
-            {
-                property.SetValue(null, row.On);
-            }
             // Launcher preferences
             if (_playerName.Value.Trim().Length > 0)
             {

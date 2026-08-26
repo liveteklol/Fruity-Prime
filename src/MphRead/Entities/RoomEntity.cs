@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using MphRead.Formats;
 using MphRead.Formats.Collision;
 using MphRead.Formats.Culling;
+using MphRead.Sound;
 using OpenTK.Mathematics;
 
 namespace MphRead.Entities
@@ -514,6 +515,15 @@ namespace MphRead.Entities
                 }
             }
             _scene.ClearNonPersistentEffects();
+            // A cam sequence that was still running gets cut off here without
+            // reaching the CanEnd branch that would have paired off whatever
+            // mute counter it bumped -- leaving sound classes silenced for the
+            // rest of the match. Sfx.Load resets these once at initial connect;
+            // a mid-session room transition needs the same reset.
+            Sfx.SfxMute = false;
+            Sfx.ForceFieldSfxMute = 0;
+            Sfx.TimedSfxMute = 0;
+            Sfx.LongSfxMute = 0;
             CamSeqEntity.Current = null;
             CameraSequence.Current = null;
             _scene.ClearMessageQueue();

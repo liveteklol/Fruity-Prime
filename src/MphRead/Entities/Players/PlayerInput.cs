@@ -299,13 +299,16 @@ namespace MphRead.Entities
             {
                 amount *= -1;
             }
-            float sensitivity = 1; // itodo: this
+            float sensitivity = 1;
             if (EquipInfo.Zoomed)
             {
-                float fovFactor = CameraInfo.Fov - Fixed.ToFloat(Values.NormalFov) * 2;
-                if (fovFactor != 0) // zero will occur when the camera info is overridden to normal FOV due to cam seq
+                float normalFov = Fixed.ToFloat(Values.NormalFov) * 2;
+                if (normalFov != 0) // zero will occur when the camera info is overridden to normal FOV due to cam seq
                 {
-                    sensitivity /= -Fixed.ToFloat(Values.ZoomSensitivityFactor) * fovFactor;
+                    // constant angular speed while zoomed: turn rate scales with the
+                    // FOV reduction, so it tracks the mouse sensitivity setting the
+                    // same way unzoomed aim does, instead of a fixed per-hunter ratio
+                    sensitivity = CameraInfo.Fov / normalFov;
                 }
             }
             amount *= sensitivity;
@@ -342,13 +345,16 @@ namespace MphRead.Entities
             {
                 amount *= -1;
             }
-            float sensitivity = 1; // itodo: this
+            float sensitivity = 1;
             if (EquipInfo.Zoomed)
             {
-                float fovFactor = CameraInfo.Fov - Fixed.ToFloat(Values.NormalFov) * 2;
-                if (fovFactor != 0) // zero will occur when the camera info is overridden to normal FOV due to cam seq
+                float normalFov = Fixed.ToFloat(Values.NormalFov) * 2;
+                if (normalFov != 0) // zero will occur when the camera info is overridden to normal FOV due to cam seq
                 {
-                    sensitivity /= -Fixed.ToFloat(Values.ZoomSensitivityFactor) * fovFactor;
+                    // constant angular speed while zoomed: turn rate scales with the
+                    // FOV reduction, so it tracks the mouse sensitivity setting the
+                    // same way unzoomed aim does, instead of a fixed per-hunter ratio
+                    sensitivity = CameraInfo.Fov / normalFov;
                 }
             }
             amount *= sensitivity;
@@ -2114,7 +2120,8 @@ namespace MphRead.Entities
                 {
                     continue;
                 }
-                if (noPlayerInput || i != Mods.Network.NetHooks.LocalSlot) // todo: multiple input?
+                if (noPlayerInput || i != Mods.Network.NetHooks.LocalSlot
+                    || Mods.SpectatorMode.IsSpectating) // todo: multiple input?
                 {
                     continue;
                 }
@@ -2476,7 +2483,7 @@ namespace MphRead.Entities
                 jump: new Keybind(Keys.Space),
                 morph: new Keybind(Keys.C),
                 boost: new Keybind(Keys.Space),
-                altAttack: new Keybind(Keys.Q),
+                altAttack: new Keybind(MouseButton.Left),
                 scanVisor: new Keybind(Keys.E),
                 scan: new Keybind(Keys.Q),
                 nextWeapon: new Keybind(ButtonType.ScrollDown),

@@ -4242,6 +4242,64 @@ namespace MphRead
             GL.BindTexture(TextureTarget.Texture2D, 0);
         }
 
+        /// <summary>
+        /// A small flat-coloured cross at the centre of the screen, drawn
+        /// with none of the game's sprite assets -- the Quake-Live-style
+        /// alternative to the reticle. Reuses the RTT shader's fade_color
+        /// path (normally the full-screen fade) as a flat-fill: with its
+        /// alpha above zero the fragment shader outputs that colour outright
+        /// instead of sampling the bound texture, which is exactly "draw a
+        /// solid shape with no asset."
+        /// </summary>
+        public void DrawCustomCrosshair(Vector3 color)
+        {
+            const float armLength = 6f;
+            const float armThickness = 2f;
+            const float gap = 3f;
+            float halfW = Size.X / 2f;
+            float halfH = Size.Y / 2f;
+            GL.Uniform4(_shaderLocations.FadeColor, color.X, color.Y, color.Z, 1f);
+            void DrawArm(float left, float right, float top, float bottom)
+            {
+                GL.Begin(PrimitiveType.TriangleStrip);
+                GL.Vertex3(right / halfW, top / halfH, 0f);
+                GL.Vertex3(left / halfW, top / halfH, 0f);
+                GL.Vertex3(right / halfW, bottom / halfH, 0f);
+                GL.Vertex3(left / halfW, bottom / halfH, 0f);
+                GL.End();
+            }
+            DrawArm(-armThickness / 2, armThickness / 2, gap + armLength, gap); // top
+            DrawArm(-armThickness / 2, armThickness / 2, -gap, -gap - armLength); // bottom
+            DrawArm(-gap - armLength, -gap, armThickness / 2, -armThickness / 2); // left
+            DrawArm(gap, gap + armLength, armThickness / 2, -armThickness / 2); // right
+            GL.Uniform4(_shaderLocations.FadeColor, Vector4.Zero);
+        }
+
+        /// <summary>
+        /// A flat-coloured, unbordered rectangle in the same 256x192 virtual
+        /// space <see cref="DrawHudObject"/>'s mode 2 and the HUD text draw
+        /// use -- for the modern HUD's equipped-weapon highlight, which has
+        /// no sprite asset of its own. Same fade_color flat-fill trick as
+        /// <see cref="DrawCustomCrosshair"/>.
+        /// </summary>
+        public void DrawHudFlatBox(float left, float top, float right, float bottom, Vector4 color)
+        {
+            float halfW = Size.X / 2f;
+            float halfH = Size.Y / 2f;
+            float x0 = (left / 256f * Size.X - halfW) / halfW;
+            float x1 = (right / 256f * Size.X - halfW) / halfW;
+            float y0 = (halfH - top / 192f * Size.Y) / halfH;
+            float y1 = (halfH - bottom / 192f * Size.Y) / halfH;
+            GL.Uniform4(_shaderLocations.FadeColor, color);
+            GL.Begin(PrimitiveType.TriangleStrip);
+            GL.Vertex3(x1, y0, 0f);
+            GL.Vertex3(x0, y0, 0f);
+            GL.Vertex3(x1, y1, 0f);
+            GL.Vertex3(x0, y1, 0f);
+            GL.End();
+            GL.Uniform4(_shaderLocations.FadeColor, Vector4.Zero);
+        }
+
         /// <param name="scale">
         /// Multiplies the size the object is drawn at, without touching the
         /// size it is *cut out* at. Those are the same field on the instance --
@@ -4613,6 +4671,7 @@ namespace MphRead
 
         public void OnKeyDown(KeyboardKeyEventArgs e)
         {
+#if DEBUG
             if (Selection.OnKeyDown(e, this))
             {
                 return;
@@ -5052,6 +5111,7 @@ namespace MphRead
                     _unloadQueue.Enqueue(Selection.Entity);
                 }
             }
+#endif
         }
 
         private enum InputMode
@@ -5803,7 +5863,14 @@ namespace MphRead
         {
             if (e.Button == MouseButton.Button1)
             {
-                Scene.OnMouseClick(down: true);
+                if (Mods.SpectatorMode.IsSpectating)
+                {
+                    Mods.SpectatorMode.CycleNext();
+                }
+                else
+                {
+                    Scene.OnMouseClick(down: true);
+                }
             }
             base.OnMouseDown(e);
         }

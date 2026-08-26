@@ -28,6 +28,7 @@ namespace MphRead.Entities
         private HudMeter _healthbarSubMeter = null!;
         private HudMeter _ammoBarMeter = null!;
         private HudObjectInstance _weaponIconInst = null!;
+        private readonly HudObjectInstance[] _weaponListIcons = new HudObjectInstance[9];
         private HudObjectInstance _boostInst = null!;
         private HudObjectInstance _bombInst = null!;
         private HudMeter _enemyHealthMeter = null!;
@@ -325,6 +326,19 @@ namespace MphRead.Entities
             _weaponIconInst.SetCharacterData(weaponIcon.CharacterData, _scene);
             _weaponIconInst.SetPaletteData(weaponIcon.PaletteData, _scene);
             _weaponIconInst.SetAnimationFrames(weaponIcon.AnimParams);
+            // Modern HUD's weapon list: one static icon per weapon, off the
+            // same sheet as the equipped-weapon icon above, each pinned to
+            // its own frame instead of switching on equip.
+            for (int i = 0; i < _weaponListIcons.Length; i++)
+            {
+                var listIcon = new HudObjectInstance(weaponIcon.Width, weaponIcon.Height);
+                listIcon.SetCharacterData(weaponIcon.CharacterData, _scene);
+                listIcon.SetPaletteData(weaponIcon.PaletteData, _scene);
+                listIcon.SetAnimationFrames(weaponIcon.AnimParams);
+                listIcon.SetIndex(i, _scene);
+                listIcon.Enabled = true;
+                _weaponListIcons[i] = listIcon;
+            }
             HudObject boost = HudInfo.GetHudObject(HudElements.Boost);
             _boostInst = new HudObjectInstance(boost.Width, boost.Height);
             _boostInst.SetCharacterData(boost.CharacterData, _scene);
@@ -913,7 +927,7 @@ namespace MphRead.Entities
 
         private void HudOnFiredShot()
         {
-            if (ScanVisor)
+            if (ScanVisor || Features.FixedCrosshair)
             {
                 return;
             }
@@ -951,6 +965,19 @@ namespace MphRead.Entities
             _targetCircleInst.PositionY = MathF.Round(pos.Y, 5);
             _targetCircleInst.Enabled = true;
             _targetCircleInst.ProcessAnimation(_scene);
+        }
+
+        private Vector3 GetCrosshairColor()
+        {
+            if (Health > 60)
+            {
+                return new Vector3(0, 1, 0);
+            }
+            if (Health > 33)
+            {
+                return new Vector3(1, 0.65f, 0);
+            }
+            return new Vector3(1, 0, 0);
         }
 
         private void HudOnMorphStart()
@@ -1222,8 +1249,19 @@ namespace MphRead.Entities
                             _weaponIconInst.PositionY = (_hudObjects.WeaponIconPosY + _objShiftY) / 192f;
                             _weaponIconInst.Alpha = Features.HudOpacity;
                             _scene.DrawHudObject(_weaponIconInst);
-                            _targetCircleInst.Alpha = Features.ReticleOpacity;
-                            _scene.DrawHudObject(_targetCircleInst);
+                            if (Features.CustomCrosshair)
+                            {
+                                _scene.DrawCustomCrosshair(GetCrosshairColor());
+                            }
+                            else
+                            {
+                                _targetCircleInst.Alpha = Features.ReticleOpacity;
+                                _scene.DrawHudObject(_targetCircleInst);
+                            }
+                            if (Features.ModernHud)
+                            {
+                                DrawWeaponList();
+                            }
                         }
                         DrawModeHud();
                         DrawDoubleDamageHud();
@@ -1672,6 +1710,47 @@ namespace MphRead.Entities
             DrawText2D(_hudObjects.AmmoBarPosX + _ammoBarMeter.BarOffsetX + _objShiftX,
                 _hudObjects.AmmoBarPosY + _ammoBarMeter.BarOffsetY + _objShiftY,
                 _ammoBarMeter.Align, _ammoBarPalette, $"{amount:00}", alpha: Features.HudOpacity);
+        }
+
+        /// <summary>
+        /// "Modern HUD": every weapon the player has picked up, with its
+        /// ammo, listed down the right edge -- the equipped one boxed. Uses
+        /// the same weapon-icon sheet and frame convention as the equipped-
+        /// weapon icon (<see cref="HudOnWeaponSwitch"/>), and the same ammo
+        /// read <see cref="DrawAmmoBar"/> uses for the current weapon, just
+        /// for every owned weapon instead of only the equipped one.
+        /// </summary>
+        private void DrawWeaponList()
+        {
+            const float iconX = 246;
+            const float textX = 228;
+            const float rowHeight = 18;
+            float y = 20;
+            for (int i = 0; i < _weaponListIcons.Length; i++)
+            {
+                var beam = (BeamType)i;
+                if (!AvailableWeapons[beam])
+                {
+                    continue;
+                }
+                WeaponInfo info = Weapons.Current[i];
+                if (beam == CurrentWeapon)
+                {
+                    _scene.DrawHudFlatBox(textX - 6, y - 2, iconX + 10, y + 15,
+                        new Vector4(1, 1, 1, 0.25f * Features.HudOpacity));
+                }
+                HudObjectInstance icon = _weaponListIcons[i];
+                icon.PositionX = (iconX - icon.Width / 2) / 256f;
+                icon.PositionY = y / 192f;
+                icon.Alpha = Features.HudOpacity;
+                _scene.DrawHudObject(icon, mode: 2);
+                if (info.AmmoCost > 0)
+                {
+                    DrawText2D(textX, y, Align.Right, palette: 0, $"{_ammo[info.AmmoType]}",
+                        alpha: Features.HudOpacity);
+                }
+                y += rowHeight;
+            }
         }
 
         private void DrawBoostBombs()

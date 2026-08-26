@@ -29,6 +29,8 @@ namespace MphRead.Mods.Launcher.Gui
         public event EventHandler? LeaveRequested;
         public event EventHandler? QuitRequested;
         public event EventHandler? FullscreenRequested;
+        public event EventHandler? SpectateRequested;
+        public event EventHandler? RejoinRequested;
 
         private readonly MenuEntry _resume;
 
@@ -57,6 +59,16 @@ namespace MphRead.Mods.Launcher.Gui
             }
             Add(stack, "Settings", "Controls, display, audio",
                 () => SettingsRequested?.Invoke(this, EventArgs.Empty));
+            if (SpectatorMode.IsSpectating)
+            {
+                Add(stack, "Rejoin match", "Score resets to 0",
+                    () => RejoinRequested?.Invoke(this, EventArgs.Empty));
+            }
+            else if (SpectatorMode.CanSpectate)
+            {
+                Add(stack, "Spectate", "Watch another player",
+                    () => SpectateRequested?.Invoke(this, EventArgs.Empty));
+            }
             Add(stack, "Leave match", "Back to the launcher",
                 () => LeaveRequested?.Invoke(this, EventArgs.Empty));
             Add(stack, "Quit", $"Close {Branding.Name}",

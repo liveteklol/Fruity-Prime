@@ -232,7 +232,8 @@ namespace MphRead.Mods
             var server = new Network.DedicatedServer(port, maxPlayers, rotation)
             {
                 ServerName = ValueAfter(args, "servername") ?? ValueAfter(args, "name")
-                    ?? Environment.MachineName
+                    ?? Environment.MachineName,
+                FriendlyFire = HasFlag(args, "friendlyfire")
             };
             // Listed by default. A dedicated server exists to be found, and a
             // server that has to be told to advertise itself is a server

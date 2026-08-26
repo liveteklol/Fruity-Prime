@@ -94,11 +94,18 @@ namespace MphRead.Mods
                 _saved = true;
             }
             MonitorInfo monitor = Monitors.GetMonitorFromWindow(window);
-            // Border first: resizing before the frame is gone leaves the
-            // window an inset rectangle with a title bar off the top of the
-            // screen on some window managers.
-            window.WindowBorder = WindowBorder.Hidden;
+            // State first: leaving any Maximized/Minimized state before the
+            // border changes, so the window manager isn't asked to strip
+            // decorations off a window it still considers snapped.
             window.WindowState = WindowState.Normal;
+            window.WindowBorder = WindowBorder.Hidden;
+            // Some window managers only apply a border change once they've
+            // processed an event since it was requested -- setting the
+            // geometry in the same tick can compute it against the window's
+            // pre-change (decorated) size, which is what needed a second F11
+            // press to actually take effect. Pumping events here flushes that
+            // pending change before Location/ClientSize are set below.
+            GLFW.PollEvents();
             window.Location = monitor.ClientArea.Min;
             window.ClientSize = new Vector2i(monitor.ClientArea.Size.X, monitor.ClientArea.Size.Y);
             IsFullscreen = true;
@@ -110,8 +117,9 @@ namespace MphRead.Mods
             {
                 return;
             }
-            window.WindowBorder = _saved ? _savedBorder : WindowBorder.Resizable;
             window.WindowState = WindowState.Normal;
+            window.WindowBorder = _saved ? _savedBorder : WindowBorder.Resizable;
+            GLFW.PollEvents();
             if (_saved)
             {
                 window.ClientSize = _savedSize;

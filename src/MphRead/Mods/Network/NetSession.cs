@@ -144,6 +144,7 @@ namespace MphRead.Mods.Network
         public static void Stop()
         {
             NetPlayerSetup.Reset();
+            SpectatorMode.Reset();
             NetMatchSync.Reset();
             NetSlotManager.Reset();
             NetDamage.Reset();
