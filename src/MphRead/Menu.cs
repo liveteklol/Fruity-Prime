@@ -36,7 +36,7 @@ namespace MphRead
         public string TextureFiltering { get; set; } = "off";
         public string CelShading { get; set; } = "off";
         public string CelBands { get; set; } = "4";
-        public string CelEdge { get; set; } = "75";
+        public string CelEdge { get; set; } = "100";
         public string PointGoal { get; set; } = "7";
         public string TimeLimit { get; set; } = "7:00";
         public string TimeGoal { get; set; } = "1:30";

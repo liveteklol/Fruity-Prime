@@ -48,6 +48,19 @@ Saving and applying
 
 Notable toggles
 
+- **Fog, lighting and texture filtering are read, not copied.** They live in
+  `Mods.RenderOptions` and `Renderer` reaches them through the `FogOn`,
+  `LightingOn` and `FilteringOn` properties every time it needs them. They used
+  to be fields initialised from `RenderOptions` when the scene was built, and
+  since this window opens from the pause menu *during* a match, turning fog off
+  there did nothing at all until the next room -- while the debug key G, which
+  wrote to the field, worked. Now the key writes to the same place the settings
+  do, so the two can no longer disagree.
+- **A render default has to be changed in two places.** `RenderOptions` holds
+  the engine's; `MenuSettings` in `Menu.cs` holds the settings file's, and that
+  one wins wherever settings are loaded, which is every path a player takes.
+  `CelEdge` was 1 in one and "75" in the other for exactly as long as it took
+  to notice the outline was not the strength it was supposed to be.
 - Window modes: windowed or borderless fullscreen. `Mods.WindowMode` owns it;
   F11/Alt+Enter toggle at any time. Escape opens the pause menu instead of
   leaving fullscreen.

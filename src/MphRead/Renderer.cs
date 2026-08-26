@@ -114,10 +114,30 @@ namespace MphRead
         // 0 - lines + fill, 1 - lines only, 2 - fill only
         private int _volumeEdges = 0;
         private bool _faceCulling = true;
-        // The three the settings own; the debug keys still flip them, and the
-        // settings write them back when they are applied.
-        private bool _textureFiltering = Mods.RenderOptions.TextureFiltering;
-        private bool _lighting = Mods.RenderOptions.Lighting;
+        // The three the settings own. Read out of RenderOptions every time
+        // rather than copied into a field when the scene was built: the
+        // settings window opens from the pause menu *during* a match, so a
+        // copy is a fog switch that does nothing until the next room -- which
+        // is exactly how it behaved. The debug keys write to the same place,
+        // so F, L and G still flip them and now agree with what the settings
+        // page says.
+        private bool FilteringOn
+        {
+            get => Mods.RenderOptions.TextureFiltering;
+            set => Mods.RenderOptions.TextureFiltering = value;
+        }
+
+        private bool LightingOn
+        {
+            get => Mods.RenderOptions.Lighting;
+            set => Mods.RenderOptions.Lighting = value;
+        }
+
+        private bool FogOn
+        {
+            get => Mods.RenderOptions.Fog;
+            set => Mods.RenderOptions.Fog = value;
+        }
         private bool _scanVisor = false;
         private int _showInvisible = 0;
         private bool _showNodeData = false;
@@ -143,7 +163,6 @@ namespace MphRead
         private Vector3 _light2Vector = Vector3.Zero;
         private Vector3 _light2Color = Vector3.Zero;
         private bool _hasFog = false;
-        private bool _showFog = Mods.RenderOptions.Fog;
         private Vector4 _fogColor = Vector4.Zero;
         private int _fogOffset = 0;
         private int _fogSlope = 0;
@@ -340,9 +359,6 @@ namespace MphRead
                 meta.Light2Color.Green / 31.0f,
                 meta.Light2Color.Blue / 31.0f
             );
-            // The room turns lighting on; the setting is what says whether it
-            // stays on.
-            _lighting = Mods.RenderOptions.Lighting;
             _hasFog = meta.FogEnabled;
             _fogColor = new Vector4(
                 meta.FogColor.Red / 31f,
@@ -446,6 +462,15 @@ namespace MphRead
             GL.Enable(EnableCap.DepthTest);
             GL.Enable(EnableCap.Texture2D);
             GL.DepthFunc(DepthFunction.Lequal);
+            // One line a scene, because the machine that has to be asked about
+            // this is always somebody else's: what the render options actually
+            // came out as is the first thing worth knowing when a picture is
+            // wrong on a device nobody here can plug in.
+            Console.WriteLine($"[render] cel shading "
+                + $"{(Mods.RenderOptions.CelShading ? "on" : "off")}, "
+                + $"{Mods.RenderOptions.CelBands} bands, "
+                + $"outline {Mods.RenderOptions.CelEdge.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)}, "
+                + $"fog {Mods.RenderOptions.OnOff(Mods.RenderOptions.Fog)}");
             InitShaders();
             AllocateEffects();
             CollisionDetection.Init();
@@ -749,6 +774,7 @@ namespace MphRead
             _shaderLocations.CelTexelHeight = GL.GetUniformLocation(_celShaderProgramId, "texel_h");
             _shaderLocations.CelNearPlane = GL.GetUniformLocation(_celShaderProgramId, "near_plane");
             _shaderLocations.CelFarPlane = GL.GetUniformLocation(_celShaderProgramId, "far_plane");
+            _shaderLocations.CelDepthQuantum = GL.GetUniformLocation(_celShaderProgramId, "depth_quantum");
 
             _shaderLocations.FadeColor = GL.GetUniformLocation(_rttShaderProgramId, "fade_color");
             _shaderLocations.LayerAlpha = GL.GetUniformLocation(_rttShaderProgramId, "alpha");
@@ -900,7 +926,7 @@ namespace MphRead
                         uint ab = (rgb >> 26) & 0x1F;
                         var diffuse = new Vector4(dr / 31.0f, dg / 31.0f, db / 31.0f, 1.0f);
                         var ambient = new Vector4(ar / 31.0f, ag / 31.0f, ab / 31.0f, 1.0f);
-                        // shader - if (_lighting)
+                        // shader - if (LightingOn)
                         // MPH only calls this with zero ambient, and we need to rely on that in order to
                         // use GL.Color to smuggle in the diffuse, since setting uniforms here doesn't work
                         Debug.Assert(ambient.X == 0 && ambient.Y == 0 && ambient.Z == 0);
@@ -1629,6 +1655,7 @@ namespace MphRead
             GL.BindTexture(TextureTarget.Texture2D, 0);
             GL.FramebufferTexture2D(FramebufferTarget.Framebuffer,
                 FramebufferAttachment.DepthStencilAttachment, TextureTarget.Texture2D, _depthTexture, 0);
+            _depthQuantum = MeasureDepthQuantum();
             FramebufferErrorCode status = GL.CheckFramebufferStatus(FramebufferTarget.Framebuffer);
             if (status != FramebufferErrorCode.FramebufferComplete)
             {
@@ -1643,6 +1670,65 @@ namespace MphRead
                 _depthTexture = 0;
             }
         }
+
+        /// <summary>
+        /// One step of the depth buffer, as the ink pass has to treat it.
+        ///
+        /// Asked for rather than assumed. `Depth24Stencil8` is what this code
+        /// requests, but a driver is free to satisfy it with less, and the ink
+        /// pass is looking for a second difference around a millionth of the
+        /// stored value -- so being wrong about this by a factor of two
+        /// hundred is the difference between an outline and straight black
+        /// lines drawn along every step of the buffer, on every flat wall.
+        ///
+        /// The depth *half* of the attachment is what gets asked: both GL and
+        /// ES answer `INVALID_OPERATION` for a component size of
+        /// `DEPTH_STENCIL_ATTACHMENT` itself. Anything unexpected falls back
+        /// to the 24 bits that were requested, which is what this assumed
+        /// before it asked at all.
+        /// </summary>
+        private float MeasureDepthQuantum()
+        {
+            const int requested = 24;
+            int bits = requested;
+            bool answered = false;
+            try
+            {
+                while (GL.GetError() != OpenTK.Graphics.OpenGL.ErrorCode.NoError)
+                {
+                }
+                GL.GetFramebufferAttachmentParameter(FramebufferTarget.Framebuffer,
+                    FramebufferAttachment.DepthAttachment,
+                    FramebufferParameterName.FramebufferAttachmentDepthSize, out int answer);
+                if (GL.GetError() == OpenTK.Graphics.OpenGL.ErrorCode.NoError
+                    && answer >= 8 && answer <= 32)
+                {
+                    bits = answer;
+                    answered = true;
+                }
+            }
+            catch (Exception)
+            {
+                // A driver that will not answer is not a reason to stop drawing.
+            }
+            if (!_saidDepthSize)
+            {
+                // Once a process, and always rather than only when it
+                // surprises: this is the one number that says whether the ink
+                // pass has anything to work with, and the machine that needs
+                // to be asked is the one nobody here can plug in.
+                _saidDepthSize = true;
+                Console.WriteLine(answered
+                    ? $"[render] cel outline: the depth buffer is {bits} bits"
+                    : $"[render] cel outline: the driver would not say how deep the depth "
+                        + $"buffer is; assuming the {requested} that were asked for");
+            }
+            return 1f / (MathF.Pow(2, bits) - 1);
+        }
+
+        private static bool _saidDepthSize;
+
+        private float _depthQuantum = 1f / (MathF.Pow(2, 24) - 1);
 
         /// <summary>
         /// Draw the ink line over the finished scene, inside the offscreen
@@ -1680,6 +1766,17 @@ namespace MphRead
             GL.Uniform1(_shaderLocations.CelOutline, Mods.RenderOptions.CelEdge);
             GL.Uniform1(_shaderLocations.CelNearPlane, _nearClip);
             GL.Uniform1(_shaderLocations.CelFarPlane, _useClip ? _farClip : 10000f);
+            GL.Uniform1(_shaderLocations.CelDepthQuantum, _depthQuantum);
+            // Off the framebuffer for the length of the pass. Sampling a
+            // texture that is attached to the framebuffer being drawn into is
+            // undefined in OpenGL ES whether or not anything writes to it --
+            // desktop GL forgives the read-only case and ES does not -- and
+            // this reads the depth while drawing colour into the same target.
+            // Two calls a frame; the depth is already in memory as a texture,
+            // so there is nothing here for a tiler to resolve that it was not
+            // resolving anyway.
+            GL.FramebufferTexture2D(FramebufferTarget.Framebuffer,
+                FramebufferAttachment.DepthStencilAttachment, TextureTarget.Texture2D, 0, 0);
             GL.Disable(EnableCap.DepthTest);
             GL.Disable(EnableCap.Blend);
             GL.Disable(EnableCap.CullFace);
@@ -1701,6 +1798,9 @@ namespace MphRead
             GL.ActiveTexture(TextureUnit.Texture1);
             GL.BindTexture(TextureTarget.Texture2D, 0);
             GL.ActiveTexture(TextureUnit.Texture0);
+            // Back on, before anything else can find the target without one.
+            GL.FramebufferTexture2D(FramebufferTarget.Framebuffer,
+                FramebufferAttachment.DepthStencilAttachment, TextureTarget.Texture2D, _depthTexture, 0);
             GL.Enable(EnableCap.DepthTest);
         }
 
@@ -3224,7 +3324,7 @@ namespace MphRead
         private void UpdateUniforms()
         {
             UseRoomLights();
-            GL.Uniform1(_shaderLocations.UseFog, _hasFog && _showFog ? 1 : 0);
+            GL.Uniform1(_shaderLocations.UseFog, _hasFog && FogOn ? 1 : 0);
             GL.Uniform1(_shaderLocations.CelBands, Mods.RenderOptions.CelShading
                 ? Mods.RenderOptions.CelBands : 0);
             GL.Uniform1(_shaderLocations.ShowColors, _showColors ? 1 : 0);
@@ -4091,7 +4191,7 @@ namespace MphRead
 
         private void DoMaterial(RenderItem item)
         {
-            GL.Uniform1(_shaderLocations.UseLight, _lighting && item.Lighting ? 1 : 0);
+            GL.Uniform1(_shaderLocations.UseLight, LightingOn && item.Lighting ? 1 : 0);
             // MPH applies the material colors initially by calling DIF_AMB with bit 15 set,
             // so the diffuse color is always set as the vertex color to start
             // (the emission color is set to white if lighting is disabled or black if lighting is enabled; we can just ignore that)
@@ -4110,8 +4210,8 @@ namespace MphRead
             if (item.HasTexture)
             {
                 GL.BindTexture(TextureTarget.Texture2D, item.TextureBindingId);
-                int minParameter = _textureFiltering ? (int)TextureMinFilter.Linear : (int)TextureMinFilter.Nearest;
-                int magParameter = _textureFiltering ? (int)TextureMagFilter.Linear : (int)TextureMagFilter.Nearest;
+                int minParameter = FilteringOn ? (int)TextureMinFilter.Linear : (int)TextureMinFilter.Nearest;
+                int magParameter = FilteringOn ? (int)TextureMagFilter.Linear : (int)TextureMagFilter.Nearest;
                 GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, minParameter);
                 GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, magParameter);
                 switch (item.XRepeat)
@@ -4593,11 +4693,11 @@ namespace MphRead
             }
             else if (e.Key == Keys.F)
             {
-                _textureFiltering = !_textureFiltering;
+                FilteringOn = !FilteringOn;
             }
             else if (e.Key == Keys.L)
             {
-                _lighting = !_lighting;
+                LightingOn = !LightingOn;
             }
             else if (e.Key == Keys.Z)
             {
@@ -4630,7 +4730,7 @@ namespace MphRead
                 }
                 else
                 {
-                    _showFog = !_showFog;
+                    FogOn = !FogOn;
                 }
             }
             else if (e.Key == Keys.N)
@@ -5068,9 +5168,9 @@ namespace MphRead
             _sb.AppendLine($" - Ctrl+C toggles vertex colors ({OnOff(_showColors)})");
             _sb.AppendLine($" - Ctrl+Q toggles wireframe ({OnOff(_wireframe)})");
             _sb.AppendLine($" - B toggles face culling ({OnOff(_faceCulling)})");
-            _sb.AppendLine($" - F toggles texture filtering ({OnOff(_textureFiltering)})");
-            _sb.AppendLine($" - L toggles lighting ({OnOff(_lighting)})");
-            _sb.AppendLine($" - G toggles fog ({OnOff(_showFog)})");
+            _sb.AppendLine($" - F toggles texture filtering ({OnOff(FilteringOn)})");
+            _sb.AppendLine($" - L toggles lighting ({OnOff(LightingOn)})");
+            _sb.AppendLine($" - G toggles fog ({OnOff(FogOn)})");
             _sb.AppendLine($" - Shift+E toggles Scan Visor ({OnOff(_scanVisor)})");
             _sb.AppendLine($" - I toggles invisible entities ({invisible})");
             _sb.AppendLine($" - Z toggles volume display ({volume})");
