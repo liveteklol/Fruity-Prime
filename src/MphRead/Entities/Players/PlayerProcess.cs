@@ -1026,7 +1026,34 @@ namespace MphRead.Entities
                 Vector3 prevPos = PrevPosition + PlayerVolumes[(int)Hunter, index].SpherePosition;
                 index = IsAltForm ? 2 : 0;
                 Vector3 curPos = Position + PlayerVolumes[(int)Hunter, index].SpherePosition;
-                NodeRef = _scene.UpdateNodeRef(NodeRef, prevPos, curPos);
+                if (IsMainPlayer)
+                {
+                    // The one-hop test below only checks the portals
+                    // bordering the node it already has, against a single
+                    // straight segment from last frame's position to this
+                    // one -- correct for an ordinary walking step, but a
+                    // silent, permanent no-op if that segment ever misses a
+                    // narrow portal opening (curved movement compressed
+                    // into one frame, a stutter, a teleport). Nothing else
+                    // ever re-derives this player's own NodeRef from
+                    // scratch the way a remote puppet's is on every network
+                    // correction (PlayerEntityNetAim.ModRefreshNodeRef), so
+                    // a single missed frame wedges it there for the rest of
+                    // the session -- observed live as one player's own
+                    // room-part visibility staying frozen at their spawn
+                    // node while they walked well outside it. The absolute
+                    // lookup below is what a puppet already gets for free;
+                    // giving the local player -- one entity per client, not
+                    // all of them -- the same one is what a session that
+                    // hits the miss can recover from instead of being stuck
+                    // for its duration.
+                    Formats.Culling.NodeRef found = _scene.GetNodeRefByPosition(curPos);
+                    NodeRef = found.PartIndex != -1 ? found : _scene.UpdateNodeRef(NodeRef, prevPos, curPos);
+                }
+                else
+                {
+                    NodeRef = _scene.UpdateNodeRef(NodeRef, prevPos, curPos);
+                }
                 if (CameraSequence.Current == null || !IsMainPlayer)
                 {
                     if (CameraType == CameraType.Free)
