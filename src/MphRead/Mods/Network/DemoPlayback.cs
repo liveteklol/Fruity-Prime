@@ -63,13 +63,30 @@ namespace MphRead.Mods.Network
             _clock = Stopwatch.StartNew();
             _pending = _reader.ReadNext();
             bool hadRecords = _pending != null;
+            // Not returned the instant the room key is known: BuildPlayers
+            // (called right after this) reads NetSession.SlotHunter and
+            // SlotOccupied to decide every player's hunter and whether their
+            // slot is even active, and those come from Roster/Snapshot
+            // packets that do not necessarily land in the same burst as the
+            // MatchState that answers ServerMatch first. Returning too early
+            // showed real players with the wrong hunter, or briefly not
+            // active at all -- see the demo playback bug notes.
+            const long gracePeriodMs = 1000;
+            long knownAt = -1;
             while (_clock.ElapsedMilliseconds < timeoutMs)
             {
                 PumpFrame();
                 NetSession.Update(_clock.Elapsed.TotalSeconds);
                 if (NetSession.ServerMatch?.RoomKey.Length > 0)
                 {
-                    return true;
+                    if (knownAt < 0)
+                    {
+                        knownAt = _clock.ElapsedMilliseconds;
+                    }
+                    else if (_clock.ElapsedMilliseconds - knownAt >= gracePeriodMs || AtEnd)
+                    {
+                        return true;
+                    }
                 }
                 Thread.Sleep(20);
             }

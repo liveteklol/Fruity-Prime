@@ -122,7 +122,15 @@ namespace MphRead.Mods
                 {
                     continue;
                 }
-                if (players[index].LoadFlags.TestFlag(LoadFlags.Active))
+                PlayerEntity candidate = players[index];
+                // Spawned and alive, not just Active: Active alone can be
+                // true for a slot that exists but has not actually been
+                // placed in the map yet (see BuildPlayers/NetSlotManager),
+                // which during demo playback showed up as a body with no
+                // model and no textures for a frame or more -- Main pointed
+                // at a player camera code did not yet consider ready to draw.
+                if (candidate.LoadFlags.TestFlag(LoadFlags.Active)
+                    && candidate.LoadFlags.TestFlag(LoadFlags.Spawned) && candidate.Health > 0)
                 {
                     return index;
                 }

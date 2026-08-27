@@ -160,7 +160,7 @@ namespace MphRead.Mods.Launcher
             }
             Menu.SaveSlot = 0;
             using var renderer = new RenderWindow();
-            NetLaunch.BuildPlayers(renderer.Scene, Hunter.Samus, localRecolor: 0, teamId: -1);
+            NetLaunch.BuildPlayers(renderer.Scene, Hunter.Samus, localRecolor: 0, teamId: -1, localSlot: -1);
             renderer.AddRoom(room.Value.RoomKey, room.Value.Mode, playerCount: NetLaunch.RoomPlayerCount);
             renderer.Run();
             DemoPlayback.Stop();
