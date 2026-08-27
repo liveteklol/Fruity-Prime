@@ -79,6 +79,17 @@ namespace MphRead.Mods
                 target.SetUpHud();
             }
             PlayerEntity.MainPlayerIndex = slot;
+            // RoomEntity.UpdateRoomParts walks the portal graph outward from
+            // Main.CameraInfo.NodeRef to decide which room geometry is
+            // active this frame -- not from the player's own NodeRef, which
+            // PlayerProcess already keeps current. CameraInfo.NodeRef only
+            // gets the same treatment while its owner *is* Main (see
+            // PlayerProcess.cs's node-ref sync block), so a player who has
+            // never been Main before starts this walk from whatever stale
+            // value the field was left at, not from wherever they actually
+            // are -- which is where the room started loading only the
+            // geometry near their spawn point instead of their real spot.
+            target.CameraInfo.NodeRef = target.NodeRef;
         }
 
         /// <summary>
