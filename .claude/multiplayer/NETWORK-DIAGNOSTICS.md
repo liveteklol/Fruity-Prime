@@ -300,6 +300,15 @@ the control:
 | C (reused slot) on the Pi | 0 | 13 |
 | D (fresh slot) on the Pi | 2 | 5 |
 
+A later run of the same script, after the fix below, gave C 1 hit and D 0 --
+which is not a regression, it is the variance. Two to four scripted clients
+duelling for a minute engage each other by luck: across runs the same slot
+has come out anywhere between 0 and 23 hits. **The hit counts here answer
+"did damage flow at all in this topology", and nothing finer.** The
+regression gate is `run-check.sh`, which cross-checks what each client did
+against what the others saw and reports mismatches; that is what to run
+after touching any of this.
+
 So slot reuse plus an authority handover does not, on its own, break
 damage. Whatever the report is about needs something this does not have --
 a human's engagement pattern rather than the tour's, the launcher's own
