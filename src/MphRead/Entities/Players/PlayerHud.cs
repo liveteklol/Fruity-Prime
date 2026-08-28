@@ -1775,18 +1775,32 @@ namespace MphRead.Entities
         {
             // Below the score block in the top-left corner, and short enough
             // that all nine weapons still fit above the bottom edge.
-            // Compact by default, and scalable, because the right size for
-            // this is a matter of eyesight and screen rather than of design --
-            // the same panel that is unreadable on a handheld is in the way on
-            // a monitor. Every measurement below is multiplied, so the panel
-            // keeps its proportions at any setting; only its top-left corner
-            // stays put, under the score block.
+            // Quake's weapon bar, at Quake's size and in Quake's place.
+            //
+            // Measured off the reference rather than guessed: in that shot the
+            // column starts hard against the left edge, each row is about 3%
+            // of the screen's height and the whole panel about 7.5% of its
+            // width -- which in the DS's 256x192 HUD space, where every
+            // coordinate here lives, is a 6-unit row in a 20-unit panel. That
+            // is a *lot* smaller than a HUD readout, and it is the point: the
+            // bar is meant to be read out of the corner of the eye and take up
+            // nothing.
+            //
+            // Scalable for the same reason as before -- eyesight and screen
+            // size are not design decisions -- and every measurement below is
+            // multiplied, so the panel keeps its proportions. Only the corner
+            // it starts from stays put.
             float scale = Math.Clamp(Features.WeaponListScale, 0.6f, 2f);
-            const float panelX = 8;
-            float panelWidth = 44 * scale;
-            float rowHeight = 12 * scale;
-            float iconCentreX = panelX + 11 * scale;
-            float ammoRightX = panelX + panelWidth - 3 * scale;
+            // Against the left edge, not inset. The reference has no margin
+            // worth the name and the panel reads as part of the frame because
+            // of it.
+            const float panelX = 2;
+            float rowHeight = 8f * scale;
+            float panelWidth = 26f * scale;
+            // The icon sits in a square block of the row's own height at the
+            // left of it, and the count is right-aligned in what is left.
+            float iconBox = rowHeight - 1f * scale;
+            float ammoRightX = panelX + panelWidth - 1.5f * scale;
             float y = 46;
             for (int i = 0; i < _weaponListIcons.Length; i++)
             {
@@ -1801,42 +1815,52 @@ namespace MphRead.Entities
                 // table -- the same 5-bit-per-channel value
                 // BeamProjectileEntity decodes to colour the shot itself.
                 //
-                // This is the piece that makes a list like Quake's work: you
-                // find a weapon by its colour rather than by reading nine
-                // labels. The cartridge has no colour icon set to do it with
-                // -- the HUD's weapon glyphs are one flat green and the
-                // touchscreen wheel's are grey outlines -- but it does have a
-                // colour per weapon, and it is the colour the player already
-                // associates with that gun from firing it.
+                // This is the piece that makes a bar like Quake's work: you
+                // find a weapon by its colour rather than by reading a column
+                // of labels. The cartridge has no colour icon set to do it
+                // with -- the HUD's weapon glyphs are one flat green and the
+                // touchscreen wheel's are grey outlines, both checked by
+                // drawing them at 4x -- but it does have a colour per weapon,
+                // and it is the colour the player already associates with that
+                // gun from firing it.
                 ushort raw = info.Colors[0];
                 var tint = new Vector4(
                     ((raw >> 0) & 0x1F) / 31f,
                     ((raw >> 5) & 0x1F) / 31f,
                     ((raw >> 10) & 0x1F) / 31f,
                     1f);
-                // A panel under every row, not only the equipped one: the
-                // icons are colour art over whatever the map happens to be
-                // behind them, and a light wall was enough to lose them.
-                float panelAlpha = (equipped ? 0.55f : 0.3f) * Features.HudOpacity;
-                float rowBottom = y + rowHeight - 1.5f * scale;
+                float rowBottom = y + rowHeight - 1f * scale;
+                // The row, dark; the equipped one lighter. That is the whole
+                // of the selection marker now. There used to be a coloured
+                // tab down the left edge as well, which the reference does not
+                // have and does not need: a lit row already says which weapon
+                // is in your hands, and a second marker for the same fact only
+                // made the column wider.
                 _scene.DrawHudFlatBox(panelX, y, panelX + panelWidth, rowBottom,
-                    new Vector4(0, 0, 0, panelAlpha));
-                // The colour chip down the left edge of the row, and wider
-                // for the equipped one -- so which weapon is in your hands is
-                // one glance and which weapon is which is another, without
-                // either having to be read.
-                float chipWidth = (equipped ? 3 : 1.5f) * scale;
-                _scene.DrawHudFlatBox(panelX, y, panelX + chipWidth, rowBottom,
+                    equipped
+                        ? new Vector4(0.45f, 0.4f, 0.2f, 0.72f * Features.HudOpacity)
+                        : new Vector4(0, 0, 0, 0.42f * Features.HudOpacity));
+                // An opaque block of the weapon's colour behind the icon.
+                //
+                // The icon art is an outline on nothing, so drawn by itself it
+                // is a few translucent grey strokes over whatever the map
+                // happens to be behind them -- which a light wall swallows
+                // whole. Filling its square first makes it a solid coloured
+                // chip with the glyph on it, which is what the reference's
+                // icons are, and is why they can be this small and still be
+                // told apart.
+                _scene.DrawHudFlatBox(panelX, y, panelX + iconBox, rowBottom,
                     new Vector4(tint.X, tint.Y, tint.Z,
-                        (equipped ? 1f : 0.65f) * Features.HudOpacity));
+                        (equipped ? 1f : 0.9f) * Features.HudOpacity));
                 HudObjectInstance icon = _weaponListIcons[i];
                 // The select sheet's frames are drawn for the weapon wheel and
-                // are far larger than a row; scaled down here rather than
+                // are many times a row's height; scaled down here rather than
                 // given a second, smaller copy of the same art.
-                float iconScale = 0.30f * scale;
-                icon.PositionX = (iconCentreX - icon.Width * iconScale / 2) / 256f;
-                icon.PositionY = (y + 1 * scale) / 192f;
-                icon.Alpha = (equipped ? 1f : 0.6f) * Features.HudOpacity;
+                float iconScale = iconBox / icon.Width;
+                icon.PositionX = (panelX + (iconBox - icon.Width * iconScale) / 2) / 256f;
+                icon.PositionY = (y + (rowHeight - icon.Height * iconScale) / 2) / 192f;
+                // Never faded. A dimmed icon at this size is an empty box.
+                icon.Alpha = Features.HudOpacity;
                 _scene.DrawHudObject(icon, mode: 2, scale: iconScale);
                 // The Power Beam costs no ammo, and a blank where every other
                 // row has a number reads as "unknown" rather than as
@@ -1844,14 +1868,12 @@ namespace MphRead.Entities
                 string ammo = info.AmmoCost > 0
                     ? _ammo[info.AmmoType].ToString()
                     : "--";
-                // Three quarters, so a three-digit count sits inside the row
-                // rather than spilling under it: the HUD font is drawn for
-                // the 16-pixel-tall readouts around the screen edge, and this
-                // row is that tall in total.
-                DrawText2D(ammoRightX, y + 1.5f * scale, Align.Right, palette: 0, ammo,
-                    color: new ColorRgba(
-                        (byte)(tint.X * 255), (byte)(tint.Y * 255), (byte)(tint.Z * 255), 255),
-                    alpha: (equipped ? 1f : 0.7f) * Features.HudOpacity, scale: 0.55f * scale);
+                // White, like the reference's: the colour is carried by the
+                // icon block beside it, and a coloured number as well made
+                // every row a different brightness to read.
+                DrawText2D(ammoRightX, y + 0.5f * scale, Align.Right, palette: 0, ammo,
+                    color: new ColorRgba(230, 234, 242, 255),
+                    alpha: Features.HudOpacity, scale: 0.5f * scale);
                 y += rowHeight;
             }
         }
