@@ -217,7 +217,7 @@ namespace MphRead
         public bool ShowInvisibleEntities => _showInvisible != 0;
         public bool ShowAllEntities => _showInvisible == 2;
         public bool TransformRoomNodes => _transformRoomNodes;
-        public bool ShowAllNodes => _showAllNodes;
+        public bool ShowAllNodes { get => _showAllNodes; set => _showAllNodes = value; }
         public float FrameTime => _frameTime;
         public ulong FrameCount => _frameCount;
         public ulong LiveFrames => _liveFrames;
@@ -445,6 +445,7 @@ namespace MphRead
         {
             return Room?.GetNodeRefByPosition(position) ?? NodeRef.None;
         }
+
 
         public bool IsNodeRefVisible(NodeRef nodeRef)
         {
@@ -4682,16 +4683,37 @@ namespace MphRead
         {
             if ((_leftMouse || _demoFreeCam) && AllowCameraMovement && _inputMode != InputMode.PlayerOnly)
             {
+                // The spectator's free camera is the player's look, so it
+                // obeys the player's settings.
+                //
+                // The /1.5 below is the model viewer's own feel and stays that
+                // for the viewer's Pivot and Roam cameras -- those are a tool,
+                // not a game. But the demo/spectator free camera is reached
+                // from a match, with the same mouse, and it ignored mouse
+                // sensitivity and both invert axes outright: turning it on
+                // changed how fast the view turned and which way up it went,
+                // with nothing in the settings able to say otherwise.
+                float sensitivity = 1f;
+                float invertX = 1f;
+                float invertY = 1f;
+                if (_demoFreeCam)
+                {
+                    sensitivity = Mods.InputSettings.MouseSensitivity;
+                    invertX = Mods.InputSettings.InvertMouseX ? -1f : 1f;
+                    invertY = Mods.InputSettings.InvertMouseY ? -1f : 1f;
+                }
+                float moveX = deltaX * sensitivity * invertX;
+                float moveY = deltaY * sensitivity * invertY;
                 if (_cameraMode == CameraMode.Pivot)
                 {
-                    _pivotAngleX += deltaY / 1.5f;
+                    _pivotAngleX += moveY / 1.5f;
                     _pivotAngleX = Math.Clamp(_pivotAngleX, -90.0f, 90.0f);
-                    _pivotAngleY += deltaX / 1.5f;
+                    _pivotAngleY += moveX / 1.5f;
                     _pivotAngleY %= 360f;
                 }
                 else if (_cameraMode == CameraMode.Roam)
                 {
-                    UpdateCameraRotation(MathHelper.DegreesToRadians(deltaX / 1.5f), MathHelper.DegreesToRadians(-deltaY / 1.5f));
+                    UpdateCameraRotation(MathHelper.DegreesToRadians(moveX / 1.5f), MathHelper.DegreesToRadians(-moveY / 1.5f));
                 }
             }
         }

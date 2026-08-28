@@ -91,6 +91,7 @@ namespace MphRead.Mods.Launcher.Gui
         private SliderRow _sensitivity = null!;
         private ToggleRow _invertY = null!;
         private ToggleRow _invertX = null!;
+        private ToggleRow _scrollAllWeapons = null!;
         private FieldRow _pointGoal = null!;
         private FieldRow _timeLimit = null!;
         private ChoiceRow _damageRow = null!;
@@ -499,6 +500,8 @@ namespace MphRead.Mods.Launcher.Gui
                 v => $"{SliderToSensitivity(v).ToString("0.00", CultureInfo.InvariantCulture)}x"));
             _invertY = Add(page, new ToggleRow("Invert vertical aim", InputSettings.InvertMouseY));
             _invertX = Add(page, new ToggleRow("Invert horizontal aim", InputSettings.InvertMouseX));
+            _scrollAllWeapons = Add(page, new ToggleRow("Wheel cycles every weapon",
+                InputSettings.ScrollAllWeapons));
 
             Heading(page, "Keys");
             Explain(page, "Click a binding and press a key, a mouse button or the wheel. "
@@ -520,6 +523,7 @@ namespace MphRead.Mods.Launcher.Gui
                 _sensitivity.Value = SensitivityToSlider(InputSettings.MouseSensitivity);
                 _invertY.On = InputSettings.InvertMouseY;
                 _invertX.On = InputSettings.InvertMouseX;
+                _scrollAllWeapons.On = InputSettings.ScrollAllWeapons;
                 foreach (KeyRow row in rows)
                 {
                     row.InvalidateVisual();
@@ -723,6 +727,7 @@ namespace MphRead.Mods.Launcher.Gui
             InputSettings.MouseSensitivity = SliderToSensitivity(_sensitivity.Value);
             InputSettings.InvertMouseY = _invertY.On;
             InputSettings.InvertMouseX = _invertX.On;
+            InputSettings.ScrollAllWeapons = _scrollAllWeapons.On;
             InputSettings.Save();
             // The players in the match already have their own copies of these.
             InputSettings.ApplyToPlayers();

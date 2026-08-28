@@ -2388,7 +2388,18 @@ namespace MphRead.Entities
 
         public bool InvertAimY { get; }
         public bool InvertAimX { get; }
-        public bool ScrollAllWeapons { get; }
+        /// <summary>
+        /// Whether the wheel walks the whole list, Power Beam and Missile
+        /// included, or only the seven affinity slots.
+        ///
+        /// Settable, and <see cref="Mods.InputSettings.ScrollAllWeapons"/> is
+        /// where the player's answer lives. It was a readonly false, and the
+        /// weapon-cycling block above only runs at all when it is true *or*
+        /// the equipped weapon is neither the Power Beam nor the Missile -- so
+        /// with the wheel's own defaults bound, scrolling did nothing
+        /// whatsoever while holding the beam every player spawns with.
+        /// </summary>
+        public bool ScrollAllWeapons { get; set; }
 
         public Keybind[] All { get; }
 
@@ -2401,7 +2412,7 @@ namespace MphRead.Entities
         {
             MouseAim = true;
             KeyboardAim = true;
-            ScrollAllWeapons = false;
+            ScrollAllWeapons = true;
             MoveLeft = moveLeft;
             MoveRight = moveRight;
             MoveUp = moveUp;

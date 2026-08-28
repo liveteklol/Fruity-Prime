@@ -6,10 +6,15 @@ namespace MphRead.Droid
     /// <summary>What a thumb can press. Each maps to one of the player's binds.</summary>
     internal enum TouchAction
     {
+        /// <summary>
+        /// FIRE, which is both attacks: the gun on foot and the alt form's
+        /// attack in the ball. There is no separate ALT action, because there
+        /// was never a separate button -- the DS had one, and the game's
+        /// defaults still bind both to it.
+        /// </summary>
         Shoot,
         Jump,
         Morph,
-        AltAttack,
         WeaponMenu,
         Zoom,
         Pause,
@@ -79,7 +84,11 @@ namespace MphRead.Droid
             new TouchButton(TouchAction.Shoot, "FIRE"),
             new TouchButton(TouchAction.Jump, "JUMP"),
             new TouchButton(TouchAction.Morph, "MORPH"),
-            new TouchButton(TouchAction.AltAttack, "ALT"),
+            // No ALT button. It shared MouseButton.Left with FIRE -- the
+            // game's own default, the DS having had one attack button -- so
+            // it was a second way to press the thing FIRE presses, and having
+            // both is what stopped FIRE working at all. FIRE is both attacks
+            // now; see GameView.CollectInput.
             new TouchButton(TouchAction.WeaponMenu, "WEAPON"),
             new TouchButton(TouchAction.Zoom, "ZOOM"),
             new TouchButton(TouchAction.Pause, "MENU"),
@@ -127,7 +136,6 @@ namespace MphRead.Droid
                 Place(TouchAction.Shoot, width - 0.17f * h, h - 0.19f * h, 0.105f * h);
                 Place(TouchAction.Jump, width - 0.40f * h, h - 0.15f * h, 0.085f * h);
                 Place(TouchAction.Morph, width - 0.15f * h, h - 0.47f * h, 0.080f * h);
-                Place(TouchAction.AltAttack, width - 0.38f * h, h - 0.42f * h, 0.075f * h);
                 Place(TouchAction.WeaponMenu, width - 0.12f * h, 0.15f * h, 0.075f * h);
                 Place(TouchAction.Zoom, width - 0.33f * h, 0.12f * h, 0.065f * h);
                 Place(TouchAction.Pause, 0.11f * h, 0.12f * h, 0.060f * h);

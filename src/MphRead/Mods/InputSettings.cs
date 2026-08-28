@@ -36,6 +36,17 @@ namespace MphRead.Mods
         public static bool InvertMouseY { get; set; }
         public static bool InvertMouseX { get; set; }
 
+        /// <summary>
+        /// Whether the wheel cycles every weapon or only the affinity slots.
+        ///
+        /// On by default, which upstream's constant was not, and the
+        /// difference is not a nicety: the cycling code runs only when this is
+        /// set *or* the equipped weapon is neither the Power Beam nor the
+        /// Missile, so with it off the wheel was dead in the hand every player
+        /// spawns with -- "the scroll wheel does not change weapons", exactly.
+        /// </summary>
+        public static bool ScrollAllWeapons { get; set; } = true;
+
         private static bool _creating;
         private static PlayerControls? _current;
 
@@ -202,6 +213,7 @@ namespace MphRead.Mods
                 target.Key = source.Key;
                 target.MouseButton = source.MouseButton;
             }
+            controls.ScrollAllWeapons = ScrollAllWeapons;
         }
 
         /// <summary>
@@ -268,6 +280,11 @@ namespace MphRead.Mods
                         InvertMouseX = invertX;
                         continue;
                     }
+                    if (key == "scroll_all_weapons" && Boolean.TryParse(value, out bool scrollAll))
+                    {
+                        ScrollAllWeapons = scrollAll;
+                        continue;
+                    }
                     PropertyInfo? property = Bindings.FirstOrDefault(p => p.Name == key);
                     if (property != null)
                     {
@@ -317,7 +334,8 @@ namespace MphRead.Mods
                     $"# {Branding.Name} controls. Delete a line to go back to the default.",
                     $"sensitivity={MouseSensitivity.ToString("0.###", CultureInfo.InvariantCulture)}",
                     $"invert_y={InvertMouseY.ToString().ToLowerInvariant()}",
-                    $"invert_x={InvertMouseX.ToString().ToLowerInvariant()}"
+                    $"invert_x={InvertMouseX.ToString().ToLowerInvariant()}",
+                    $"scroll_all_weapons={ScrollAllWeapons.ToString().ToLowerInvariant()}"
                 };
                 foreach (PropertyInfo property in Bindings)
                 {
@@ -351,6 +369,7 @@ namespace MphRead.Mods
             MouseSensitivity = 1;
             InvertMouseY = false;
             InvertMouseX = false;
+            ScrollAllWeapons = true;
         }
     }
 }

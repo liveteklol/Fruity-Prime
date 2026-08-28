@@ -313,6 +313,17 @@ namespace MphRead.Droid
             {
                 Instance = null;
             }
+            // Leaving the app is the other way out of a match, and it has the
+            // same problem EndMatch had: the render thread is a background
+            // thread that outlives this activity, so quitting from the pause
+            // menu (or by the system taking the activity down) left the room
+            // loaded and its music and SFX playing with nothing on screen.
+            //
+            // Stopping the loop rather than tearing the sound down from here:
+            // Sfx is not thread-safe and the GL thread owns it, so it is asked
+            // to shut itself down on its own thread, which is what
+            // Scene.DoCleanup does at the end of the loop.
+            _gameView?.Stop();
             base.OnDestroy();
         }
 
@@ -741,6 +752,18 @@ namespace MphRead.Droid
             }
             if (_gameView != null)
             {
+                // Stop the render loop *before* the view goes, and this is the
+                // only thing that ends the match's sound.
+                //
+                // Removing the view only destroys the surface, and this loop is
+                // built to survive that -- it lets go of the surface and waits
+                // for another one, keeping its context, its scene and every
+                // voice that scene has playing. So the front screen came back
+                // over a match that was still running, with the music and the
+                // SFX still going, which is exactly how it was reported. The
+                // stop is what breaks the loop, and breaking the loop is what
+                // reaches Scene.DoCleanup -> Sfx.ShutDown and OutputStop.
+                _gameView.Stop();
                 _content.RemoveView(_gameView);
                 _gameView = null;
             }

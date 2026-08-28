@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Reflection;
 using MphRead.Entities;
 using OpenTK.Mathematics;
@@ -39,6 +40,13 @@ namespace MphRead.Droid
         private readonly Action<MouseState, MouseButton, bool> _setButton;
 
         private Vector2 _pointer;
+
+        // What this frame's actions have asked for, and what the last frame
+        // left held. See Apply.
+        private readonly HashSet<Keys> _keysDown = new HashSet<Keys>();
+        private readonly HashSet<MouseButton> _buttonsDown = new HashSet<MouseButton>();
+        private readonly HashSet<Keys> _keysHeld = new HashSet<Keys>();
+        private readonly HashSet<MouseButton> _buttonsHeld = new HashSet<MouseButton>();
 
         public AndroidInput()
         {
@@ -86,18 +94,97 @@ namespace MphRead.Droid
             _setButton(Mouse, button, down);
         }
 
-        /// <summary>Press or release whatever the player has this action bound to.</summary>
+        /// <summary>
+        /// Press or release whatever the player has this action bound to.
+        ///
+        /// **Held down wins over let go, for the frame.** Two actions can share
+        /// one bind, and the game's own defaults do it: <c>shoot</c> and
+        /// <c>altAttack</c> are both <c>MouseButton.Left</c>, because the DS
+        /// had one fire button and the alt form's attack is what it does while
+        /// you are a ball. Applying each action in turn therefore had the last
+        /// one applied decide the shared button's state -- so a thumb on FIRE
+        /// set Left down and the very next line, ALT not being held, set it
+        /// straight back up. FIRE did nothing at all and ALT fired, which is
+        /// exactly how it was reported.
+        ///
+        /// So a frame's presses are accumulated rather than written straight
+        /// through, and <see cref="CommitFrame"/> writes the union. Anything
+        /// no action asked for this frame is released. Nothing here depends on
+        /// the *order* actions are applied in any more, which is what made the
+        /// bug possible.
+        /// </summary>
         public void Apply(Keybind bind, bool down)
         {
             if (bind.Type == ButtonType.Key)
             {
-                SetKey(bind.Key, down);
+                if (bind.Key != Keys.Unknown && down)
+                {
+                    _keysDown.Add(bind.Key);
+                }
             }
             else if (bind.Type == ButtonType.Mouse)
             {
-                SetButton(bind.MouseButton, down);
+                if (down)
+                {
+                    _buttonsDown.Add(bind.MouseButton);
+                }
             }
             // Scroll binds have no touch equivalent and are left alone.
+        }
+
+        /// <summary>
+        /// A press that is not one of the player's binds -- the dialog box's
+        /// OK button, which the DS read off its touch screen. Goes through the
+        /// same accumulator so <see cref="CommitFrame"/> does not release it.
+        /// </summary>
+        public void ApplyButton(MouseButton button, bool down)
+        {
+            if (down)
+            {
+                _buttonsDown.Add(button);
+            }
+        }
+
+        /// <summary>
+        /// Start collecting a frame's presses. Everything held at the end of
+        /// the last frame is remembered, so <see cref="CommitFrame"/> knows
+        /// what to release.
+        /// </summary>
+        public void BeginFrame()
+        {
+            _keysDown.Clear();
+            _buttonsDown.Clear();
+        }
+
+        /// <summary>Write the frame's union of presses, and release the rest.</summary>
+        public void CommitFrame()
+        {
+            foreach (Keys key in _keysHeld)
+            {
+                if (!_keysDown.Contains(key))
+                {
+                    SetKey(key, down: false);
+                }
+            }
+            foreach (MouseButton button in _buttonsHeld)
+            {
+                if (!_buttonsDown.Contains(button))
+                {
+                    SetButton(button, down: false);
+                }
+            }
+            foreach (Keys key in _keysDown)
+            {
+                SetKey(key, down: true);
+            }
+            foreach (MouseButton button in _buttonsDown)
+            {
+                SetButton(button, down: true);
+            }
+            _keysHeld.Clear();
+            _keysHeld.UnionWith(_keysDown);
+            _buttonsHeld.Clear();
+            _buttonsHeld.UnionWith(_buttonsDown);
         }
 
         /// <summary>Aiming: move the pointer, which is what the engine reads.</summary>
@@ -123,9 +210,15 @@ namespace MphRead.Droid
             _setPosition(Mouse, _pointer);
         }
 
-        /// <summary>Everything up, for a match that is starting or a view that lost focus.</summary>
+        /// <summary>
+        /// Everything up, for a match that is starting or a view that lost
+        /// focus. Goes straight to the state rather than through
+        /// <see cref="Apply"/>, which only ever records presses now.
+        /// </summary>
         public void ReleaseAll()
         {
+            BeginFrame();
+            CommitFrame();
             PlayerControls? controls = PlayerEntity.Main?.Controls;
             if (controls == null)
             {
@@ -133,7 +226,15 @@ namespace MphRead.Droid
             }
             for (int i = 0; i < controls.All.Length; i++)
             {
-                Apply(controls.All[i], down: false);
+                Keybind bind = controls.All[i];
+                if (bind.Type == ButtonType.Key)
+                {
+                    SetKey(bind.Key, down: false);
+                }
+                else if (bind.Type == ButtonType.Mouse)
+                {
+                    SetButton(bind.MouseButton, down: false);
+                }
             }
         }
     }

@@ -46,6 +46,55 @@ namespace MphRead.Mods.Network
         private readonly bool[] _everDisrupted = new bool[PlayerEntity.SlotCapacity];
         private double _lowestY = Double.MaxValue;
 
+        // The render probe. A map whose geometry does not draw is a map that
+        // passes every check above -- the players spawn, the pads fire, the
+        // teleporters move -- and is unplayable, because the picture is black
+        // with a gun in front of it. Nothing but the pixels says so, so the
+        // pixels are read: once a second, from the main player's own camera,
+        // as the fraction of the frame that is not the clear colour.
+        //
+        // Sampled rather than read every frame: ReadSceneTarget is a
+        // glReadPixels and a stall, and one a second over a 20 s tour is
+        // plenty to catch a room that is dark from the spawn and one that
+        // goes dark after walking into it.
+        private string? _shotDirectory;
+        private int _shotsSaved;
+        private int _litSamples;
+        private double _litMin = Double.MaxValue;
+        private double _litMax;
+        private double _litFirst = -1;
+        private double _litTotal;
+        private const int _litSampleFrames = 60;
+
+        /// <summary>
+        /// Below this fraction of the frame lit, the room is not being drawn.
+        /// See the note where this is used.
+        /// </summary>
+        private const double _renderFloor = 0.06;
+
+        // The spawn render sweep: -maptest -renderprobe.
+        //
+        // A direct reading of the report this exists for -- "spawn the player,
+        // screenshot after the spawn, screenshot after walking forward five
+        // seconds, and a near-black frame with only the gun in it is a
+        // failure". Doing it from every spawn point in the room rather than
+        // whichever one the tour happened to get, because a map that draws
+        // from nine of its ten spawns and not the tenth is exactly the shape
+        // of thing one manual run finds by luck and misses by luck.
+        private readonly bool _renderProbe;
+        private readonly List<Vector3> _spawnSpots = new();
+        private readonly List<Vector3> _spawnFacings = new();
+        private readonly List<Formats.Culling.NodeRef> _spawnNodeRefs = new();
+        private int _spawnIndex = -1;
+        private int _spawnFrames;
+        private double _spawnLitAtSpawn;
+        private double _spawnLitWorst;
+        private int _spawnFailures;
+        /// <summary>Frames to settle on the spawn before the first reading.</summary>
+        private const int _spawnSettleFrames = 30;
+        /// <summary>Five seconds of walking, which is what the report asks for.</summary>
+        private const int _spawnWalkFrames = 300;
+
         // The world probe: after the tour, stand a player on every jump pad
         // and teleporter in turn and see whether it does anything.
         private readonly List<EntityBase> _probeTargets = new();
@@ -145,9 +194,11 @@ namespace MphRead.Mods.Network
         /// </summary>
         private readonly bool _bots;
 
-        private MapAudit(string room, int players, double seconds, GameMode mode, bool bots)
+        private MapAudit(string room, int players, double seconds, GameMode mode, bool bots,
+            bool renderProbe)
             : base(GameSettings(), WindowSettings())
         {
+            _renderProbe = renderProbe;
             _bots = bots;
             _room = room;
             _players = players;
@@ -205,8 +256,24 @@ namespace MphRead.Mods.Network
                 return;
             }
             _frame++;
+            if (_renderProbe)
+            {
+                if (!StepSpawnRender())
+                {
+                    SwapBuffers();
+                    Scene.AfterRenderFrame();
+                    base.OnRenderFrame(args);
+                    Close();
+                    return;
+                }
+                SwapBuffers();
+                Scene.AfterRenderFrame();
+                base.OnRenderFrame(args);
+                return;
+            }
             Drive();
             Observe();
+            SampleRender();
             SwapBuffers();
             Scene.AfterRenderFrame();
             base.OnRenderFrame(args);
@@ -651,6 +718,173 @@ namespace MphRead.Mods.Network
             }
         }
 
+        /// <summary>
+        /// One frame of the spawn render sweep. False when every spawn point
+        /// has been visited.
+        ///
+        /// The shape is the report's own recipe: stand on a spawn, let the
+        /// player settle, read the frame; then walk straight ahead for five
+        /// seconds, reading the frame as it goes, and keep the worst. A room
+        /// that draws from the spawn and stops drawing once you have walked
+        /// into it is the failure being looked for, and only the second
+        /// reading finds it.
+        /// </summary>
+        private bool StepSpawnRender()
+        {
+            if (_spawnIndex < 0)
+            {
+                CollectSpawnSpots();
+                _spawnIndex = 0;
+                _spawnFrames = -1;
+            }
+            if (_spawnIndex >= _spawnSpots.Count)
+            {
+                return false;
+            }
+            PlayerEntity player = PlayerEntity.Main;
+            if (_spawnFrames < 0)
+            {
+                // Between lives: ask to come back rather than measure a frame
+                // drawn from a dead player's camera.
+                if (!player.LoadFlags.TestFlag(LoadFlags.Spawned) || player.Health == 0)
+                {
+                    NetTestScript.Rest(player, wantBiped: true);
+                    return true;
+                }
+                Vector3 spot = _spawnSpots[_spawnIndex];
+                player.ModForceForm(altForm: false);
+                // The spawn point's own node ref, which is what
+                // PlayerProcess's respawn passes -- not a positional lookup.
+                // GetNodeRefByPosition tests a position against the *portal
+                // planes* of each room part in turn and takes the first whose
+                // half-spaces it is inside, which for a part with two portals
+                // is an unbounded wedge: it answers "part 5" for points
+                // nowhere near part 5, and a sweep built on it measures the
+                // approximation rather than the map.
+                player.Teleport(spot, _spawnFacings[_spawnIndex], _spawnNodeRefs[_spawnIndex]);
+                _spawnFrames = 0;
+                _spawnLitWorst = Double.MaxValue;
+                NetTestScript.Rest(player, wantBiped: true);
+                return true;
+            }
+            _spawnFrames++;
+            if (_spawnFrames < _spawnSettleFrames)
+            {
+                NetTestScript.Rest(player, wantBiped: true);
+                return true;
+            }
+            if (_spawnFrames == _spawnSettleFrames)
+            {
+                _spawnLitAtSpawn = Mods.ScreenCapture.NonBlackFraction(Scene);
+                _spawnLitWorst = _spawnLitAtSpawn;
+                SaveSpawnShot("spawn");
+            }
+            NetTestScript.WalkForward(player);
+            if (_spawnFrames % 30 == 0)
+            {
+                double lit = Mods.ScreenCapture.NonBlackFraction(Scene);
+                if (lit < _spawnLitWorst)
+                {
+                    _spawnLitWorst = lit;
+                }
+            }
+            if (_spawnFrames < _spawnSettleFrames + _spawnWalkFrames)
+            {
+                return true;
+            }
+            SaveSpawnShot("walked");
+            Vector3 at = _spawnSpots[_spawnIndex];
+            bool failed = _spawnLitWorst < _renderFloor;
+            if (failed)
+            {
+                _spawnFailures++;
+            }
+            PlayerEntity main = PlayerEntity.Main;
+            Console.WriteLine($"RENDERSPAWN {_room} | spawn {_spawnIndex} "
+                + $"at {at.X:0.0},{at.Y:0.0},{at.Z:0.0} "
+                + $"| at spawn {_spawnLitAtSpawn * 100:0.0}% "
+                + $"| worst while walking {_spawnLitWorst * 100:0.0}%"
+                + $" | part {main.NodeRef.PartIndex}"
+                + (failed ? " | FAIL" : ""));
+            _spawnIndex++;
+            _spawnFrames = -1;
+            return true;
+        }
+
+        private void SaveSpawnShot(string what)
+        {
+            if (_shotDirectory == null)
+            {
+                return;
+            }
+            string name = _room.Replace(' ', '_').Replace('-', '_');
+            Mods.ScreenCapture.Save(Scene,
+                System.IO.Path.Combine(_shotDirectory, $"{name}-spawn{_spawnIndex:00}-{what}.png"));
+        }
+
+        private void CollectSpawnSpots()
+        {
+            foreach (EntityBase entity in Scene.Entities)
+            {
+                if (entity.Type != EntityType.PlayerSpawn)
+                {
+                    continue;
+                }
+                // Just above the marker: a spawn point sits on the floor and
+                // teleporting exactly onto it can put the player's own volume
+                // inside it.
+                _spawnSpots.Add(entity.Position.AddY(0.5f));
+                Vector3 facing = entity.FacingVector;
+                _spawnFacings.Add(facing.LengthSquared < 0.0001f ? Vector3.UnitZ : facing);
+                _spawnNodeRefs.Add(entity.NodeRef);
+            }
+        }
+
+        /// <summary>
+        /// Read the frame back and record how much of it is lit.
+        ///
+        /// Before <c>SwapBuffers</c> deliberately: this reads the scene's own
+        /// offscreen target, which is a texture the scene owns and is valid
+        /// either way, but the window is <c>StartVisible = false</c> and a
+        /// hidden window's back buffer is not -- see <c>ScreenCapture</c>.
+        ///
+        /// The first sample is kept separately from the rest. "Black from the
+        /// spawn" and "black once you walk into it" are different faults with
+        /// different causes, and a single average hides both.
+        /// </summary>
+        private void SampleRender()
+        {
+            if (_frame % _litSampleFrames != 1)
+            {
+                return;
+            }
+            double lit = Mods.ScreenCapture.NonBlackFraction(Scene);
+            _litSamples++;
+            _litTotal += lit;
+            if (_litFirst < 0)
+            {
+                _litFirst = lit;
+            }
+            if (lit < _litMin)
+            {
+                _litMin = lit;
+            }
+            if (lit > _litMax)
+            {
+                _litMax = lit;
+            }
+            if (_shotDirectory != null)
+            {
+                string name = _room.Replace(' ', '_').Replace('-', '_');
+                string path = System.IO.Path.Combine(_shotDirectory,
+                    $"{name}-{_shotsSaved:00}.png");
+                if (Mods.ScreenCapture.Save(Scene, path))
+                {
+                    _shotsSaved++;
+                }
+            }
+        }
+
         protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
         {
             Scene.DoCleanup();
@@ -726,7 +960,26 @@ namespace MphRead.Mods.Network
             line.Append($" morphcams {morphCameras} flagbases {flagBases} nodes {nodeDefenses}");
             line.Append($" artifacts {artifacts} triggers {triggers} areas {areaVolumes}");
             line.Append($" | lowest Y {_lowestY:0.0}");
+            if (_litSamples > 0)
+            {
+                line.Append($" | lit first {_litFirst * 100:0.0}%"
+                    + $" min {_litMin * 100:0.0}% max {_litMax * 100:0.0}%"
+                    + $" mean {_litTotal / _litSamples * 100:0.0}%"
+                    + $" ({_litSamples} samples)");
+            }
             Console.WriteLine(line.ToString());
+
+            if (_renderProbe)
+            {
+                Console.WriteLine($"RENDERSWEEP {_room} | {_spawnSpots.Count} spawn point(s) "
+                    + $"| {_spawnFailures} drew nothing");
+                if (_spawnFailures > 0)
+                {
+                    Console.WriteLine($"MAPFAIL {_room} | {_spawnFailures} of {_spawnSpots.Count} "
+                        + "spawn point(s) end in a frame with no room in it");
+                }
+                return _spawnFailures;
+            }
 
             var problems = new List<string>();
             // One silent pad can be a pad somebody has to jump onto from
@@ -761,6 +1014,24 @@ namespace MphRead.Mods.Network
             {
                 problems.Add("no spawn points at all");
             }
+            // The room drew nothing but the player's own gun and HUD.
+            //
+            // The threshold is deliberately low. A dark room is normal in this
+            // game and several are mostly black sky; what is being caught is
+            // the frame the report describes -- near-black with the viewmodel
+            // in it and a handful of stray polygons floating in the middle.
+            // Every room that renders at all is far above this, so a number
+            // near it is the fault and not a dark map.
+            if (_litSamples > 0 && _litMax < _renderFloor)
+            {
+                problems.Add($"the room never drew: at most {_litMax * 100:0.0}% of the frame "
+                    + $"was lit across {_litSamples} samples (first {_litFirst * 100:0.0}%)");
+            }
+            else if (_litSamples > 1 && _litMin < _renderFloor)
+            {
+                problems.Add($"the room stopped drawing: {_litMin * 100:0.0}% of the frame lit "
+                    + $"at its worst against {_litMax * 100:0.0}% at its best");
+            }
             for (int i = 0; i < _players; i++)
             {
                 PlayerEntity player = PlayerEntity.Players[i];
@@ -777,13 +1048,26 @@ namespace MphRead.Mods.Network
         }
 
         public static int Run(string room, int players, double seconds, GameMode mode,
-            bool bots = false)
+            bool bots = false, string? shotDirectory = null, bool renderProbe = false,
+            bool allNodes = false)
         {
             MapAudit? window = null;
             try
             {
                 window = new MapAudit(room, Math.Clamp(players, 1, PlayerEntity.SlotCapacity),
-                    seconds, mode, bots);
+                    seconds, mode, bots, renderProbe);
+                // Draw every node the model has, ignoring the portal-graph
+                // room-part culling. Answers one question and only one: is a
+                // frame with no room in it a culling decision or geometry that
+                // is not being drawn at all? It has to be set for a whole
+                // frame, update included -- the draw lists are built during
+                // the update and this is read while they are.
+                window.Scene.ShowAllNodes = allNodes;
+                if (shotDirectory != null)
+                {
+                    System.IO.Directory.CreateDirectory(shotDirectory);
+                    window._shotDirectory = shotDirectory;
+                }
                 window.Run();
                 return window.Report();
             }

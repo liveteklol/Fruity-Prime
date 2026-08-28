@@ -117,6 +117,19 @@ namespace MphRead.Mods
             // triggering.
             window.ClientSize = new Vector2i(monitor.ClientArea.Size.X, monitor.ClientArea.Size.Y - 1);
             IsFullscreen = true;
+            // And above the taskbar, which is the other half of covering the
+            // screen. A borderless window is an ordinary window as far as the
+            // desktop is concerned: it sits in the normal z-band, and the
+            // taskbar (and the dock, and a panel) is always-on-top, so it
+            // stayed drawn over the game -- pressing F11 filled the screen and
+            // left the taskbar sitting on it, which is how it was reported.
+            //
+            // Exclusive fullscreen is what usually takes the screen away from
+            // the shell, and it is the thing this deliberately is not; asking
+            // for always-on-top instead gets the same picture while keeping
+            // every reason borderless was chosen (instant alt-tab, no display
+            // mode change, no black flash).
+            SetTopmost(window, true);
         }
 
         public static void Leave(NativeWindow window)
@@ -134,6 +147,62 @@ namespace MphRead.Mods
                 window.Location = _savedLocation;
             }
             IsFullscreen = false;
+            SetTopmost(window, false);
+        }
+
+        /// <summary>
+        /// Whether the game window sits above the shell's own always-on-top
+        /// windows. True for the length of borderless fullscreen, and dropped
+        /// while the pause menu is up.
+        /// </summary>
+        public static bool IsTopmost => _topmost;
+
+        private static bool _topmost;
+
+        /// <summary>
+        /// Ask the window manager to float this window, or stop.
+        ///
+        /// Cached, because <see cref="SyncTopmost"/> is called once a frame
+        /// and this is a round trip to the window manager, not a field.
+        ///
+        /// Best-effort by nature: X11 window managers are free to ignore it
+        /// and Wayland has no concept of it at all, so a failure here is a
+        /// taskbar that is still visible, not a broken window. It is never
+        /// worth an exception reaching the render loop.
+        /// </summary>
+        public static void SetTopmost(NativeWindow window, bool topmost)
+        {
+            if (_topmost == topmost)
+            {
+                return;
+            }
+            _topmost = topmost;
+            try
+            {
+                unsafe
+                {
+                    GLFW.SetWindowAttrib(window.WindowPtr, WindowAttribute.Floating, topmost);
+                }
+            }
+            catch (Exception)
+            {
+                // See above: not worth a match.
+            }
+        }
+
+        /// <summary>
+        /// Keep the floating state right, once a frame.
+        ///
+        /// The pause menu is a separate always-on-top Avalonia window, and two
+        /// windows in the same always-on-top band are ordered by whichever the
+        /// desktop last raised -- which is not something to rely on for the one
+        /// window the player needs to be able to press. So the game window
+        /// stands down for as long as the menu is up and takes the band back
+        /// when it closes.
+        /// </summary>
+        public static void SyncTopmost(NativeWindow window)
+        {
+            SetTopmost(window, IsFullscreen && !PauseMenu.Open);
         }
 
         /// <summary>"borderless"/"fullscreen"/"windowed" from a settings file or a flag.</summary>

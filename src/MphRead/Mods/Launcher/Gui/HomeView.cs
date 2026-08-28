@@ -335,6 +335,42 @@ namespace MphRead.Mods.Launcher.Gui
             view.Resumed += (_, _) => { Close(); onResume(); };
             view.LeaveRequested += (_, _) => { Close(); onLeave(); };
             view.QuitRequested += (_, _) => { Close(); onQuit(); };
+            // Spectating and demo recording, which this screen offers and
+            // nothing was listening for.
+            //
+            // PauseMenuView builds the same entries on every platform -- it is
+            // the desktop's pause menu, shown as an overlay here because a
+            // phone has no second window to put it in -- so "Spectate",
+            // "Rejoin match" and "Record demo" were all drawn, all pressable,
+            // and all did nothing but close the menu, because only Resume,
+            // Leave, Quit and Settings were wired up. Same handlers as
+            // PauseMenuWindow's.
+            view.SpectateRequested += (_, _) =>
+            {
+                Close();
+                SpectatorMode.Start();
+                onResume();
+            };
+            view.RejoinRequested += (_, _) =>
+            {
+                Close();
+                SpectatorMode.Rejoin();
+                onResume();
+            };
+            view.RecordToggleRequested += (_, _) =>
+            {
+                if (DemoRecorder.IsRecording)
+                {
+                    Console.WriteLine($"[demo] recording saved to {DemoRecorder.CurrentPath}");
+                    DemoRecorder.Stop();
+                }
+                else
+                {
+                    DemoRecorder.Start();
+                }
+                Close();
+                onResume();
+            };
             view.SettingsRequested += async (_, _) =>
             {
                 await OpenSettings();

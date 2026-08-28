@@ -1026,34 +1026,40 @@ namespace MphRead.Entities
                 Vector3 prevPos = PrevPosition + PlayerVolumes[(int)Hunter, index].SpherePosition;
                 index = IsAltForm ? 2 : 0;
                 Vector3 curPos = Position + PlayerVolumes[(int)Hunter, index].SpherePosition;
-                if (IsMainPlayer)
-                {
-                    // The one-hop test below only checks the portals
-                    // bordering the node it already has, against a single
-                    // straight segment from last frame's position to this
-                    // one -- correct for an ordinary walking step, but a
-                    // silent, permanent no-op if that segment ever misses a
-                    // narrow portal opening (curved movement compressed
-                    // into one frame, a stutter, a teleport). Nothing else
-                    // ever re-derives this player's own NodeRef from
-                    // scratch the way a remote puppet's is on every network
-                    // correction (PlayerEntityNetAim.ModRefreshNodeRef), so
-                    // a single missed frame wedges it there for the rest of
-                    // the session -- observed live as one player's own
-                    // room-part visibility staying frozen at their spawn
-                    // node while they walked well outside it. The absolute
-                    // lookup below is what a puppet already gets for free;
-                    // giving the local player -- one entity per client, not
-                    // all of them -- the same one is what a session that
-                    // hits the miss can recover from instead of being stuck
-                    // for its duration.
-                    Formats.Culling.NodeRef found = _scene.GetNodeRefByPosition(curPos);
-                    NodeRef = found.PartIndex != -1 ? found : _scene.UpdateNodeRef(NodeRef, prevPos, curPos);
-                }
-                else
-                {
-                    NodeRef = _scene.UpdateNodeRef(NodeRef, prevPos, curPos);
-                }
+                // Upstream's one-hop test, for every player including this
+                // one. **Do not put an absolute position lookup in front of
+                // it.**
+                //
+                // That was tried, to cure a local player's NodeRef freezing at
+                // its spawn value: GetNodeRefByPosition was preferred and the
+                // hop kept only as a fallback. It cost far more than it
+                // bought. That lookup bounds a room part by the planes of the
+                // portals opening out of it and nothing else, so a part with
+                // two portals is an unbounded wedge, several parts' wedges
+                // overlap, and it returns a confidently wrong part far more
+                // readily than it returns none. On Elder Passage
+                // (MP4 HIGHGROUND - EXPANDED) it put the player in the
+                // four-node hall "rmHallB" while they stood in the open valley
+                // that all ten of that room's spawn points are authored into,
+                // and RoomEntity.UpdateRoomParts walks the portal graph from
+                // there -- so the room drew as a black screen with the gun and
+                // a few floating item pickups in it, from eight of the ten
+                // spawns, on every platform and in local play as much as
+                // online. Measured with `-maptest ROOM -renderprobe`: 8.7-19%
+                // of the frame lit with the lookup in front, 94-99.9% with it
+                // gone.
+                //
+                // The lookup is not sound enough to override the hop, and it
+                // is not sound enough to be a "have I left this part" check
+                // either -- asked about the correct part 7 at seven of those
+                // ten spawns, it says no. A remote puppet still uses it
+                // (PlayerEntityNetAim.ModRefreshNodeRef) because a puppet's
+                // position is written in rather than walked, so the hop cannot
+                // work there at all and a wrong part costs only that one
+                // player's visibility; here it costs the whole room. Curing
+                // the freeze needs a real point-in-node test against the node
+                // data, not this one.
+                NodeRef = _scene.UpdateNodeRef(NodeRef, prevPos, curPos);
                 if (CameraSequence.Current == null || !IsMainPlayer)
                 {
                     if (CameraType == CameraType.Free)

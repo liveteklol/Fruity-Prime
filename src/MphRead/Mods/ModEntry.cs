@@ -546,7 +546,9 @@ namespace MphRead.Mods
                     mapMode = parsedMode;
                 }
                 Environment.ExitCode = Network.MapAudit.Run(mapTest, players, seconds, mapMode,
-                    bots: HasFlag(args, "bots"));
+                    bots: HasFlag(args, "bots"), shotDirectory: ValueAfter(args, "shots"),
+                    renderProbe: HasFlag(args, "renderprobe"),
+                    allNodes: HasFlag(args, "allnodes"));
                 return true;
             }
 

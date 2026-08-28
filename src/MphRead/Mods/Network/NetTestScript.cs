@@ -169,6 +169,29 @@ namespace MphRead.Mods.Network
             Finish(c);
         }
 
+        /// <summary>
+        /// Walk straight ahead and do nothing else.
+        ///
+        /// The map audit's render sweep drives with this: the question it asks
+        /// is what a player sees after leaving the spot they spawned on, and
+        /// anything else the tour does -- firing, morphing, aiming at people --
+        /// only moves them somewhere less predictable.
+        /// </summary>
+        public static void WalkForward(PlayerEntity player)
+        {
+            PlayerControls c = player.Controls;
+            Clear(c);
+            if (player.Health == 0)
+            {
+                Hold(c.Shoot, true);
+            }
+            else
+            {
+                Hold(c.MoveUp, true);
+            }
+            Finish(c);
+        }
+
         public static void Apply(PlayerEntity player)
         {
             if (!Enabled)
