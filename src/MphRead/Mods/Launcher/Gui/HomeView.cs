@@ -300,10 +300,16 @@ namespace MphRead.Mods.Launcher.Gui
         private Task ShowOverlay(Control view, Action<EventHandler> subscribeClosed)
         {
             var done = new TaskCompletionSource();
+            // Held so that *any* way the overlay comes down finishes the wait,
+            // not only the view raising Closed. GoBack takes it down directly
+            // when the view declines Escape, and whoever is awaiting this would
+            // otherwise wait for ever -- which on this path means the settings
+            // never run the code after them (the jump to the game-files card),
+            // and the continuation is never collected.
+            _overlayDone = done;
             subscribeClosed((_, _) =>
             {
                 CloseOverlay();
-                done.TrySetResult();
             });
             _overlay.Children.Clear();
             _overlay.Children.Add(view);
@@ -311,6 +317,8 @@ namespace MphRead.Mods.Launcher.Gui
             Dispatcher.UIThread.Post(() => view.Focus(), DispatcherPriority.Background);
             return done.Task;
         }
+
+        private TaskCompletionSource? _overlayDone;
 
         /// <summary>
         /// The pause menu, over a running match.
@@ -384,6 +392,9 @@ namespace MphRead.Mods.Launcher.Gui
         {
             _overlay.IsVisible = false;
             _overlay.Children.Clear();
+            TaskCompletionSource? done = _overlayDone;
+            _overlayDone = null;
+            done?.TrySetResult();
         }
 
         /// <summary>True when this screen is inside a real window.</summary>
@@ -1222,17 +1233,16 @@ namespace MphRead.Mods.Launcher.Gui
             {
                 return;
             }
+            // Over this screen, not in a window of its own.
+            //
+            // It used to open a dialog on the desktop and overlay only on
+            // Android. A second window to pick a map from is a window to find,
+            // move out of the way and close again, for a choice that belongs
+            // to the card it came from -- and it covered the map picture the
+            // front screen exists to show. The overlay fills the launcher
+            // until the choice is made and then it is gone.
             var view = new MapPickerView(_playable, _matchMap.Value);
-            Window? owner = OwnerWindow;
-            if (owner != null)
-            {
-                var picker = new MapPickerWindow(view);
-                await picker.ShowDialog(owner);
-            }
-            else
-            {
-                await ShowOverlay(view, handler => view.Closed += handler);
-            }
+            await ShowOverlay(view, handler => view.Closed += handler);
             if (view.RoomKey == null)
             {
                 return;
@@ -1401,6 +1411,9 @@ namespace MphRead.Mods.Launcher.Gui
 
             card.Children.Add(new Caption("Join"));
             card.Children.Add(_browseNote);
+            // Headings over the list, outside the scroll viewer so they stay
+            // put while it scrolls -- which is the whole point of having them.
+            card.Children.Add(new ServerHeader());
             card.Children.Add(new ScrollViewer
             {
                 Height = 300,
@@ -1455,25 +1468,20 @@ namespace MphRead.Mods.Launcher.Gui
         private void AddServerRow(MasterListing listing)
         {
             string name = listing.ServerName.Length > 0 ? listing.ServerName : listing.Endpoint;
-            var entry = new MenuEntry(name, listing.Endpoint, titleSize: 15);
-            entry.Click += (_, _) =>
+            var row = new ServerRow(name, listing.Endpoint);
+            ToolTip.SetTip(row, listing.Endpoint);
+            row.Clicked += (_, _) =>
             {
                 _onlineAddress.Value = $"{listing.Address}:{listing.Port}";
                 ShowCard(_onlineCard);
                 QueryStatusSoon();
             };
-            _browseList.Children.Add(entry);
+            _browseList.Children.Add(row);
             Task.Run(() =>
             {
                 ServerStatus status = NetStatus.Query(listing.Address, listing.Port,
                     allowJoinProbe: false);
-                Dispatcher.UIThread.Post(() =>
-                {
-                    entry.Subtitle = status.Online
-                        ? $"{listing.Endpoint} -- {Describe(status)}"
-                        : $"{listing.Endpoint} -- did not answer";
-                    entry.SubtitleColor = status.Online ? GuiTheme.TextDim : GuiTheme.Warm;
-                });
+                Dispatcher.UIThread.Post(() => row.SetStatus(status));
             });
         }
 
@@ -1498,16 +1506,10 @@ namespace MphRead.Mods.Launcher.Gui
                 // how you end up on a screen you cannot see.
                 bool gameFiles = false;
                 view.GameFilesRequested += (_, _) => gameFiles = true;
-                Window? owner = OwnerWindow;
-                if (owner != null)
-                {
-                    var window = new SettingsWindow(view);
-                    await window.ShowDialog(owner);
-                }
-                else
-                {
-                    await ShowOverlay(view, handler => view.Closed += handler);
-                }
+                // The same overlay the map picker uses, for the same reason.
+                // The pause menu still opens SettingsWindow: it is over a game
+                // window, and there is no front screen there to lay this on.
+                await ShowOverlay(view, handler => view.Closed += handler);
                 if (gameFiles)
                 {
                     ShowCard(_setupCard);

@@ -102,23 +102,39 @@ namespace MphRead.Mods.Launcher.Gui
             InvalidateVisual();
         }
 
+        /// <summary>
+        /// Width of the arrow buttons, and of the column the value is drawn
+        /// in between them.
+        /// </summary>
+        private const double ArrowWidth = 28;
+        private const double ValueColumn = 180;
+
+        /// <summary>
+        /// Both arrows sit still.
+        ///
+        /// The back arrow used to be placed from the width of the *value* --
+        /// it slid left to make room for a long room name and back again for a
+        /// short one. Which meant it moved as you stepped: the button jumped
+        /// out from under the pointer between one map and the next, so a
+        /// second click landed on the row instead of the arrow and stepped
+        /// forward again. Picking a map by clicking became a thing you had to
+        /// re-aim for every time.
+        ///
+        /// So the value gets a column of its own, of a fixed width, and is
+        /// trimmed to it. The arrows never move, and the row is still one
+        /// height on every card.
+        /// </summary>
         private Rect LeftArrow
         {
             get
             {
-                // The back arrow slides left to make room for a long value --
-                // a room name is wider than the gap a fixed pair leaves, and
-                // the text used to be drawn straight over both arrows.
-                double x = Math.Min(Bounds.Width - 150,
-                    Bounds.Width - 28 - (_valueWidth + 16) - 28);
-                return new Rect(Math.Max(110, x), 0, 28, Bounds.Height);
+                double x = Bounds.Width - ArrowWidth - ValueColumn - ArrowWidth;
+                // Never over the label, on a card too narrow for the column.
+                return new Rect(Math.Max(110, x), 0, ArrowWidth, Bounds.Height);
             }
         }
 
-        private Rect RightArrow => new(Bounds.Width - 28, 0, 28, Bounds.Height);
-
-        /// <summary>Set while drawing; the arrows are placed around it.</summary>
-        private double _valueWidth;
+        private Rect RightArrow => new(Bounds.Width - ArrowWidth, 0, ArrowWidth, Bounds.Height);
 
         protected override void OnPointerMoved(PointerEventArgs e)
         {
@@ -202,12 +218,10 @@ namespace MphRead.Mods.Launcher.Gui
                 FlowDirection.LeftToRight, GuiTheme.Face(false), 13, GuiTheme.TextDimBrush);
             context.DrawText(label, new Point(4, (Bounds.Height - label.Height) / 2));
 
-            // The value lives between the arrows, and a room name is long
-            // enough that the pair has to move apart for it; past that it is
-            // trimmed rather than drawn over them.
+            // The value lives in the fixed column between the arrows, and is
+            // trimmed to it rather than pushing them apart.
             var value = new FormattedText(Value, CultureInfo.InvariantCulture,
                 FlowDirection.LeftToRight, GuiTheme.Face(true), 13, GuiTheme.TextBrush);
-            _valueWidth = value.Width;
             Rect left = LeftArrow;
             double room = RightArrow.X - left.Right - 8;
             if (value.Width > room)
