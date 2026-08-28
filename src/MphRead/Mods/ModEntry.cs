@@ -523,6 +523,21 @@ namespace MphRead.Mods
                 return true;
             }
 
+            // Pictures of the launcher's own screens, rendered without a
+            // window. The one part of this program that could not be looked at
+            // from a headless box.
+            string? uiShot = ValueAfter(args, "uishot");
+            if (uiShot != null)
+            {
+#if MPHREAD_AVALONIA
+                Environment.ExitCode = Launcher.Gui.UiCapture.Run(uiShot);
+#else
+                Console.WriteLine("[uishot] this build has no Avalonia launcher");
+                Environment.ExitCode = 1;
+#endif
+                return true;
+            }
+
             string? mapTest = ValueAfter(args, "maptest");
             if (mapTest != null)
             {

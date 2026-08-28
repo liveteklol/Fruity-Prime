@@ -1,0 +1,171 @@
+#if MPHREAD_AVALONIA
+using System;
+using System.Collections.Generic;
+using System.IO;
+using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Media;
+using Avalonia.Media.Imaging;
+using Avalonia.Threading;
+
+namespace MphRead.Mods.Launcher.Gui
+{
+    /// <summary>
+    /// Screenshots of the front screen, without a screen.
+    ///
+    /// The launcher is the one part of this program that could not be looked
+    /// at from here: the game renders through GL and can be read back
+    /// (ScreenCapture), but the launcher is Avalonia, and checking a change to
+    /// it meant opening a window on a machine with a display and looking. On a
+    /// headless box, or over SSH, or in CI, there was no way to see what a
+    /// layout change had actually done -- which is how a control that moves
+    /// under the pointer ships.
+    ///
+    /// Avalonia can measure, arrange and draw a control into a bitmap with no
+    /// window involved, which is all a screenshot of a layout needs. So
+    /// `-uishot DIR` builds each screen at a fixed size, renders it, and
+    /// writes a PNG.
+    ///
+    /// What this does *not* prove: that a real window manager gives the window
+    /// the size asked for, that the fonts on another machine are these ones,
+    /// or that anything is clickable. It proves the layout -- which is what
+    /// every report about this screen has been about.
+    /// </summary>
+    internal static class UiCapture
+    {
+        /// <summary>The window size the launcher opens at (see HomeWindow).</summary>
+        private static readonly Size _windowSize = new Size(940, 560);
+
+        public static int Run(string directory)
+        {
+            if (!GuiLauncher.EnsureSetup())
+            {
+                Console.WriteLine("[uishot] no Avalonia backend on this machine; nothing captured");
+                return 1;
+            }
+            Directory.CreateDirectory(directory);
+            int written = 0;
+            // On the toolkit's own thread, and drained afterwards: the views
+            // post work to the dispatcher as they are built (the front screen
+            // focuses its first control that way), and a render before that
+            // has run is a picture of a half-built screen.
+            Dispatcher.UIThread.Invoke(() =>
+            {
+                var settings = new MenuSettings();
+                List<string> rooms = RoomList();
+                foreach ((string name, Control view) in Screens(settings, rooms))
+                {
+                    string path = Path.Combine(directory, $"{name}.png");
+                    if (Capture(view, path))
+                    {
+                        written++;
+                        Console.WriteLine($"[uishot] {path}");
+                    }
+                }
+            });
+            Console.WriteLine($"[uishot] {written} screen(s) written to {directory}");
+            return written > 0 ? 0 : 1;
+        }
+
+        private static List<string> RoomList()
+        {
+            var rooms = new List<string>();
+            try
+            {
+                foreach (RoomMetadata meta in Metadata.RoomMetadata.Values)
+                {
+                    if (meta.Multiplayer)
+                    {
+                        rooms.Add(meta.Name);
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                // No game files here. The screens still lay out; the map rows
+                // are simply empty, which is itself worth being able to see.
+            }
+            rooms.Sort(StringComparer.OrdinalIgnoreCase);
+            return rooms;
+        }
+
+        private static IEnumerable<(string, Control)> Screens(MenuSettings settings,
+            IReadOnlyList<string> rooms)
+        {
+            yield return ("home", new HomeView(settings, rooms));
+            yield return ("settings", new SettingsView(settings));
+            if (rooms.Count > 0)
+            {
+                yield return ("mappicker", new MapPickerView(rooms, rooms[0]));
+            }
+            yield return ("pausemenu", new PauseMenuView(offerWindowMode: true));
+        }
+
+        /// <summary>
+        /// Render one screen.
+        ///
+        /// Through a real <see cref="Window"/>, not by laying the control out
+        /// on its own. Avalonia resolves styles through the visual tree's
+        /// style host, and a control with no window above it has none: it
+        /// measures, arranges and renders perfectly happily and comes out a
+        /// flat rectangle of the background colour, which is exactly what the
+        /// first attempt at this produced. The window is what connects the
+        /// tree to the Application's styles.
+        ///
+        /// It is shown, because a window that has never been shown has no
+        /// layout pass behind it -- but shown *off the side of the display*
+        /// and without taking focus, so a capture run does not steal the
+        /// pointer or flash a window per screen.
+        /// </summary>
+        private static bool Capture(Control view, string path)
+        {
+            Window? window = null;
+            try
+            {
+                window = new Window
+                {
+                    Width = _windowSize.Width,
+                    Height = _windowSize.Height,
+                    Background = GuiTheme.PanelBrush,
+                    RequestedThemeVariant = Avalonia.Styling.ThemeVariant.Dark,
+                    SystemDecorations = SystemDecorations.None,
+                    ShowInTaskbar = false,
+                    ShowActivated = false,
+                    WindowStartupLocation = WindowStartupLocation.Manual,
+                    Position = new PixelPoint(-4000, -4000),
+                    Content = view
+                };
+                window.Show();
+                // The views post work to the dispatcher as they are built --
+                // the front screen focuses its first control that way, and the
+                // map picker loads its pictures -- and a render before that has
+                // run is a picture of a half-built screen. Several passes,
+                // because one job can queue another.
+                for (int i = 0; i < 8; i++)
+                {
+                    Dispatcher.UIThread.RunJobs();
+                }
+                window.Measure(_windowSize);
+                window.Arrange(new Rect(_windowSize));
+                Dispatcher.UIThread.RunJobs();
+                var bitmap = new RenderTargetBitmap(
+                    new PixelSize((int)_windowSize.Width, (int)_windowSize.Height),
+                    new Vector(96, 96));
+                bitmap.Render(window);
+                bitmap.Save(path);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[uishot] {Path.GetFileName(path)} could not be rendered: {ex.Message}");
+                return false;
+            }
+            finally
+            {
+                window?.Close();
+            }
+        }
+
+    }
+}
+#endif

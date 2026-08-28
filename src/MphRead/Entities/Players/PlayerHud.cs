@@ -1824,11 +1824,20 @@ namespace MphRead.Entities
                 // and it is the colour the player already associates with that
                 // gun from firing it.
                 ushort raw = info.Colors[0];
-                var tint = new Vector4(
-                    ((raw >> 0) & 0x1F) / 31f,
-                    ((raw >> 5) & 0x1F) / 31f,
-                    ((raw >> 10) & 0x1F) / 31f,
-                    1f);
+                float red = ((raw >> 0) & 0x1F) / 31f;
+                float green = ((raw >> 5) & 0x1F) / 31f;
+                float blue = ((raw >> 10) & 0x1F) / 31f;
+                // Brightened to full, keeping the hue. Some of these are dark
+                // -- they are meant to be a glow in mid-air, not ink on a
+                // black panel -- and a dark glyph on a dark row is no glyph.
+                float peak = Math.Max(red, Math.Max(green, blue));
+                if (peak > 0.01f)
+                {
+                    red /= peak;
+                    green /= peak;
+                    blue /= peak;
+                }
+                var tint = new ColorRgba((byte)(red * 255), (byte)(green * 255), (byte)(blue * 255), 255);
                 float rowBottom = y + rowHeight - 1f * scale;
                 // The row, dark; the equipped one lighter. That is the whole
                 // of the selection marker now. There used to be a coloured
@@ -1840,19 +1849,21 @@ namespace MphRead.Entities
                     equipped
                         ? new Vector4(0.45f, 0.4f, 0.2f, 0.72f * Features.HudOpacity)
                         : new Vector4(0, 0, 0, 0.42f * Features.HudOpacity));
-                // An opaque block of the weapon's colour behind the icon.
-                //
-                // The icon art is an outline on nothing, so drawn by itself it
-                // is a few translucent grey strokes over whatever the map
-                // happens to be behind them -- which a light wall swallows
-                // whole. Filling its square first makes it a solid coloured
-                // chip with the glyph on it, which is what the reference's
-                // icons are, and is why they can be this small and still be
-                // told apart.
-                _scene.DrawHudFlatBox(panelX, y, panelX + iconBox, rowBottom,
-                    new Vector4(tint.X, tint.Y, tint.Z,
-                        (equipped ? 1f : 0.9f) * Features.HudOpacity));
                 HudObjectInstance icon = _weaponListIcons[i];
+                // The glyph itself in the weapon's colour, on nothing.
+                //
+                // SetData redraws the instance's texture with every pixel that
+                // is not palette index 0 in a flat colour, and index 0 -- the
+                // whole background of these frames -- left transparent. So the
+                // icon is a coloured symbol over the row, not a coloured tile:
+                // filling the square behind it instead, which is what this did
+                // first, reads as a block of colour with something faint on it
+                // rather than as an icon.
+                //
+                // Cheap to call every frame: it rebuilds the texture only when
+                // the frame or the colour has actually changed, and neither
+                // does after the first one.
+                icon.SetData(i, tint, _scene);
                 // The select sheet's frames are drawn for the weapon wheel and
                 // are many times a row's height; scaled down here rather than
                 // given a second, smaller copy of the same art.
