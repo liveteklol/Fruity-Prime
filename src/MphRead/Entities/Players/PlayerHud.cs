@@ -326,16 +326,27 @@ namespace MphRead.Entities
             _weaponIconInst.SetCharacterData(weaponIcon.CharacterData, _scene);
             _weaponIconInst.SetPaletteData(weaponIcon.PaletteData, _scene);
             _weaponIconInst.SetAnimationFrames(weaponIcon.AnimParams);
-            // Modern HUD's weapon list: one static icon per weapon, off the
-            // same sheet as the equipped-weapon icon above, each pinned to
-            // its own frame instead of switching on equip.
+            // Modern HUD's weapon list: one static icon per weapon, each
+            // pinned to its own frame instead of switching on equip.
+            //
+            // Off the **weapon-select sheet**, not the equipped-weapon icon
+            // beside the ammo bar. Both have a frame per beam, and they are
+            // not the same picture: the equipped icon is a monochrome glyph in
+            // the visor's own green, meant to be read at a glance next to a
+            // green bar, and a column of nine of them is nine green smudges
+            // that have to be told apart by shape. The select sheet is the
+            // touchscreen weapon menu's -- the game's own full-colour art for
+            // each beam, with its own palette -- which is what makes a list
+            // scannable, and is the whole reason Quake's weapon bar works.
+            //
+            // Frame index is the BeamType either way (see the select ring
+            // above, which reads _availableWeapons[inst.CurrentFrame]).
+            HudObject listSheet = HudInfo.GetHudObject(_hudObjects.WeaponSelect);
             for (int i = 0; i < _weaponListIcons.Length; i++)
             {
-                var listIcon = new HudObjectInstance(weaponIcon.Width, weaponIcon.Height);
-                listIcon.SetCharacterData(weaponIcon.CharacterData, _scene);
-                listIcon.SetPaletteData(weaponIcon.PaletteData, _scene);
-                listIcon.SetAnimationFrames(weaponIcon.AnimParams);
-                listIcon.SetIndex(i, _scene);
+                var listIcon = new HudObjectInstance(listSheet.Width, listSheet.Height);
+                listIcon.SetCharacterData(listSheet.CharacterData, i, _scene);
+                listIcon.SetPaletteData(listSheet.PaletteData, _scene);
                 listIcon.Enabled = true;
                 _weaponListIcons[i] = listIcon;
             }
@@ -1743,12 +1754,36 @@ namespace MphRead.Entities
         /// read <see cref="DrawAmmoBar"/> uses for the current weapon, just
         /// for every owned weapon instead of only the equipped one.
         /// </summary>
+        /// <summary>
+        /// Down the left, under the score, the way Quake's is: one row per
+        /// weapon you are carrying, its own colour art on the left and its
+        /// ammo beside it, the equipped one lit and the rest dimmed.
+        ///
+        /// It used to sit hard against the right edge, over the visor frame
+        /// and under the ammo readout, drawn in the HUD's monochrome green --
+        /// which is a list you have to look *for*, and then read shape by
+        /// shape. The two things that make Quake's work are that it is in one
+        /// clear column with nothing else in it, and that each weapon is a
+        /// different colour, so you find one by its colour instead of reading
+        /// the whole list. Both are copied here; the art is the game's own
+        /// (the touchscreen weapon menu's sheet, see SetUpHud).
+        ///
+        /// Every coordinate is in the DS's 256x192 HUD space, which
+        /// DrawHudObject mode 2 and DrawText2D both scale to the window.
+        /// </summary>
         private void DrawWeaponList()
         {
-            const float iconX = 246;
-            const float textX = 228;
-            const float rowHeight = 18;
-            float y = 20;
+            // Below the score block in the top-left corner, and short enough
+            // that all nine weapons still fit above the bottom edge.
+            const float panelX = 8;
+            const float panelWidth = 58;
+            // Nine weapons have to fit between the score block and the bottom
+            // edge of a 192-unit screen, so the row is as short as a row with
+            // an icon and a number in it can be: 9 * 15 from 46 ends at 181.
+            const float rowHeight = 15;
+            const float iconCentreX = panelX + 15;
+            const float ammoRightX = panelX + panelWidth - 4;
+            float y = 46;
             for (int i = 0; i < _weaponListIcons.Length; i++)
             {
                 var beam = (BeamType)i;
@@ -1756,22 +1791,62 @@ namespace MphRead.Entities
                 {
                     continue;
                 }
+                bool equipped = beam == CurrentWeapon;
                 WeaponInfo info = Weapons.Current[i];
-                if (beam == CurrentWeapon)
-                {
-                    _scene.DrawHudFlatBox(textX - 6, y - 2, iconX + 10, y + 15,
-                        new Vector4(1, 1, 1, 0.25f * Features.HudOpacity));
-                }
+                // The weapon's own beam colour, out of the game's weapon
+                // table -- the same 5-bit-per-channel value
+                // BeamProjectileEntity decodes to colour the shot itself.
+                //
+                // This is the piece that makes a list like Quake's work: you
+                // find a weapon by its colour rather than by reading nine
+                // labels. The cartridge has no colour icon set to do it with
+                // -- the HUD's weapon glyphs are one flat green and the
+                // touchscreen wheel's are grey outlines -- but it does have a
+                // colour per weapon, and it is the colour the player already
+                // associates with that gun from firing it.
+                ushort raw = info.Colors[0];
+                var tint = new Vector4(
+                    ((raw >> 0) & 0x1F) / 31f,
+                    ((raw >> 5) & 0x1F) / 31f,
+                    ((raw >> 10) & 0x1F) / 31f,
+                    1f);
+                // A panel under every row, not only the equipped one: the
+                // icons are colour art over whatever the map happens to be
+                // behind them, and a light wall was enough to lose them.
+                float panelAlpha = (equipped ? 0.55f : 0.3f) * Features.HudOpacity;
+                _scene.DrawHudFlatBox(panelX, y, panelX + panelWidth, y + rowHeight - 2,
+                    new Vector4(0, 0, 0, panelAlpha));
+                // The colour chip down the left edge of the row, and wider
+                // for the equipped one -- so which weapon is in your hands is
+                // one glance and which weapon is which is another, without
+                // either having to be read.
+                float chipWidth = equipped ? 4 : 2;
+                _scene.DrawHudFlatBox(panelX, y, panelX + chipWidth, y + rowHeight - 2,
+                    new Vector4(tint.X, tint.Y, tint.Z,
+                        (equipped ? 1f : 0.65f) * Features.HudOpacity));
                 HudObjectInstance icon = _weaponListIcons[i];
-                icon.PositionX = (iconX - icon.Width / 2) / 256f;
-                icon.PositionY = y / 192f;
-                icon.Alpha = Features.HudOpacity;
-                _scene.DrawHudObject(icon, mode: 2);
-                if (info.AmmoCost > 0)
-                {
-                    DrawText2D(textX, y, Align.Right, palette: 0, $"{_ammo[info.AmmoType]}",
-                        alpha: Features.HudOpacity);
-                }
+                // The select sheet's frames are drawn for the weapon wheel and
+                // are far larger than a row; scaled down here rather than
+                // given a second, smaller copy of the same art.
+                const float iconScale = 0.42f;
+                icon.PositionX = (iconCentreX - icon.Width * iconScale / 2) / 256f;
+                icon.PositionY = (y + 1) / 192f;
+                icon.Alpha = (equipped ? 1f : 0.6f) * Features.HudOpacity;
+                _scene.DrawHudObject(icon, mode: 2, scale: iconScale);
+                // The Power Beam costs no ammo, and a blank where every other
+                // row has a number reads as "unknown" rather than as
+                // "unlimited".
+                string ammo = info.AmmoCost > 0
+                    ? _ammo[info.AmmoType].ToString()
+                    : "--";
+                // Three quarters, so a three-digit count sits inside the row
+                // rather than spilling under it: the HUD font is drawn for
+                // the 16-pixel-tall readouts around the screen edge, and this
+                // row is that tall in total.
+                DrawText2D(ammoRightX, y + 2, Align.Right, palette: 0, ammo,
+                    color: new ColorRgba(
+                        (byte)(tint.X * 255), (byte)(tint.Y * 255), (byte)(tint.Z * 255), 255),
+                    alpha: (equipped ? 1f : 0.7f) * Features.HudOpacity, scale: 0.75f);
                 y += rowHeight;
             }
         }

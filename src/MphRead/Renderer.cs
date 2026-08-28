@@ -1591,6 +1591,37 @@ namespace MphRead
             return first;
         }
 
+        /// <summary>
+        /// Read the window's own buffer, HUD and all.
+        ///
+        /// <see cref="ReadSceneTarget"/> reads the offscreen target, which the
+        /// HUD is deliberately not drawn into -- it goes to the default
+        /// framebuffer after the target is unbound (see OnRenderFrame), which
+        /// is what lets every thumbnail and map preview come out without one.
+        /// So no screenshot could ever show the HUD, and HUD work could not be
+        /// checked by looking at it, only by playing.
+        ///
+        /// Called between the draw and SwapBuffers, and **only on a window
+        /// that is actually visible**: a hidden window has no usable back
+        /// buffer under Mesa, which is the whole reason the offscreen target
+        /// is what everything else reads.
+        /// </summary>
+        public byte[]? ReadWindowBuffer(out int width, out int height)
+        {
+            width = Size.X;
+            height = Size.Y;
+            if (width <= 0 || height <= 0)
+            {
+                return null;
+            }
+            byte[] buffer = new byte[width * height * 3];
+            GL.BindFramebuffer(FramebufferTarget.ReadFramebuffer, 0);
+            GL.ReadBuffer(ReadBufferMode.Back);
+            GL.PixelStore(PixelStoreParameter.PackAlignment, 1);
+            GL.ReadPixels(0, 0, width, height, PixelFormat.Rgb, PixelType.UnsignedByte, buffer);
+            return buffer;
+        }
+
         public byte[]? ReadSceneTarget(out int width, out int height)
         {
             Vector2i target = _targetSize;

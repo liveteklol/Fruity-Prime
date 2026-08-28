@@ -153,7 +153,10 @@ namespace MphRead.Mods.Network
 
         private static NativeWindowSettings WindowSettings() => new()
         {
-            ClientSize = new Vector2i(320, 180),
+            // Bigger for -hudshots: the HUD is authored for a 256x192 screen
+            // and scaled to the window, so at 320x180 a weapon icon is a few
+            // pixels and a capture of it says nothing.
+            ClientSize = ShowWindow ? new Vector2i(1024, 576) : new Vector2i(320, 180),
             Title = "MphRead map audit",
             Profile = ContextProfile.Compatability,
             // Explicitly, exactly as the game's own window does. Left
@@ -168,8 +171,14 @@ namespace MphRead.Mods.Network
             // game sets this and these windows did not.
             Flags = ContextFlags.Default,
             APIVersion = new Version(3, 2),
-            StartVisible = false
+            // Visible only for -hudshots, which reads the window's own buffer
+            // because that is the one the HUD is drawn into. Everything else
+            // reads the offscreen target and wants no window on screen.
+            StartVisible = ShowWindow
         };
+
+        /// <summary>Set by -hudshots before the window is built.</summary>
+        public static bool ShowWindow { get; set; }
 
         public Scene Scene { get; }
 
@@ -878,7 +887,10 @@ namespace MphRead.Mods.Network
                 string name = _room.Replace(' ', '_').Replace('-', '_');
                 string path = System.IO.Path.Combine(_shotDirectory,
                     $"{name}-{_shotsSaved:00}.png");
-                if (Mods.ScreenCapture.Save(Scene, path))
+                bool saved = ShowWindow
+                    ? Mods.ScreenCapture.SaveWindow(Scene, path)
+                    : Mods.ScreenCapture.Save(Scene, path);
+                if (saved)
                 {
                     _shotsSaved++;
                 }

@@ -545,6 +545,10 @@ namespace MphRead.Mods
                 {
                     mapMode = parsedMode;
                 }
+                // The HUD is drawn to the window, not to the offscreen
+                // target every other capture reads, so seeing it needs a real
+                // window and a read from its buffer.
+                Network.MapAudit.ShowWindow = HasFlag(args, "hudshots");
                 Environment.ExitCode = Network.MapAudit.Run(mapTest, players, seconds, mapMode,
                     bots: HasFlag(args, "bots"), shotDirectory: ValueAfter(args, "shots"),
                     renderProbe: HasFlag(args, "renderprobe"),

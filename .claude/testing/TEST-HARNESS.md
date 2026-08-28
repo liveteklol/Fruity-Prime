@@ -64,3 +64,68 @@ Map sweeps and probes
   units from a target, everyone else stands down, and reports `ok` / `nohit`
   (charged shot missed) / `FAIL` (hit, no state) / `n/a`. `-netdebug` prints
   what each probe actually saw.
+
+The render probe: `-maptest ROOM -renderprobe`
+
+The one failure every other check passes: a room that draws nothing. The
+players spawn, the pads fire, the teleporters move, the scoreboards agree --
+and the screen is black with the gun in it. Only the pixels say so, so the
+pixels are read.
+
+`-maptest ROOM` now samples the frame once a second and reports
+`lit first/min/max/mean` as a fraction of the frame that is not the clear
+colour, and fails a map that never draws or stops drawing.
+
+`-renderprobe` is the reported repro recipe as a sweep, and is the form to use
+when chasing this: it stands the player on every spawn point in the room in
+turn (teleporting them there with that spawn entity's own node ref, which is
+what PlayerProcess's respawn passes), lets them settle, reads the frame, then
+walks them forward for five seconds reading the worst. One line per spawn
+point:
+
+```
+RENDERSPAWN MP4 HIGHGROUND - EXPANDED | spawn 2 at 12.6,12.1,-16.5
+  | at spawn 99.4% | worst while walking 99.4% | part 7
+```
+
+Two flags tell the two causes apart, and asking in this order is what makes
+the answer quick:
+
+- `-allnodes` draws every node the model has, ignoring the portal-graph
+  room-part culling. If the picture comes back, the cull lost it; if it does
+  not, the geometry is not being drawn at all. It must be set for a WHOLE
+  FRAME, update included -- the draw lists are built during the update and the
+  flag is read while they are, so toggling it around a second `OnRenderFrame`
+  measures nothing and will happily report culling innocent when it is not.
+  That cost an hour once.
+- `-shots DIR` writes the PNGs, which is the only way to tell a dark map from
+  a broken one by eye.
+
+Reading the numbers
+
+Whole-room sweep, all 27 rooms, 236 spawn points, after the Elder Passage fix:
+232 above 70% lit, three between 40 and 70, one below. The one below is MP9
+Cryochasm's spawn 2, which sits on a ledge over a chasm -- walking straight
+forward off it is what the probe does and what the map is for. A low reading
+is not automatically a fault; look at the shot.
+
+The threshold the report uses (`_renderFloor`, 6%) is deliberately far below
+what a broken room actually measures. Elder Passage's eight bad spawns read
+8.7-19%, which is ABOVE it: the floor only catches "nothing at all", and the
+number to compare against is the same room's good spawns, which read 99%+.
+Sweep the room; do not trust one reading.
+
+`-hudshots`
+
+`Scene.ReadSceneTarget` -- what every screenshot, thumbnail and map preview
+reads -- is the offscreen target, and the HUD is deliberately not drawn into
+it (it goes to the default framebuffer after the target is unbound, which is
+what makes thumbnails come out without one). So no capture could ever show the
+HUD, and HUD work could only be checked by playing.
+
+`-maptest ROOM -hudshots -shots DIR` opens a VISIBLE window at 1024x576 and
+reads its buffer instead (`Scene.ReadWindowBuffer`, called between the draw
+and the swap). Only valid on a visible window -- a hidden one has no usable
+back buffer under Mesa, which is the whole reason the offscreen target exists.
+The window is bigger because the HUD is authored for 256x192 and scaled to it:
+at 320x180 a weapon icon is a few pixels and a capture of it says nothing.

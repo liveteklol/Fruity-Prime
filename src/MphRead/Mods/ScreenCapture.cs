@@ -29,11 +29,28 @@ namespace MphRead.Mods
         /// </summary>
         public static Action<byte[], int, int, string>? PngWriter { get; set; }
 
+        /// <summary>
+        /// Save what the *window* holds, which is the only capture that
+        /// includes the HUD. See <c>Scene.ReadWindowBuffer</c>: only valid on
+        /// a visible window, and only between the draw and the buffer swap.
+        /// </summary>
+        public static bool SaveWindow(Scene scene, string path)
+        {
+            return Save(scene, path, scene.ReadWindowBuffer);
+        }
+
         public static bool Save(Scene scene, string path)
+        {
+            return Save(scene, path, scene.ReadSceneTarget);
+        }
+
+        private delegate byte[]? ReadPixels(out int width, out int height);
+
+        private static bool Save(Scene scene, string path, ReadPixels read)
         {
             try
             {
-                byte[]? pixels = scene.ReadSceneTarget(out int width, out int height);
+                byte[]? pixels = read(out int width, out int height);
                 if (pixels == null || width <= 0 || height <= 0)
                 {
                     return false;
