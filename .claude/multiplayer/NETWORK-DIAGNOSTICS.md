@@ -266,3 +266,73 @@ protocol bump and a Pi redeploy. Not needed for correctness.
 Item pickup is simulated on every machine from replicated positions and the
 clients agree exactly on how many items were taken, so it is probably fine, but
 probably is not measured.
+
+
+## Rejoining: per-slot state, and what `run-rejoin.sh` measures
+
+The report: A creates the game, B joins, A quits, B stays, A rejoins the
+same match. B sees A but cannot hit them; A can hit B.
+
+`~/mph-net-test/run-rejoin.sh [seconds] [leave_at] [rejoin_at] [host] [port]`
+builds exactly that topology and adds a control:
+
+- A joins first, so it takes slot 0 and becomes the authority.
+- B joins (slot 1).
+- A leaves. The server promotes B (`DedicatedServer.Remove`), so the
+  authority moves mid-match -- which is half of what makes this scenario
+  different from any other.
+- Then **two** clients join at the same moment: C, which takes slot 0, the
+  one A vacated, and D, which takes slot 2, never used. Both then play the
+  same tour against the same authority for the same time.
+
+A is two processes on purpose: the suspicion is state that is only cleared
+when a session starts or stops, so a rejoin simulated inside one process
+would clear the very thing that needs to survive.
+
+**Not reproduced.** Loopback and against the Pi, the rejoined client in the
+reused slot registers damage in both directions, and if anything more than
+the control:
+
+| | slot | took a hit |
+|---|---|---|
+| C (reused slot) loopback | 0 | 23 |
+| D (fresh slot) loopback | 2 | 6 |
+| C (reused slot) on the Pi | 0 | 13 |
+| D (fresh slot) on the Pi | 2 | 5 |
+
+So slot reuse plus an authority handover does not, on its own, break
+damage. Whatever the report is about needs something this does not have --
+a human's engagement pattern rather than the tour's, the launcher's own
+host path rather than a dedicated server, or a particular moment (a
+rotation, an intermission) to rejoin in.
+
+**One trap to avoid when running this.** An earlier run of this script was
+read as a reproduction: the rejoining client reported `took a hit 0` and
+`authority=True` when the server said the authority was the other client.
+Both were artefacts. The `authority=True` was real but legitimate -- the
+other client had left seconds before the report was printed, so the
+authority had moved back. And `took a hit 0` was a two-player match with
+little engagement, not a client that could not be hurt. **A single run of
+two scripted clients is not evidence of a damage fault**; that is what the
+control client is for.
+
+### What was fixed anyway
+
+Per-slot state was cleared only when the session started or stopped, or the
+room changed -- never when a slot changed hands. So a slot's next occupant
+inherited the previous one's reported position and frame number, spawn
+barrier, divergence and staleness counters, and damage sequence.
+
+`StaleSinceSpawn` names this hazard in its own comment -- "a peer that
+reconnects restarts its counter at zero, and a slot that changes hands
+inherits the barrier of whoever held it... a player nobody can hit and who
+slides without ever taking a step" -- and bounds it with a 120-frame give-up,
+so it costs two seconds rather than a session. Two seconds of a player who
+cannot be hit is still the reported symptom.
+
+`NetPlayerBridge.ForgetSlot` and `NetDamage.ForgetSlot`, called from both
+`NetSlotManager.Activate` and `Deactivate`, clear it. A slot changing hands
+means the old occupant's history is meaningless by definition, so there is
+nothing to weigh up. **This is hardening, not a confirmed fix for the
+report**: the report was not reproduced, so nothing here is known to be the
+cause of it.
