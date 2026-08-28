@@ -529,12 +529,7 @@ namespace MphRead.Mods
             string? uiShot = ValueAfter(args, "uishot");
             if (uiShot != null)
             {
-#if MPHREAD_AVALONIA
-                Environment.ExitCode = Launcher.Gui.UiCapture.Run(uiShot);
-#else
-                Console.WriteLine("[uishot] this build has no Avalonia launcher");
-                Environment.ExitCode = 1;
-#endif
+                Environment.ExitCode = RunUiCapture(uiShot);
                 return true;
             }
 
@@ -770,6 +765,37 @@ namespace MphRead.Mods
         private static bool HasFlag(string[] args, string name)
         {
             return args.Any(a => a.TrimStart('-').Equals(name, StringComparison.OrdinalIgnoreCase));
+        }
+
+        /// <summary>
+        /// Kept out of <see cref="TryHandle"/> and told not to inline.
+        ///
+        /// The runtime loads the assemblies a method needs when it first
+        /// *enters* that method, not when it reaches the call -- so naming
+        /// UiCapture directly in TryHandle made every command load Avalonia,
+        /// including `-server`. On a machine without it that is not a missing
+        /// feature, it is the dedicated server aborting at startup with a
+        /// FileNotFoundException, which is exactly what the netcheck clients
+        /// did against a bin/ that had not been refreshed.
+        /// </summary>
+        [System.Runtime.CompilerServices.MethodImpl(
+            System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        private static int RunUiCapture(string directory)
+        {
+#if MPHREAD_AVALONIA
+            try
+            {
+                return Launcher.Gui.UiCapture.Run(directory);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[uishot] no launcher toolkit here: {ex.Message}");
+                return 1;
+            }
+#else
+            Console.WriteLine("[uishot] this build has no Avalonia launcher");
+            return 1;
+#endif
         }
 
         private static string? ValueAfter(string[] args, string name)

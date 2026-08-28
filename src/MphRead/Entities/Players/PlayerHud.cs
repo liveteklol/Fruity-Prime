@@ -1771,6 +1771,35 @@ namespace MphRead.Entities
         /// Every coordinate is in the DS's 256x192 HUD space, which
         /// DrawHudObject mode 2 and DrawText2D both scale to the window.
         /// </summary>
+        /// <summary>
+        /// One colour per weapon for the list, indexed by <see cref="BeamType"/>.
+        ///
+        /// Not the game's own weapon table, which is what this used first.
+        /// <c>WeaponInfo.Colors[0]</c> is the colour of the *shot* -- what the
+        /// projectile is tinted with in mid-air -- and several of those are
+        /// nothing like the colour the weapon is known by: it came out with a
+        /// white Volt Driver and a purple Judicator.
+        ///
+        /// These are the values the melonPrimeDS weapon overlay uses, read out
+        /// of its SVGs (res/assets/weapons), which is the reference the colours
+        /// were asked to match. Only the numbers are here -- nine RGB triples,
+        /// which are facts about which colour goes with which gun. None of
+        /// that project's art is copied or shipped, which is also what
+        /// tools/check-no-game-assets.sh would refuse.
+        /// </summary>
+        private static readonly ColorRgba[] _weaponListColors =
+        {
+            new ColorRgba(0xF8, 0x28, 0x28, 255), // Power Beam
+            new ColorRgba(0xF8, 0xF8, 0x08, 255), // Volt Driver
+            new ColorRgba(0xF8, 0x28, 0x28, 255), // Missile
+            new ColorRgba(0x20, 0xC0, 0x20, 255), // Battlehammer
+            new ColorRgba(0xD0, 0x18, 0x18, 255), // Imperialist
+            new ColorRgba(0x98, 0x38, 0xC0, 255), // Judicator
+            new ColorRgba(0xF8, 0xB0, 0x18, 255), // Magmaul
+            new ColorRgba(0x50, 0x98, 0xD0, 255), // Shock Coil
+            new ColorRgba(0xD0, 0xD0, 0xD0, 255)  // Omega Cannon
+        };
+
         private void DrawWeaponList()
         {
             // Below the score block in the top-left corner, and short enough
@@ -1811,33 +1840,10 @@ namespace MphRead.Entities
                 }
                 bool equipped = beam == CurrentWeapon;
                 WeaponInfo info = Weapons.Current[i];
-                // The weapon's own beam colour, out of the game's weapon
-                // table -- the same 5-bit-per-channel value
-                // BeamProjectileEntity decodes to colour the shot itself.
-                //
-                // This is the piece that makes a bar like Quake's work: you
-                // find a weapon by its colour rather than by reading a column
-                // of labels. The cartridge has no colour icon set to do it
-                // with -- the HUD's weapon glyphs are one flat green and the
-                // touchscreen wheel's are grey outlines, both checked by
-                // drawing them at 4x -- but it does have a colour per weapon,
-                // and it is the colour the player already associates with that
-                // gun from firing it.
-                ushort raw = info.Colors[0];
-                float red = ((raw >> 0) & 0x1F) / 31f;
-                float green = ((raw >> 5) & 0x1F) / 31f;
-                float blue = ((raw >> 10) & 0x1F) / 31f;
-                // Brightened to full, keeping the hue. Some of these are dark
-                // -- they are meant to be a glow in mid-air, not ink on a
-                // black panel -- and a dark glyph on a dark row is no glyph.
-                float peak = Math.Max(red, Math.Max(green, blue));
-                if (peak > 0.01f)
-                {
-                    red /= peak;
-                    green /= peak;
-                    blue /= peak;
-                }
-                var tint = new ColorRgba((byte)(red * 255), (byte)(green * 255), (byte)(blue * 255), 255);
+                // The colour this weapon is known by. See _weaponListColors:
+                // deliberately not the game's own beam colour, which is the
+                // colour of the *shot* and is nothing like it for several.
+                ColorRgba tint = _weaponListColors[i];
                 float rowBottom = y + rowHeight - 1f * scale;
                 // The row, dark; the equipped one lighter. That is the whole
                 // of the selection marker now. There used to be a coloured
@@ -1882,9 +1888,16 @@ namespace MphRead.Entities
                 // White, like the reference's: the colour is carried by the
                 // icon block beside it, and a coloured number as well made
                 // every row a different brightness to read.
-                DrawText2D(ammoRightX, y + 0.5f * scale, Align.Right, palette: 0, ammo,
+                // Small. This font is drawn for the 16-unit readouts round
+                // the screen edge; its digits are wide and its zero is a
+                // filled slashed box, so at a row's size the count was reading
+                // as the biggest thing in the bar rather than as a footnote to
+                // the icon. Spacing is left to the font: fontSpacing is in HUD
+                // units and does not follow `scale`, so setting it spread the
+                // digits back out and undid the shrink.
+                DrawText2D(ammoRightX, y + 1.6f * scale, Align.Right, palette: 0, ammo,
                     color: new ColorRgba(230, 234, 242, 255),
-                    alpha: Features.HudOpacity, scale: 0.5f * scale);
+                    alpha: Features.HudOpacity, scale: 0.42f * scale);
                 y += rowHeight;
             }
         }
@@ -3068,12 +3081,20 @@ namespace MphRead.Entities
                 aspectFix = _scene.Size.Y / 192f * (256f / _scene.Size.X);
             }
             float spacingY = _textSpacingY == 0 ? (fontSpacing == -1 ? 12 : fontSpacing) : _textSpacingY;
+            // `scale` applies to every alignment.
+            //
+            // It used to be honoured by Align.Left alone: the Right and Centre
+            // branches drew each glyph with DrawHudObject's default scale and
+            // advanced by the font's unscaled widths, so asking for smaller
+            // right-aligned text silently produced text of exactly the same
+            // size. Measured: the ammo counts in the weapon list came out
+            // pixel-for-pixel identical at 0.5, 0.38, 0.28 and 0.15.
+            if (scale != 1)
+            {
+                spacingY *= scale;
+            }
             if (type == Align.Left)
             {
-                if (scale != 1)
-                {
-                    spacingY *= scale;
-                }
                 float startX = x;
                 for (int i = 0; i < length; i++)
                 {
@@ -3136,8 +3157,8 @@ namespace MphRead.Entities
                             ch = text[++i] & 0x3F | ((ch & 0x1F) << 6);
                         }
                         int index = ch - font.MinCharacter;
-                        x -= font.Widths[index] * aspectFix;
-                        float offset = font.Offsets[index] + y;
+                        x -= font.Widths[index] * scale * aspectFix;
+                        float offset = font.Offsets[index] * scale + y;
                         if (orig != ' ')
                         {
                             _textInst.PositionX = x / 256f;
@@ -3150,7 +3171,7 @@ namespace MphRead.Entities
                             {
                                 _textInst.SetData(index, palette, _scene);
                             }
-                            _scene.DrawHudObject(_textInst, mode: 1);
+                            _scene.DrawHudObject(_textInst, mode: 1, scale: scale);
                         }
                     }
                     if (end != length)
@@ -3192,7 +3213,7 @@ namespace MphRead.Entities
                             ch = text[++i] & 0x3F | ((ch & 0x1F) << 6);
                         }
                         int index = ch - font.MinCharacter;
-                        width += font.Widths[index];
+                        width += font.Widths[index] * scale;
                     }
                     // character widths include their rightmost empty pixel, leading to a slight overestimation of the total width before the line break,
                     // making the text shift to the left instead of being centered. fix by flooring (which the game does implicitly with integer division).
@@ -3206,7 +3227,7 @@ namespace MphRead.Entities
                             ch = text[++i] & 0x3F | ((ch & 0x1F) << 6);
                         }
                         int index = ch - font.MinCharacter;
-                        float offset = font.Offsets[index] + y;
+                        float offset = font.Offsets[index] * scale + y;
                         if (orig != ' ')
                         {
                             _textInst.PositionX = x / 256f;
@@ -3221,10 +3242,10 @@ namespace MphRead.Entities
                                 {
                                     _textInst.SetData(index, palette, _scene);
                                 }
-                                _scene.DrawHudObject(_textInst, mode: 1);
+                                _scene.DrawHudObject(_textInst, mode: 1, scale: scale);
                             }
                         }
-                        x += font.Widths[index] * aspectFix;
+                        x += font.Widths[index] * scale * aspectFix;
                     }
                     if (end != length)
                     {
