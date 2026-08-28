@@ -89,8 +89,17 @@ namespace MphRead
         public static bool FixedCrosshair { get; set; } = false;
         /// <summary>Replaces the reticle with a flat-coloured cross, coloured by current HP.</summary>
         public static bool CustomCrosshair { get; set; } = false;
-        /// <summary>The acquired-weapons-and-ammo panel on the right edge of the HUD.</summary>
+        /// <summary>The acquired-weapons-and-ammo panel down the left of the HUD.</summary>
         public static bool ModernHud { get; set; } = false;
+        /// <summary>
+        /// How big that panel is drawn, as a multiplier on every one of its
+        /// measurements -- row height, panel width, icon and ammo text.
+        ///
+        /// It exists because the right size for it is a matter of eyesight and
+        /// screen, not of design: the same panel that is unreadable on a
+        /// handheld is in the way on a monitor. 1.0 is the compact default.
+        /// </summary>
+        public static float WeaponListScale { get; set; } = 1f;
         /// <summary>Rides rigidly with the camera instead of lagging behind aim, and stops the mouse-driven HUD shift too -- Quake's static weapon.</summary>
         public static bool FixedWeapon { get; set; } = false;
 
@@ -124,6 +133,11 @@ namespace MphRead
             {
                 ModernHud = boolean;
             }
+            if (values.TryGetValue(nameof(WeaponListScale), out value)
+                && Single.TryParse(value, CultureInfo.InvariantCulture, out single))
+            {
+                WeaponListScale = Math.Clamp(single, 0.6f, 2f);
+            }
             if (values.TryGetValue(nameof(FixedWeapon), out value) && Boolean.TryParse(value, out boolean))
             {
                 FixedWeapon = boolean;
@@ -149,6 +163,7 @@ namespace MphRead
                 new(nameof(FixedCrosshair), FixedCrosshair.ToString().ToLower()),
                 new(nameof(CustomCrosshair), CustomCrosshair.ToString().ToLower()),
                 new(nameof(ModernHud), ModernHud.ToString().ToLower()),
+                new(nameof(WeaponListScale), WeaponListScale.ToString(CultureInfo.InvariantCulture)),
                 new(nameof(FixedWeapon), FixedWeapon.ToString().ToLower())
             ]);
         }

@@ -81,6 +81,7 @@ namespace MphRead.Mods.Launcher.Gui
         private SliderRow _helmetOpacity = null!;
         private SliderRow _visorOpacity = null!;
         private SliderRow _hudOpacity = null!;
+        private SliderRow _weaponListSize = null!;
         private ToggleRow _fixedCrosshair = null!;
         private ToggleRow _customCrosshair = null!;
         private ToggleRow _modernHud = null!;
@@ -436,8 +437,12 @@ namespace MphRead.Mods.Launcher.Gui
 
             Heading(page, "Modern HUD");
             _modernHud = Add(page, new ToggleRow("Enable modern HUD", Features.ModernHud));
-            Explain(page, "A panel on the right edge listing every weapon you have picked up "
-                + "and its ammo, with the equipped one boxed.");
+            Explain(page, "A column down the left listing every weapon you are carrying "
+                + "and its ammo, each in that weapon's own colour, with the equipped one "
+                + "marked. Only weapons you have actually picked up appear.");
+            _weaponListSize = Add(page, new SliderRow("Weapon list size",
+                ScaleToSlider(Features.WeaponListScale), v => $"{SliderToScale(v) * 100:0}%"));
+            Explain(page, "How big that column is drawn, from 60% to 200%.");
 
             Heading(page, "Weapon");
             _fixedWeapon = Add(page, new ToggleRow("Fixed weapon", Features.FixedWeapon));
@@ -540,6 +545,18 @@ namespace MphRead.Mods.Launcher.Gui
         private static float SliderToSensitivity(int value)
         {
             return 0.1f + value / 100f * 2.9f;
+        }
+
+        // The weapon list runs 60%-200%, so the slider's 0-100 is that range
+        // rather than a percentage of its own.
+        private static int ScaleToSlider(float scale)
+        {
+            return Math.Clamp((int)Math.Round((scale - 0.6f) / 1.4f * 100), 0, 100);
+        }
+
+        private static float SliderToScale(int value)
+        {
+            return 0.6f + value / 100f * 1.4f;
         }
 
         // ---------------------------------------------------------- match rules
@@ -715,6 +732,7 @@ namespace MphRead.Mods.Launcher.Gui
             Features.HelmetOpacity = _helmetRow.On ? _helmetOpacity.Value / 100f : 0;
             Features.VisorOpacity = _helmetRow.On ? _visorOpacity.Value / 100f : 0;
             Features.HudOpacity = _hudOpacity.Value / 100f;
+            Features.WeaponListScale = SliderToScale(_weaponListSize.Value);
             Features.FixedCrosshair = _fixedCrosshair.On;
             Features.CustomCrosshair = _customCrosshair.On;
             Features.ModernHud = _modernHud.On;

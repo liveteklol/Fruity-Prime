@@ -1775,14 +1775,18 @@ namespace MphRead.Entities
         {
             // Below the score block in the top-left corner, and short enough
             // that all nine weapons still fit above the bottom edge.
+            // Compact by default, and scalable, because the right size for
+            // this is a matter of eyesight and screen rather than of design --
+            // the same panel that is unreadable on a handheld is in the way on
+            // a monitor. Every measurement below is multiplied, so the panel
+            // keeps its proportions at any setting; only its top-left corner
+            // stays put, under the score block.
+            float scale = Math.Clamp(Features.WeaponListScale, 0.6f, 2f);
             const float panelX = 8;
-            const float panelWidth = 58;
-            // Nine weapons have to fit between the score block and the bottom
-            // edge of a 192-unit screen, so the row is as short as a row with
-            // an icon and a number in it can be: 9 * 15 from 46 ends at 181.
-            const float rowHeight = 15;
-            const float iconCentreX = panelX + 15;
-            const float ammoRightX = panelX + panelWidth - 4;
+            float panelWidth = 44 * scale;
+            float rowHeight = 12 * scale;
+            float iconCentreX = panelX + 11 * scale;
+            float ammoRightX = panelX + panelWidth - 3 * scale;
             float y = 46;
             for (int i = 0; i < _weaponListIcons.Length; i++)
             {
@@ -1814,23 +1818,24 @@ namespace MphRead.Entities
                 // icons are colour art over whatever the map happens to be
                 // behind them, and a light wall was enough to lose them.
                 float panelAlpha = (equipped ? 0.55f : 0.3f) * Features.HudOpacity;
-                _scene.DrawHudFlatBox(panelX, y, panelX + panelWidth, y + rowHeight - 2,
+                float rowBottom = y + rowHeight - 1.5f * scale;
+                _scene.DrawHudFlatBox(panelX, y, panelX + panelWidth, rowBottom,
                     new Vector4(0, 0, 0, panelAlpha));
                 // The colour chip down the left edge of the row, and wider
                 // for the equipped one -- so which weapon is in your hands is
                 // one glance and which weapon is which is another, without
                 // either having to be read.
-                float chipWidth = equipped ? 4 : 2;
-                _scene.DrawHudFlatBox(panelX, y, panelX + chipWidth, y + rowHeight - 2,
+                float chipWidth = (equipped ? 3 : 1.5f) * scale;
+                _scene.DrawHudFlatBox(panelX, y, panelX + chipWidth, rowBottom,
                     new Vector4(tint.X, tint.Y, tint.Z,
                         (equipped ? 1f : 0.65f) * Features.HudOpacity));
                 HudObjectInstance icon = _weaponListIcons[i];
                 // The select sheet's frames are drawn for the weapon wheel and
                 // are far larger than a row; scaled down here rather than
                 // given a second, smaller copy of the same art.
-                const float iconScale = 0.42f;
+                float iconScale = 0.30f * scale;
                 icon.PositionX = (iconCentreX - icon.Width * iconScale / 2) / 256f;
-                icon.PositionY = (y + 1) / 192f;
+                icon.PositionY = (y + 1 * scale) / 192f;
                 icon.Alpha = (equipped ? 1f : 0.6f) * Features.HudOpacity;
                 _scene.DrawHudObject(icon, mode: 2, scale: iconScale);
                 // The Power Beam costs no ammo, and a blank where every other
@@ -1843,10 +1848,10 @@ namespace MphRead.Entities
                 // rather than spilling under it: the HUD font is drawn for
                 // the 16-pixel-tall readouts around the screen edge, and this
                 // row is that tall in total.
-                DrawText2D(ammoRightX, y + 2, Align.Right, palette: 0, ammo,
+                DrawText2D(ammoRightX, y + 1.5f * scale, Align.Right, palette: 0, ammo,
                     color: new ColorRgba(
                         (byte)(tint.X * 255), (byte)(tint.Y * 255), (byte)(tint.Z * 255), 255),
-                    alpha: (equipped ? 1f : 0.7f) * Features.HudOpacity, scale: 0.75f);
+                    alpha: (equipped ? 1f : 0.7f) * Features.HudOpacity, scale: 0.55f * scale);
                 y += rowHeight;
             }
         }
