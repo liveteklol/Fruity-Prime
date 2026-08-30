@@ -119,6 +119,29 @@ namespace MphRead.Mods
             Switch(next);
         }
 
+        /// <summary>
+        /// Space, while spectating: the map, or the player you were watching.
+        ///
+        /// Never your own body, which is what toggling the camera directly
+        /// did -- a spectator's own view is of a hidden, frozen hunter taking
+        /// no input, and it came with their HUD back on. Leaving the overview
+        /// therefore means picking somebody, exactly as a click does, and
+        /// where there is nobody to pick it means staying where you are.
+        /// </summary>
+        public static void ToggleView()
+        {
+            if (!IsSpectating)
+            {
+                return;
+            }
+            if (FreeCamera)
+            {
+                CycleNext();
+                return;
+            }
+            _cameraRequest = true;
+        }
+
         /// <summary>The scene reporting what it did with the camera. See <see cref="FreeCamera"/>.</summary>
         internal static void NoteFreeCamera(bool on)
         {

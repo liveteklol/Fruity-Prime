@@ -119,8 +119,8 @@ things you can do on the right.
 |---|---|
 | Host | the story from a save slot, or a match: map, mode, hunter, and a `Where` row -- **Local** is an offline match with 0-7 bots and their skill, **Online** asks the directory to run it. The listen-host path (`NetHostSession`, the dedicated server in this process over the loopback) still exists and is still what `LaunchKind.Host` can do, but the card no longer offers it: the port, "let the directory run it" and "list it" rows are built and forced rather than shown, because every one of them is a question about the player's router. Running a server yourself is the dedicated server's job |
 | Join | name, hunter, `host` or `host:port`, and a live line saying what that server is running. **Find a server** opens the browser |
-| Watch a demo | pick a `.fpdemo` and replay it |
-| Settings | display, audio, controls, match rules, and profile (name, hunter, server addresses, updates, game files, credits). Also reachable from the pause menu during a match. **Pro mode HUD** is one switch for the whole competitive layout -- no helmet, plain fixed crosshair, weapon list at 170%, fixed weapon, and its own energy and score readouts in place of the game's -- and it *overrides* the six settings below it rather than overwriting them, so they come back untouched when it goes off. Cheats, bugfixes, the leftover feature flags and the HUD-readout opacity have **no UI any more** and no longer load from `settings.json` -- they sit at their code defaults |
+| Demos | pick a `.fpdemo` and replay it -- on Android too, where the picker cannot filter by pattern and hands back a `content://` document that has to be copied in first |
+| Settings | display, audio, controls, match rules, and profile (name, hunter, server addresses, updates, game files, credits). Also reachable from the pause menu during a match. **Pro mode HUD** is one switch for the whole competitive layout -- no helmet, plain fixed crosshair, weapon list at 170%, fixed weapon, and its own energy, ammo and score readouts in place of the game's -- and it *overrides* the six settings it answers for rather than overwriting them (they disappear from the page while it is on and come back untouched). Cheats, bugfixes, the leftover feature flags and the HUD-readout opacity have **no UI any more** and no longer load from `settings.json` -- they sit at their code defaults |
 | Game files | where the .nds goes. Shown first, and everything else greyed out, when there is nothing set up yet |
 
 Gotchas worth keeping in view without opening another file:
@@ -161,7 +161,8 @@ and the DS weapon wheel all work without touching `ProcessAllInput`.
 **The front screen runs; the match has never been loaded.** An emulator (API
 30, x86_64, software CPU and GL) shows the screen and the game-files card; what
 that box cannot do is load a room, having no extracted game files, so the
-renderer and the touch controls are still unmeasured. Two traps that killed the
+renderer, the touch controls and demo playback (which the head can now do --
+see the port notes) are still unmeasured on a device. Two traps that killed the
 app before any of this project's code ran — an activity theme that was not an
 AppCompat descendant, and a Debug APK that carries no managed code unless
 `EmbedAssembliesIntoApk=true` — are written up with the rest in

@@ -29,6 +29,8 @@ namespace MphRead.Entities
         private HudMeter _ammoBarMeter = null!;
         private HudObjectInstance _weaponIconInst = null!;
         private readonly HudObjectInstance[] _weaponListIcons = new HudObjectInstance[9];
+        /// <summary>Where the drawing actually is inside each of those frames. See ModIconBounds.</summary>
+        private readonly IconBounds[] _weaponListIconBounds = new IconBounds[9];
         private HudObjectInstance _boostInst = null!;
         private HudObjectInstance _bombInst = null!;
         private HudMeter _enemyHealthMeter = null!;
@@ -349,6 +351,10 @@ namespace MphRead.Entities
                 listIcon.SetPaletteData(listSheet.PaletteData, _scene);
                 listIcon.Enabled = true;
                 _weaponListIcons[i] = listIcon;
+                // Once, here, because it is a fact about the art and never
+                // changes: which part of the frame the weapon is drawn in.
+                _weaponListIconBounds[i] = ModIconBounds(listSheet.CharacterData, i,
+                    listSheet.Width, listSheet.Height);
             }
             HudObject boost = HudInfo.GetHudObject(HudElements.Boost);
             _boostInst = new HudObjectInstance(boost.Width, boost.Height);
@@ -1223,6 +1229,20 @@ namespace MphRead.Entities
             {
                 DrawFps();
             }
+            if (Mods.SpectatorMode.IsSpectating && !Mods.Network.DemoPlayback.IsActive)
+            {
+                // Watching, not playing. The HUD belongs to whoever is in the
+                // match, and a spectator is not: their own readouts would be
+                // of a body that is hidden, non-solid and taking no input, and
+                // the readouts of whoever they are following are not theirs to
+                // have. It comes back with Rejoin and not before.
+                //
+                // Demo playback is the exception. It is spectating too, but
+                // there is nothing to rejoin and no match of your own being
+                // shown instead -- the HUD of whoever is being watched is the
+                // whole point of watching a recording back.
+                return;
+            }
             if (GameState.MenuPause)
             {
                 return;
@@ -1332,6 +1352,12 @@ namespace MphRead.Entities
         {
             if (Mods.ThumbnailMode.Active)
             {
+                return;
+            }
+            if (Mods.SpectatorMode.IsSpectating && !Mods.Network.DemoPlayback.IsActive)
+            {
+                // The other half of the HUD -- the locator icons and the
+                // screen filter. See DrawHudObjects.
                 return;
             }
             if (CameraSequence.Current?.IsIntro == true)
@@ -1922,9 +1948,16 @@ namespace MphRead.Entities
                 // the frame or the colour has actually changed, and neither
                 // does after the first one.
                 icon.SetData(i, tint, _scene);
-                // The select sheet's frames are drawn for the weapon wheel and
-                // are many times a row's height; scaled down here rather than
-                // given a second, smaller copy of the same art.
+                // Sized and placed on the *drawing*, not on the frame around
+                // it. The select sheet's frames come off the touchscreen
+                // weapon wheel, where each weapon sits wherever it sits on
+                // that ring and several are much smaller than their frame, so
+                // fitting frames to the boxes put every icon in a different
+                // spot at a different size. _weaponListIconBounds is where the
+                // ink actually is (see ModIconBounds); the larger of its two
+                // sides fills the box, and its centre goes in the box's
+                // centre, so nine icons drawn to nine different conventions
+                // come out as one column.
                 //
                 // Mode 1, not mode 2: mode 2 maps the frame's width to the
                 // window's width and its height to the window's height
@@ -1932,10 +1965,15 @@ namespace MphRead.Entities
                 // exactly as much as the window is wider than 4:3. Mode 1
                 // sizes both from the height, so the frame keeps the shape it
                 // was drawn in on any screen.
-                float iconScale = iconBox / icon.Height;
-                float iconWidth = icon.Width * iconScale;
-                icon.PositionX = (panelX + (iconBoxX - iconWidth * aspectFix) / 2) / 256f;
-                icon.PositionY = (y + (rowHeight - iconBox) / 2) / 192f;
+                IconBounds bounds = _weaponListIconBounds[i];
+                // A margin inside the box, so the icons do not touch the row
+                // above and below; and the box's own centre, not the row
+                // pitch's, since the row is drawn one unit shorter than it.
+                float iconFit = iconBox - 1f * scale;
+                float iconScale = iconFit / Math.Max(bounds.Width, bounds.Height);
+                icon.PositionX = (panelX + iconBoxX / 2
+                    - bounds.CentreX * iconScale * aspectFix) / 256f;
+                icon.PositionY = (y + iconBox / 2 - bounds.CentreY * iconScale) / 192f;
                 // Never faded. A dimmed icon at this size is an empty box.
                 icon.Alpha = Features.HudOpacity;
                 _scene.DrawHudObject(icon, mode: 1, scale: iconScale);

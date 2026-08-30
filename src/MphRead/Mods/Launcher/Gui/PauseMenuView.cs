@@ -53,11 +53,15 @@ namespace MphRead.Mods.Launcher.Gui
             const double panelWidth = 420;
             var stack = new StackPanel { Spacing = 4 };
             stack.Children.Add(new Caption("Paused") { Height = 34 });
-            _resume = Add(stack, "Resume", offerWindowMode ? "Escape" : "Back",
+            // Titles only. Every entry here said what it did twice -- "Quit",
+            // "Close FruityPrime" -- and the second saying is what made a
+            // seven-line menu tall enough to be cut off by the window it is
+            // drawn over.
+            _resume = Add(stack, "Resume",
                 () => Resumed?.Invoke(this, EventArgs.Empty));
             if (offerWindowMode)
             {
-                var windowEntry = new MenuEntry(WindowLabel(), "F11 or Alt+Enter", titleSize: 17);
+                var windowEntry = new MenuEntry(WindowLabel(), titleSize: 17);
                 windowEntry.Click += (_, _) =>
                 {
                     FullscreenRequested?.Invoke(this, EventArgs.Empty);
@@ -68,30 +72,29 @@ namespace MphRead.Mods.Launcher.Gui
                 };
                 stack.Children.Add(windowEntry);
             }
-            Add(stack, "Settings", "Controls, display, audio",
+            Add(stack, "Settings",
                 () => SettingsRequested?.Invoke(this, EventArgs.Empty));
             if (!DemoPlayback.IsActive)
             {
                 if (SpectatorMode.IsSpectating)
                 {
-                    Add(stack, "Rejoin match", "Score resets to 0",
+                    Add(stack, "Rejoin match",
                         () => RejoinRequested?.Invoke(this, EventArgs.Empty));
                 }
                 else if (SpectatorMode.CanSpectate)
                 {
-                    Add(stack, "Spectate", "Free camera, click to follow a player",
+                    Add(stack, "Spectate",
                         () => SpectateRequested?.Invoke(this, EventArgs.Empty));
                 }
                 if (NetSession.Active)
                 {
                     Add(stack, DemoRecorder.IsRecording ? "Stop recording" : "Record demo",
-                        DemoRecorder.IsRecording ? "Saving to a file" : "Watch it back later, like Quake",
                         () => RecordToggleRequested?.Invoke(this, EventArgs.Empty));
                 }
             }
-            Add(stack, "Leave match", "Back to the launcher",
+            Add(stack, "Leave match",
                 () => LeaveRequested?.Invoke(this, EventArgs.Empty));
-            Add(stack, "Quit", $"Close {Branding.Name}",
+            Add(stack, "Quit",
                 () => QuitRequested?.Invoke(this, EventArgs.Empty));
 
             var panel = new Border
@@ -192,9 +195,9 @@ namespace MphRead.Mods.Launcher.Gui
             return WindowMode.IsFullscreen ? "Windowed" : "Fullscreen";
         }
 
-        private static MenuEntry Add(StackPanel stack, string text, string note, Action action)
+        private static MenuEntry Add(StackPanel stack, string text, Action action)
         {
-            var entry = new MenuEntry(text, note, titleSize: 17);
+            var entry = new MenuEntry(text, titleSize: 17);
             entry.Click += (_, _) => action();
             stack.Children.Add(entry);
             return entry;

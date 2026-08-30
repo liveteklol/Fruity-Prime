@@ -72,11 +72,20 @@ Notable toggles
   `WeaponListScale` (1.7) and both helmet opacities (0) *answer* as the pro
   layout while it is on; each keeps a `*Setting` companion holding what the
   player chose, and that is what the settings rows are seeded from, what
-  `Features.Commit` writes, and what comes back when it goes off. The rows for
-  all six are greyed out while it is on rather than hidden. Writing the
+  `Features.Commit` writes, and what comes back when it goes off. Writing the
   overridden values to disk instead would turn one night of pro mode into a
   permanent change to six settings, which is the bug this shape exists to
   avoid.
+- **Everything it answers for disappears from the page while it is on**, headings
+  and explanations included -- `BuildDisplay` records the range of the page's
+  children it built after the Pro mode row and `UpdateHudRows` flips
+  `IsVisible` over that range, so a row added to one of those sections later
+  cannot be left behind on its own. A range rather than a hand-written list for
+  that reason; hidden rather than greyed because six rows showing values that
+  are not what the game is drawing are six chances to conclude the switch is
+  broken. It also draws its own energy, ammo and score
+  (`Mods/Render/PlayerEntityProHud.cs`) in place of the game's, which are
+  suppressed in `DrawHudObjects` and `DrawModeScore`.
 - **HUD readouts opacity is no longer a setting.** `Features.HudOpacity` stays
   at 1 and is out of `Load`/`Commit`; the slider is gone. It is still read
   throughout the HUD, so it remains the hook for anything that wants to fade

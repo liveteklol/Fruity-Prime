@@ -73,6 +73,17 @@ it once after the launcher closes, because on X11 the window's destroy request
 would otherwise sit unflushed in the connection's buffer for the whole match and
 leave a launcher painted over the game.
 
+Menu entries
+
+- **No descriptions under the titles, anywhere.** An entry called "Join" did
+  not need a line saying it joins, and in the pause menu the second saying is
+  what made a seven-line menu tall enough to be cut off. The only subtitles
+  left are the ones reporting something the player could not otherwise know --
+  missing game files on "Host", a demo that would not open, the map-preview
+  progress -- and those are set when they happen, so `MenuEntry` takes its
+  height from the subtitle (42 bare, 54 with one) in `OnPropertyChanged`
+  rather than deciding it once in the constructor.
+
 Pause menu
 
 - `Escape` in a match opens it on every platform now (`Mods/PauseMenu.cs` +
@@ -89,7 +100,17 @@ Pause menu
   floor was 600. That floor is now 1024x720 and the default window 1280x768.
 - **Spectating starts on the free camera** (`Mods/SpectatorMode.cs`): "Spectate"
   puts you on the map with no HUD, a left click moves into the players and
-  cycles through them, and Space toggles back to the overview. The camera is
+  cycles through them, and Space toggles between the two -- `ToggleView`, not
+  the camera directly, because the camera on its own would put you back behind
+  your own hidden, frozen body with your own HUD on. **No HUD at all while
+  spectating a live match** (`DrawHudObjects`/`DrawHudModels` return early):
+  your readouts are of a body that is out of the match, and the readouts of
+  whoever you are following are not yours. Demo playback is exempt -- there is
+  nothing to rejoin, and the watched player's HUD is the point of a replay.
+  A spectator is also **drawn not at all** (`PlayerDraw.Draw` returns before
+  `DrawShadow`, which is cast from the volume and so survived hiding the model)
+  and is **not a target** (`PlayerAi`'s opponent and teammate searches ask
+  `ModInPlay`, not `Health > 0`). The camera is
   the scene's, and the menu runs on the game's thread but has no scene to hand,
   so `Start`/`Rejoin` leave a `bool?` in `SpectatorMode` that
   `Scene.OnRenderFrame` acts on -- the same shape as this menu's own window

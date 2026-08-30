@@ -214,6 +214,19 @@ namespace MphRead.Entities
         }
 
         /// <summary>
+        /// In the match, and so worth aiming at: alive, and not sitting this
+        /// one out in the spectator.
+        ///
+        /// What <c>PlayerAi</c>'s opponent and teammate searches ask, in place
+        /// of <c>Health > 0</c> alone. A spectator is already hidden and
+        /// non-solid, so the bots that kept picking one as their target were
+        /// walking towards nobody and shooting through them -- a hunter
+        /// nobody can hit is not an opponent, and one nobody can be hit by is
+        /// not a teammate worth covering either.
+        /// </summary>
+        internal bool ModInPlay => Health > 0 && !Flags2.TestFlag(PlayerFlags2.Spectating);
+
+        /// <summary>
         /// Whether this player is standing in the map rather than waiting at
         /// the origin to be placed. Spawned is set by Spawn() and never
         /// cleared, so health is what distinguishes "in the match" from

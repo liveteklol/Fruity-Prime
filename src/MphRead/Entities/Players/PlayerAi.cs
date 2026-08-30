@@ -10184,7 +10184,7 @@ namespace MphRead.Entities
                         result = player;
                         minDist = Vector3.DistanceSquared(player.Position, position);
                     }
-                    if (player != _player && player.TeamIndex != _player.TeamIndex && player.Health > 0
+                    if (player != _player && player.TeamIndex != _player.TeamIndex && player.ModInPlay
                         && (!botsOnly || player.IsBot))
                     {
                         float dist = Vector3.DistanceSquared(player.Position, position);
@@ -10215,7 +10215,7 @@ namespace MphRead.Entities
                         minDist = Vector3.DistanceSquared(player.Position, position);
                     }
                     if (AggroFunc214857C(6, 1, 2, null, player)
-                        && player != _player && player.TeamIndex != _player.TeamIndex && player.Health > 0)
+                        && player != _player && player.TeamIndex != _player.TeamIndex && player.ModInPlay)
                     {
                         float dist = Vector3.DistanceSquared(player.Position, position);
                         if (dist <= minDist || result.Health == 0)
@@ -10246,7 +10246,7 @@ namespace MphRead.Entities
                         result = player;
                         minDist = Vector3.DistanceSquared(player.Position, position);
                     }
-                    if (player != _player && player.TeamIndex != _player.TeamIndex && player.Health > 0)
+                    if (player != _player && player.TeamIndex != _player.TeamIndex && player.ModInPlay)
                     {
                         int value = AggroFunc2148394(7, 2, 1, player, null);
                         if (value > maxValue)
@@ -10289,7 +10289,7 @@ namespace MphRead.Entities
                         minDist = Vector3.DistanceSquared(player.Position, position);
                     }
                     if (AggroFunc214857C(6, 1, 2, null, player)
-                        && player != _player && player.TeamIndex != _player.TeamIndex && player.Health > 0)
+                        && player != _player && player.TeamIndex != _player.TeamIndex && player.ModInPlay)
                     {
                         int value = AggroFunc2148394(7, 2, 1, player, null);
                         if (value > maxValue)
@@ -10327,12 +10327,12 @@ namespace MphRead.Entities
                 foreach (PlayerEntity player in _scene.GetPlayerEntities())
                 {
                     bool v14 = AggroFunc214857C(6, 1, 2, null, player);
-                    if ((v14 || !v4) && player != _player && player.TeamIndex != _player.TeamIndex && player.Health > 0)
+                    if ((v14 || !v4) && player != _player && player.TeamIndex != _player.TeamIndex && player.ModInPlay)
                     {
                         int value = AggroFunc2148394(7, 2, 1, player, null);
                         foreach (PlayerEntity other in _scene.GetPlayerEntities())
                         {
-                            if (other != _player && other.TeamIndex == _player.TeamIndex && other.Health > 0)
+                            if (other != _player && other.TeamIndex == _player.TeamIndex && other.ModInPlay)
                             {
                                 value += AggroFunc2148394(7, 2, 2, player, other);
                             }
@@ -10369,7 +10369,7 @@ namespace MphRead.Entities
                 int maxValue = 0;
                 foreach (PlayerEntity player in _scene.GetPlayerEntities())
                 {
-                    if (player != _player && player.TeamIndex != _player.TeamIndex && player.Health > 0
+                    if (player != _player && player.TeamIndex != _player.TeamIndex && player.ModInPlay
                         && player.Hunter == Hunter.Weavel && player.Halfturret.Health > 0)
                     {
                         int value = AggroFunc2148394(5, 2, 1, player, null);

@@ -6068,7 +6068,16 @@ namespace MphRead
             if (e.Key == Keys.Space
                 && (Mods.Network.DemoPlayback.IsActive || Mods.SpectatorMode.IsSpectating))
             {
-                Scene.ToggleFreeCamera();
+                if (Mods.Network.DemoPlayback.IsActive)
+                {
+                    Scene.ToggleFreeCamera();
+                }
+                else
+                {
+                    // Spectating a live match: the map or a player, never the
+                    // hidden body you left behind. See SpectatorMode.
+                    Mods.SpectatorMode.ToggleView();
+                }
                 base.OnKeyDown(e);
                 return;
             }

@@ -837,11 +837,6 @@ namespace MphRead.Mods
             {
                 Features.ProHud = true;
             }
-            string? proHudStyle = ValueAfter(args, "prohudstyle");
-            if (proHudStyle != null && Int32.TryParse(proHudStyle, out int styleNumber))
-            {
-                ProHudStyle.Current = styleNumber;
-            }
         }
 
         private static bool HasFlag(string[] args, string name)

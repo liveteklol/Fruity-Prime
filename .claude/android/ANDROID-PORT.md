@@ -308,6 +308,27 @@ which is exactly how it was reported. `ThumbnailMode.Exit()` exists for that,
 while an in-process run is going.
 
 
+## Demos
+
+Watching a recorded match works here too, and needed two things the desktop
+never had to think about:
+
+- **The file picker cannot filter by pattern.** Android filters by MIME type
+  and a `.fpdemo` has none, so `FileTypeFilter` is skipped here exactly as it
+  is for the `.nds` picker -- setting one produces a picker in which every file
+  is refused.
+- **There is no path behind what it hands back.** A `content://` document has
+  no local path, and `DemoPlayback.Join` takes one, so `HomeView.ChooseDemo`
+  copies the document into `GameFiles.Root` and plays it from there. Kept
+  rather than deleted afterwards, unlike the cartridge copy: the reader holds
+  the file for the whole session, and the next demo overwrites it.
+
+`AndroidMatch.BuildDemo` is the rest -- the half of `MatchStart.LaunchDemo`
+that is not a window: join, read the room out of the recording's own
+MatchState, build the players with `localSlot: -1`, load the room.
+`MainActivity.EndMatch` calls `DemoPlayback.Stop`, which `NetSession.Stop`
+does not do for it: a demo feeds the session from a file rather than a socket.
+
 ## Building
 
 ```bash

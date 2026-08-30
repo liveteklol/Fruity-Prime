@@ -460,7 +460,6 @@ namespace MphRead.Mods.Launcher.Gui
         private MenuEntry _onlineEntry = null!;
         private MenuEntry _hostEntry = null!;
         private MenuEntry _demoEntry = null!;
-        private const string _hostBlurb = "The story, or a match you run";
         private ChoiceRow _adventureSlot = null!;
         private ChoiceRow _adventureHunter = null!;
         private Note _adventureNote = null!;
@@ -470,14 +469,19 @@ namespace MphRead.Mods.Launcher.Gui
         private Control BuildHomeCard()
         {
             var card = Card();
-            _hostEntry = new MenuEntry("Host", _hostBlurb);
+            // No descriptions under any of these. "Join" does not need a line
+            // saying it joins; what the line was worth was the space it took
+            // and the reading it asked for. The only subtitles left anywhere
+            // are the ones that report something the player could not
+            // otherwise know -- missing game files, a demo that would not
+            // open -- and those are set when they happen.
+            _hostEntry = new MenuEntry("Host");
             _hostEntry.Click += (_, _) => OpenHost();
-            _onlineEntry = new MenuEntry("Join", "Play on a server somebody else is running");
+            _onlineEntry = new MenuEntry("Join");
             _onlineEntry.Click += (_, _) => OpenJoin();
-            _demoEntry = new MenuEntry("Watch a demo", "Replay a recorded match");
+            _demoEntry = new MenuEntry("Demos");
             _demoEntry.Click += async (_, _) => await ChooseDemo();
-            var settings = new MenuEntry("Settings",
-                "Display, audio, controls, game files, credits");
+            var settings = new MenuEntry("Settings");
             settings.Click += async (_, _) => await OpenSettings();
             var quit = new MenuEntry("Quit");
             quit.Click += (_, _) => Finish(default);
@@ -533,7 +537,7 @@ namespace MphRead.Mods.Launcher.Gui
             // missing extract is that the two entries needing one are dead and
             // why -- and the setup card is what it shows instead of this one
             // until there is an extract at all.
-            _hostEntry.Subtitle = ready ? _hostBlurb : GameFiles.Describe();
+            _hostEntry.Subtitle = ready ? "" : GameFiles.Describe();
             _hostEntry.SubtitleColor = ready ? GuiTheme.TextDim : GuiTheme.Warm;
         }
 
@@ -728,14 +732,22 @@ namespace MphRead.Mods.Launcher.Gui
             }
             var options = new FilePickerOpenOptions
             {
-                Title = "Watch a demo",
-                AllowMultiple = false,
-                FileTypeFilter = new[]
+                Title = "Demos",
+                AllowMultiple = false
+            };
+            if (!OperatingSystem.IsAndroid())
+            {
+                // Patterns are what Windows, Linux and the browser filter on.
+                // Android filters by MIME type, and a demo file has none --
+                // the same trap the cartridge picker is written around, and
+                // the first of the two reasons this screen could open a demo
+                // everywhere except on the platform it was drawn for.
+                options.FileTypeFilter = new[]
                 {
                     new FilePickerFileType($"{Branding.Name} demo") { Patterns = new[] { $"*{DemoFile.Extension}" } },
                     new FilePickerFileType("Every file") { Patterns = new[] { "*" } }
-                }
-            };
+                };
+            }
             try
             {
                 string demoDir = Paths.Combine(Paths.Export, "_demos");
@@ -758,7 +770,28 @@ namespace MphRead.Mods.Launcher.Gui
             string? path = picked[0].TryGetLocalPath();
             if (path == null)
             {
-                return;
+                // The second reason. Android hands back a content:// document
+                // with no file behind it, and the demo reader takes a path --
+                // so the document is copied into the app's own directory and
+                // played from there. Kept afterwards rather than deleted: the
+                // reader holds the file open for the whole session, and the
+                // next demo overwrites it.
+                try
+                {
+                    string scratch = Path.Combine(GameFiles.Root, $"picked{DemoFile.Extension}");
+                    await using (Stream source = await picked[0].OpenReadAsync())
+                    await using (var target = File.Create(scratch))
+                    {
+                        await source.CopyToAsync(target);
+                    }
+                    path = scratch;
+                }
+                catch (Exception ex)
+                {
+                    _demoEntry.Subtitle = $"That file could not be read: {ex.Message}";
+                    _demoEntry.SubtitleColor = GuiTheme.Warm;
+                    return;
+                }
             }
             // Joined here, not inside MatchStart: a failure has to land back
             // on a screen that is still open to show it on. Console.WriteLine
@@ -773,7 +806,7 @@ namespace MphRead.Mods.Launcher.Gui
             if (!joined)
             {
                 _demoEntry.IsEnabled = true;
-                _demoEntry.Title = "Watch a demo";
+                _demoEntry.Title = "Demos";
                 _demoEntry.Subtitle = DemoPlayback.LastError ?? "That file could not be read as a demo.";
                 _demoEntry.SubtitleColor = GuiTheme.Warm;
                 return;

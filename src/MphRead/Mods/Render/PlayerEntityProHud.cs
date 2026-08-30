@@ -31,6 +31,18 @@ namespace MphRead.Entities
         private const float ProHudWarn = 60 / 99f;
         private const float ProHudDanger = 33 / 99f;
 
+        /// <summary>
+        /// The three states every readout here shares: plenty, getting low,
+        /// nearly out -- and, for energy alone, carrying more than a hunter's
+        /// own tank. One set of colours for energy and ammo both, so a glance
+        /// at either corner means the same thing, and so the two cannot drift
+        /// apart into two vocabularies.
+        /// </summary>
+        private static readonly Vector4 ProGood = new Vector4(0.24f, 0.85f, 0.32f, 1);
+        private static readonly Vector4 ProWarn = new Vector4(1f, 0.68f, 0.1f, 1);
+        private static readonly Vector4 ProDanger = new Vector4(0.95f, 0.18f, 0.18f, 1);
+        private static readonly Vector4 ProOver = new Vector4(0.45f, 0.8f, 1f, 1);
+
         private static readonly Vector4 ProHudPanel = new Vector4(0, 0, 0, 0.5f);
         private static readonly Vector4 ProHudShade = new Vector4(0, 0, 0, 0.55f);
         private static readonly Vector4 ProHudTrack = new Vector4(1, 1, 1, 0.16f);
@@ -38,24 +50,102 @@ namespace MphRead.Entities
         private static readonly ColorRgba ProHudDim = new ColorRgba(178, 186, 200, 255);
         private static readonly ColorRgba ProHudShadow = new ColorRgba(0, 0, 0, 255);
 
-        /// <summary>Energy, ammo and the score, in whichever layout is being tried.</summary>
+        /// <summary>Energy down the left under the weapon list, ammo down the right, the score up in the corner.</summary>
         private void DrawProHud()
         {
-            switch (Mods.ProHudStyle.Current)
+            float aspect = HudAspectFix;
+            Vector4 health = ProHealthColor();
+            // The left foot of the screen, under the weapon list and the same
+            // width as it: score, weapons and energy then read as one column
+            // top to bottom, which is one place to look instead of three
+            // corners.
+            _scene.DrawHudFlatBox(2 * aspect, 170, 46 * aspect, 190, ProHudPanel);
+            ProNumber(6 * aspect, 172, Align.Left, _health.ToString(), ProInk(health), 1.5f);
+            ProBar(4 * aspect, 186, 40, 3, ProHealthFraction(), health);
+            DrawProAmmo();
+            ProScore(4 * aspect, 12, Align.Left, 1.1f);
+        }
+
+        /// <summary>
+        /// The equipped weapon's shots, mirrored into the right foot of the
+        /// screen -- the same panel, the same size, the far side.
+        ///
+        /// The weapon list already carries a number for every weapon, but not
+        /// at a size you can read without looking at it, and the one that
+        /// matters is the one in your hands. Coloured by how much is left, not
+        /// by which weapon it is: drawn in the weapon's own colour first, a
+        /// full ten missiles read red, which is the colour every other
+        /// readout here uses for "you are nearly out".
+        /// </summary>
+        /// <summary>
+        /// Panel geometry for the ammo corner, in HUD units off the screen's
+        /// height. Wider than the energy panel opposite it because it carries
+        /// an icon as well as a number, and the number can be three digits:
+        /// the Battlehammer costs 4 a shot, so a full pool is 149 of them --
+        /// which is 36 units of digits beside a 12-unit icon.
+        /// </summary>
+        private const float ProAmmoPanelWidth = 58;
+        private const float ProAmmoNumberScale = 1.5f;
+
+        private void DrawProAmmo()
+        {
+            string? ammo = ProAmmoText();
+            if (ammo == null)
             {
-                case 2:
-                    DrawProHudCorners();
-                    break;
-                case 3:
-                    DrawProHudColumn();
-                    break;
-                case 4:
-                    DrawProHudCentre();
-                    break;
-                default:
-                    DrawProHudStrip();
-                    break;
+                return;
             }
+            float aspect = HudAspectFix;
+            Vector4 color = ProAmmoColor();
+            float right = 256 - 2 * aspect;
+            float left = right - ProAmmoPanelWidth * aspect;
+            _scene.DrawHudFlatBox(left, 170, right, 190, ProHudPanel);
+            DrawProAmmoIcon(left + 2 * aspect, 172);
+            ProNumber(right - 4 * aspect, 172, Align.Right, ammo, ProInk(color), ProAmmoNumberScale);
+            ProBar(left + 2 * aspect, 186, ProAmmoPanelWidth - 4, 3, ProAmmoFraction(), color);
+        }
+
+        /// <summary>
+        /// The equipped weapon's own icon, beside its number.
+        ///
+        /// The same instance and the same colour the weapon list draws down
+        /// the left -- one icon per weapon, tinted the colour that weapon is
+        /// known by -- so the two are obviously the same thing said twice, and
+        /// so the texture is not rebuilt: SetData only redraws when the frame
+        /// or the colour has actually changed, and asking for the pair the
+        /// list has just asked for changes neither.
+        ///
+        /// Sized to the digits beside it rather than to the panel: at the
+        /// number's own height it reads as a label on the number, which is
+        /// what it is for. Placed on its ink like the list's are (see
+        /// ModIconBounds), because these frames are drawn for the touchscreen
+        /// weapon wheel and each sits somewhere different in its own frame.
+        /// </summary>
+        private void DrawProAmmoIcon(float x, float y)
+        {
+            int index = (int)CurrentWeapon;
+            if (index < 0 || index >= _weaponListIcons.Length)
+            {
+                return;
+            }
+            HudObjectInstance icon = _weaponListIcons[index];
+            if (icon == null)
+            {
+                return;
+            }
+            // A glyph is 8 units tall before scaling, so this is exactly the
+            // height of the number it stands next to.
+            float side = 8 * ProAmmoNumberScale;
+            float aspect = HudAspectFix;
+            IconBounds bounds = _weaponListIconBounds[index];
+            float scale = side / Math.Max(bounds.Width, bounds.Height);
+            icon.SetData(index, _weaponListColors[index], _scene);
+            icon.Alpha = Features.HudOpacity;
+            // The ink's centre put in the centre of a box `side` across and
+            // `side` down -- across being measured off the height too, hence
+            // the aspect on every horizontal term.
+            icon.PositionX = (x + side * aspect / 2 - bounds.CentreX * scale * aspect) / 256f;
+            icon.PositionY = (y + side / 2 - bounds.CentreY * scale) / 192f;
+            _scene.DrawHudObject(icon, mode: 1, scale: scale);
         }
 
         // ------------------------------------------------------------ pieces
@@ -100,18 +190,18 @@ namespace MphRead.Entities
         {
             if (ProHealthOver())
             {
-                return new Vector4(0.45f, 0.8f, 1f, 1);
+                return ProOver;
             }
             float fraction = ProHealthFraction();
             if (fraction > ProHudWarn)
             {
-                return new Vector4(0.24f, 0.85f, 0.32f, 1);
+                return ProGood;
             }
             if (fraction > ProHudDanger)
             {
-                return new Vector4(1f, 0.68f, 0.1f, 1);
+                return ProWarn;
             }
-            return new Vector4(0.95f, 0.18f, 0.18f, 1);
+            return ProDanger;
         }
 
         private static ColorRgba ProInk(Vector4 color)
@@ -119,7 +209,13 @@ namespace MphRead.Entities
             return new ColorRgba((byte)(color.X * 255), (byte)(color.Y * 255), (byte)(color.Z * 255), 255);
         }
 
-        /// <summary>The equipped weapon's shots left, or null where there is no such number.</summary>
+        /// <summary>
+        /// The equipped weapon's shots left, or null where there is no such
+        /// number -- the Power Beam, which costs nothing, and alt form, which
+        /// has no gun. Shots, not the ammo pool they are bought from: one
+        /// missile costs ten, so the raw figure is wrong by each weapon's own
+        /// factor. -1 is the unlimited-ammo marker single-player bots carry.
+        /// </summary>
         private string? ProAmmoText()
         {
             if (IsAltForm || IsMorphing || IsUnmorphing)
@@ -133,6 +229,60 @@ namespace MphRead.Entities
             }
             int amount = _ammo[info.AmmoType];
             return amount < 0 ? "--" : (amount / info.AmmoCost).ToString();
+        }
+
+        /// <summary>
+        /// What counts as a full load, in pool units: the big ammo pickup.
+        ///
+        /// Not <c>_ammoMax</c>, which is the *cap* -- 599 in multiplayer, six
+        /// times what anything hands out at once. Measured against that, a
+        /// hunter carrying a perfectly ordinary loadout reads as nearly empty,
+        /// and the bar never moves off its left end. What the game actually
+        /// gives you is 100 units from a big pickup and 50 from a small one
+        /// (250 and 100 in the story), a weapon pickup tops you up to 60, and
+        /// multiplayer spawns you with exactly 100 units of missiles -- ten of
+        /// them, at ten a shot. So one big pickup is what "full" means here,
+        /// and the spawn loadout reads full, which is what it is.
+        /// </summary>
+        private static int ProAmmoFull => GameState.Multiplayer ? 100 : 250;
+
+        /// <summary>How full the ammo pool is, against <see cref="ProAmmoFull"/>.</summary>
+        private float ProAmmoFraction()
+        {
+            int amount = _ammo[EquipInfo.Weapon.AmmoType];
+            if (amount < 0)
+            {
+                return 1;
+            }
+            return Math.Clamp(amount / (float)ProAmmoFull, 0, 1);
+        }
+
+        /// <summary>
+        /// Green down to a small pickup's worth -- half a big one -- then
+        /// amber, then red under a fifth of one. The same three colours, at
+        /// the same meanings, as the energy beside it.
+        ///
+        /// In pool units rather than shots, so one rule covers weapons that
+        /// cost 4 a shot and weapons that cost 20: a small pickup is the least
+        /// the map can hand you, so having less than that is the first thing
+        /// worth saying, and a fifth of a big one leaves no weapon in the game
+        /// more than a couple of shots. Ten missiles -- what multiplayer spawns
+        /// you with -- is a full 100 units and reads green, which is the whole
+        /// point of not colouring this by weapon: in the weapon's own colour
+        /// a full missile load was red, the one colour that means trouble.
+        /// </summary>
+        private Vector4 ProAmmoColor()
+        {
+            int amount = _ammo[EquipInfo.Weapon.AmmoType];
+            if (amount < 0 || amount >= ProAmmoFull / 2)
+            {
+                return ProGood;
+            }
+            if (amount >= ProAmmoFull / 5)
+            {
+                return ProWarn;
+            }
+            return ProDanger;
         }
 
         /// <summary>
@@ -219,89 +369,5 @@ namespace MphRead.Entities
             }
         }
 
-        // ------------------------------------------------------------ styles
-
-        /// <summary>
-        /// Style 1: the strip. A dark band across the foot of the screen with
-        /// energy at the left of it and ammo at the right, and the score up in
-        /// the corner. Quake 3's status bar, which is the shape the reference
-        /// shot is.
-        /// </summary>
-        private void DrawProHudStrip()
-        {
-            float aspect = HudAspectFix;
-            Vector4 health = ProHealthColor();
-            _scene.DrawHudFlatBox(0, 168, 256, 192, ProHudPanel);
-            // A block of the health colour standing in for the energy icon:
-            // the same job the cross does in the reference, with no art.
-            _scene.DrawHudFlatBox(52 * aspect, 173, 57 * aspect, 186, health);
-            ProNumber(62 * aspect, 171, Align.Left, _health.ToString(), ProInk(health), 1.8f);
-            ProBar(52 * aspect, 187, 62, 3, ProHealthFraction(), health);
-            string? ammo = ProAmmoText();
-            if (ammo != null)
-            {
-                ProNumber(256 - 8 * aspect, 171, Align.Right, ammo, ProHudInk, 1.8f);
-            }
-            ProScore(4 * aspect, 12, Align.Left, 1.1f);
-        }
-
-        /// <summary>
-        /// Style 2: corners, and nothing else. No panel at all -- the numbers
-        /// are large enough to read against the room, with a bar under the
-        /// energy one carrying the same reading in a form you can take in
-        /// without reading it.
-        /// </summary>
-        private void DrawProHudCorners()
-        {
-            float aspect = HudAspectFix;
-            Vector4 health = ProHealthColor();
-            ProNumber(52 * aspect, 162, Align.Left, _health.ToString(), ProInk(health), 2.4f);
-            ProBar(52 * aspect, 183, 66, 3, ProHealthFraction(), health);
-            string? ammo = ProAmmoText();
-            if (ammo != null)
-            {
-                ProNumber(256 - 6 * aspect, 162, Align.Right, ammo, ProHudInk, 2.4f);
-            }
-            ProScore(4 * aspect, 12, Align.Left, 1.3f);
-        }
-
-        /// <summary>
-        /// Style 3: one column. Everything the player owns reads top to bottom
-        /// down the left edge -- score, then the weapon list, then energy --
-        /// so there is one place to look instead of three corners.
-        /// </summary>
-        private void DrawProHudColumn()
-        {
-            float aspect = HudAspectFix;
-            Vector4 health = ProHealthColor();
-            _scene.DrawHudFlatBox(2 * aspect, 170, 46 * aspect, 190, ProHudPanel);
-            ProNumber(6 * aspect, 172, Align.Left, _health.ToString(), ProInk(health), 1.5f);
-            ProBar(4 * aspect, 186, 40, 3, ProHealthFraction(), health);
-            string? ammo = ProAmmoText();
-            if (ammo != null)
-            {
-                ProNumber(44 * aspect, 175, Align.Right, ammo, ProHudInk, 0.9f);
-            }
-            ProScore(4 * aspect, 12, Align.Left, 1.1f);
-        }
-
-        /// <summary>
-        /// Style 4: under the crosshair. Energy on a bar in the middle of the
-        /// foot of the screen, where the eye already is, with the number on
-        /// one side of it and ammo on the other.
-        /// </summary>
-        private void DrawProHudCentre()
-        {
-            float aspect = HudAspectFix;
-            Vector4 health = ProHealthColor();
-            ProNumber(128 - 48 * aspect, 170, Align.Right, _health.ToString(), ProInk(health), 1.6f);
-            ProBar(128 - 44 * aspect, 175, 88, 6, ProHealthFraction(), health);
-            string? ammo = ProAmmoText();
-            if (ammo != null)
-            {
-                ProNumber(128 + 48 * aspect, 170, Align.Left, ammo, ProHudInk, 1.6f);
-            }
-            ProScore(128, 12, Align.Center, 1.2f);
-        }
     }
 }

@@ -411,11 +411,21 @@ namespace MphRead.Mods.Launcher.Gui
             Heading(page, "Pro mode HUD");
             _proHud = Add(page, new ToggleRow("Pro mode HUD", Features.ProHud));
             Explain(page, "The competitive layout, as one switch: no helmet and no visor, "
-                + "a plain crosshair that does not move, the weapon list at 170%, and the "
-                + "gun square with the camera. It takes over every HUD setting below "
-                + "while it is on -- they are greyed out, not lost, and come back exactly "
-                + "as you left them when you turn it off.", GuiTheme.Accent);
+                + "a plain crosshair that does not move, the weapon list at 170%, the gun "
+                + "square with the camera, and energy, ammo and the score drawn flat in "
+                + "the corners. Everything it answers for disappears from this page while "
+                + "it is on -- those settings are not lost, and come back exactly as you "
+                + "left them when you turn it off.", GuiTheme.Accent);
             _proHud.Changed += (_, _) => UpdateHudRows();
+
+            // Everything from here to the end of the page is what Pro mode
+            // answers for, so the whole run of it -- headings and explanations
+            // included, not only the controls -- is what has to disappear
+            // while it is on. Taken as a range of the page's children rather
+            // than as a list built by hand: a row added to one of these
+            // sections later would otherwise be left behind, on its own, under
+            // a heading that had gone.
+            int proManagedFrom = page.Children.Count;
 
             Heading(page, "Helmet and HUD");
             _helmetRow = Add(page, new ToggleRow("Draw the helmet",
@@ -454,26 +464,32 @@ namespace MphRead.Mods.Launcher.Gui
             Explain(page, "Stops the gun and the HUD drifting when you move the mouse -- "
                 + "the gun rides square with the camera instead of lagging behind it, "
                 + "like Quake's weapon.");
+            for (int i = proManagedFrom; i < page.Children.Count; i++)
+            {
+                _proManaged.Add(page.Children[i]);
+            }
             UpdateHudRows();
         }
 
+        /// <summary>Every heading, row and note Pro mode HUD answers for. See BuildDisplay.</summary>
+        private readonly List<Control> _proManaged = new List<Control>();
+
         /// <summary>
-        /// Grey out everything Pro mode HUD is answering for.
+        /// Take away everything Pro mode HUD is answering for.
         ///
-        /// Greyed rather than hidden: the rows still show what the player
-        /// chose, so what pro mode is standing in for stays visible, and
-        /// nothing here writes to those settings while it is on -- see
-        /// Features.ProHud.
+        /// Hidden, not greyed: six rows showing values that are not what the
+        /// game is drawing are six chances to conclude the switch is broken.
+        /// Nothing here writes to those settings while it is on either -- they
+        /// are seeded from, and committed to, the *Setting properties, so what
+        /// disappears comes back untouched. See Features.ProHud.
         /// </summary>
         private void UpdateHudRows()
         {
             bool own = !_proHud.On;
-            _helmetRow.IsEnabled = own;
-            _fixedCrosshair.IsEnabled = own;
-            _customCrosshair.IsEnabled = own;
-            _modernHud.IsEnabled = own;
-            _weaponListSize.IsEnabled = own;
-            _fixedWeapon.IsEnabled = own;
+            foreach (Control control in _proManaged)
+            {
+                control.IsVisible = own;
+            }
             UpdateHelmetRows();
         }
 
