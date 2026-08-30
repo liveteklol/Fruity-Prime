@@ -143,6 +143,36 @@ namespace MphRead.Mods.Network
             LastError = null;
         }
 
+        /// <summary>
+        /// Forget what has already been seen, because the demo is about to be
+        /// played again from its first frame.
+        ///
+        /// <see cref="DemoPlayback.Join"/> reads the opening of the file to
+        /// find out what room to load, and then rewinds so that opening is
+        /// actually watched rather than spent. Everything learned along the
+        /// way is kept -- the match state, the roster, who is in which slot
+        /// and as which hunter, all of which the scene is about to be built
+        /// from. What has to go is the bookkeeping that says "I have seen
+        /// newer than this": the ordering guards on the snapshot and intent
+        /// streams would otherwise refuse every rewound packet as stale,
+        /// which is a worse version of the problem the rewind is fixing.
+        /// </summary>
+        public static void RewindPlayback()
+        {
+            _lastSnapshotFrame = 0;
+            Array.Clear(_lastSlotIntentFrame);
+            Array.Clear(RemoteStateValid);
+            Array.Clear(RemoteIntentValid);
+            SnapshotsReceived = 0;
+            SnapshotsSent = 0;
+            SnapshotsOutOfOrder = 0;
+            StatesApplied = 0;
+            IntentsReceived = 0;
+            IntentsOutOfOrder = 0;
+            NetPlayerBridge.Reset();
+            NetDamage.Reset();
+        }
+
         /// <summary>Hands a packet read back from a demo file to this session as if it had just arrived.</summary>
         public static void InjectPlaybackPacket(byte[] data, int length)
         {

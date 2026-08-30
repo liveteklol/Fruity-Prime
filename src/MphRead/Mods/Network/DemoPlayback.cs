@@ -111,7 +111,7 @@ namespace MphRead.Mods.Network
                     }
                     else if (_frame - knownAt >= JoinGraceFrames || AtEnd)
                     {
-                        return true;
+                        return Rewind(path);
                     }
                 }
                 else if (AtEnd)
@@ -126,6 +126,41 @@ namespace MphRead.Mods.Network
             Console.WriteLine($"[demo] \"{path}\": {LastError}");
             Stop();
             return false;
+        }
+
+        /// <summary>
+        /// Go back to the file's first frame, now that the room to load is
+        /// known.
+        ///
+        /// The search above is not free: it hands its records to the session
+        /// to be acted on, and there is no scene yet to act on them, so
+        /// everything in the first second or three of the recording was
+        /// consumed and then thrown away. The replay opened that far in --
+        /// which is why the first thing anybody did after pressing record was
+        /// missing from the file's playback while everything after it was
+        /// fine. Reported as "the first shot is not in the demo", and it was
+        /// in the demo; it was simply never played.
+        ///
+        /// Rewinding costs re-parsing a couple of hundred records. The state
+        /// the search was for stays -- see
+        /// <see cref="NetSession.RewindPlayback"/> for what has to go with it.
+        /// </summary>
+        private static bool Rewind(string path)
+        {
+            _reader?.Dispose();
+            _reader = DemoReader.Open(path);
+            if (_reader == null)
+            {
+                LastError = "That demo could not be read a second time.";
+                Console.WriteLine($"[demo] \"{path}\": {LastError}");
+                Stop();
+                return false;
+            }
+            _frame = 0;
+            _started = false;
+            _pending = _reader.ReadNext();
+            NetSession.RewindPlayback();
+            return true;
         }
 
         /// <summary>

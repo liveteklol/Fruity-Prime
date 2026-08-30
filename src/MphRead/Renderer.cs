@@ -5870,8 +5870,22 @@ namespace MphRead
         public Scene Scene { get; }
         private bool _startedHidden = true;
 
+        /// <summary>
+        /// The smallest the game window may be dragged to.
+        ///
+        /// Not an aesthetic floor: Escape's menu is laid over this window and
+        /// its entries need about 470 pixels of height, so a window shorter
+        /// than that had "Leave match" and "Quit" off the bottom edge -- a
+        /// player who cannot get out of the match. The menu scrolls now and so
+        /// survives anything, but a window this small is not a size anybody
+        /// wants to play at either, and GLFW will honour a minimum where it
+        /// will not honour a request to be sensible.
+        /// </summary>
+        private static readonly Vector2i _minimumSize = new Vector2i(800, 600);
+
         public RenderWindow() : base(_gameWindowSettings, _nativeWindowSettings)
         {
+            MinimumSize = _minimumSize;
             Scene = new Scene(Size, KeyboardState, MouseState, (string title) =>
             {
                 Title = title;

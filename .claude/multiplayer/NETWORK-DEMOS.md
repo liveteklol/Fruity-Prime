@@ -70,6 +70,35 @@ recording, faithfully reproduced).
 state is known plus a 120-frame grace for the roster, which is a few hundred
 frames of parsing rather than the up-to-8-second wall-clock wait it was.
 
+### And then it rewinds
+
+The search is not free: it hands its records to the session to be acted on,
+and there is no scene yet to act on them. So the first one to three seconds
+of every recording were parsed and thrown away, and the replay opened that
+far in. Reported as **"the first shot isn't in the demo"** -- a charged
+missile fired right after pressing record. It was in the demo; it was never
+played.
+
+`DemoPlayback.Rewind` reopens the file at frame 0 once the room key is known,
+and `NetSession.RewindPlayback` clears the bookkeeping that would otherwise
+refuse the rewound packets as stale -- `_lastSnapshotFrame`,
+`_lastSlotIntentFrame`, the bridge and damage baselines -- while **keeping**
+what the search was for: `ServerMatch`, `SlotOccupied`, `SlotHunter`,
+`GameState.Nicknames`, all of which `NetLaunch.BuildPlayers` reads on the
+next line. Re-delivering the same `MatchState` is a no-op (`HandleMatchState`
+only raises `MapChanged` when the room key differs), so nothing reloads.
+
+Measured on a 25 s authority recording, frames 1-1500 with 1410 SlotIntent
+records:
+
+| | frames replayed | intents applied |
+|---|---|---|
+| before | 1499 of 1620 | 1496 of 1666 |
+| after | **1501 of 1500** | **1410 of 1410** |
+
+Every intent in the file now reaches the simulation, and 99.9% of frames get
+exactly one snapshot with no frame taking two.
+
 ## The file
 
 ```

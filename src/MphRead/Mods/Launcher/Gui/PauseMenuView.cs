@@ -1,6 +1,7 @@
 using System;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
 using Avalonia.Threading;
 using MphRead.Mods.Network;
@@ -104,11 +105,24 @@ namespace MphRead.Mods.Launcher.Gui
                 Padding = new Thickness(22, 18, 22, 18),
                 Child = stack
             };
-            panel.Width = panelWidth;
+            panel.MaxWidth = panelWidth;
             panel.CornerRadius = new CornerRadius(6);
             panel.HorizontalAlignment = HorizontalAlignment.Center;
             panel.VerticalAlignment = VerticalAlignment.Center;
-            Content = panel;
+            // Scrolled, and a maximum width rather than a fixed one, because
+            // the host is now the game window and the game window can be any
+            // size the player has dragged it to. Seven entries need about 470
+            // pixels of height; below that the fixed-size version simply drew
+            // the bottom ones off the edge, and "Leave match" and "Quit" not
+            // being on screen is not a menu missing some polish, it is a
+            // player who cannot get out of the match.
+            Content = new ScrollViewer
+            {
+                Content = panel,
+                Padding = new Thickness(12),
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto
+            };
         }
 
         /// <summary>

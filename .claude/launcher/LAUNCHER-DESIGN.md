@@ -85,10 +85,30 @@ Pause menu
   as the game's own pause screen rather than as a dialog the game opened. It was
   a 340x392 box centred on the game before, which is the shape of a settings
   prompt and not of pressing Escape in a game. `PauseMenuWindow.CoverGameWindow`
-  takes the rectangle from `PauseMenu.WindowX/Y/Width/Height`, which
-  `HandleEscape` fills in from the GLFW window; those are client *pixels* and
-  Avalonia's `Width`/`Height` are device-independent, so `RenderScaling` has to
-  come back out of them or the menu overhangs the game by that factor.
+  takes the rectangle from `PauseMenu.WindowX/Y/Width/Height`.
+- **It follows the game window, every frame.** Sampling that rectangle once at
+  open time is not enough: drag the game and the menu stays where it was, which
+  is the floating popup all over again. `PauseMenu.TakeWindowRect` re-reads the
+  GLFW client rect from `Poll` -- already called once a frame while the menu is
+  up -- and `PauseMenuWindow.FollowGameWindow` re-lays both the menu and the
+  in-game settings when it changes. It remains a borderless window *over* the
+  game rather than something drawn *inside* it, because Avalonia cannot render
+  into the GL context; following is what makes that difference invisible.
+- The rectangle is in client **pixels** (what GLFW reports, and what Avalonia's
+  `Position` is in) while `Width`/`Height` are device-independent, so the
+  display scaling has to come back out of them. Take it from
+  `Screens.ScreenFromPoint(...).Scaling`, **not** `RenderScaling`: the latter
+  is 1 until the window has been given a screen, so the constructor's call --
+  the one that stops the window appearing mid-desktop for a frame -- would be
+  wrong on any display not at 100%.
+- **Nothing in it can be clipped.** The panel has a `MaxWidth` rather than a
+  `Width` and sits in a `ScrollViewer`: the host is now the game window and the
+  game window is whatever size it has been dragged to. Seven entries need about
+  470 px of height, and below that the fixed-size version drew "Leave match"
+  and "Quit" off the bottom -- a player who cannot get out of the match.
+  `RenderWindow.MinimumSize` is 800x600 as well, so that case needs a window
+  smaller than the game allows; `-uishot` renders a `pausemenu-small` at
+  560x320 to keep the scroll path checked anyway.
 - The entries are a 420-wide panel centred in it -- the same shape the Android
   overlay already used -- because a column of entries stretched across a 3840
   window is a menu you have to hunt across.

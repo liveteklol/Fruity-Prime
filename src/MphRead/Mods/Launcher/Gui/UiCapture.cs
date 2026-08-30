@@ -54,10 +54,10 @@ namespace MphRead.Mods.Launcher.Gui
             {
                 var settings = new MenuSettings();
                 List<string> rooms = RoomList();
-                foreach ((string name, Control view) in Screens(settings, rooms))
+                foreach ((string name, Control view, Size size) in Screens(settings, rooms))
                 {
                     string path = Path.Combine(directory, $"{name}.png");
-                    if (Capture(view, path))
+                    if (Capture(view, path, size))
                     {
                         written++;
                         Console.WriteLine($"[uishot] {path}");
@@ -90,17 +90,25 @@ namespace MphRead.Mods.Launcher.Gui
             return rooms;
         }
 
-        private static IEnumerable<(string, Control)> Screens(MenuSettings settings,
+        private static IEnumerable<(string, Control, Size)> Screens(MenuSettings settings,
             IReadOnlyList<string> rooms)
         {
-            yield return ("home", new HomeView(settings, rooms));
-            yield return ("settings", new SettingsView(settings));
+            yield return ("home", new HomeView(settings, rooms), _windowSize);
+            yield return ("settings", new SettingsView(settings), _windowSize);
             if (rooms.Count > 0)
             {
-                yield return ("mappicker", new MapPickerView(rooms, rooms[0]));
+                yield return ("mappicker", new MapPickerView(rooms, rooms[0]), _windowSize);
             }
-            yield return ("pausemenu", new PauseMenuView(offerWindowMode: true));
-            yield return ("serverbrowser", ServerList());
+            yield return ("pausemenu", new PauseMenuView(offerWindowMode: true), _windowSize);
+            // Deliberately shorter than the menu's own content, and shorter
+            // than the game window is now allowed to be. The pause menu is
+            // laid over the game window, so its host is whatever size the
+            // player dragged that to, and entries drawn off the bottom edge
+            // are a player who cannot leave the match. This is the check that
+            // the scroll view carries them.
+            yield return ("pausemenu-small", new PauseMenuView(offerWindowMode: true),
+                new Size(560, 320));
+            yield return ("serverbrowser", ServerList(), _windowSize);
         }
 
         /// <summary>
@@ -164,15 +172,15 @@ namespace MphRead.Mods.Launcher.Gui
         /// and without taking focus, so a capture run does not steal the
         /// pointer or flash a window per screen.
         /// </summary>
-        private static bool Capture(Control view, string path)
+        private static bool Capture(Control view, string path, Size size)
         {
             Window? window = null;
             try
             {
                 window = new Window
                 {
-                    Width = _windowSize.Width,
-                    Height = _windowSize.Height,
+                    Width = size.Width,
+                    Height = size.Height,
                     Background = GuiTheme.PanelBrush,
                     RequestedThemeVariant = Avalonia.Styling.ThemeVariant.Dark,
                     SystemDecorations = SystemDecorations.None,
@@ -192,11 +200,11 @@ namespace MphRead.Mods.Launcher.Gui
                 {
                     Dispatcher.UIThread.RunJobs();
                 }
-                window.Measure(_windowSize);
-                window.Arrange(new Rect(_windowSize));
+                window.Measure(size);
+                window.Arrange(new Rect(size));
                 Dispatcher.UIThread.RunJobs();
                 var bitmap = new RenderTargetBitmap(
-                    new PixelSize((int)_windowSize.Width, (int)_windowSize.Height),
+                    new PixelSize((int)size.Width, (int)size.Height),
                     new Vector(96, 96));
                 bitmap.Render(window);
                 bitmap.Save(path);

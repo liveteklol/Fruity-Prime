@@ -36,8 +36,32 @@ namespace MphRead.Mods.Launcher.Gui
     internal sealed class PauseMenuWindow : Window
     {
         private static PauseMenuWindow? _open;
+        /// <summary>
+        /// The settings dialog, while it is up over a match. Tracked so it can
+        /// be moved with the game window too: it covers the same rectangle,
+        /// and one of the two following the game while the other stays put
+        /// would be worse than neither doing it.
+        /// </summary>
+        private static Window? _openSettings;
         private readonly PauseMenuView _view;
         private bool _settingsOpen;
+
+        /// <summary>
+        /// Lay the in-game windows back over the game window, because it has
+        /// moved or been resized. Called from <see cref="PauseMenu.Poll"/>,
+        /// on the game's own thread, which is the toolkit's thread too.
+        /// </summary>
+        internal static void FollowGameWindow()
+        {
+            if (_open != null)
+            {
+                CoverGameWindow(_open);
+            }
+            if (_openSettings != null)
+            {
+                CoverGameWindow(_openSettings);
+            }
+        }
 
         /// <summary>Open the menu, or bring the one already up to the front.</summary>
         public static bool Open()
@@ -154,14 +178,52 @@ namespace MphRead.Mods.Launcher.Gui
                 return;
             }
             window.WindowStartupLocation = WindowStartupLocation.Manual;
+            var origin = new PixelPoint(PauseMenu.WindowX, PauseMenu.WindowY);
+            if (window.Position != origin)
+            {
+                window.Position = origin;
+            }
             // Client pixels, which is what GLFW reports and what Avalonia's
             // Position is in. Width and Height are device-independent, so the
-            // scaling the display is running at has to come back out of them
-            // or the menu overhangs the game by that factor.
-            double scale = window.RenderScaling > 0 ? window.RenderScaling : 1;
-            window.Position = new PixelPoint(PauseMenu.WindowX, PauseMenu.WindowY);
-            window.Width = PauseMenu.WindowWidth / scale;
-            window.Height = PauseMenu.WindowHeight / scale;
+            // display's scaling has to come back out of them or the menu
+            // overhangs the game by that factor.
+            //
+            // Not RenderScaling: it is 1 until the window has been given a
+            // screen, so the first call -- the one in the constructor, which
+            // is what stops the window appearing in the middle of the desktop
+            // for a frame -- would get it wrong on any display not running at
+            // 100%. The screen under the game window knows before anybody has
+            // been shown anything.
+            double scale = ScalingAt(window, origin);
+            double width = PauseMenu.WindowWidth / scale;
+            double height = PauseMenu.WindowHeight / scale;
+            // Only when it actually changed. This runs on every frame of a
+            // drag, and assigning a size is a layout pass whether or not the
+            // number moved; a move is not a resize.
+            if (Math.Abs(window.Width - width) > 0.5
+                || Math.Abs(window.Height - height) > 0.5)
+            {
+                window.Width = width;
+                window.Height = height;
+            }
+        }
+
+        private static double ScalingAt(Window window, PixelPoint point)
+        {
+            try
+            {
+                Avalonia.Platform.Screen? screen = window.Screens?.ScreenFromPoint(point);
+                if (screen != null && screen.Scaling > 0)
+                {
+                    return screen.Scaling;
+                }
+            }
+            catch (Exception)
+            {
+                // A backend with no screen information is not a reason to
+                // refuse to draw the menu.
+            }
+            return window.RenderScaling > 0 ? window.RenderScaling : 1;
         }
 
         private static string WindowLabel()
@@ -199,6 +261,7 @@ namespace MphRead.Mods.Launcher.Gui
             {
                 MenuSettings settings = GameState.LoadSettings();
                 var window = new SettingsWindow(settings, inGame: true);
+                _openSettings = window;
                 await window.ShowDialog(this);
             }
             catch (Exception ex)
@@ -211,6 +274,7 @@ namespace MphRead.Mods.Launcher.Gui
             }
             finally
             {
+                _openSettings = null;
                 _settingsOpen = false;
                 Topmost = wasTopmost;
                 Activate();
