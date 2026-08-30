@@ -81,12 +81,56 @@ Pause menu
 - It talks to the game through volatile flags. GLFW window calls -- closing it,
   changing its border -- belong to the thread that created the window, so the
   menu asks and `PauseMenu.Poll` does it on the game's own thread.
-- It centres on the game window, not the desktop, and is topmost so it clears a
-  borderless-fullscreen game. The settings window it opens is topmost too, and
-  the menu steps out of the topmost band while that dialog is up so the two are
-  not left arguing about which is in front.
+- **It is the size of the game window and laid straight over it**, so it reads
+  as the game's own pause screen rather than as a dialog the game opened. It was
+  a 340x392 box centred on the game before, which is the shape of a settings
+  prompt and not of pressing Escape in a game. `PauseMenuWindow.CoverGameWindow`
+  takes the rectangle from `PauseMenu.WindowX/Y/Width/Height`, which
+  `HandleEscape` fills in from the GLFW window; those are client *pixels* and
+  Avalonia's `Width`/`Height` are device-independent, so `RenderScaling` has to
+  come back out of them or the menu overhangs the game by that factor.
+- The entries are a 420-wide panel centred in it -- the same shape the Android
+  overlay already used -- because a column of entries stretched across a 3840
+  window is a menu you have to hunt across.
+- The fill is a scrim (`GuiTheme.ScrimBrush`, `Ink` at alpha 196) with
+  `TransparencyLevelHint` asking for `Transparent` and falling back to `None`.
+  The match is still running behind it and that is the point; a compositor that
+  will not give a window an alpha channel renders it opaque, which loses the
+  view and nothing else. The panel carries a 1px `EdgeBrush` border, because
+  panel and scrim are otherwise two shades of the same dark.
+- **The settings window does the same when it is opened from here**
+  (`SettingsWindow`, `view.InGame`): same rectangle, no decorations. A fixed
+  980x660 dialog centred on its owner was two different rectangles in two
+  different places for one screen -- and on a game window smaller than that, a
+  dialog hanging off the edges of the thing it belongs to. From the front screen
+  it is still an ordinary 980x660 dialog.
+- Both are topmost so they clear a borderless-fullscreen game, and the menu
+  steps out of the topmost band while the settings are up so the two are not
+  left arguing about which is in front.
 - Its title is "<name> - paused", not the product name: the game window carries
   that, and two windows with one title is what an alt-tab list cannot tell apart.
+
+Server browser (`Gui/ServerRow.cs`)
+
+- **`FormattedText` wraps; `Trimming` alone does not stop it.** A
+  `MaxTextWidth` with a breakable string breaks at the space rather than
+  ellipsizing, so "MP3 PROVING GROUND" became two lines in a 30-pixel row and
+  drew over the server beneath it. `MaxTextHeight = size * 1.6` is what forces
+  one line and lets the trimming apply. A `PushClip` per cell goes with it,
+  because trimming cannot help a single unbreakable word wider than its column
+  -- which "PLAYERS" is at 51 pixels in a 43-pixel heading, and it simply
+  overflowed into "PING".
+- **Columns are pixels from the right, not fractions of the width.**
+  `ServerRow.Columns` fixes ping (34), players (52) and mode (66) and gives
+  what is left to the two columns that hold prose. Fractions of the launcher's
+  400-pixel panel put the map column at 89 pixels, which is not a room name.
+- The browse card widens the panel to 600 while it is up
+  (`HomeView.PanelWidth`), because that card is a five-column table and the
+  others are not. The picture beside it is decoration; the list is the thing
+  being read.
+- `-uishot` renders a `serverbrowser` screen at both 600 and 400 with sample
+  rows, which is how the wrap and the overlap were seen and how the fix was
+  checked. Neither needs a directory or a server to be up.
 
 Implementation pitfalls
 

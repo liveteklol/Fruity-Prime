@@ -29,15 +29,59 @@ namespace MphRead.Mods.Launcher.Gui
     internal sealed class ServerRow : Control
     {
         /// <summary>
-        /// Column left edges as a fraction of the row, except the first, which
-        /// is where the name starts. Shared with the header so the two cannot
-        /// drift apart.
+        /// Where each column starts and how wide it is, worked out from the
+        /// row's width and shared with <see cref="ServerHeader"/> so the two
+        /// cannot drift apart.
+        ///
+        /// Measured from the right, not as fractions of the whole. Fractions
+        /// were what put "MP3 PROVING GROUND" into a 89-pixel map column in
+        /// the launcher's 400-pixel panel, where it wrapped onto a second line
+        /// of a 30-pixel row and drew over the server under it, and squeezed
+        /// the PLAYERS heading into 43 pixels of a column it needs 51 for, so
+        /// it ran into PING. The three columns on the right hold numbers and a
+        /// mode name: what they need is a known number of pixels, not a share
+        /// of however wide the window happens to be. Everything left over goes
+        /// to the two that hold prose, which is where a long name should cost
+        /// something.
         /// </summary>
-        internal const double NameX = 8;
-        internal const double MapFrac = 0.42;
-        internal const double ModeFrac = 0.68;
-        internal const double PlayersFrac = 0.84;
-        internal const double PingFrac = 1.0;
+        internal readonly struct Columns
+        {
+            private const double Margin = 8;
+            private const double Gutter = 10;
+            /// <summary>Fits "999" and the PING heading.</summary>
+            private const double MaxPing = 34;
+            /// <summary>Fits "8/8" and the PLAYERS heading, which is the widest of the five.</summary>
+            private const double MaxPlayers = 52;
+            /// <summary>Fits "Battle"; "Prime Hunter" trims, which is the right one to trim.</summary>
+            private const double MaxMode = 66;
+            /// <summary>The name's share of what the fixed columns leave.</summary>
+            private const double NameShare = 0.44;
+
+            public readonly double NameX, NameWidth;
+            public readonly double MapX, MapWidth;
+            public readonly double ModeX, ModeWidth;
+            /// <summary>Right edge: the players and ping columns are right-aligned.</summary>
+            public readonly double PlayersRight, PlayersWidth;
+            public readonly double PingRight, PingWidth;
+
+            public Columns(double width)
+            {
+                PingRight = width - Margin;
+                PingWidth = MaxPing;
+                PlayersRight = PingRight - MaxPing - Gutter;
+                PlayersWidth = MaxPlayers;
+                // The mode column gives ground first on a narrow row: a
+                // trimmed mode is still readable where a trimmed server name
+                // is not the server anybody was looking for.
+                ModeWidth = Math.Min(MaxMode, Math.Max(0, (width - 200) * 0.4));
+                ModeX = PlayersRight - MaxPlayers - Gutter - ModeWidth;
+                NameX = Margin;
+                double rest = Math.Max(0, ModeX - Gutter - Margin);
+                NameWidth = rest * NameShare;
+                MapX = NameX + NameWidth + Gutter;
+                MapWidth = Math.Max(0, rest - NameWidth - Gutter);
+            }
+        }
 
         public event EventHandler? Clicked;
 
@@ -142,26 +186,37 @@ namespace MphRead.Mods.Launcher.Gui
             {
                 context.FillRectangle(GuiTheme.PanelLightBrush, full, 4);
             }
-            double mapX = Bounds.Width * MapFrac;
-            double modeX = Bounds.Width * ModeFrac;
-            double playersX = Bounds.Width * PlayersFrac;
-            double pingX = Bounds.Width * PingFrac - 8;
-
+            var columns = new Columns(Bounds.Width);
             // The name, and the address under nothing -- there is no room for a
             // second line here, and the address is what the row does when
             // clicked rather than something to compare servers by. It goes in
             // the tooltip instead.
             IBrush nameBrush = _answered ? GuiTheme.TextBrush : GuiTheme.TextDimBrush;
-            Draw(context, _name, NameX, mapX - NameX - 8, nameBrush, bold: true, rightAlign: false);
-            Draw(context, _map, mapX, modeX - mapX - 8, GuiTheme.TextDimBrush,
+            Draw(context, _name, columns.NameX, columns.NameWidth, nameBrush,
+                bold: true, rightAlign: false);
+            Draw(context, _map, columns.MapX, columns.MapWidth, GuiTheme.TextDimBrush,
                 bold: false, rightAlign: false);
-            Draw(context, _mode, modeX, playersX - modeX - 8, GuiTheme.TextDimBrush,
+            Draw(context, _mode, columns.ModeX, columns.ModeWidth, GuiTheme.TextDimBrush,
                 bold: false, rightAlign: false);
-            Draw(context, _players, playersX, pingX - playersX - 8, GuiTheme.TextBrush,
+            Draw(context, _players, columns.PlayersRight, columns.PlayersWidth,
+                GuiTheme.TextBrush, bold: false, rightAlign: true);
+            Draw(context, _ping, columns.PingRight, columns.PingWidth, _pingBrush,
                 bold: false, rightAlign: true);
-            Draw(context, _ping, pingX, 44, _pingBrush, bold: false, rightAlign: true);
         }
 
+        /// <summary>
+        /// One cell: a single line, trimmed to the column, and clipped to it
+        /// whatever the trimming decides.
+        ///
+        /// Both halves are needed. Without a height limit Avalonia wraps at
+        /// the first space rather than ellipsizing, and a wrapped cell in a
+        /// 30-pixel row draws its second line over the row beneath -- which is
+        /// what a two-word map name did. And trimming cannot help a single
+        /// unbreakable word that is wider than its column, which is what
+        /// PLAYERS is: there is no break to take, so it simply overflows into
+        /// the next heading. The clip is what makes that impossible rather
+        /// than unlikely.
+        /// </summary>
         internal static void Draw(DrawingContext context, string text, double x, double width,
             IBrush brush, bool bold, bool rightAlign, double size = 13)
         {
@@ -173,10 +228,16 @@ namespace MphRead.Mods.Launcher.Gui
                 FlowDirection.LeftToRight, GuiTheme.Face(bold), size, brush)
             {
                 MaxTextWidth = width,
+                // One line: enough for the tallest this face gets at this
+                // size, and far short of two.
+                MaxTextHeight = size * 1.6,
                 Trimming = TextTrimming.CharacterEllipsis
             };
             double left = rightAlign ? x - Math.Min(formatted.Width, width) : x;
-            context.DrawText(formatted, new Point(left, 8));
+            using (context.PushClip(new Rect(rightAlign ? x - width : x, 0, width, size * 1.6 + 8)))
+            {
+                context.DrawText(formatted, new Point(left, 8));
+            }
         }
 
         public string Endpoint => _endpoint;
@@ -193,19 +254,16 @@ namespace MphRead.Mods.Launcher.Gui
 
         public override void Render(DrawingContext context)
         {
-            double mapX = Bounds.Width * ServerRow.MapFrac;
-            double modeX = Bounds.Width * ServerRow.ModeFrac;
-            double playersX = Bounds.Width * ServerRow.PlayersFrac;
-            double pingX = Bounds.Width * ServerRow.PingFrac - 8;
-            ServerRow.Draw(context, "SERVER", ServerRow.NameX, mapX - ServerRow.NameX - 8,
+            var columns = new ServerRow.Columns(Bounds.Width);
+            ServerRow.Draw(context, "SERVER", columns.NameX, columns.NameWidth,
                 GuiTheme.TextDimBrush, bold: true, rightAlign: false, size: 11);
-            ServerRow.Draw(context, "MAP", mapX, modeX - mapX - 8,
+            ServerRow.Draw(context, "MAP", columns.MapX, columns.MapWidth,
                 GuiTheme.TextDimBrush, bold: true, rightAlign: false, size: 11);
-            ServerRow.Draw(context, "TYPE", modeX, playersX - modeX - 8,
+            ServerRow.Draw(context, "TYPE", columns.ModeX, columns.ModeWidth,
                 GuiTheme.TextDimBrush, bold: true, rightAlign: false, size: 11);
-            ServerRow.Draw(context, "PLAYERS", playersX, pingX - playersX - 8,
+            ServerRow.Draw(context, "PLAYERS", columns.PlayersRight, columns.PlayersWidth,
                 GuiTheme.TextDimBrush, bold: true, rightAlign: true, size: 11);
-            ServerRow.Draw(context, "PING", pingX, 44,
+            ServerRow.Draw(context, "PING", columns.PingRight, columns.PingWidth,
                 GuiTheme.TextDimBrush, bold: true, rightAlign: true, size: 11);
             // A hairline under the headings, so the list reads as a table.
             context.FillRectangle(GuiTheme.EdgeBrush,

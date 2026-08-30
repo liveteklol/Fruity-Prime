@@ -616,6 +616,12 @@ namespace MphRead.Mods.Network
             }
         }
 
+        /// <summary>
+        /// How far behind a peer's newest intent frame a packet may be and
+        /// still be a reordered straggler rather than a restarted counter.
+        /// </summary>
+        private const uint IntentResetGap = 600;
+
         private void HandleIntent(ReceivedPacket packet, double now)
         {
             Peer? peer = Find(packet.Sender);
@@ -628,7 +634,16 @@ namespace MphRead.Mods.Network
             {
                 IntentPacket intent = IntentPacket.Read(packet.Payload);
                 // UDP reorders; an older frame must not replace a newer one.
-                if (peer.LastIntentFrame != 0 && intent.Frame <= peer.LastIntentFrame)
+                //
+                // Unless it is far enough behind to be a different session
+                // rather than a straggler: a client's counter restarts at
+                // zero when it joins, and a Peer that survived a reconnect --
+                // one that came back to the same endpoint before this server
+                // noticed it had gone -- would otherwise have every packet of
+                // its new session refused until the counter climbed back past
+                // the old one. Same ten seconds NetSession allows.
+                if (peer.LastIntentFrame != 0 && intent.Frame <= peer.LastIntentFrame
+                    && peer.LastIntentFrame - intent.Frame < IntentResetGap)
                 {
                     return;
                 }

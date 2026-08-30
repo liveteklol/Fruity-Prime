@@ -42,6 +42,13 @@ namespace MphRead.Mods.Launcher.Gui
         /// </param>
         public PauseMenuView(bool offerWindowMode)
         {
+            // The host is the size of the game, on every platform: a phone's
+            // overlay is the screen and the desktop's window now covers the
+            // one the match is being played in. So the entries are always a
+            // panel of a stated width in the middle, never a column stretched
+            // across whatever the match happens to be running at -- 1024 or
+            // 3840 -- which is a menu you have to hunt across.
+            const double panelWidth = 420;
             var stack = new StackPanel { Spacing = 4 };
             stack.Children.Add(new Caption("Paused") { Height = 34 });
             _resume = Add(stack, "Resume", offerWindowMode ? "Escape" : "Back",
@@ -88,20 +95,19 @@ namespace MphRead.Mods.Launcher.Gui
             var panel = new Border
             {
                 Background = GuiTheme.PanelBrush,
+                // An edge, because what is behind this is a scrim of nearly
+                // the same colour over a running match: without one the panel
+                // and the dimmed game are two shades of the same dark and the
+                // menu has no shape.
+                BorderBrush = GuiTheme.EdgeBrush,
+                BorderThickness = new Thickness(1),
                 Padding = new Thickness(22, 18, 22, 18),
                 Child = stack
             };
-            if (!offerWindowMode)
-            {
-                // Full-screen overlay: a column of entries spread across a 20:9
-                // phone is a menu you have to hunt across, so it is a panel of
-                // a stated width in the middle. The desktop is left stretching,
-                // because there the window is already this size and a panel
-                // floating inside it would just be a border around a border.
-                panel.Width = 420;
-                panel.HorizontalAlignment = HorizontalAlignment.Center;
-                panel.VerticalAlignment = VerticalAlignment.Center;
-            }
+            panel.Width = panelWidth;
+            panel.CornerRadius = new CornerRadius(6);
+            panel.HorizontalAlignment = HorizontalAlignment.Center;
+            panel.VerticalAlignment = VerticalAlignment.Center;
             Content = panel;
         }
 

@@ -209,7 +209,7 @@ namespace MphRead.Mods.Launcher.Gui
             _layout.ColumnDefinitions = new ColumnDefinitions("*,Auto");
             _layout.RowDefinitions = new RowDefinitions("*");
             _splash.Height = Double.NaN;
-            _panel.Width = 400;
+            _panel.Width = PanelWidth();
             Grid.SetColumn(_splash, 0);
             Grid.SetRow(_splash, 0);
             Grid.SetColumn(_updateBadge, 0);
@@ -220,6 +220,24 @@ namespace MphRead.Mods.Launcher.Gui
 
         private bool _narrow;
         private bool _laidOut;
+
+        /// <summary>
+        /// How wide the column of cards is beside the picture.
+        ///
+        /// Wider for the server list, because that one is a table and the rest
+        /// are not. Five columns -- name, map, mode, players, ping -- do not
+        /// go into 400 pixels: the map column came out at 89, which is not a
+        /// room name, and the PLAYERS heading needs more than its share of
+        /// that width all by itself. The picture beside it is decoration and
+        /// the list is the thing being read, so the list gets the space while
+        /// it is up.
+        /// </summary>
+        private double PanelWidth()
+        {
+            return ReferenceEquals(_current, _browseCard) ? _browseWidth : 400;
+        }
+
+        private const double _browseWidth = 600;
 
         /// <summary>
         /// Answer a "back" gesture: the pointer's Escape and the phone's back
@@ -406,6 +424,10 @@ namespace MphRead.Mods.Launcher.Gui
             _cards.Children.Clear();
             _cards.Children.Add(card);
             _current = card;
+            if (!_narrow)
+            {
+                _panel.Width = PanelWidth();
+            }
             // The splash is a map preview everywhere but the setup card, so it
             // has to be told which one is up.
             if (_matchMap != null)

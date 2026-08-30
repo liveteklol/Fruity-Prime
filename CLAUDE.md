@@ -84,6 +84,7 @@ export ALSOFT_DRIVERS=null PULSE_SERVER=   # else ALSA retries stall frames
 | `MphRead -connect HOST -port N -name X -hunter H` | join from the command line, no launcher |
 | `MphRead -netcheck HOST -port N -name X -hunter H -seconds N [-shots DIR] [-size WxH]` | a real client driven by a script, which reports what it saw. Exit code 0 = pass |
 | `~/mph-net-test/run-remote.sh HOST PORT SECONDS hunter...` | the same check against a server that is not on this machine -- which is the one that matters, since eight clients on one box measure the box |
+| `~/mph-net-test/run-demo.sh SEC [authority\|client]` | record a demo from a scripted client and print what landed in the file. The authority is the case that matters: it is whichever client joined first, so it is normally whoever set the match up, and the server sends it no snapshots at all |
 | `~/mph-net-test/run-rejoin.sh SEC LEAVE REJOIN [host] [port]` | the rejoin scenario, with a control: A hosts and leaves, the authority moves, then one client takes the vacated slot and another takes a fresh one. Prints what each took. `.claude/multiplayer/NETWORK-DIAGNOSTICS.md` |
 | `~/mph-net-test/run-lag.sh MS SECONDS hunter...` | the same check against a loopback server behind `udp-lag.py`, which holds every datagram for `MS` before passing it on. A latency bug reproduced at a number you chose, rather than at whatever the internet is doing -- and the Pi answers in 7-17 ms, so it is the *worse* instrument for one |
 | `MphRead -maptest "ROOM" -players 8 -seconds 22` | load one room with a full house, drive every player, and report what the map holds and whether it survived |
@@ -93,6 +94,8 @@ export ALSOFT_DRIVERS=null PULSE_SERVER=   # else ALSA retries stall frames
 | `MphRead -mapgen ["NAME"]` | generate the room binaries for the custom maps in `maps/`, from the player's own textures. **Nothing ships there** -- the folder is the hook, not a map pack. `-mapmaterials "ROOM"` prints what textures a room can lend. A map is a JSON file; the `.bin` it produces is never committed. `.claude/mapgen/MAP-PIPELINE.md` |
 | `MphRead -cel on\|off [-celbands N] [-celedge N]` / `-fog on\|off` | render options for every path that never opens a launcher, which is every screenshot command. `.claude/render/CEL-SHADING.md` |
 | `MphRead -uishot DIR` | pictures of the launcher's own screens -- home, settings, the map picker, the pause menu -- rendered without anyone looking at a display. The one part of the program that could not otherwise be checked from a headless box |
+| `MphRead -demoinfo FILE [-replay]` | what a recorded match contains -- records, frames, a packet-type histogram, and how well it compressed. `-replay` then runs the file through the real player with no room or window and reports how the packets landed per frame, which is the measurement "the replay stutters" is about. Needs no game files. `.claude/multiplayer/NETWORK-DEMOS.md` |
+| `MphRead -netcheck ... -recorddemo` | the harness client, recording a demo as it plays |
 | `MphRead -mechanics` | print the catalogue in `MECHANICS.md`, generated from the game's own tables |
 | `MphRead` (no arguments, Windows or macOS) | the front screen. The Windows build is a GUI binary, so double-clicking it opens the launcher with no terminal behind it |
 | `MphRead -menu` | the console menu, for people who typed something |
@@ -283,9 +286,23 @@ Shapes worth keeping without opening anything else:
 - **`untested` is a question about the harness, not a pass or a fail.** The
   zoom-replication check read `untested` for months because the tour never
   actually pressed the zoom button, not because zoom was broken.
+- **A frame counter that restarts is not an out-of-order packet.** Every
+  ordering guard on the wire compared frame numbers and nothing else, so a
+  client rejoining a match it had been in for five minutes -- counter back to
+  1, the authority still holding 18000 -- had every intent it sent refused for
+  the next five minutes. Reproduced, and the shape to look for is any guard
+  that says "older than what I have" without also asking "older by how much".
+- **A ping is a measurement of the code path, not only of the wire.** The
+  number on the scoreboard read 20 ms to a server 1 ms away by ICMP because
+  the reply waited for the next rendered frame and for two poll-sleeps on the
+  way. Now 1 ms on loopback, where it was 8-11.
 - **A randomised run against a loopback server is a regression check, not a
   real-world one, and must not be reported as one** — it has none of the
   reordering, jitter or CPU load the bugs above were found under.
+
+Recording and watching a match back -- the file format, the two things a demo
+has to synthesize because they were never received, and why the player counts
+frames rather than milliseconds: `.claude/multiplayer/NETWORK-DEMOS.md`.
 
 Full postmortem, measurements, before/after tables, and the traps that cost
 the most time: `.claude/multiplayer/NETWORK-DIAGNOSTICS.md`. The

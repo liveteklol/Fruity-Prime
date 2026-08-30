@@ -46,6 +46,18 @@ namespace MphRead.Mods.Launcher.Gui
         public static readonly IBrush BadBrush = new SolidColorBrush(Bad);
 
         /// <summary>
+        /// What the pause menu and the in-game settings lay over the match.
+        ///
+        /// Dark enough to read a menu on and clear enough to watch through,
+        /// because the match behind it is still running -- a networked one
+        /// cannot be paused, and hiding it would be a lie. A compositor that
+        /// refuses window transparency renders this opaque instead, which
+        /// costs the view and nothing else.
+        /// </summary>
+        public static readonly IBrush ScrimBrush =
+            new SolidColorBrush(Color.FromArgb(196, Ink.R, Ink.G, Ink.B));
+
+        /// <summary>
         /// The display face. Inter is embedded in the build rather than looked
         /// up on the system: the WinForms theme can ask for Bahnschrift and
         /// fall back through four more faces because Windows is known to have

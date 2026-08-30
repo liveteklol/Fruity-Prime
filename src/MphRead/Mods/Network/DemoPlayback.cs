@@ -1,6 +1,4 @@
 using System;
-using System.Diagnostics;
-using System.Threading;
 
 namespace MphRead.Mods.Network
 {
@@ -12,6 +10,14 @@ namespace MphRead.Mods.Network
     /// handler, room transition and match-end sequence runs unchanged; this
     /// class only decides *when* each recorded packet gets handed over.
     ///
+    /// "When" is a frame number, not a moment. <see cref="PumpFrame"/> is
+    /// called once per simulated frame and releases exactly the packets the
+    /// recorder saw on the matching frame of its own run, so the replay has
+    /// the same packets-per-frame the recording did -- however fast this
+    /// machine is drawing, and however long the room took to load in the
+    /// middle. See <see cref="DemoFile"/> for the three ways the stopwatch
+    /// this replaces got that wrong.
+    ///
     /// There is no real local player during playback, so the viewer starts
     /// and stays in <see cref="SpectatorMode"/>; Space additionally toggles
     /// a free no-clip camera on top of that, for looking around rather than
@@ -21,7 +27,9 @@ namespace MphRead.Mods.Network
     {
         private static DemoReader? _reader;
         private static DemoRecord? _pending;
-        private static Stopwatch? _clock;
+        /// <summary>The frame of the recording about to be replayed.</summary>
+        private static uint _frame;
+        private static bool _started;
 
         public static bool IsActive { get; private set; }
 
@@ -37,13 +45,39 @@ namespace MphRead.Mods.Network
         public static string? LastError { get; private set; }
 
         /// <summary>
-        /// Open the file and wait for the first match info, the same shape
-        /// as <see cref="NetLaunch.Join"/> -- blocking, called off the UI
-        /// thread, true once <c>NetSession.ServerMatch</c> knows what room
-        /// to load.
+        /// How far into the recording <see cref="Join"/> will look for the
+        /// match info before giving up. Twenty seconds of recorded frames:
+        /// the server repeats its match state once a second, so a file that
+        /// has not said what room it is by then does not contain one.
+        /// </summary>
+        private const uint JoinSearchFrames = 60 * 20;
+
+        /// <summary>
+        /// Frames to keep pumping after the room key is known.
+        ///
+        /// BuildPlayers, called right after this, reads NetSession.SlotHunter
+        /// and SlotOccupied to decide every player's hunter and whether their
+        /// slot is even active, and those come from Roster packets that do not
+        /// necessarily land in the same burst as the MatchState that answers
+        /// ServerMatch first. Returning on the room key alone showed real
+        /// players with the wrong hunter, or briefly not active at all. The
+        /// roster repeats once a second, so two of those.
+        /// </summary>
+        private const uint JoinGraceFrames = 120;
+
+        /// <summary>
+        /// Open the file and wind it forward to the first match info, the
+        /// same shape as <see cref="NetLaunch.Join"/> -- true once
+        /// <c>NetSession.ServerMatch</c> knows what room to load.
+        ///
+        /// Blocking, and called off the UI thread for that reason, but no
+        /// longer *waiting*: a live join waits on a server, and this reads a
+        /// file, so it costs a few hundred frames of parsing rather than the
+        /// eight seconds the wall-clock version could spend.
         /// </summary>
         public static bool Join(string path, int timeoutMs = 8000)
         {
+            _ = timeoutMs; // kept for the call site; nothing here waits on a clock
             LastError = null;
             _reader = DemoReader.Open(path);
             if (_reader == null)
@@ -60,35 +94,30 @@ namespace MphRead.Mods.Network
             }
             NetSession.StartPlayback();
             IsActive = true;
-            _clock = Stopwatch.StartNew();
+            _frame = 0;
+            _started = false;
             _pending = _reader.ReadNext();
             bool hadRecords = _pending != null;
-            // Not returned the instant the room key is known: BuildPlayers
-            // (called right after this) reads NetSession.SlotHunter and
-            // SlotOccupied to decide every player's hunter and whether their
-            // slot is even active, and those come from Roster/Snapshot
-            // packets that do not necessarily land in the same burst as the
-            // MatchState that answers ServerMatch first. Returning too early
-            // showed real players with the wrong hunter, or briefly not
-            // active at all -- see the demo playback bug notes.
-            const long gracePeriodMs = 1000;
             long knownAt = -1;
-            while (_clock.ElapsedMilliseconds < timeoutMs)
+            while (_frame < JoinSearchFrames)
             {
                 PumpFrame();
-                NetSession.Update(_clock.Elapsed.TotalSeconds);
+                NetSession.Update(_frame / 60.0);
                 if (NetSession.ServerMatch?.RoomKey.Length > 0)
                 {
                     if (knownAt < 0)
                     {
-                        knownAt = _clock.ElapsedMilliseconds;
+                        knownAt = _frame;
                     }
-                    else if (_clock.ElapsedMilliseconds - knownAt >= gracePeriodMs || AtEnd)
+                    else if (_frame - knownAt >= JoinGraceFrames || AtEnd)
                     {
                         return true;
                     }
                 }
-                Thread.Sleep(20);
+                else if (AtEnd)
+                {
+                    break;
+                }
             }
             LastError = !hadRecords
                 ? "That demo file is empty -- nothing was ever recorded to it."
@@ -99,15 +128,25 @@ namespace MphRead.Mods.Network
             return false;
         }
 
-        /// <summary>Called once a frame: hands over every recorded packet whose time has come.</summary>
+        /// <summary>
+        /// Called once a frame: hands over every packet the recorder saw on
+        /// this frame of its own run.
+        /// </summary>
         public static void PumpFrame()
         {
-            if (!IsActive || _reader == null || _clock == null)
+            if (!IsActive || _reader == null)
             {
                 return;
             }
-            long elapsed = _clock.ElapsedMilliseconds;
-            while (_pending is DemoRecord record && record.ElapsedMs <= elapsed)
+            // The first pumped frame is frame 0 of the recording; every one
+            // after it is the next. Advancing before the release instead
+            // would skip whatever the recorder caught on its own first frame.
+            if (_started)
+            {
+                _frame++;
+            }
+            _started = true;
+            while (_pending is DemoRecord record && record.Frame <= _frame)
             {
                 NetSession.InjectPlaybackPacket(record.Data, record.Data.Length);
                 _pending = _reader.ReadNext();
@@ -120,7 +159,8 @@ namespace MphRead.Mods.Network
             _reader?.Dispose();
             _reader = null;
             _pending = null;
-            _clock = null;
+            _frame = 0;
+            _started = false;
         }
     }
 }

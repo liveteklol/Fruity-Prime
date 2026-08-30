@@ -92,6 +92,7 @@ namespace MphRead.Mods.Network
             // NetPlayerBridge.ForgetSlot.
             NetPlayerBridge.ForgetSlot(slot);
             NetDamage.ForgetSlot(slot);
+            NetSession.ForgetSlot(slot);
             // The same flags Scene.AddPlayer sets, minus the bot marking:
             // a networked player is driven by relayed intent, not by AI.
             player.LoadFlags |= LoadFlags.SlotActive;
@@ -159,6 +160,7 @@ namespace MphRead.Mods.Network
             // clearing has to happen either way round.
             NetPlayerBridge.ForgetSlot(slot);
             NetDamage.ForgetSlot(slot);
+            NetSession.ForgetSlot(slot);
             player.LoadFlags &= ~LoadFlags.Active;
             // SlotActive is deliberately left on. It is what Scene.AddRoom and
             // Scene.OnLoad key off, and clearing it would mean this slot's

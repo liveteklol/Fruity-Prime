@@ -95,6 +95,10 @@ namespace MphRead.Mods.Network
             try
             {
                 _transport = new NetTransport(0);
+                // The server measures everyone's round trip by pinging them,
+                // so the reply must not wait for a frame boundary: see
+                // NetTransport.AnswerPingsImmediately.
+                _transport.AnswerPingsImmediately();
                 // Resolve rather than Parse: IPAddress.Parse only accepts a
                 // literal, so a hostname threw here and the join silently
                 // failed -- the session stayed offline while the launcher
@@ -203,6 +207,7 @@ namespace MphRead.Mods.Network
             SnapshotsReceived = 0;
             SnapshotsSent = 0;
             SnapshotsOutOfOrder = 0;
+            IntentsOutOfOrder = 0;
             _lastSnapshotFrame = 0;
             StatesApplied = 0;
             IntentsReceived = 0;
@@ -363,8 +368,11 @@ namespace MphRead.Mods.Network
                     HandleRoster(packet);
                     break;
                 case PacketType.Ping when Role == NetRole.Client:
-                    // Echo the payload: it carries the id the server uses to
-                    // tell this reply from the one before it.
+                    // Normally answered on the transport's own thread before
+                    // it ever reaches here, which is what keeps the reported
+                    // ping a measurement of the network rather than of this
+                    // machine's frame rate. Kept as the fallback for a
+                    // transport that was not asked to.
                     if (_hostEndPoint != null)
                     {
                         _transport?.Send(_hostEndPoint, PacketType.Pong, packet.Payload);
@@ -420,8 +428,11 @@ namespace MphRead.Mods.Network
                 return;
             }
             IntentPacket intent = IntentPacket.Read(packet.Payload);
-            // UDP reorders; an older frame must not overwrite a newer one.
-            if (peer.LastIntentFrame != 0 && intent.Frame <= peer.LastIntentFrame)
+            // UDP reorders; an older frame must not overwrite a newer one --
+            // unless it is so much older that the peer restarted its counter.
+            // See HandleSlotIntent.
+            if (peer.LastIntentFrame != 0 && intent.Frame <= peer.LastIntentFrame
+                && peer.LastIntentFrame - intent.Frame < IntentResetGap)
             {
                 return;
             }
@@ -456,8 +467,24 @@ namespace MphRead.Mods.Network
             }
             IntentPacket intent = IntentPacket.Read(packet.Payload[1..]);
             // UDP reorders; an older frame must not overwrite a newer one.
-            if (_lastSlotIntentFrame[slot] != 0 && intent.Frame <= _lastSlotIntentFrame[slot])
+            //
+            // "Older", though, means older than what this peer was sending a
+            // moment ago -- not older than what the peer who held this slot
+            // before them was sending. A client's frame counter starts at
+            // zero on NetSession.StartClient, so somebody rejoining a match
+            // they had been playing for five minutes comes back numbering
+            // from 1 while this array still holds 18000, and every intent
+            // they send is refused for the next five minutes: they are drawn
+            // wherever they were standing when they left, their aim and their
+            // trigger never arrive, and on the authority -- which is the only
+            // machine whose shots count -- they can neither hit nor be hit
+            // where anyone can see them. The same gap the snapshot stream
+            // has: below it this is a reordered straggler, above it the
+            // counter has restarted and the newcomer is who to believe.
+            if (_lastSlotIntentFrame[slot] != 0 && intent.Frame <= _lastSlotIntentFrame[slot]
+                && _lastSlotIntentFrame[slot] - intent.Frame < IntentResetGap)
             {
+                IntentsOutOfOrder++;
                 return;
             }
             _lastSlotIntentFrame[slot] = intent.Frame;
@@ -467,6 +494,49 @@ namespace MphRead.Mods.Network
         }
 
         private static readonly uint[] _lastSlotIntentFrame = new uint[PlayerEntity.SlotCapacity];
+
+        /// <summary>
+        /// How far behind the newest intent a packet may be and still be
+        /// treated as a reordered straggler rather than a peer whose counter
+        /// has restarted. The same ten seconds at sixty frames the snapshot
+        /// stream allows: reordering is a matter of milliseconds, so anything
+        /// this far back is a different session.
+        /// </summary>
+        private const uint IntentResetGap = 600;
+
+        /// <summary>Relayed intents thrown away as out of order, for the report.</summary>
+        public static long IntentsOutOfOrder { get; private set; }
+
+        /// <summary>
+        /// Forget everything this session keeps for one slot, because
+        /// somebody else is in it now.
+        ///
+        /// The per-slot state <see cref="NetPlayerBridge.ForgetSlot"/> clears
+        /// is the simulation's; this is the wire's, and it was not cleared
+        /// anywhere. A vacated slot kept its last occupant's intent flagged
+        /// valid, so the authority went on placing, aiming and firing a
+        /// player who had left -- and kept their frame counter, which is what
+        /// refused the next occupant's packets.
+        /// </summary>
+        public static void ForgetSlot(int slot)
+        {
+            if (slot < 0 || slot >= PlayerEntity.SlotCapacity)
+            {
+                return;
+            }
+            _lastSlotIntentFrame[slot] = 0;
+            RemoteIntentValid[slot] = false;
+            RemoteIntents[slot] = default;
+            RemoteStateValid[slot] = false;
+            RemoteStates[slot] = default;
+            for (int i = 0; i < _peers.Count; i++)
+            {
+                if (_peers[i].SlotIndex == slot)
+                {
+                    _peers[i].LastIntentFrame = 0;
+                }
+            }
+        }
 
         /// <summary>
         /// The running match, as last reported by a dedicated server. Null
@@ -790,6 +860,12 @@ namespace MphRead.Mods.Network
             };
             header.Write(_scratch);
             SnapshotsSent++;
+            // A demo only ever contains what this client *received*, and the
+            // server forwards a snapshot to every peer except the one that
+            // sent it -- so the authority's own demo had no snapshots in it
+            // at all, which is every spawn, every hit and the whole
+            // scoreboard. Same trick as the intent below.
+            DemoRecorder.RecordOwnSnapshot(_scratch.AsSpan(0, offset));
             if (asAuthority)
             {
                 // One send to the server, which relays to every other peer.

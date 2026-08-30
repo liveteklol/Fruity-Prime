@@ -7,6 +7,7 @@ using Avalonia.Controls;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
+using MphRead.Mods.Network;
 
 namespace MphRead.Mods.Launcher.Gui
 {
@@ -99,7 +100,53 @@ namespace MphRead.Mods.Launcher.Gui
                 yield return ("mappicker", new MapPickerView(rooms, rooms[0]));
             }
             yield return ("pausemenu", new PauseMenuView(offerWindowMode: true));
+            yield return ("serverbrowser", ServerList());
         }
+
+        /// <summary>
+        /// The browser's table, at the width the panel gives it, with rows
+        /// standing in for servers that are not up.
+        ///
+        /// Built here rather than reached through HomeView because the card is
+        /// private to it and only fills in when a directory answers -- and the
+        /// fault this is for (a map name wrapping onto the row below, headings
+        /// running into each other) is a property of the columns and the
+        /// width, not of any real server. Both widths are drawn: the panel's,
+        /// and the 400 the rest of the cards use, so a narrow row is checked
+        /// too.
+        /// </summary>
+        private static Control ServerList()
+        {
+            var stack = new StackPanel { Spacing = 18, Margin = new Thickness(12) };
+            foreach (double width in new[] { 600.0, 400.0 })
+            {
+                var list = new StackPanel { Spacing = 2, Width = width };
+                list.Children.Add(new ServerHeader());
+                foreach ((string name, string room, GameMode mode, int players, int ping) in _sampleServers)
+                {
+                    var row = new ServerRow(name, "203.0.113.7:27888");
+                    row.SetStatus(new ServerStatus
+                    {
+                        Online = true,
+                        RoomKey = room,
+                        Mode = mode,
+                        Players = players,
+                        MaxPlayers = 8,
+                        Latency = ping
+                    });
+                    list.Children.Add(row);
+                }
+                stack.Children.Add(list);
+            }
+            return stack;
+        }
+
+        private static readonly (string, string, GameMode, int, int)[] _sampleServers =
+        {
+            ("france-mining.com", "MP3 PROVING GROUND", GameMode.Battle, 3, 41),
+            ("A very long server name indeed", "MP7 PROCESSOR CORE", GameMode.PrimeHunter, 8, 152),
+            ("lan", "MP2 HARVESTER", GameMode.Bounty, 1, 2)
+        };
 
         /// <summary>
         /// Render one screen.

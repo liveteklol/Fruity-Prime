@@ -629,7 +629,18 @@ namespace MphRead.Mods
                     seconds = parsedSeconds;
                 }
                 Environment.ExitCode = Network.NetCheckClient.Run(check, ParsePort(args),
-                    ParseName(args), ParseHunter(args), seconds, shots, width, height);
+                    ParseName(args), ParseHunter(args), seconds, shots, width, height,
+                    recordDemo: HasFlag(args, "recorddemo"));
+                return true;
+            }
+
+            // What a recorded match actually contains. Reads the file and
+            // nothing else -- no room, no window, no game files.
+            string? demoInfo = ValueAfter(args, "demoinfo");
+            if (demoInfo != null)
+            {
+                Environment.ExitCode = Network.DemoInfo.Print(demoInfo,
+                    replay: HasFlag(args, "replay"));
                 return true;
             }
 

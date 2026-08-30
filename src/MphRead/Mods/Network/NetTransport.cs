@@ -59,10 +59,20 @@ namespace MphRead.Mods.Network
         /// <summary>
         /// Bytes the OS may hold before the worker thread gets to them. The
         /// default (64 KB) is the other half of the same problem: the worker
-        /// sleeps a millisecond at a time, and a millisecond of eight clients
-        /// is not the issue -- a scheduling hiccup of fifty is.
+        /// is quick but it is still one thread, and a scheduling hiccup of
+        /// fifty milliseconds with eight clients talking is a lot of bytes.
         /// </summary>
         private const int SocketBufferBytes = 1 << 20;
+
+        private volatile bool _autoPong;
+
+        /// <summary>
+        /// Answer Ping on this thread instead of queueing it for the game
+        /// loop. Opt-in: a session that has a frame to wait for wants this
+        /// and a directory server, whose replies are part of its own
+        /// bookkeeping, does not.
+        /// </summary>
+        public void AnswerPingsImmediately() => _autoPong = true;
 
         public int LocalPort { get; }
         public long PacketsDropped { get; private set; }
@@ -103,6 +113,9 @@ namespace MphRead.Mods.Network
                 // A system that refuses the size keeps its default; the
                 // session still works, it just tolerates less of a stall.
             }
+            // Only so the worker notices _running going false; nothing waits
+            // on this in normal operation.
+            _socket.Client.ReceiveTimeout = 500;
             _socket.Client.Bind(new IPEndPoint(IPAddress.Any, port));
             LocalPort = ((IPEndPoint)_socket.Client.LocalEndPoint!).Port;
             _running = true;
@@ -121,15 +134,47 @@ namespace MphRead.Mods.Network
             {
                 try
                 {
-                    if (_socket.Available == 0)
+                    // Blocking, with a timeout only so shutdown is prompt.
+                    //
+                    // This used to poll Available and Thread.Sleep(1) between
+                    // passes, which put an arrival delay on the front of every
+                    // packet the session ever received -- a millisecond at
+                    // best, and Sleep(1) is not a millisecond on Windows,
+                    // where the scheduler's tick is 15.6 ms unless something
+                    // in the process has raised the timer resolution. The
+                    // cost showed up as ping: the number on the scoreboard is
+                    // a round trip through two of these loops, so a server
+                    // one millisecond away by ICMP was reported at rather
+                    // more. Blocking costs nothing -- the thread exists for
+                    // this and does nothing else -- and hands the packet over
+                    // the moment the kernel has it.
+                    IPEndPoint sender = any;
+                    byte[] data;
+                    try
                     {
-                        Thread.Sleep(1);
+                        data = _socket.Receive(ref sender);
+                    }
+                    catch (SocketException ex) when (ex.SocketErrorCode == SocketError.TimedOut)
+                    {
                         continue;
                     }
-                    IPEndPoint sender = any;
-                    byte[] data = _socket.Receive(ref sender);
                     if (data.Length == 0)
                     {
+                        continue;
+                    }
+                    // Answered here rather than from the game loop, when the
+                    // session asked for it.
+                    //
+                    // A Pong needs no game state: it echoes the id back so the
+                    // server can match the reply to the ping it sent. Waiting
+                    // for the next frame to do that added anything up to a
+                    // whole frame -- half of one on average, more when the
+                    // frame ran long -- to a measurement whose entire purpose
+                    // is to describe the network. Every player's ping read
+                    // about a frame worse than their connection.
+                    if (_autoPong && data.Length >= 1 && (PacketType)data[0] == PacketType.Ping)
+                    {
+                        Send(sender, PacketType.Pong, data.AsSpan(1));
                         continue;
                     }
                     if (Volatile.Read(ref _inboxCount) >= MaxQueuedPackets)

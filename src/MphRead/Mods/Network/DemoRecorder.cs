@@ -9,13 +9,19 @@ namespace MphRead.Mods.Network
     /// matches only) to whenever they ask again or the match ends.
     ///
     /// Fed from <see cref="NetSession.Update"/>'s own drain loop -- it sees
-    /// exactly what the session sees, in the same order, so a replay through
-    /// <see cref="DemoPlayback"/> reproduces exactly what this client saw.
+    /// exactly what the session sees, in the same order, on the same frame,
+    /// so a replay through <see cref="DemoPlayback"/> reproduces exactly what
+    /// this client saw.
+    ///
+    /// Two things this client never receives are synthesized instead, because
+    /// a demo made of arrivals alone is missing whatever this machine already
+    /// knew: its own intent (<see cref="RecordOwnIntent"/>) and, when it is
+    /// the authority, its own snapshot (<see cref="RecordOwnSnapshot"/>).
     /// </summary>
     internal static class DemoRecorder
     {
         private static DemoWriter? _writer;
-        private static long _startTimeMs;
+        private static uint _startFrame;
 
         public static bool IsRecording => _writer != null;
 
@@ -42,7 +48,7 @@ namespace MphRead.Mods.Network
                 return false;
             }
             CurrentPath = path;
-            _startTimeMs = Environment.TickCount64;
+            _startFrame = NetSession.NetFrame;
             return true;
         }
 
@@ -59,7 +65,7 @@ namespace MphRead.Mods.Network
             {
                 return;
             }
-            _writer.WriteRecord(ElapsedMs(), packet.Data.AsSpan(0, packet.Length));
+            _writer.WriteRecord(Frame(), packet.Data.AsSpan(0, packet.Length));
         }
 
         /// <summary>
@@ -81,10 +87,52 @@ namespace MphRead.Mods.Network
             buffer[0] = (byte)PacketType.SlotIntent;
             buffer[1] = (byte)slot;
             intentBytes.CopyTo(buffer[2..]);
-            _writer.WriteRecord(ElapsedMs(), buffer);
+            _writer.WriteRecord(Frame(), buffer);
         }
 
-        private static uint ElapsedMs() => (uint)Math.Max(0, Environment.TickCount64 - _startTimeMs);
+        /// <summary>
+        /// Synthesizes a Snapshot record for the one this machine is about to
+        /// publish, when this machine is the one publishing them.
+        ///
+        /// Without it, a demo recorded by the authority contains no snapshots
+        /// at all -- the server forwards them to every peer *except* the one
+        /// that sent them, which is right on the wire and leaves a hole in the
+        /// file. And the snapshot is not one stream among several: it is the
+        /// only carrier of health, score, the damage sequence and the spawn
+        /// flag, and <see cref="NetPlayerBridge.ApplyState"/> is the only
+        /// thing during playback that ever calls <c>ModNetSpawn</c>. So an
+        /// authority's demo did not merely look thin, it opened on an empty
+        /// room: nobody was ever placed, nothing was ever hit, and no score
+        /// ever moved.
+        ///
+        /// The authority is whichever client connected first, which is
+        /// normally whoever set the match up -- so this was the common case,
+        /// not the corner one.
+        /// </summary>
+        internal static void RecordOwnSnapshot(ReadOnlySpan<byte> payload)
+        {
+            if (_writer == null)
+            {
+                return;
+            }
+            Span<byte> buffer = stackalloc byte[1 + payload.Length];
+            buffer[0] = (byte)PacketType.Snapshot;
+            payload.CopyTo(buffer[1..]);
+            _writer.WriteRecord(Frame(), buffer);
+        }
+
+        /// <summary>
+        /// Simulation frames since recording started.
+        ///
+        /// The frame counter and not the clock: the whole point is that the
+        /// player releases these on the frame they were recorded on, whatever
+        /// either machine's frame rate is doing. See <see cref="DemoFile"/>.
+        /// </summary>
+        private static uint Frame()
+        {
+            uint now = NetSession.NetFrame;
+            return now > _startFrame ? now - _startFrame : 0;
+        }
 
         private static string SanitizeFileName(string name)
         {
