@@ -4,8 +4,10 @@ using MphRead.Entities;
 namespace MphRead.Mods
 {
     /// <summary>
-    /// Watching another connected player in first person, as if playing as
-    /// them -- reached from the pause menu, multiplayer only.
+    /// Watching the match instead of playing it -- reached from the pause
+    /// menu, multiplayer only. It opens on the map, on a free camera of its
+    /// own (<see cref="FreeCamera"/>), and a left click moves into the
+    /// players, one per click, in first person as if playing as them.
     ///
     /// The whole thing is one pointer swap: <see cref="PlayerEntity.Main"/>
     /// is already what the camera, the HUD and the weapon viewmodel all key
@@ -22,18 +24,49 @@ namespace MphRead.Mods
     {
         public static bool IsSpectating { get; private set; }
 
+        /// <summary>
+        /// Looking around the map on the spectator's own camera, rather than
+        /// out of some player's eyes. Where spectating starts.
+        ///
+        /// Owned by the scene, which is what actually holds the camera:
+        /// <c>Scene.SetFreeCamera</c> reports the change here through
+        /// <see cref="NoteFreeCamera"/> rather than this class trying to keep
+        /// a second copy of the truth. Space toggles it (see the render
+        /// window's key handling) and the first left click leaves it.
+        /// </summary>
+        public static bool FreeCamera { get; private set; }
+
+        /// <summary>
+        /// The camera this mode wants, for the render loop to act on: true
+        /// for the free one, false for a player's, null for nothing pending.
+        ///
+        /// Both callers -- the pause menu's Spectate and Rejoin entries --
+        /// run on the game's own thread, but neither has the scene to hand,
+        /// and the camera is the scene's. So they leave the decision here and
+        /// <c>Scene.OnRenderFrame</c> takes it between frames, the same shape
+        /// <see cref="PauseMenu"/> uses for the window work it cannot do
+        /// from a click handler either.
+        /// </summary>
+        private static bool? _cameraRequest;
+
         /// <summary>Hidden in the adventure/single-player pause menu -- there is nobody else to watch.</summary>
         public static bool CanSpectate => GameState.Multiplayer;
 
-        public static void Start()
+        /// <param name="watchSomeone">
+        /// Skip the overview and go straight to a player, for demo playback,
+        /// which has no view of its own to have just left.
+        /// </param>
+        public static void Start(bool watchSomeone = false)
         {
             if (IsSpectating || !CanSpectate)
             {
                 return;
             }
             int next = FindNextActiveSlot(PlayerEntity.MainPlayerIndex);
-            if (next == -1)
+            if (watchSomeone && next == -1)
             {
+                // Nobody to watch yet: the demo path calls this every frame
+                // until there is somebody, so this is "not yet", not "no".
                 return;
             }
             IsSpectating = true;
@@ -46,10 +79,25 @@ namespace MphRead.Mods
             {
                 PlayerEntity.Players[localSlot].ModSetSpectating(true);
             }
-            Switch(next);
+            if (watchSomeone)
+            {
+                Switch(next);
+                return;
+            }
+            // The overview first, whether or not there is anybody to watch.
+            // Spectating is "I am out of the match and looking at it", and
+            // being dropped into a stranger's first-person view the instant
+            // you ask for it is a jump cut that also loses the thing worth
+            // having -- the map itself. A click moves on to the players; the
+            // camera starts where the player's own view was, so this reads as
+            // stepping out of your body rather than as a cut somewhere else.
+            _cameraRequest = true;
         }
 
-        /// <summary>Left click, while spectating: move on to the next connected player.</summary>
+        /// <summary>
+        /// Left click, while spectating: into the players, and then on to the
+        /// next one each click after that.
+        /// </summary>
         public static void CycleNext()
         {
             if (!IsSpectating)
@@ -57,10 +105,32 @@ namespace MphRead.Mods
                 return;
             }
             int next = FindNextActiveSlot(PlayerEntity.MainPlayerIndex);
-            if (next != -1)
+            if (next == -1)
             {
-                Switch(next);
+                // Nobody to switch to. In the overview that means the click
+                // does nothing, which is better than dropping the free camera
+                // to follow a player who is not there.
+                return;
             }
+            if (FreeCamera)
+            {
+                _cameraRequest = false;
+            }
+            Switch(next);
+        }
+
+        /// <summary>The scene reporting what it did with the camera. See <see cref="FreeCamera"/>.</summary>
+        internal static void NoteFreeCamera(bool on)
+        {
+            FreeCamera = on;
+        }
+
+        /// <summary>The render loop taking the pending camera change, if there is one.</summary>
+        internal static bool? TakeCameraRequest()
+        {
+            bool? request = _cameraRequest;
+            _cameraRequest = null;
+            return request;
         }
 
         /// <summary>
@@ -107,6 +177,9 @@ namespace MphRead.Mods
             int localSlot = Network.NetHooks.LocalSlot;
             PlayerEntity.MainPlayerIndex = localSlot;
             IsSpectating = false;
+            // Back behind your own eyes, whichever of the two spectator
+            // cameras was up.
+            _cameraRequest = false;
             if (localSlot >= 0 && localSlot < GameState.Points.Length)
             {
                 PlayerEntity.Players[localSlot].ModSetSpectating(false);
@@ -120,6 +193,8 @@ namespace MphRead.Mods
         public static void Reset()
         {
             IsSpectating = false;
+            FreeCamera = false;
+            _cameraRequest = null;
         }
 
         private static int FindNextActiveSlot(int fromSlot)

@@ -24,7 +24,7 @@ Sections
 
 | Section | What is on it |
 |---|---|
-| Display | window mode; the helmet switch with its two opacity sliders; HUD opacity |
+| Display | window mode; performance and cel shading; **Pro mode HUD**; the helmet switch with its two opacity sliders; crosshair, modern HUD and weapon-list size; fixed weapon |
 | Audio | sound-effect and music volume; the game's text language |
 | Controls | mouse sensitivity, invert either axis, and every key binding, plus reset to defaults |
 | Match rules | point goal, time limit, damage level, team play, friendly fire, hunter radar, affinity weapons |
@@ -67,6 +67,20 @@ Notable toggles
 - Helmet opacity: one switch over both `HelmetOpacity` and `VisorOpacity`, with a
   slider each behind it. Clearing only the shell is what leaves a tinted pane
   with nothing behind it; `-nohelmet` zeroes both.
+- **Pro mode HUD is an override, not a preset.** `Features.ProHud` makes
+  `ModernHud`, `FixedWeapon`, `FixedCrosshair`, `CustomCrosshair`,
+  `WeaponListScale` (1.7) and both helmet opacities (0) *answer* as the pro
+  layout while it is on; each keeps a `*Setting` companion holding what the
+  player chose, and that is what the settings rows are seeded from, what
+  `Features.Commit` writes, and what comes back when it goes off. The rows for
+  all six are greyed out while it is on rather than hidden. Writing the
+  overridden values to disk instead would turn one night of pro mode into a
+  permanent change to six settings, which is the bug this shape exists to
+  avoid.
+- **HUD readouts opacity is no longer a setting.** `Features.HudOpacity` stays
+  at 1 and is out of `Load`/`Commit`; the slider is gone. It is still read
+  throughout the HUD, so it remains the hook for anything that wants to fade
+  the readouts.
 - Controls: `Mods.InputSettings` holds the canonical `PlayerControls` and writes
   it to `controls.txt`. A rebind made from the pause menu also goes through
   `ApplyToPlayers`, because the players in a running match already hold their

@@ -76,8 +76,25 @@ leave a launcher painted over the game.
 Pause menu
 
 - `Escape` in a match opens it on every platform now (`Mods/PauseMenu.cs` +
-  `Gui/PauseMenuWindow.cs`): Resume, Fullscreen/Windowed, Settings, Leave match,
-  Quit.
+  `Gui/PauseMenuWindow.cs`): Resume, Fullscreen/Windowed, Settings, Spectate or
+  Rejoin, Record demo, Leave match, Quit.
+- **It scales itself down rather than being cut off.** The panel's natural
+  height is worked out from the entries put in it (each states its own
+  `Height`), and `PauseMenuView.FitToHost` puts a `ScaleTransform` on a
+  `LayoutTransformControl` around it, down to half size, when the window is
+  shorter than that. The scroller under it is the last resort, not the plan:
+  what a scrollbar produces here is a panel with its top and bottom cut off.
+  A display at 150% is what made this ordinary -- the panel needs ~500
+  device-independent pixels, which is 750 real ones, and the game window's
+  floor was 600. That floor is now 1024x720 and the default window 1280x768.
+- **Spectating starts on the free camera** (`Mods/SpectatorMode.cs`): "Spectate"
+  puts you on the map with no HUD, a left click moves into the players and
+  cycles through them, and Space toggles back to the overview. The camera is
+  the scene's, and the menu runs on the game's thread but has no scene to hand,
+  so `Start`/`Rejoin` leave a `bool?` in `SpectatorMode` that
+  `Scene.OnRenderFrame` acts on -- the same shape as this menu's own window
+  work. Demo playback is the exception: it calls `Start(watchSomeone: true)`
+  and goes straight to a player, having no view of its own to have just left.
 - It talks to the game through volatile flags. GLFW window calls -- closing it,
   changing its border -- belong to the thread that created the window, so the
   menu asks and `PauseMenu.Poll` does it on the game's own thread.

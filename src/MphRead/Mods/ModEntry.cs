@@ -591,6 +591,19 @@ namespace MphRead.Mods
                 // target every other capture reads, so seeing it needs a real
                 // window and a read from its buffer.
                 Network.MapAudit.ShowWindow = HasFlag(args, "hudshots");
+                // -size WxH, so a HUD capture can be taken at a window shape
+                // other than the one this happens to default to.
+                string? sizeValue = ValueAfter(args, "size");
+                if (sizeValue != null)
+                {
+                    string[] parts = sizeValue.ToLowerInvariant().Split('x');
+                    if (parts.Length == 2 && Int32.TryParse(parts[0], out int sizeWidth)
+                        && Int32.TryParse(parts[1], out int sizeHeight)
+                        && sizeWidth > 0 && sizeHeight > 0)
+                    {
+                        Network.MapAudit.WindowSize = new OpenTK.Mathematics.Vector2i(sizeWidth, sizeHeight);
+                    }
+                }
                 Environment.ExitCode = Network.MapAudit.Run(mapTest, players, seconds, mapMode,
                     bots: HasFlag(args, "bots"), shotDirectory: ValueAfter(args, "shots"),
                     renderProbe: HasFlag(args, "renderprobe"),
@@ -793,6 +806,15 @@ namespace MphRead.Mods
             {
                 RenderOptions.Fog = RenderOptions.ParseOnOff(fog, RenderOptions.Fog);
             }
+            string? fps = ValueAfter(args, "fps");
+            if (fps != null && !fps.StartsWith('-'))
+            {
+                RenderOptions.ShowFps = RenderOptions.ParseOnOff(fps, RenderOptions.ShowFps);
+            }
+            else if (HasFlag(args, "fps"))
+            {
+                RenderOptions.ShowFps = true;
+            }
             string? bands = ValueAfter(args, "celbands");
             if (bands != null && Int32.TryParse(bands, out int bandCount))
             {
@@ -802,6 +824,23 @@ namespace MphRead.Mods
             if (edge != null && Int32.TryParse(edge.TrimEnd('%'), out int edgePercent))
             {
                 RenderOptions.CelEdge = edgePercent / 100f;
+            }
+            // The whole competitive HUD, for the same paths and the same
+            // reason: it is a mode whose point is what the picture looks like,
+            // and every command that can photograph one opens no launcher.
+            string? proHud = ValueAfter(args, "prohud");
+            if (proHud != null && !proHud.StartsWith('-'))
+            {
+                Features.ProHud = RenderOptions.ParseOnOff(proHud, Features.ProHud);
+            }
+            else if (HasFlag(args, "prohud"))
+            {
+                Features.ProHud = true;
+            }
+            string? proHudStyle = ValueAfter(args, "prohudstyle");
+            if (proHudStyle != null && Int32.TryParse(proHudStyle, out int styleNumber))
+            {
+                ProHudStyle.Current = styleNumber;
             }
         }
 

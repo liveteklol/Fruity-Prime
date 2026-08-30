@@ -1278,11 +1278,18 @@ namespace MphRead.Entities
                         }
                         else if (!ScanVisor)
                         {
-                            DrawAmmoBar();
-                            _weaponIconInst.PositionX = (_hudObjects.WeaponIconPosX + _objShiftX) / 256f;
-                            _weaponIconInst.PositionY = (_hudObjects.WeaponIconPosY + _objShiftY) / 192f;
-                            _weaponIconInst.Alpha = Features.HudOpacity;
-                            _scene.DrawHudObject(_weaponIconInst);
+                            // The ammo meter and the weapon icon beside it are
+                            // both drawn into the helmet's moulding, so Pro
+                            // mode -- which has no helmet -- draws neither.
+                            // What it puts in their place is in DrawProHud.
+                            if (!Features.ProHud)
+                            {
+                                DrawAmmoBar();
+                                _weaponIconInst.PositionX = (_hudObjects.WeaponIconPosX + _objShiftX) / 256f;
+                                _weaponIconInst.PositionY = (_hudObjects.WeaponIconPosY + _objShiftY) / 192f;
+                                _weaponIconInst.Alpha = Features.HudOpacity;
+                                _scene.DrawHudObject(_weaponIconInst);
+                            }
                             if (Features.CustomCrosshair)
                             {
                                 _scene.DrawCustomCrosshair(GetCrosshairColor());
@@ -1303,7 +1310,14 @@ namespace MphRead.Entities
                     }
                     // todo: once we have masking that can account for various things (in this case, not drawing the scan lines
                     // on top of the layer for the scan log title box), call DrawModeHud when dialog pause is active
-                    if (!GameState.DialogPause || DialogType != DialogType.Event
+                    if (Features.ProHud)
+                    {
+                        if (!ScanVisor)
+                        {
+                            DrawProHud();
+                        }
+                    }
+                    else if (!GameState.DialogPause || DialogType != DialogType.Event
                         && (Hunter == Hunter.Samus || Hunter == Hunter.Guardian))
                     {
                         DrawHealthbars();
@@ -1772,6 +1786,32 @@ namespace MphRead.Entities
         /// DrawHudObject mode 2 and DrawText2D both scale to the window.
         /// </summary>
         /// <summary>
+        /// How many horizontal HUD units make up one vertical one -- 1 on a
+        /// 4:3 window, less than 1 on anything wider.
+        ///
+        /// Everything in the HUD is laid out in the DS's 256x192 space, which
+        /// is 4:3, and reaches the window as x / 256 * width and
+        /// y / 192 * height. Those are the same number of pixels per unit only
+        /// on a 4:3 screen; on a wider one a unit is further across than it is
+        /// down, so anything measured in units comes out stretched sideways
+        /// and anything placed by them drifts. Multiplying a horizontal
+        /// measurement by this gives a distance that is the same number of
+        /// pixels on any window. <see cref="DrawText2D"/> already does exactly
+        /// this to its glyph advances.
+        /// </summary>
+        private float HudAspectFix
+        {
+            get
+            {
+                if (_scene.Size.X <= 0 || _scene.Size.Y <= 0)
+                {
+                    return 1;
+                }
+                return _scene.Size.Y / 192f * (256f / _scene.Size.X);
+            }
+        }
+
+        /// <summary>
         /// One colour per weapon for the list, indexed by <see cref="BeamType"/>.
         ///
         /// Not the game's own weapon table, which is what this used first.
@@ -1820,16 +1860,28 @@ namespace MphRead.Entities
             // multiplied, so the panel keeps its proportions. Only the corner
             // it starts from stays put.
             float scale = Math.Clamp(Features.WeaponListScale, 0.6f, 2f);
+            // Every width below is measured off the screen's *height*: left
+            // uncorrected the panel was a different shape on every window --
+            // at 21:9 its rows came out two thirds wider than they were
+            // drawn, the icons in them stretched to match, and the ammo
+            // count, right-aligned against a panel edge that had moved but
+            // drawn by DrawText2D at its true shape, drifted further from its
+            // icon the wider the window got. See HudAspectFix.
+            float aspectFix = HudAspectFix;
             // Against the left edge, not inset. The reference has no margin
             // worth the name and the panel reads as part of the frame because
             // of it.
-            const float panelX = 2;
+            float panelX = 2 * aspectFix;
             float rowHeight = 8f * scale;
-            float panelWidth = 26f * scale;
+            float panelWidth = 26f * scale * aspectFix;
             // The icon sits in a square block of the row's own height at the
             // left of it, and the count is right-aligned in what is left.
+            // iconBox is that block's side in HUD *height* units; iconBoxX is
+            // the same distance expressed across, which is what the panel's
+            // own coordinates are in.
             float iconBox = rowHeight - 1f * scale;
-            float ammoRightX = panelX + panelWidth - 1.5f * scale;
+            float iconBoxX = iconBox * aspectFix;
+            float ammoRightX = panelX + panelWidth - 1.5f * scale * aspectFix;
             float y = 46;
             for (int i = 0; i < _weaponListIcons.Length; i++)
             {
@@ -1873,17 +1925,36 @@ namespace MphRead.Entities
                 // The select sheet's frames are drawn for the weapon wheel and
                 // are many times a row's height; scaled down here rather than
                 // given a second, smaller copy of the same art.
-                float iconScale = iconBox / icon.Width;
-                icon.PositionX = (panelX + (iconBox - icon.Width * iconScale) / 2) / 256f;
-                icon.PositionY = (y + (rowHeight - icon.Height * iconScale) / 2) / 192f;
+                //
+                // Mode 1, not mode 2: mode 2 maps the frame's width to the
+                // window's width and its height to the window's height
+                // independently, so every icon came out stretched sideways by
+                // exactly as much as the window is wider than 4:3. Mode 1
+                // sizes both from the height, so the frame keeps the shape it
+                // was drawn in on any screen.
+                float iconScale = iconBox / icon.Height;
+                float iconWidth = icon.Width * iconScale;
+                icon.PositionX = (panelX + (iconBoxX - iconWidth * aspectFix) / 2) / 256f;
+                icon.PositionY = (y + (rowHeight - iconBox) / 2) / 192f;
                 // Never faded. A dimmed icon at this size is an empty box.
                 icon.Alpha = Features.HudOpacity;
-                _scene.DrawHudObject(icon, mode: 2, scale: iconScale);
-                // The Power Beam costs no ammo, and a blank where every other
+                _scene.DrawHudObject(icon, mode: 1, scale: iconScale);
+                // Shots, not the internal ammo pool.
+                //
+                // _ammo counts the currency a shot is *bought* with, and one
+                // shot costs AmmoCost of it -- ten for a missile -- so the raw
+                // value read 100 for the ten missiles the game starts you
+                // with, and was wrong by that weapon's own factor for every
+                // other one too. Same division the ammo readout beside the gun
+                // does (see DrawAmmoBar), so the two now agree.
+                //
+                // The Power Beam costs no ammo, and -1 is the unlimited-ammo
+                // marker single-player bots carry; a blank where every other
                 // row has a number reads as "unknown" rather than as
-                // "unlimited".
-                string ammo = info.AmmoCost > 0
-                    ? _ammo[info.AmmoType].ToString()
+                // "unlimited", so both say so.
+                int ammoAmount = _ammo[info.AmmoType];
+                string ammo = info.AmmoCost > 0 && ammoAmount >= 0
+                    ? (ammoAmount / info.AmmoCost).ToString()
                     : "--";
                 // White, like the reference's: the colour is carried by the
                 // icon block beside it, and a coloured number as well made
@@ -2450,6 +2521,13 @@ namespace MphRead.Entities
 
         private void DrawModeScore(int messageId, string text)
         {
+            if (Features.ProHud)
+            {
+                // Drawn by DrawProHud instead, in its own place and its own
+                // size. Suppressed here rather than at each of the seven
+                // modes that calls this.
+                return;
+            }
             float posX = _hudObjects.ScorePosX + _objShiftX;
             float posY = _hudObjects.ScorePosY + _objShiftY;
             _textSpacingY = 8;
@@ -2989,8 +3067,14 @@ namespace MphRead.Entities
         /// idle sway: the rest of the HUD drifts on purpose and a number you
         /// are trying to read should not.
         /// </summary>
-        private const float NumberX = 30;
-        private const float NumberY = 6;
+        /// <summary>
+        /// Hard into the top-left corner on the desktop, and clear of it on
+        /// Android, which draws its MENU button there -- over the scene and
+        /// outside it, so a counter in the corner itself would sit under a
+        /// translucent circle on a phone and nowhere else.
+        /// </summary>
+        private static readonly float NumberX = OperatingSystem.IsAndroid() ? 30 : 3;
+        private const float NumberY = 3;
         private const float NumberScale = 0.5f;
         private const float UnitScale = 0.34f;
 
@@ -3002,21 +3086,19 @@ namespace MphRead.Entities
                 return;
             }
             var color = new ColorRgba(0x3FEF);
-            // Clear of the top-left corner on purpose: Android draws its MENU
-            // button there, over the scene and outside it, so a counter in the
-            // corner itself is legible on the desktop and sitting under a
-            // translucent circle on a phone.
-            //
             // The unit is drawn smaller than the number rather than in
             // lowercase, because the DS shipped one alphabet and it is
             // capitals: a lowercase f in the string comes out as a capital F
             // whatever we do. Smaller is what makes it read as a unit instead
             // of as three more digits.
-            Vector2 end = DrawText2D(NumberX, NumberY, Align.Left, palette: 0,
+            // Corrected across, like every other horizontal HUD measurement:
+            // NumberX is a margin in units of the screen's height, so the
+            // counter sits the same distance from the edge on any window.
+            Vector2 end = DrawText2D(NumberX * HudAspectFix, NumberY, Align.Left, palette: 0,
                 buffer[..written], color, fontSpacing: 8, scale: NumberScale);
             // A glyph is placed from its top, so the smaller run has to come
             // down by the difference in height to sit on the same baseline.
-            DrawText2D(end.X + 1, NumberY + (NumberScale - UnitScale) * 8, Align.Left,
+            DrawText2D(end.X + HudAspectFix, NumberY + (NumberScale - UnitScale) * 8, Align.Left,
                 palette: 0, "fps", color, fontSpacing: 8, scale: UnitScale);
         }
 

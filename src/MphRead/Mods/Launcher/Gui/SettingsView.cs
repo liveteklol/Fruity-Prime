@@ -80,12 +80,12 @@ namespace MphRead.Mods.Launcher.Gui
         private ToggleRow _helmetRow = null!;
         private SliderRow _helmetOpacity = null!;
         private SliderRow _visorOpacity = null!;
-        private SliderRow _hudOpacity = null!;
         private SliderRow _weaponListSize = null!;
         private ToggleRow _fixedCrosshair = null!;
         private ToggleRow _customCrosshair = null!;
         private ToggleRow _modernHud = null!;
         private ToggleRow _fixedWeapon = null!;
+        private ToggleRow _proHud = null!;
         private SliderRow _sfxVolume = null!;
         private SliderRow _musicVolume = null!;
         private ChoiceRow _languageRow = null!;
@@ -408,52 +408,78 @@ namespace MphRead.Mods.Launcher.Gui
                 + "everything: a wall keeps its own colour and it is the shading across it "
                 + "that goes to steps.");
 
+            Heading(page, "Pro mode HUD");
+            _proHud = Add(page, new ToggleRow("Pro mode HUD", Features.ProHud));
+            Explain(page, "The competitive layout, as one switch: no helmet and no visor, "
+                + "a plain crosshair that does not move, the weapon list at 170%, and the "
+                + "gun square with the camera. It takes over every HUD setting below "
+                + "while it is on -- they are greyed out, not lost, and come back exactly "
+                + "as you left them when you turn it off.", GuiTheme.Accent);
+            _proHud.Changed += (_, _) => UpdateHudRows();
+
             Heading(page, "Helmet and HUD");
             _helmetRow = Add(page, new ToggleRow("Draw the helmet",
-                Features.HelmetOpacity > 0 || Features.VisorOpacity > 0));
+                Features.HelmetOpacitySetting > 0 || Features.VisorOpacitySetting > 0));
             Explain(page, "All of it: the shell in front of and behind the readouts, and "
                 + "the visor pane over the view.");
             _helmetRow.Changed += (_, _) => UpdateHelmetRows();
             _helmetOpacity = Add(page, new SliderRow("Helmet",
-                (int)Math.Round(Features.HelmetOpacity * 100)));
+                (int)Math.Round(Features.HelmetOpacitySetting * 100)));
             _visorOpacity = Add(page, new SliderRow("Visor",
-                (int)Math.Round(Features.VisorOpacity * 100)));
+                (int)Math.Round(Features.VisorOpacitySetting * 100)));
             Explain(page, "The helmet is three layers: the shell behind the readouts, the "
                 + "shell in front, and the visor pane over the view. Clearing only the "
                 + "shell is what leaves a tinted pane with nothing behind it.");
-            _hudOpacity = Add(page, new SliderRow("HUD readouts",
-                (int)Math.Round(Features.HudOpacity * 100)));
-            Explain(page, "Energy, ammo, the radar and the rest. Separate from the helmet.");
-            UpdateHelmetRows();
 
             Heading(page, "Crosshair");
-            _fixedCrosshair = Add(page, new ToggleRow("Fixed crosshair", Features.FixedCrosshair));
+            _fixedCrosshair = Add(page, new ToggleRow("Fixed crosshair", Features.FixedCrosshairSetting));
             Explain(page, "Stops the reticle shrinking when you fire -- it stays one size, "
                 + "like Quake's.");
-            _customCrosshair = Add(page, new ToggleRow("Custom crosshair", Features.CustomCrosshair));
+            _customCrosshair = Add(page, new ToggleRow("Custom crosshair", Features.CustomCrosshairSetting));
             Explain(page, "Replaces the reticle with a plain cross at the centre of the "
                 + "screen, coloured by your current HP: green above 60, orange down to 33, "
                 + "red below that. Also shown with the modern HUD, below.");
 
             Heading(page, "Modern HUD");
-            _modernHud = Add(page, new ToggleRow("Enable modern HUD", Features.ModernHud));
+            _modernHud = Add(page, new ToggleRow("Enable modern HUD", Features.ModernHudSetting));
             Explain(page, "A column down the left listing every weapon you are carrying "
                 + "and its ammo, each in that weapon's own colour, with the equipped one "
                 + "marked. Only weapons you have actually picked up appear.");
             _weaponListSize = Add(page, new SliderRow("Weapon list size",
-                ScaleToSlider(Features.WeaponListScale), v => $"{SliderToScale(v) * 100:0}%"));
+                ScaleToSlider(Features.WeaponListScaleSetting), v => $"{SliderToScale(v) * 100:0}%"));
             Explain(page, "How big that column is drawn, from 60% to 200%.");
 
             Heading(page, "Weapon");
-            _fixedWeapon = Add(page, new ToggleRow("Fixed weapon", Features.FixedWeapon));
+            _fixedWeapon = Add(page, new ToggleRow("Fixed weapon", Features.FixedWeaponSetting));
             Explain(page, "Stops the gun and the HUD drifting when you move the mouse -- "
                 + "the gun rides square with the camera instead of lagging behind it, "
                 + "like Quake's weapon.");
+            UpdateHudRows();
+        }
+
+        /// <summary>
+        /// Grey out everything Pro mode HUD is answering for.
+        ///
+        /// Greyed rather than hidden: the rows still show what the player
+        /// chose, so what pro mode is standing in for stays visible, and
+        /// nothing here writes to those settings while it is on -- see
+        /// Features.ProHud.
+        /// </summary>
+        private void UpdateHudRows()
+        {
+            bool own = !_proHud.On;
+            _helmetRow.IsEnabled = own;
+            _fixedCrosshair.IsEnabled = own;
+            _customCrosshair.IsEnabled = own;
+            _modernHud.IsEnabled = own;
+            _weaponListSize.IsEnabled = own;
+            _fixedWeapon.IsEnabled = own;
+            UpdateHelmetRows();
         }
 
         private void UpdateHelmetRows()
         {
-            bool on = _helmetRow.On;
+            bool on = _helmetRow.On && !_proHud.On;
             _helmetOpacity.IsEnabled = on;
             _visorOpacity.IsEnabled = on;
             if (on && _helmetOpacity.Value == 0)
@@ -729,9 +755,13 @@ namespace MphRead.Mods.Launcher.Gui
             _settings.CelShading = RenderOptions.OnOff(_celRow.On);
             _settings.CelBands = "8";
             _settings.CelEdge = "50";
+            // The rows below are the player's own HUD, whether or not Pro
+            // mode is currently drawing something else instead: they were
+            // seeded from the *Setting properties and they write back to the
+            // same ones, so turning pro mode on and off leaves them alone.
+            Features.ProHud = _proHud.On;
             Features.HelmetOpacity = _helmetRow.On ? _helmetOpacity.Value / 100f : 0;
             Features.VisorOpacity = _helmetRow.On ? _visorOpacity.Value / 100f : 0;
-            Features.HudOpacity = _hudOpacity.Value / 100f;
             Features.WeaponListScale = SliderToScale(_weaponListSize.Value);
             Features.FixedCrosshair = _fixedCrosshair.On;
             Features.CustomCrosshair = _customCrosshair.On;

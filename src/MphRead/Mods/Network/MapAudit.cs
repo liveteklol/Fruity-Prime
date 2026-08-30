@@ -164,7 +164,7 @@ namespace MphRead.Mods.Network
             // Bigger for -hudshots: the HUD is authored for a 256x192 screen
             // and scaled to the window, so at 320x180 a weapon icon is a few
             // pixels and a capture of it says nothing.
-            ClientSize = ShowWindow ? new Vector2i(1024, 576) : new Vector2i(320, 180),
+            ClientSize = WindowSize ?? (ShowWindow ? new Vector2i(1024, 576) : new Vector2i(320, 180)),
             Title = "MphRead map audit",
             Profile = ContextProfile.Compatability,
             // Explicitly, exactly as the game's own window does. Left
@@ -187,6 +187,16 @@ namespace MphRead.Mods.Network
 
         /// <summary>Set by -hudshots before the window is built.</summary>
         public static bool ShowWindow { get; set; }
+
+        /// <summary>
+        /// What -size WxH asked for, before the window is built.
+        ///
+        /// The HUD is laid out in a 4:3 space and stretched to the window, so
+        /// how it looks is partly a question about the window's shape -- a
+        /// panel that is right at 16:9 can be two thirds too wide at 21:9.
+        /// One fixed capture size cannot answer that; this lets a shell loop.
+        /// </summary>
+        public static Vector2i? WindowSize { get; set; }
 
         public Scene Scene { get; }
 

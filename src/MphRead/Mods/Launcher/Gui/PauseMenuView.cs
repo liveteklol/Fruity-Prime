@@ -3,6 +3,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
+using Avalonia.Media;
 using Avalonia.Threading;
 using MphRead.Mods.Network;
 
@@ -78,7 +79,7 @@ namespace MphRead.Mods.Launcher.Gui
                 }
                 else if (SpectatorMode.CanSpectate)
                 {
-                    Add(stack, "Spectate", "Watch another player",
+                    Add(stack, "Spectate", "Free camera, click to follow a player",
                         () => SpectateRequested?.Invoke(this, EventArgs.Empty));
                 }
                 if (NetSession.Active)
@@ -109,20 +110,72 @@ namespace MphRead.Mods.Launcher.Gui
             panel.CornerRadius = new CornerRadius(6);
             panel.HorizontalAlignment = HorizontalAlignment.Center;
             panel.VerticalAlignment = VerticalAlignment.Center;
-            // Scrolled, and a maximum width rather than a fixed one, because
-            // the host is now the game window and the game window can be any
-            // size the player has dragged it to. Seven entries need about 470
-            // pixels of height; below that the fixed-size version simply drew
-            // the bottom ones off the edge, and "Leave match" and "Quit" not
-            // being on screen is not a menu missing some polish, it is a
-            // player who cannot get out of the match.
-            Content = new ScrollViewer
+            // What the panel needs, worked out from what was just put in it
+            // rather than measured later: every entry states its own height,
+            // so this is a fact about the menu and not a guess about layout.
+            double needed = PanelPadding;
+            foreach (Control child in stack.Children)
             {
-                Content = panel,
+                // Every entry here states its height; anything that did not
+                // would measure as NaN and take the whole sum with it.
+                needed += (Double.IsNaN(child.Height) ? 0 : child.Height) + stack.Spacing;
+            }
+            _neededHeight = needed;
+            // Shrunk to fit, then scrolled if even that is not enough.
+            //
+            // A maximum width rather than a fixed one, and a scroller under
+            // it, because the host is the game window and the game window is
+            // whatever size the player dragged it to -- but a scrollbar is a
+            // poor answer for a pause menu: what it produces is a panel with
+            // its top and bottom cut off, which is what "the menu is always
+            // bitten" was. Scaling is the better one at this size, because
+            // there is nothing here to reflow: seven entries in a column stay
+            // seven entries in a column, just smaller. It only ever shrinks --
+            // a menu that grew to fill a 4K window would be a menu in
+            // 40-point type.
+            _scaler = new LayoutTransformControl
+            {
+                Child = panel,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            var scroller = new ScrollViewer
+            {
+                Content = _scaler,
                 Padding = new Thickness(12),
                 HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto
             };
+            scroller.SizeChanged += (_, e) => FitToHost(e.NewSize.Height);
+            Content = scroller;
+        }
+
+        /// <summary>The panel's own top and bottom padding, plus the scroller's.</summary>
+        private const double PanelPadding = 18 + 18 + 12 + 12;
+
+        /// <summary>How tall the panel wants to be, at full size.</summary>
+        private readonly double _neededHeight;
+        private readonly LayoutTransformControl _scaler;
+
+        /// <summary>
+        /// Fit the panel to the height it has been given, down to half size.
+        ///
+        /// Below that the scroller takes over: text that small is not a menu
+        /// either, and a window that short is not one anybody is playing in.
+        /// </summary>
+        private void FitToHost(double height)
+        {
+            if (height <= 0 || _neededHeight <= 0)
+            {
+                return;
+            }
+            double scale = Math.Clamp(height / _neededHeight, 0.5, 1);
+            var current = _scaler.LayoutTransform as ScaleTransform;
+            if (current != null && Math.Abs(current.ScaleY - scale) < 0.001)
+            {
+                return;
+            }
+            _scaler.LayoutTransform = scale >= 1 ? null : new ScaleTransform(scale, scale);
         }
 
         /// <summary>
