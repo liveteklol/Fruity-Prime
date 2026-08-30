@@ -4,30 +4,30 @@
 [NoneGiven/MphRead](https://github.com/NoneGiven/MphRead) with online multiplayer, dedicated
 servers, 8 players, high resolution, ultrawide, a real launcher, and an Android build.
 
-> Needs your own Metroid Prime Hunters cartridge dump. No game data ships here or is downloaded.
+> Needs your own Metroid Prime Hunters cartridge dump. No Nintendo game data ships here or is downloaded.
 
 **[Download](https://github.com/liveteklol/Fruity-Prime/releases)** · [Server how-to](#dedicated-server) · [Support the project ☕](https://ko-fi.com/livetek)
 
 ## Features
 
-- **Widescreen** — 16:9 and 21:9 ultrawide, a wider view rather than a stretched one
-- **High resolution** — any window size, borderless fullscreen, 25-100% render scale
-- **60 FPS** — fixed 60 Hz everywhere, with an FPS counter
-- **8x players** — eight in a match, not four
-- **Online** — server browser, join by address, host with zero router setup
-- **Dedicated servers** — no game files needed, map rotation, runs on a Raspberry Pi
-- **Demo recording** — record mid-match, replay it later, spectate live matches Quake-3 style
-- **Custom maps** — build from JSON, or import a Quake 3 `.bsp`
-- **Bots** — 0 to 7 offline, three skill levels
-- **All 12 modes** — Battle, Survival, Capture, Bounty, Defender, Nodes, Prime Hunter, and teams
-- **Keyboard & mouse** — fully rebindable, aim sensitivity, inverted axes
-- **Cel shading** — flat colours and inked edges, plus fog, lighting and filtering toggles
-- **Modern HUD** — resizable weapon list, custom crosshair, helmet/visor/HUD opacity, no-helmet mode
-- **A real launcher** — Host, Join, Watch a demo, Settings, on Windows, Linux, macOS and Android
-- **Map previews** — rendered on your own machine, nothing downloaded
-- **Story mode** — 3 save slots, straight from the launcher, upstream bug fixes on by default
-- **Android** — real APK, GL ES 3.0 renderer, touch controls, online play
-- **Update check** — tells you when a newer release is out; installs nothing
+- **Widescreen**: 16:9 and 21:9 ultrawide, a wider view rather than a stretched one
+- **High resolution**: any window size, borderless fullscreen, 25-100% render scale
+- **60 FPS**: fixed 60 Hz everywhere, with an FPS counter
+- **8 players**: eight in a match, where the DS allowed four
+- **Online**: server browser, join by address, host with zero router setup
+- **Dedicated servers**: no game files needed, map rotation, runs on a Raspberry Pi
+- **Demo recording**: record mid-match, replay it later, spectate live matches Quake-3 style
+- **Custom maps**: convert a Quake 3 `.pk3` in one command, or build one from JSON. Dust II ships with the release
+- **Bots**: 0 to 7 offline, three skill levels, and they navigate custom maps
+- **All 12 modes**: Battle, Survival, Capture, Bounty, Defender, Nodes, Prime Hunter, and teams
+- **Keyboard & mouse**: fully rebindable, aim sensitivity, inverted axes
+- **Cel shading**: flat colours and inked edges, plus fog, lighting and filtering toggles
+- **Modern HUD**: resizable weapon list, custom crosshair, helmet/visor/HUD opacity, no-helmet mode
+- **A real launcher**: Host, Join, Watch a demo, Settings, on Windows, Linux, macOS and Android
+- **Map previews**: rendered on your own machine, nothing downloaded
+- **Story mode**: 3 save slots, straight from the launcher, upstream bug fixes on by default
+- **Android**: real APK, GL ES 3.0 renderer, touch controls, online play
+- **Update check**: tells you when a newer release is out; installs nothing
 
 Plus everything upstream already did: model viewer, scene renderer, collision view, COLLADA/PNG/WAV
 export, Blender scripts.
@@ -39,7 +39,7 @@ export, Blender scripts.
 3. **Game files** → pick your `.nds`. It unpacks locally, with a progress bar.
 4. Play. `Escape` = pause menu, `F11` / `Alt+Enter` = fullscreen.
 
-Hosting a game: **Host → Battle → Where: Online**. The directory runs the match, you join it — no
+Hosting a game: **Host → Battle → Where: Online**. The directory runs the match and you join it. No
 port forwarding, nothing to configure.
 
 ## Dedicated server
@@ -63,21 +63,22 @@ FruityPrimeServer.exe -server -port 27888 -players 8 -servername "My server"
 | `-nomaster` | stay off every server list |
 | `-master HOST` `-masterport N` | use another directory than `net.livetek.fr:27889` |
 
-**Map rotation** — `maprotation.txt`, one match per line, `#` for comments:
+**Map rotation**: `maprotation.txt`, one match per line, `#` for comments:
 
 ```
 MP1 SANCTORUS      | Battle | 7 | 7
 MP3 PROVING GROUND | Battle | 7 | 7
 ```
 
-`ROOM KEY | mode | minutes | points`. Only the key is required. `FruityPrime -rooms` lists the 27
-keys (needs game files, so run it on a machine that has them).
+`ROOM KEY | mode | minutes | points`. Only the key is required. `FruityPrime -rooms` lists every
+key, the 27 cartridge rooms and any custom map (needs game files, so run it on a machine that has
+them).
 
-**Ports** — UDP only. Forward **27888** to the server. The directory uses **27889**.
+**Ports**: UDP only. Forward **27888** to the server. The directory uses **27889**.
 
 **Listed by default** on `net.livetek.fr`. Check with `FruityPrime -servers`.
 
-**systemd** — units in `tools/systemd/`:
+**systemd**: units in `tools/systemd/`:
 
 ```bash
 sed -e 's|__USER__|youruser|' -e 's|__DIR__|/home/youruser/fruityprime-server|' \
@@ -86,9 +87,9 @@ sudo systemctl enable --now mphread-server
 ```
 
 `deploy-server.sh` does build + upload + units + restart against a remote box. Stop the service
-before replacing the binary — systemd holds it open.
+before replacing the binary; systemd holds it open.
 
-**Your own directory** — `FruityPrime -masterserver -port 27889`, plus `-public HOST` if a game
+**Your own directory**: `FruityPrime -masterserver -port 27889`, plus `-public HOST` if a game
 server shares the box, `-hostports A-B` for the range it may run matches on. Point servers at it
 with `-master HOST`, players in *Settings → Servers*.
 
@@ -98,7 +99,7 @@ Update the server first.
 ## Command line
 
 `-launcher [-text]` · `-connect HOST -port N -name X -hunter H` · `-servers` · `-hostgame "ROOM"` ·
-`-server` · `-masterserver` · `-rooms` · `-demoinfo FILE [-replay]` · `-mapgen` · `-mechanics` ·
+`-server` · `-masterserver` · `-rooms` · `-q3convert FILE.pk3` · `-demoinfo FILE [-replay]` · `-mapgen` · `-mechanics` ·
 `-update` / `-noupdate` · `-credits` · `-fullscreen` / `-windowed` / `-nohelmet` · `-cel on|off` ·
 `-fog on|off` · `-menu`
 
@@ -106,12 +107,12 @@ Full list, test harness included: [`CLAUDE.md`](CLAUDE.md).
 
 ## Not done yet
 
-- **Adventure co-op.** The launcher's toggle is a placeholder and blocks Start on purpose — the
+- **Adventure co-op.** The launcher's toggle is a placeholder and blocks Start on purpose. The
   network layer replicates players only, so no enemies, doors, pickups or save state.
 - **Gamepads**, on any platform.
 - **Android**: no command line (so no exports, no model viewer, no CLI server), no window settings,
   demo *playback* not wired (recording works), cel shading unverified on real hardware.
-- Unproven claims are kept honest in [`.claude/KNOWN-GAPS.md`](.claude/KNOWN-GAPS.md).
+- What is claimed but not yet proven is listed in [`.claude/KNOWN-GAPS.md`](.claude/KNOWN-GAPS.md).
 
 ## Building
 
