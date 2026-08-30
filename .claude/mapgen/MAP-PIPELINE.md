@@ -1,12 +1,14 @@
 # Custom maps: the generator and the Quake 3 importer
 
-**No map ships in `maps/`.** The game is the 27 multiplayer rooms of the
-cartridge and nothing else; what is described below is the hook a player uses
-to add their own, and `maps/q3dm17.json.example` is the worked example of it.
-The three maps that used to travel with the repository -- `longestyard`,
-`testbox` and the converted OpenArena level `wrackdm17`, with its stripped
-`.bsp` and its baked `.tex` -- were taken out, along with the GPL notice they
-needed. `FruityPrime -rooms` printing 27 is the check.
+**No level ships in `maps/`, only recipes.** The game is the 27 multiplayer
+rooms of the cartridge plus whatever the player has the source for; what is
+described below is the hook. `maps/q3dm17.json.example` is the worked example,
+and `maps/dust2/dust2.json` is a real one -- but its `df_dust2.pk3` is the
+player's own, so on a machine without it the room is left out and `-rooms`
+prints 27 again. The three maps that used to travel with the repository --
+`longestyard`, `testbox` and the converted OpenArena level `wrackdm17`, with
+its stripped `.bsp` and its baked `.tex` -- were taken out, along with the GPL
+notice they needed.
 
 Everything lives in `src/MphRead/Mods/MapGen/`. Two upstream files carry a
 change and both are one token: `RepackCollision` gained the word `partial`,
@@ -82,6 +84,12 @@ A shader with no image of its own (a light or an effect, defined in a
 `.shader` script rather than a file -- four of wrackdm17's twenty-two) has its
 surfaces dropped rather than painted with somebody else's texture.
 
+Images are matched **case-insensitively**: a shader name in a `.bsp` is not
+the spelling of the file it came from -- the compiler upper-cases some of them,
+and a level whose author worked on Windows has `SandTrim.JPG` answering to
+`textures/dust2/SANDTRIM`. Matching exactly finds nothing and the level comes
+out with no textures at all.
+
 **Borrowed from a shipped room**, the older way, still used by the hand-built
 maps. A map borrows them from a room the player already has: `textureSource` names
 it, and each material says which of that room's materials to take the texture
@@ -99,6 +107,14 @@ copied:
 
 - **Axes.** Quake is Z-up, this engine is Y-up. `(x, y, z) -> (x, z, -y)`
   keeps the handedness, so no surface ends up inside out.
+- **Winding.** Preserving the handedness is not enough: Quake winds a front
+  face clockwise and culls GL's *front*, while this engine culls the back of a
+  counter-clockwise one. Carried across unchanged, every surface is visible
+  only from the side you are never on -- the floor disappears from above and
+  the level reads as *missing geometry* rather than as inside-out, which is
+  what made this cost a day. Each triangle's vertices are therefore emitted in
+  reverse. The check is one shot straight down: if the floor is not there, the
+  winding is wrong.
 - **Scale.** The number that matters is the one that keeps the level's routes
   intact. Samus leaves the ground at 1228/4096 per frame against 77/4096 of
   gravity: 2.39 units up, about 7.7 across at her walking cap. A Quake player
@@ -120,6 +136,27 @@ other plane of the brush. Bezier patches are skipped and counted -- they are
 control points rather than triangles, and their collision lives with the patch,
 so a skipped one leaves a hole rather than an invisible wall.
 
+**Buried brush sides are dropped**, and that is what makes a real level fit.
+A level's walls are stacks of brushes, so most brush sides face into another
+brush and nothing outside the solid can ever touch them -- on df_dust2, 6,119
+of 10,624. They are not free: the grid lists every face in every cell it
+reaches and indexes those listings with 16 bits, and the buried ones alone
+overflow it at any scale worth playing. A side is dropped only when its centre,
+every corner and every edge midpoint -- each drawn a little in from the rim and
+pushed a unit out along the normal -- all land inside another solid brush.
+Every sample has to agree, because missing a buried face costs one listing
+while dropping an exposed one leaves a hole in the floor.
+
+`-mapgen` reports the number the grid needs when it does not fit, so the
+scale can be chosen by arithmetic instead of by bisection.
+
+`keepSpawns` (default true) says whether to take the level's own player
+starts. True is right for a deathmatch level, authored with eight of them in
+the places its author wanted people to appear. It is wrong for anything else:
+a race level has one start, often on a ledge sealed off from the course, and a
+player who spawns there is stuck. Turn it off and the map file's spawns are
+the only ones.
+
 ### Verified against a real level
 
 OpenArena's `wrackdm17` -- its homage to The Longest Yard, freely licensed --
@@ -130,6 +167,17 @@ importer works; the map itself no longer ships. Quake 3's own `pak0.pk3` is
 not in this repository and is not fetched by anything here; it is id Software's
 commercial data, and the same rule the project applies to the cartridge applies
 to it.
+
+**df_dust2**, a DeFRaG rebuild of Counter-Strike's de_dust2, is the second and
+the one that stretched the format: 2,314 surfaces to 9,540 triangles, 1,751
+solid brushes to 4,505 collision faces once the buried sides were dropped, 20
+baked textures, 290 x 85 x 331 units at 34 Quake units each. 34 is not a
+preference: below it the collision grid does not fit, and much above it a
+128-unit wall becomes something Samus can jump. It is a race map with one
+sealed start, so `keepSpawns` is off and the ten spawn points, the weapons and
+the pickups are the map file's own. Neither the `.pk3` nor the `.tex` is in
+this repository -- both are somebody else's game data -- and `.gitignore`
+refuses them by extension.
 
 `tools/make-test-bsp.py` writes a synthetic IBSP 46 level -- a floor, walls, a
 platform, spawns, a push trigger and items -- so the importer can be exercised
@@ -149,11 +197,27 @@ FruityPrime -thumbnail "LONGEST YARD"     # the launcher's picture
 ```
 
 Nothing has to be generated by hand: `ModEntry.TryHandle` builds any map whose
-binaries are missing or older than its source, on every startup, whichever
-entry point was used. A map that cannot be built prints one line and leaves the
+binaries are missing or older than its source, and `MatchStart.Launch` does the
+same immediately before a launcher session loads a room.
+
+**Both, because TryHandle is not on every path.** The front screen is
+dispatched from `TryHandleHeadless`, which returns as soon as it has run one,
+so a launcher session never reaches `TryHandle` -- and on Windows,
+double-clicking the binary *is* the launcher. Nothing built the binaries, the
+room was registered from its JSON regardless, and it sat in the map picker and
+took the process down the moment anybody picked it. Every command
+(`-mapgen`, `-maptest`, `-rooms`, `-thumbnail`) goes through `TryHandle` and
+was therefore fine, which is exactly why this survived a day of testing: the
+one path a player uses is the one no check went down. A map that cannot be built prints one line and leaves the
 room registered but unloadable -- see below.
 
-`maps/*.json` is copied next to the binary by the build and read at startup;
+A map may live in a folder of its own -- `maps/dust2/dust2.json` beside its
+`df_dust2.pk3` and `df_dust2.tex` -- which is the tidy arrangement once a map
+brings a level and a texture pack with it. Map files are found recursively, and
+`import.source` and `import.textures` are looked for **beside the map file**
+first, then in `maps/`, then beside the game files.
+
+`maps/**/*.json` is copied next to the binary by the build and read at startup;
 the generated `.bin` files land in the player's own extracted files under
 `_archives/<name>/`. **The JSON is the thing that belongs in git.** The
 binaries are derived from the player's cartridge dump (the textures) and, for

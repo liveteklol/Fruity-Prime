@@ -165,7 +165,7 @@
        generated on the player's machine from the player's own extracted files
        and never travel with the build. -->
   <ItemGroup>
-    <None Include="..\..\maps\*.json;..\..\maps\*.bsp;..\..\maps\*.tex" Link="maps\%(Filename)%(Extension)">
+    <None Include="..\..\maps\**\*.json;..\..\maps\**\*.bsp;..\..\maps\**\*.tex" Link="maps\%(RecursiveDir)%(Filename)%(Extension)">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>

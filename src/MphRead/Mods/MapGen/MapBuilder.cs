@@ -17,6 +17,29 @@ namespace MphRead.Mods.MapGen
     /// </summary>
     public static class MapBuilder
     {
+        /// <summary>
+        /// What a custom map may put on the floor: what the cartridge's own
+        /// multiplayer rooms hold, and nothing else.
+        ///
+        /// The ones left out are not a matter of taste. An energy tank, a
+        /// missile expansion, a UA expansion and an artifact are the story's
+        /// pickups: they raise a hunter's *capacity* permanently instead of
+        /// topping it up until the end of the match, so one of them in a
+        /// deathmatch is a player who is simply better than the others for as
+        /// long as the session lasts. Double Damage, Cloak and Deathalt are
+        /// the powerups a multiplayer room does have -- they run out.
+        /// </summary>
+        public static readonly HashSet<ItemType> MultiplayerItems = new HashSet<ItemType>()
+        {
+            ItemType.HealthSmall, ItemType.HealthMedium, ItemType.HealthBig,
+            ItemType.UASmall, ItemType.UABig,
+            ItemType.MissileSmall, ItemType.MissileBig,
+            ItemType.DoubleDamage, ItemType.Cloak, ItemType.Deathalt,
+            ItemType.VoltDriver, ItemType.Battlehammer, ItemType.Imperialist,
+            ItemType.Judicator, ItemType.Magmaul, ItemType.ShockCoil,
+            ItemType.OmegaCannon, ItemType.AffinityWeapon
+        };
+
         // brighter on top, darker underneath: with no lightmaps and no
         // per-vertex lighting to import, this is what keeps a box from
         // reading as a flat silhouette
@@ -152,6 +175,14 @@ namespace MphRead.Mods.MapGen
                 if (!Enum.TryParse(item.Type, ignoreCase: true, out ItemType itemType))
                 {
                     throw new ProgramException($"Unknown item type {item.Type}.");
+                }
+                if (!MultiplayerItems.Contains(itemType))
+                {
+                    throw new ProgramException($"{item.Type} does not belong in a multiplayer map. "
+                        + "It is one of the story's permanent upgrades -- an energy tank, a missile or "
+                        + "UA expansion, an artifact -- which raise a hunter's capacity for the rest of "
+                        + $"the game rather than topping it up for the rest of the match. Use one of: "
+                        + $"{String.Join(", ", MultiplayerItems)}.");
                 }
                 map.Entities.Add(new ItemSpawnEntityEditor()
                 {

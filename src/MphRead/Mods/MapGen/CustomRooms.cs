@@ -46,6 +46,21 @@ namespace MphRead.Mods.MapGen
             }
         }
 
+        /// <summary>
+        /// Every map file, including the ones in a folder of their own. A map
+        /// that brings a level and a texture pack with it is tidier as
+        /// maps/dust2/dust2.json than as three files loose in maps/, and the
+        /// level it converts is found beside the map file first.
+        /// </summary>
+        private static IEnumerable<string> MapFiles()
+        {
+            if (!Directory.Exists(MapDirectory))
+            {
+                return Enumerable.Empty<string>();
+            }
+            return Directory.EnumerateFiles(MapDirectory, "*.json", SearchOption.AllDirectories);
+        }
+
         private static IReadOnlyList<MapDefinition> LoadDefinitions()
         {
             var results = new List<MapDefinition>();
@@ -53,7 +68,7 @@ namespace MphRead.Mods.MapGen
             {
                 return results;
             }
-            foreach (string path in Directory.EnumerateFiles(MapDirectory, "*.json").OrderBy(p => p))
+            foreach (string path in MapFiles().OrderBy(p => p))
             {
                 try
                 {
@@ -69,8 +84,8 @@ namespace MphRead.Mods.MapGen
                         // actually happens: the map file travels with the
                         // repository, the level it was made from does not.
                         Console.WriteLine($"Leaving out map {definition.Name}: its source level "
-                            + $"{definition.Import.Source} is not here. Put it in {MapDirectory} "
-                            + "to have this map.");
+                            + $"{definition.Import.Source} is not here. Put it in "
+                            + $"{definition.BaseDirectory ?? MapDirectory} to have this map.");
                         continue;
                     }
                     results.Add(definition);
@@ -115,7 +130,7 @@ namespace MphRead.Mods.MapGen
                 collisionPath: $"{prefix}_Collision.bin",
                 texturePath: null, // the textures are inside the model file
                 entityPath: $"{prefix}_Ent.bin",
-                nodePath: null, // no navigation mesh: the bots find their own way
+                nodePath: $@"levels\nodeData\{prefix}_Node.bin",
                 roomNodeName: null,
                 battleTimeLimit: def.BattleTimeLimit,
                 timeLimit: def.BattleTimeLimit,
@@ -159,6 +174,11 @@ namespace MphRead.Mods.MapGen
             return Paths.Combine(Paths.FileSystem, @"levels\entities");
         }
 
+        public static string NodeDirectory()
+        {
+            return Paths.Combine(Paths.FileSystem, @"levels\nodeData");
+        }
+
         /// <summary>
         /// Generates every map whose binaries are missing or older than its
         /// source. Returns the number generated.
@@ -170,7 +190,7 @@ namespace MphRead.Mods.MapGen
             {
                 if (force || NeedsGenerating(def))
                 {
-                    MapPacker.Generate(def, ArchiveDirectory(def), EntityDirectory(), verbose);
+                    MapPacker.Generate(def, ArchiveDirectory(def), EntityDirectory(), NodeDirectory(), verbose);
                     count++;
                 }
             }
@@ -203,7 +223,7 @@ namespace MphRead.Mods.MapGen
                         continue;
                     }
                     Console.WriteLine($"[mapgen] building {def.Name}");
-                    MapPacker.Generate(def, ArchiveDirectory(def), EntityDirectory(), verbose: false);
+                    MapPacker.Generate(def, ArchiveDirectory(def), EntityDirectory(), NodeDirectory(), verbose: false);
                 }
                 catch (Exception ex)
                 {
@@ -220,10 +240,8 @@ namespace MphRead.Mods.MapGen
             {
                 return true;
             }
-            string? source = Directory.Exists(MapDirectory)
-                ? Directory.EnumerateFiles(MapDirectory, "*.json")
-                    .FirstOrDefault(p => Path.GetFileNameWithoutExtension(p).ToUpperInvariant() == def.Name)
-                : null;
+            string? source = MapFiles()
+                .FirstOrDefault(p => Path.GetFileNameWithoutExtension(p).ToUpperInvariant() == def.Name);
             return source != null && File.GetLastWriteTimeUtc(source) > File.GetLastWriteTimeUtc(model);
         }
     }
