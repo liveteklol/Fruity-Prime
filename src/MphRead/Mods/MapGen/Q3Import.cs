@@ -34,8 +34,14 @@ namespace MphRead.Mods.MapGen
             // With a baked pack the level wears its own textures and a
             // material is one shader; without one, materials are whatever the
             // map file mapped its shaders onto in a borrowed room.
-            string? packPath = import.ResolveTextures() ?? BakeTextures(bsp, import, verbose);
-            MapTexturePack? pack = packPath == null ? null : MapTexturePack.Load(packPath);
+            // Its own baked art if it has any -- in its bundle or beside its
+            // recipe -- and otherwise baked now, from the level.
+            MapTexturePack? pack = import.LoadTexturePack();
+            if (pack == null)
+            {
+                string? baked = BakeTextures(bsp, import, verbose);
+                pack = baked == null ? null : MapTexturePack.Load(baked);
+            }
             IReadOnlyList<(int, int)> textureSizes = pack == null
                 ? GetTextureSizes(def)
                 : pack.Entries.Select(e => ((int)e.Width, (int)e.Height)).ToList();

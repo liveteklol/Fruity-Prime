@@ -82,24 +82,49 @@ namespace MphRead.Mods.MapGen
         [JsonIgnore]
         public string? BaseDirectory { get; set; }
 
+        /// <summary>
+        /// The bundle this recipe came out of, if it came out of one. Its
+        /// level and its textures are inside the same file; see
+        /// <see cref="MapBundle"/>.
+        /// </summary>
+        [JsonIgnore]
+        public string? BundlePath { get; set; }
+
+        /// <summary>The file this was read from -- a recipe, or the bundle holding one.</summary>
+        [JsonIgnore]
+        public string? SourcePath { get; set; }
+
         public static MapDefinition Load(string path)
         {
-            MapDefinition? result = JsonSerializer.Deserialize<MapDefinition>(File.ReadAllText(path), _options);
+            string text = MapBundle.Is(path)
+                ? MapBundle.ReadRecipe(path)
+                    ?? throw new ProgramException($"{Path.GetFileName(path)} has no map in it.")
+                : File.ReadAllText(path);
+            MapDefinition? result = JsonSerializer.Deserialize<MapDefinition>(text, _options);
             if (result == null)
             {
                 throw new ProgramException($"Could not read map definition {path}.");
             }
             result.BaseDirectory = Path.GetDirectoryName(Path.GetFullPath(path));
+            result.SourcePath = Path.GetFullPath(path);
+            result.BundlePath = MapBundle.Is(path) ? result.SourcePath : null;
             if (result.Import != null)
             {
                 result.Import.BaseDirectory = result.BaseDirectory;
+                result.Import.BundlePath = result.BundlePath;
             }
             return result;
         }
 
         public void Save(string path)
         {
-            File.WriteAllText(path, JsonSerializer.Serialize(this, _options));
+            File.WriteAllText(path, Serialize());
+        }
+
+        /// <summary>The recipe as it would be written, for a bundle to carry.</summary>
+        public string Serialize()
+        {
+            return JsonSerializer.Serialize(this, _options);
         }
     }
 
@@ -139,11 +164,22 @@ namespace MphRead.Mods.MapGen
         /// Where the source level actually is, or null when it is not on this
         /// machine at all.
         /// </summary>
+        /// <summary>The bundle this map travels in, if it travels in one. See <see cref="MapDefinition.BundlePath"/>.</summary>
+        [JsonIgnore]
+        public string? BundlePath { get; set; }
+
         public string? Resolve()
         {
             if (Source.Length == 0)
             {
                 return null;
+            }
+            if (BundlePath != null)
+            {
+                // The level is inside the bundle, and Q3Bsp.Load opens a zip
+                // and finds a level in it by name -- which is how it reads a
+                // .pk3. So the bundle *is* the source path.
+                return BundlePath;
             }
             foreach (string candidate in Candidates(Source))
             {
@@ -206,6 +242,43 @@ namespace MphRead.Mods.MapGen
         public string? Textures { get; set; }
 
         /// <summary>Where the texture pack is, or null if there is none here.</summary>
+        /// <summary>
+        /// The baked texture pack out of the bundle, or null when this map
+        /// does not travel in one. Bytes rather than a path: nothing is
+        /// unpacked to disk, so a bundle stays one file on the player's
+        /// machine as well as in the download.
+        /// </summary>
+        public byte[]? ReadBundledTextures()
+        {
+            if (BundlePath == null || String.IsNullOrEmpty(Textures))
+            {
+                return null;
+            }
+            return MapBundle.ReadEntry(BundlePath, Textures);
+        }
+
+        /// <summary>
+        /// This map's own baked textures, wherever they live: inside its
+        /// bundle, or beside its recipe. Null means it has none and wears a
+        /// shipped room's instead.
+        ///
+        /// One accessor because there are two callers -- the importer and the
+        /// packer -- and when only the importer knew about bundles, a bundled
+        /// map imported with its own art and was then packed with somebody
+        /// else's, which is the branch that fails outright with "a map needs
+        /// at least one material".
+        /// </summary>
+        public MapTexturePack? LoadTexturePack()
+        {
+            byte[]? bundled = ReadBundledTextures();
+            if (bundled != null)
+            {
+                return MapTexturePack.Load(bundled, Textures);
+            }
+            string? path = ResolveTextures();
+            return path == null ? null : MapTexturePack.Load(path);
+        }
+
         public string? ResolveTextures()
         {
             if (String.IsNullOrEmpty(Textures))

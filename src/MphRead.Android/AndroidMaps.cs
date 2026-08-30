@@ -49,11 +49,16 @@ namespace MphRead.Droid
                 Console.WriteLine($"[android] {names.Length} bundled map files -> {directory}");
                 foreach (string name in names)
                 {
-                    // The map files, and the one level that travels with us:
-                    // see maps/README.md for whose it is and under what terms.
+                    // The map files, and the levels that travel with them:
+                    // see maps/README.md for whose they are and under what
+                    // terms. A .fpmap is all of it in one file, which is the
+                    // shape a map reaches this platform in -- an asset listing
+                    // does not recurse, so a map that keeps its level in a
+                    // folder of its own never arrives at all.
                     if (!name.EndsWith(".json", StringComparison.OrdinalIgnoreCase)
                         && !name.EndsWith(".bsp", StringComparison.OrdinalIgnoreCase)
-                        && !name.EndsWith(".tex", StringComparison.OrdinalIgnoreCase))
+                        && !name.EndsWith(".tex", StringComparison.OrdinalIgnoreCase)
+                        && !name.EndsWith(MapBundle.Extension, StringComparison.OrdinalIgnoreCase))
                     {
                         continue;
                     }

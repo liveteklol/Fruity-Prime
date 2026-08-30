@@ -96,13 +96,20 @@
          Nothing on this head calls STB: exporting images and movies is a
          desktop feature, and preview capture goes through AndroidPng. -->
     <PackageReference Include="ReFuel.StbImage" Version="2.1.1" ExcludeAssets="native" />
-    <!-- The custom maps. They are text; the room binaries they describe are
-         built on the device from the player's own extracted files, and never
-         travel in the package. AndroidAsset rather than a content file because
-         nothing in an APK is a file the runtime can enumerate: see
-         AndroidMaps.cs, which unpacks these into the external directory the
-         game files already use. -->
-    <AndroidAsset Include="..\..\maps\*.json;..\..\maps\*.bsp;..\..\maps\*.tex"
+    <!-- The custom maps. The room binaries they describe are built on the
+         device from the player's own extracted files and never travel in the
+         package. AndroidAsset rather than a content file because nothing in an
+         APK is a file the runtime can enumerate: see AndroidMaps.cs, which
+         unpacks these into the external directory the game files already use.
+
+         Bundles as well as loose recipes, and that is what actually put the
+         custom maps on this platform: a map that keeps its level in a folder
+         of its own, which is how they are worked on, matched neither this
+         glob nor the non-recursive asset listing on the other side, so the
+         phone shipped a recipe with no level, or nothing at all, and listed 27
+         rooms. A bundle is one file at the top of maps/, which both halves
+         can see. -->
+    <AndroidAsset Include="..\..\maps\*.json;..\..\maps\*.bsp;..\..\maps\*.tex;..\..\maps\*.fpmap"
                   Link="Assets\maps\%(Filename)%(Extension)" />
     <AvaloniaResource Include="..\MphRead\Assets\fruity-prime-logo.png"
                       Link="Assets\fruity-prime-logo.png" />

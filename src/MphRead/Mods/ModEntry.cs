@@ -485,6 +485,46 @@ namespace MphRead.Mods
                 return true;
             }
 
+            // Cook a map into the one file it is handed out as.
+            if (HasFlag(args, "mapbundle"))
+            {
+                string? which = ValueAfter(args, "mapbundle");
+                string? outPath = ValueAfter(args, "out");
+                int cooked = 0;
+                int failed = 0;
+                foreach (MapGen.MapDefinition def in MapGen.CustomRooms.Definitions)
+                {
+                    if (which != null && !which.Equals(def.Name, StringComparison.OrdinalIgnoreCase)
+                        && !which.Equals("all", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+                    if (def.SourcePath == null || def.BundlePath != null || def.Import == null)
+                    {
+                        // Already a bundle, or a map that builds from its own
+                        // description and has no level to carry.
+                        continue;
+                    }
+                    try
+                    {
+                        MapGen.MapBundle.Cook(def, def.SourcePath, outPath);
+                        cooked++;
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"{def.Name}: {ex.Message}");
+                        failed++;
+                    }
+                }
+                if (cooked == 0 && failed == 0)
+                {
+                    Console.WriteLine("No map to bundle. A bundle is cooked from a recipe and the "
+                        + $"level it converts; put both in {MapGen.CustomRooms.MapDirectory}.");
+                }
+                Environment.ExitCode = failed == 0 ? 0 : 1;
+                return true;
+            }
+
             // What levels are in a .pk3, so a conversion knows what to ask
             // for. Reads the archive's index only -- nothing is extracted.
             string? q3Maps = ValueAfter(args, "q3maps");

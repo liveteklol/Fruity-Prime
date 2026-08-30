@@ -175,6 +175,47 @@ namespace MphRead.Mods.Launcher.Gui
                 Update.Updater.CheckInBackground(update =>
                     Dispatcher.UIThread.Post(() => ShowUpdate(update)));
             }
+            _ = CatchUpPreviews();
+        }
+
+        /// <summary>
+        /// Render the pictures of any map that does not have one yet, without
+        /// being asked.
+        ///
+        /// This is what a map arriving looks like from here. A custom map is a
+        /// file dropped into maps/ -- a bundle handed over by somebody, and one
+        /// day a download from the server a player is joining -- and the room
+        /// itself needs nothing more: the room list is built at startup and the
+        /// binaries are built with it. The picture was the part that waited,
+        /// because it is rendered from the room and nothing rendered it until
+        /// somebody found the button. So the new map sat in the picker as a
+        /// name over an empty frame, which reads as a map that failed rather
+        /// than one that arrived.
+        ///
+        /// Nothing happens in the ordinary case, which is every map already
+        /// having one; the work is one worker process per missing picture. It
+        /// stays off the UI thread throughout, and the splash and the button
+        /// are refreshed at the end, on it.
+        /// </summary>
+        private async Task CatchUpPreviews()
+        {
+            if (!GameFiles.Ready || !ThumbnailHost.CanRender
+                || ThumbnailGenerator.MissingThumbnails().Count == 0)
+            {
+                return;
+            }
+            await ThumbnailHost.RenderMissingAsync(line => Dispatcher.UIThread.Post(() =>
+            {
+                if (_previewProgress != null)
+                {
+                    _previewProgress.Subtitle = line;
+                }
+            }));
+            Dispatcher.UIThread.Post(() =>
+            {
+                RefreshSplash();
+                RefreshPreviewEntry();
+            });
         }
 
         /// <summary>

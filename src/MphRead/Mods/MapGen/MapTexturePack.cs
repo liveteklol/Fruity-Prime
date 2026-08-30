@@ -47,9 +47,21 @@ namespace MphRead.Mods.MapGen
             BySourceIndex = map;
         }
 
+        /// <summary>The same pack out of a map bundle, where it is bytes rather than a file.</summary>
+        public static MapTexturePack Load(byte[] bytes, string name)
+        {
+            using var memory = new MemoryStream(bytes);
+            return Load(memory, name);
+        }
+
         public static MapTexturePack Load(string path)
         {
             using var stream = File.OpenRead(path);
+            return Load(stream, Path.GetFileName(path));
+        }
+
+        private static MapTexturePack Load(Stream stream, string path)
+        {
             using var reader = new BinaryReader(stream, Encoding.UTF8);
             if (new string(reader.ReadChars(4)) != "FPTX")
             {

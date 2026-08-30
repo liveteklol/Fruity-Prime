@@ -165,10 +165,24 @@
        are still generated on the player's machine, because they land where
        that machine's extracted files are, but everything needed to generate
        them ships, so a downloaded release has its custom maps ready and the
-       first launch builds them. -->
+       first launch builds them.
+
+       A map is handed out as one .fpmap bundle: recipe, level and baked
+       textures in a single file, with the level trimmed to the lumps the
+       importer reads (see Mods/MapGen/MapBundle.cs): 376 KB for de_dust2
+       against the 2.8 MB its folder weighed. The folder is what a map is
+       *worked on* as, so it is still copied to the build output for the loop
+       of converting and testing one, but a .pk3 is somebody else's level in
+       somebody else's container, and CopyToPublishDirectory keeps it out of
+       what players download. The workflow cooks the bundle before it
+       publishes. -->
   <ItemGroup>
-    <None Include="..\..\maps\**\*.json;..\..\maps\**\*.bsp;..\..\maps\**\*.tex;..\..\maps\**\*.pk3" Link="maps\%(RecursiveDir)%(Filename)%(Extension)">
+    <None Include="..\..\maps\**\*.json;..\..\maps\**\*.bsp;..\..\maps\**\*.tex;..\..\maps\**\*.fpmap" Link="maps\%(RecursiveDir)%(Filename)%(Extension)">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="..\..\maps\**\*.pk3" Link="maps\%(RecursiveDir)%(Filename)%(Extension)">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Never</CopyToPublishDirectory>
     </None>
   </ItemGroup>
 

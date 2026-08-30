@@ -33,15 +33,18 @@ namespace MphRead.Entities
 
         /// <summary>
         /// The three states every readout here shares: plenty, getting low,
-        /// nearly out -- and, for energy alone, carrying more than a hunter's
-        /// own tank. One set of colours for energy and ammo both, so a glance
-        /// at either corner means the same thing, and so the two cannot drift
-        /// apart into two vocabularies.
+        /// nearly out. One set of colours for energy and ammo both, so a
+        /// glance at either corner means the same thing, and so the two
+        /// cannot drift apart into two vocabularies.
+        ///
+        /// Three, not four: carrying more than a hunter's own tank used to get
+        /// a fourth colour of its own, which made the one state you are never
+        /// in trouble in the one state the bar changed colour for. Plenty is
+        /// plenty, and the number beside the bar says how much.
         /// </summary>
         private static readonly Vector4 ProGood = new Vector4(0.24f, 0.85f, 0.32f, 1);
         private static readonly Vector4 ProWarn = new Vector4(1f, 0.68f, 0.1f, 1);
         private static readonly Vector4 ProDanger = new Vector4(0.95f, 0.18f, 0.18f, 1);
-        private static readonly Vector4 ProOver = new Vector4(0.45f, 0.8f, 1f, 1);
 
         private static readonly Vector4 ProHudPanel = new Vector4(0, 0, 0, 0.5f);
         private static readonly Vector4 ProHudShade = new Vector4(0, 0, 0, 0.55f);
@@ -174,24 +177,15 @@ namespace MphRead.Entities
             return Math.Max(_healthMax, 1);
         }
 
-        /// <summary>Carrying more than one hunter's worth: Quake's overhealth, and worth saying so.</summary>
-        private bool ProHealthOver()
-        {
-            return GameState.Multiplayer && _health > Values.EnergyTank - 1;
-        }
-
         /// <summary>
         /// Green, amber, red -- the same three, at the same thresholds, the
         /// custom crosshair uses, so the two never disagree about how much
-        /// trouble you are in. Over a full tank it goes pale blue, which is
-        /// the one state the crosshair has no way to show.
+        /// trouble you are in. Above a full tank the bar is simply full and
+        /// green: <see cref="ProHealthFraction"/> clamps, so 199 reads as the
+        /// best state there is rather than as a state of its own.
         /// </summary>
         private Vector4 ProHealthColor()
         {
-            if (ProHealthOver())
-            {
-                return ProOver;
-            }
             float fraction = ProHealthFraction();
             if (fraction > ProHudWarn)
             {

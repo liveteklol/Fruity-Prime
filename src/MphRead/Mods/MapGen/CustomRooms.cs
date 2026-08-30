@@ -47,10 +47,15 @@ namespace MphRead.Mods.MapGen
         }
 
         /// <summary>
-        /// Every map file, including the ones in a folder of their own. A map
-        /// that brings a level and a texture pack with it is tidier as
-        /// maps/dust2/dust2.json than as three files loose in maps/, and the
-        /// level it converts is found beside the map file first.
+        /// Every map file: a loose recipe, one in a folder of its own with the
+        /// level it converts beside it, or a bundle, which is all of that in
+        /// one file (see <see cref="MapBundle"/>).
+        ///
+        /// A bundle wins where both exist, and it is the same map either way:
+        /// the working copy of a map is a folder with somebody's .pk3 in it,
+        /// and the bundle is what that folder is cooked into to be shipped or
+        /// handed out, so a checkout that has both would otherwise register
+        /// the same room twice.
         /// </summary>
         private static IEnumerable<string> MapFiles()
         {
@@ -58,7 +63,13 @@ namespace MphRead.Mods.MapGen
             {
                 return Enumerable.Empty<string>();
             }
-            return Directory.EnumerateFiles(MapDirectory, "*.json", SearchOption.AllDirectories);
+            var bundles = Directory.EnumerateFiles(MapDirectory, $"*{MapBundle.Extension}",
+                SearchOption.AllDirectories).ToList();
+            var names = new HashSet<string>(bundles.Select(
+                p => Path.GetFileNameWithoutExtension(p)), StringComparer.OrdinalIgnoreCase);
+            return bundles.Concat(Directory
+                .EnumerateFiles(MapDirectory, "*.json", SearchOption.AllDirectories)
+                .Where(p => !names.Contains(Path.GetFileNameWithoutExtension(p))));
         }
 
         private static IReadOnlyList<MapDefinition> LoadDefinitions()
@@ -246,9 +257,12 @@ namespace MphRead.Mods.MapGen
                 // and looks up to date
                 return true;
             }
-            string? source = MapFiles()
-                .FirstOrDefault(p => Path.GetFileNameWithoutExtension(p).ToUpperInvariant() == def.Name);
-            return source != null && File.GetLastWriteTimeUtc(source) > File.GetLastWriteTimeUtc(model);
+            // The file it was actually loaded from -- a recipe or a bundle --
+            // rather than a search for one named after the room, which a map
+            // whose file is not named after its room quietly failed.
+            string? source = def.SourcePath;
+            return source != null && File.Exists(source)
+                && File.GetLastWriteTimeUtc(source) > File.GetLastWriteTimeUtc(model);
         }
     }
 }

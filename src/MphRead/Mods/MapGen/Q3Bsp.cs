@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text;
 
 namespace MphRead.Mods.MapGen
@@ -39,11 +40,79 @@ namespace MphRead.Mods.MapGen
         public const int SurfaceSkip = 0x200;
 
         /// <summary>
-        /// Loads a level from a .bsp on disk, or by name from inside a .pk3,
-        /// which is a zip. Passing the pk3 is the normal case: that is the
-        /// form the player has.
+        /// The lumps <see cref="Parse"/> actually reads, and so the only ones
+        /// worth carrying: entities, textures, planes, models, brushes,
+        /// brushsides, vertexes, meshverts, faces.
+        ///
+        /// The rest of a compiled level -- lightmaps, light volumes, visdata
+        /// and the BSP tree itself -- is for a renderer that lights and culls
+        /// the level the way Quake does, and this importer does neither. In
+        /// df_dust2 they are 7.6 MB of the 8.8, which is what
+        /// <see cref="Trim"/> exists to leave behind.
+        ///
+        /// Beside the reader deliberately: the day it reads a tenth lump,
+        /// this is the line that has to grow with it, and a trimmed level
+        /// missing that lump would be a map that half builds.
+        /// </summary>
+        public static readonly int[] UsedLumps = { 0, 1, 2, 7, 8, 9, 10, 11, 13 };
+
+        /// <summary>
+        /// The same level with every lump this importer never opens emptied
+        /// out, ready to be compressed into a map bundle.
+        ///
+        /// The header keeps all seventeen entries, because that is what makes
+        /// it a Quake 3 level; the ones that are gone are given a length of
+        /// zero rather than removed, so any reader that looks at them finds
+        /// nothing instead of finding somebody else's bytes.
+        /// </summary>
+        public static byte[] Trim(byte[] bsp)
+        {
+            if (bsp.Length < 8 + 17 * 8)
+            {
+                throw new ProgramException("Not a Quake 3 level: too short to hold a header.");
+            }
+            var output = new List<byte>(bsp.Length / 4);
+            output.AddRange(bsp.AsSpan(0, 8 + 17 * 8).ToArray());
+            Span<byte> header = CollectionsMarshal.AsSpan(output);
+            for (int i = 0; i < 17; i++)
+            {
+                int offset = BitConverter.ToInt32(bsp, 8 + i * 8);
+                int length = BitConverter.ToInt32(bsp, 8 + i * 8 + 4);
+                if (!UsedLumps.Contains(i) || offset < 0 || length <= 0
+                    || offset + length > bsp.Length)
+                {
+                    BitConverter.TryWriteBytes(header[(8 + i * 8)..], output.Count);
+                    BitConverter.TryWriteBytes(header[(8 + i * 8 + 4)..], 0);
+                    continue;
+                }
+                BitConverter.TryWriteBytes(header[(8 + i * 8)..], output.Count);
+                BitConverter.TryWriteBytes(header[(8 + i * 8 + 4)..], length);
+                output.AddRange(bsp.AsSpan(offset, length).ToArray());
+                while (output.Count % 4 != 0)
+                {
+                    output.Add(0);
+                }
+                header = CollectionsMarshal.AsSpan(output);
+            }
+            return output.ToArray();
+        }
+
+        /// <summary>
+        /// Loads a level from a .bsp on disk, or by name from inside a .pk3 or
+        /// a map bundle, both of which are zips. Passing the pk3 is the normal
+        /// case for a map somebody is converting; a bundle is what a converted
+        /// map is handed out as.
         /// </summary>
         public static Q3Bsp Load(string source, string? mapName)
+        {
+            return Parse(ReadLevel(source, mapName));
+        }
+
+        /// <summary>
+        /// The level's bytes, out of a .bsp or out of the zip around it --
+        /// what <see cref="Load"/> parses and what <see cref="Trim"/> cooks.
+        /// </summary>
+        public static byte[] ReadLevel(string source, string? mapName)
         {
             if (!File.Exists(source))
             {
@@ -51,7 +120,7 @@ namespace MphRead.Mods.MapGen
             }
             if (Path.GetExtension(source).Equals(".bsp", StringComparison.OrdinalIgnoreCase))
             {
-                return Parse(File.ReadAllBytes(source));
+                return File.ReadAllBytes(source);
             }
             using ZipArchive archive = ZipFile.OpenRead(source);
             List<ZipArchiveEntry> maps = archive.Entries
@@ -73,7 +142,7 @@ namespace MphRead.Mods.MapGen
             using Stream stream = entry.Open();
             using var memory = new MemoryStream();
             stream.CopyTo(memory);
-            return Parse(memory.ToArray());
+            return memory.ToArray();
         }
 
         public static IReadOnlyList<string> ListMaps(string source)
