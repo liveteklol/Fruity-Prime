@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using MphRead.Editor;
 using MphRead.Entities;
@@ -33,7 +34,7 @@ namespace MphRead.Mods.MapGen
             // With a baked pack the level wears its own textures and a
             // material is one shader; without one, materials are whatever the
             // map file mapped its shaders onto in a borrowed room.
-            string? packPath = import.ResolveTextures();
+            string? packPath = import.ResolveTextures() ?? BakeTextures(bsp, import, verbose);
             MapTexturePack? pack = packPath == null ? null : MapTexturePack.Load(packPath);
             IReadOnlyList<(int, int)> textureSizes = pack == null
                 ? GetTextureSizes(def)
@@ -489,6 +490,52 @@ namespace MphRead.Mods.MapGen
                 face.Texcoords[i] = ay > ax && ay >= az
                     ? new Vector2(offset.X, offset.Z)
                     : ax >= az ? new Vector2(offset.Z, -offset.Y) : new Vector2(offset.X, -offset.Y);
+            }
+        }
+
+        /// <summary>
+        /// Bakes the texture pack the map file asks for but does not have.
+        ///
+        /// What travels with a map is the level and the recipe; the pack is
+        /// neither. It is derived from the level, exactly like the room
+        /// binaries, so a map file that names one and a folder that has only
+        /// the .pk3 is the normal state of a fresh clone, not a broken map.
+        ///
+        /// It stays a file rather than becoming a step in the conversion,
+        /// because the machine that plays the game is not always the one that
+        /// can do this: the Android head has no image decoder at all, its STB
+        /// natives being desktop builds left out of the APK on purpose. There,
+        /// this fails and says so, and the pack has to arrive already baked.
+        /// </summary>
+        private static string? BakeTextures(Q3Bsp bsp, MapImport import, bool verbose)
+        {
+            string? level = import.Resolve();
+            if (String.IsNullOrEmpty(import.Textures) || level == null)
+            {
+                return null;
+            }
+            string target = Path.Combine(
+                import.BaseDirectory ?? CustomRooms.MapDirectory, import.Textures);
+            try
+            {
+                MapTextureBake.Result result = MapTextureBake.Bake(bsp, new[] { level }, target);
+                if (result.Baked == 0)
+                {
+                    File.Delete(target);
+                    return null;
+                }
+                if (verbose)
+                {
+                    Console.WriteLine($"  baked {result.Baked} textures from {Path.GetFileName(level)}"
+                        + $" -> {Path.GetFileName(target)}");
+                }
+                return target;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[mapgen] could not bake textures from "
+                    + $"{Path.GetFileName(level)}: {ex.Message}");
+                return null;
             }
         }
 

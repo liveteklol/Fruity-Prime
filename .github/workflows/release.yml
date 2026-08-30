@@ -81,6 +81,9 @@ jobs:
       - name: nothing from the game is tracked
         run: tools/check-no-game-assets.sh
 
+      - name: every custom map has the level it converts
+        run: tools/check-maps-shipped.sh
+
       - name: publish every target
         env:
           VERSION: ${{ steps.name.outputs.version }}
@@ -137,6 +140,13 @@ jobs:
           tools/check-no-game-assets.sh publish/win-x64 publish/linux-x64
           publish/osx-x64 publish/osx-arm64
           publish/linux-arm64 publish/win-x64-server publish/linux-x64-server
+
+      # What a downloaded release is judged on: the maps are there and ready.
+      - name: the custom maps reached every package
+        run: >
+          for d in publish/win-x64 publish/linux-x64 publish/osx-x64
+          publish/osx-arm64 publish/linux-arm64; do
+          tools/check-maps-shipped.sh "$d" || exit 1; done
 
       # A GUI game and a console server, which is what makes one
       # double-clickable and the other scriptable. Checked before a tag exists,

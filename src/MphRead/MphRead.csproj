@@ -161,11 +161,13 @@
     </None>
   </ItemGroup>
 
-  <!-- Custom map sources. These are text: the room binaries they describe are
-       generated on the player's machine from the player's own extracted files
-       and never travel with the build. -->
+  <!-- Custom maps: the map file, and the level it converts. The room binaries
+       are still generated on the player's machine, because they land where
+       that machine's extracted files are, but everything needed to generate
+       them ships, so a downloaded release has its custom maps ready and the
+       first launch builds them. -->
   <ItemGroup>
-    <None Include="..\..\maps\**\*.json;..\..\maps\**\*.bsp;..\..\maps\**\*.tex" Link="maps\%(RecursiveDir)%(Filename)%(Extension)">
+    <None Include="..\..\maps\**\*.json;..\..\maps\**\*.bsp;..\..\maps\**\*.tex;..\..\maps\**\*.pk3" Link="maps\%(RecursiveDir)%(Filename)%(Extension)">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>

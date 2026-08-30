@@ -1,11 +1,28 @@
 # Custom maps: the generator and the Quake 3 importer
 
-**No level ships in `maps/`, only recipes.** The game is the 27 multiplayer
+**A map is two files: the recipe and the level, and both ship.** The asset
+guard used to refuse a `.pk3` by extension; it now refuses only id Software's
+own paks, by name. What that guard is for is keeping somebody else's
+*commercial* data out -- the cartridge, and a game somebody bought -- and a
+custom map made by a person who wants it played is not that. Whether a
+particular level may be published is a judgement no script can make, so it is
+made by whoever commits it.
+
+The room binaries are still generated on the player's machine, because they
+land where that machine's extracted files are. So is the texture pack: a map
+file that names one and a folder that has only the `.pk3` is the normal state
+of a fresh clone, and the importer bakes it. `tools/check-maps-shipped.sh`
+runs in CI over the repository and over every published package, because a map
+file that arrives without its level registers a room the game then declines to
+build -- the player just sees the 27 cartridge rooms and no sign anything was
+meant to be there.
+
+**Only recipes used to ship.** The game is the 27 multiplayer
 rooms of the cartridge plus whatever the player has the source for; what is
 described below is the hook. `maps/q3dm17.json.example` is the worked example,
-and `maps/dust2/dust2.json` is a real one -- but its `df_dust2.pk3` is the
-player's own, so on a machine without it the room is left out and `-rooms`
-prints 27 again. The three maps that used to travel with the repository --
+and `maps/dust2/dust2.json` is a real one. A map whose level is *not* here --
+the Quake III example, which is id Software's commercial data -- is left out at
+startup and `-rooms` prints 27 again. The three maps that used to travel with the repository --
 `longestyard`, `testbox` and the converted OpenArena level `wrackdm17`, with
 its stripped `.bsp` and its baked `.tex` -- were taken out, along with the GPL
 notice they needed.

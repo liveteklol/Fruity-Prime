@@ -24,6 +24,9 @@ jobs:
       - name: nothing from the game is tracked
         run: tools/check-no-game-assets.sh
 
+      - name: every custom map has the level it converts
+        run: tools/check-maps-shipped.sh
+
   build:
     name: ${{ matrix.id }}
     needs: assets
@@ -86,6 +89,14 @@ jobs:
 
       - name: nothing from the game is in the output
         run: tools/check-no-game-assets.sh publish/${{ matrix.id }}
+
+      # A release has to arrive with its maps ready. The room binaries are
+      # still built on the player's machine, because they land where that
+      # machine's extracted files are, but everything needed to build them
+      # travels -- and a map file that reached the package without its level
+      # would register a room the game then declines to build.
+      - name: the custom maps reached the package
+        run: tools/check-maps-shipped.sh publish/${{ matrix.id }}
 
       # Double-clicking the game must not put a terminal behind it. That is one
       # field in the PE header, it comes out of a csproj condition, and nothing
