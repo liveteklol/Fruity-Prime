@@ -217,7 +217,7 @@ namespace MphRead
         public bool ShowInvisibleEntities => _showInvisible != 0;
         public bool ShowAllEntities => _showInvisible == 2;
         public bool TransformRoomNodes => _transformRoomNodes;
-        public bool ShowAllNodes => _showAllNodes;
+        public bool ShowAllNodes { get => _showAllNodes; set => _showAllNodes = value; }
         public float FrameTime => _frameTime;
         public ulong FrameCount => _frameCount;
         public ulong LiveFrames => _liveFrames;
@@ -445,6 +445,7 @@ namespace MphRead
         {
             return Room?.GetNodeRefByPosition(position) ?? NodeRef.None;
         }
+
 
         public bool IsNodeRefVisible(NodeRef nodeRef)
         {
@@ -1389,7 +1390,15 @@ namespace MphRead
                 {
                     PlayerEntity.Main.Controls.ClearAll();
                 }
+                Mods.Network.DemoPlayback.PumpFrame();
                 Mods.Network.NetSession.Update(_globalElapsedTime);
+                if (Mods.Network.DemoPlayback.IsActive && !Mods.SpectatorMode.IsSpectating)
+                {
+                    // No local player to spawn as during playback -- watch
+                    // as soon as anyone recorded becomes available, rather
+                    // than sitting on an empty room waiting for Escape.
+                    Mods.SpectatorMode.Start();
+                }
                 PlayerEntity.ProcessInput(_keyboardState, _mouseState,
                     _inputMode == InputMode.CameraOnly || Mods.PauseMenu.Open);
                 Mods.Network.NetHooks.AfterInput(this);
@@ -1580,6 +1589,37 @@ namespace MphRead
                 }
             }
             return first;
+        }
+
+        /// <summary>
+        /// Read the window's own buffer, HUD and all.
+        ///
+        /// <see cref="ReadSceneTarget"/> reads the offscreen target, which the
+        /// HUD is deliberately not drawn into -- it goes to the default
+        /// framebuffer after the target is unbound (see OnRenderFrame), which
+        /// is what lets every thumbnail and map preview come out without one.
+        /// So no screenshot could ever show the HUD, and HUD work could not be
+        /// checked by looking at it, only by playing.
+        ///
+        /// Called between the draw and SwapBuffers, and **only on a window
+        /// that is actually visible**: a hidden window has no usable back
+        /// buffer under Mesa, which is the whole reason the offscreen target
+        /// is what everything else reads.
+        /// </summary>
+        public byte[]? ReadWindowBuffer(out int width, out int height)
+        {
+            width = Size.X;
+            height = Size.Y;
+            if (width <= 0 || height <= 0)
+            {
+                return null;
+            }
+            byte[] buffer = new byte[width * height * 3];
+            GL.BindFramebuffer(FramebufferTarget.ReadFramebuffer, 0);
+            GL.ReadBuffer(ReadBufferMode.Back);
+            GL.PixelStore(PixelStoreParameter.PackAlignment, 1);
+            GL.ReadPixels(0, 0, width, height, PixelFormat.Rgb, PixelType.UnsignedByte, buffer);
+            return buffer;
         }
 
         public byte[]? ReadSceneTarget(out int width, out int height)
@@ -4242,6 +4282,64 @@ namespace MphRead
             GL.BindTexture(TextureTarget.Texture2D, 0);
         }
 
+        /// <summary>
+        /// A small flat-coloured cross at the centre of the screen, drawn
+        /// with none of the game's sprite assets -- the Quake-Live-style
+        /// alternative to the reticle. Reuses the RTT shader's fade_color
+        /// path (normally the full-screen fade) as a flat-fill: with its
+        /// alpha above zero the fragment shader outputs that colour outright
+        /// instead of sampling the bound texture, which is exactly "draw a
+        /// solid shape with no asset."
+        /// </summary>
+        public void DrawCustomCrosshair(Vector3 color)
+        {
+            const float armLength = 9f;
+            const float armThickness = 3f;
+            const float gap = 3f;
+            float halfW = Size.X / 2f;
+            float halfH = Size.Y / 2f;
+            GL.Uniform4(_shaderLocations.FadeColor, color.X, color.Y, color.Z, 1f);
+            void DrawArm(float left, float right, float top, float bottom)
+            {
+                GL.Begin(PrimitiveType.TriangleStrip);
+                GL.Vertex3(right / halfW, top / halfH, 0f);
+                GL.Vertex3(left / halfW, top / halfH, 0f);
+                GL.Vertex3(right / halfW, bottom / halfH, 0f);
+                GL.Vertex3(left / halfW, bottom / halfH, 0f);
+                GL.End();
+            }
+            DrawArm(-armThickness / 2, armThickness / 2, gap + armLength, gap); // top
+            DrawArm(-armThickness / 2, armThickness / 2, -gap, -gap - armLength); // bottom
+            DrawArm(-gap - armLength, -gap, armThickness / 2, -armThickness / 2); // left
+            DrawArm(gap, gap + armLength, armThickness / 2, -armThickness / 2); // right
+            GL.Uniform4(_shaderLocations.FadeColor, Vector4.Zero);
+        }
+
+        /// <summary>
+        /// A flat-coloured, unbordered rectangle in the same 256x192 virtual
+        /// space <see cref="DrawHudObject"/>'s mode 2 and the HUD text draw
+        /// use -- for the modern HUD's equipped-weapon highlight, which has
+        /// no sprite asset of its own. Same fade_color flat-fill trick as
+        /// <see cref="DrawCustomCrosshair"/>.
+        /// </summary>
+        public void DrawHudFlatBox(float left, float top, float right, float bottom, Vector4 color)
+        {
+            float halfW = Size.X / 2f;
+            float halfH = Size.Y / 2f;
+            float x0 = (left / 256f * Size.X - halfW) / halfW;
+            float x1 = (right / 256f * Size.X - halfW) / halfW;
+            float y0 = (halfH - top / 192f * Size.Y) / halfH;
+            float y1 = (halfH - bottom / 192f * Size.Y) / halfH;
+            GL.Uniform4(_shaderLocations.FadeColor, color);
+            GL.Begin(PrimitiveType.TriangleStrip);
+            GL.Vertex3(x1, y0, 0f);
+            GL.Vertex3(x0, y0, 0f);
+            GL.Vertex3(x1, y1, 0f);
+            GL.Vertex3(x0, y1, 0f);
+            GL.End();
+            GL.Uniform4(_shaderLocations.FadeColor, Vector4.Zero);
+        }
+
         /// <param name="scale">
         /// Multiplies the size the object is drawn at, without touching the
         /// size it is *cut out* at. Those are the same field on the instance --
@@ -4561,6 +4659,49 @@ namespace MphRead
             _cameraRight = Vector3.UnitX;
         }
 
+        /// <summary>
+        /// Space, during demo playback: an independent free no-clip camera
+        /// with no HUD, instead of following whoever spectator mode has the
+        /// camera on. Reuses the same Roam camera the room/model viewer
+        /// tooling already has -- WASD and the arrow keys already move and
+        /// turn it in <see cref="OnKeyHeld"/>, and the HUD draw calls
+        /// already gate on <c>CameraMode == CameraMode.Player</c>, so
+        /// switching to Roam gets "no HUD" for free rather than needing a
+        /// separate suppression somewhere.
+        /// </summary>
+        /// <summary>
+        /// True while the demo free camera specifically (as opposed to the
+        /// room/model viewer's own Roam camera, which is CameraMode.Roam
+        /// too) is up -- lets <see cref="OnMouseMove"/> turn it without
+        /// requiring the viewer tool's held-left-click gesture, since this
+        /// is meant to feel like the game's ordinary first-person look.
+        /// </summary>
+        private bool _demoFreeCam;
+        public bool IsDemoFreeCam => _demoFreeCam;
+
+        public void ToggleDemoFreeCamera()
+        {
+            if (_cameraMode == CameraMode.Roam)
+            {
+                _cameraMode = CameraMode.Player;
+                _inputMode = InputMode.All;
+                _demoFreeCam = false;
+                return;
+            }
+            _cameraPosition = PlayerEntity.Main.CameraInfo.Position;
+            _cameraFacing = PlayerEntity.Main.CameraInfo.Facing;
+            if (_cameraFacing.LengthSquared < 0.0001f)
+            {
+                _cameraFacing = -Vector3.UnitZ;
+            }
+            _cameraFacing = _cameraFacing.Normalized();
+            _cameraRight = Vector3.Cross(_cameraFacing, Vector3.UnitY);
+            _cameraUp = Vector3.Cross(_cameraRight, _cameraFacing);
+            _cameraMode = CameraMode.Roam;
+            _inputMode = InputMode.CameraOnly;
+            _demoFreeCam = true;
+        }
+
         public void OnMouseClick(bool down)
         {
             if (_inputMode != InputMode.PlayerOnly)
@@ -4571,18 +4712,39 @@ namespace MphRead
 
         public void OnMouseMove(float deltaX, float deltaY)
         {
-            if (_leftMouse && AllowCameraMovement && _inputMode != InputMode.PlayerOnly)
+            if ((_leftMouse || _demoFreeCam) && AllowCameraMovement && _inputMode != InputMode.PlayerOnly)
             {
+                // The spectator's free camera is the player's look, so it
+                // obeys the player's settings.
+                //
+                // The /1.5 below is the model viewer's own feel and stays that
+                // for the viewer's Pivot and Roam cameras -- those are a tool,
+                // not a game. But the demo/spectator free camera is reached
+                // from a match, with the same mouse, and it ignored mouse
+                // sensitivity and both invert axes outright: turning it on
+                // changed how fast the view turned and which way up it went,
+                // with nothing in the settings able to say otherwise.
+                float sensitivity = 1f;
+                float invertX = 1f;
+                float invertY = 1f;
+                if (_demoFreeCam)
+                {
+                    sensitivity = Mods.InputSettings.MouseSensitivity;
+                    invertX = Mods.InputSettings.InvertMouseX ? -1f : 1f;
+                    invertY = Mods.InputSettings.InvertMouseY ? -1f : 1f;
+                }
+                float moveX = deltaX * sensitivity * invertX;
+                float moveY = deltaY * sensitivity * invertY;
                 if (_cameraMode == CameraMode.Pivot)
                 {
-                    _pivotAngleX += deltaY / 1.5f;
+                    _pivotAngleX += moveY / 1.5f;
                     _pivotAngleX = Math.Clamp(_pivotAngleX, -90.0f, 90.0f);
-                    _pivotAngleY += deltaX / 1.5f;
+                    _pivotAngleY += moveX / 1.5f;
                     _pivotAngleY %= 360f;
                 }
                 else if (_cameraMode == CameraMode.Roam)
                 {
-                    UpdateCameraRotation(MathHelper.DegreesToRadians(deltaX / 1.5f), MathHelper.DegreesToRadians(-deltaY / 1.5f));
+                    UpdateCameraRotation(MathHelper.DegreesToRadians(moveX / 1.5f), MathHelper.DegreesToRadians(-moveY / 1.5f));
                 }
             }
         }
@@ -4613,6 +4775,7 @@ namespace MphRead
 
         public void OnKeyDown(KeyboardKeyEventArgs e)
         {
+#if DEBUG
             if (Selection.OnKeyDown(e, this))
             {
                 return;
@@ -5052,6 +5215,7 @@ namespace MphRead
                     _unloadQueue.Enqueue(Selection.Entity);
                 }
             }
+#endif
         }
 
         private enum InputMode
@@ -5706,8 +5870,22 @@ namespace MphRead
         public Scene Scene { get; }
         private bool _startedHidden = true;
 
+        /// <summary>
+        /// The smallest the game window may be dragged to.
+        ///
+        /// Not an aesthetic floor: Escape's menu is laid over this window and
+        /// its entries need about 470 pixels of height, so a window shorter
+        /// than that had "Leave match" and "Quit" off the bottom edge -- a
+        /// player who cannot get out of the match. The menu scrolls now and so
+        /// survives anything, but a window this small is not a size anybody
+        /// wants to play at either, and GLFW will honour a minimum where it
+        /// will not honour a request to be sensible.
+        /// </summary>
+        private static readonly Vector2i _minimumSize = new Vector2i(800, 600);
+
         public RenderWindow() : base(_gameWindowSettings, _nativeWindowSettings)
         {
+            MinimumSize = _minimumSize;
             Scene = new Scene(Size, KeyboardState, MouseState, (string title) =>
             {
                 Title = title;
@@ -5766,7 +5944,7 @@ namespace MphRead
         protected override void OnRenderFrame(FrameEventArgs args)
         {
             // The pause menu wants the pointer back.
-            CursorState = Scene.CameraMode == CameraMode.Player && !Scene.FrameAdvance
+            CursorState = (Scene.CameraMode == CameraMode.Player || Scene.IsDemoFreeCam) && !Scene.FrameAdvance
                 && !Mods.PauseMenu.Open
                 && !Scene.ShowCursor && !GameState.DialogPause && !GameState.MenuPause
                 ? CursorState.Grabbed
@@ -5803,7 +5981,14 @@ namespace MphRead
         {
             if (e.Button == MouseButton.Button1)
             {
-                Scene.OnMouseClick(down: true);
+                if (Mods.SpectatorMode.IsSpectating)
+                {
+                    Mods.SpectatorMode.CycleNext();
+                }
+                else
+                {
+                    Scene.OnMouseClick(down: true);
+                }
             }
             base.OnMouseDown(e);
         }
@@ -5837,11 +6022,24 @@ namespace MphRead
                 base.OnKeyDown(e);
                 return;
             }
+            // Space, during demo playback only: free no-clip camera instead
+            // of following whoever spectator mode has the camera on. Not a
+            // real control during a real match -- every player's input is
+            // frozen for the whole session while watching a demo, so there
+            // is nothing this could conflict with.
+            if (e.Key == Keys.Space && Mods.Network.DemoPlayback.IsActive)
+            {
+                Scene.ToggleDemoFreeCamera();
+                base.OnKeyDown(e);
+                return;
+            }
             // Escape opens the pause menu while a player is being driven --
             // the mouse comes back, the window can be resized, and the
             // settings are reachable without leaving the match. Everywhere
-            // else it still means "close this".
-            if (e.Key == Keys.Escape && Scene.CameraMode == CameraMode.Player
+            // else it still means "close this" -- except the demo free
+            // camera, which is CameraMode.Roam and would otherwise fall
+            // through to that and quit the game instead of pausing it.
+            if (e.Key == Keys.Escape && (Scene.CameraMode == CameraMode.Player || Scene.IsDemoFreeCam)
                 && Mods.PauseMenu.HandleEscape(this))
             {
                 base.OnKeyDown(e);

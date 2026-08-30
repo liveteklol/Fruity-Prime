@@ -6,7 +6,8 @@ namespace MphRead.Mods.Launcher
         Online,
         Offline,
         Host,
-        Adventure
+        Adventure,
+        Demo
     }
 
     /// <summary>
@@ -37,5 +38,8 @@ namespace MphRead.Mods.Launcher
 
         /// <summary>Adventure only: start over rather than resume the slot.</summary>
         public bool NewGame { get; init; }
+
+        /// <summary>Demo only: the recorded file to play back.</summary>
+        public string DemoPath { get; init; }
     }
 }

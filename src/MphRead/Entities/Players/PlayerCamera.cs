@@ -619,14 +619,13 @@ namespace MphRead.Entities
                 float aimX = 0;
                 if (Controls.MouseAim && !IsBot)
                 {
-                    // itodo: x and y sensitivity
                     if (!Controls.KeyboardAim || !Controls.AimUp.IsDown && !Controls.AimDown.IsDown)
                     {
-                        aimY = -Input.MouseDeltaY / 4f;
+                        aimY = -Input.MouseDeltaY / 4f * Mods.InputSettings.MouseSensitivity;
                     }
                     if (!Controls.KeyboardAim || !Controls.AimLeft.IsDown && !Controls.AimRight.IsDown)
                     {
-                        aimX = -Input.MouseDeltaX / 4f;
+                        aimX = -Input.MouseDeltaX / 4f * Mods.InputSettings.MouseSensitivity;
                     }
                 }
                 if (Controls.KeyboardAim || IsBot)
@@ -693,9 +692,6 @@ namespace MphRead.Entities
                 {
                     aimX *= -1;
                 }
-                float sensitivity = 1; // itodo: this
-                aimY *= sensitivity;
-                aimX *= sensitivity;
                 bool updateY = aimY != 0 && (CameraInfo.Facing.Y < 0.985f || aimY < 0) && (CameraInfo.Facing.Y > -0.985f || aimY > 0);
                 bool updateX = aimX != 0;
                 if (updateY || updateX)

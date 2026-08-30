@@ -1617,9 +1617,11 @@ namespace MphRead
 
         private class SerializedSettings
         {
-            public IReadOnlyDictionary<string, string>? Bugfixes { get; set; }
+            // Bugfixes and Cheats stay at their code defaults -- there is no
+            // UI to change them any more, and an old settings.json is not
+            // allowed to override that. Features still persists, but only
+            // the subset Commit()/Load() actually write -- see Features.cs.
             public IReadOnlyDictionary<string, string>? Features { get; set; }
-            public IReadOnlyDictionary<string, string>? Cheats { get; set; }
             public MenuSettings? MenuSettings { get; set; }
         }
 
@@ -1631,17 +1633,9 @@ namespace MphRead
                 SerializedSettings? settings = JsonSerializer.Deserialize<SerializedSettings>(File.ReadAllText(path), _jsonOpt);
                 if (settings != null)
                 {
-                    if (settings.Bugfixes != null)
-                    {
-                        Bugfixes.Load(settings.Bugfixes);
-                    }
                     if (settings.Features != null)
                     {
                         Features.Load(settings.Features);
-                    }
-                    if (settings.Cheats != null)
-                    {
-                        Cheats.Load(settings.Cheats);
                     }
                     if (settings.MenuSettings != null)
                     {
@@ -1661,9 +1655,7 @@ namespace MphRead
             }
             var settings = new SerializedSettings
             {
-                Bugfixes = Bugfixes.Commit(),
                 Features = Features.Commit(),
-                Cheats = Cheats.Commit(),
                 MenuSettings = menuSettings
             };
             File.WriteAllText(GetSettingsPath(), JsonSerializer.Serialize(settings, _jsonOpt));

@@ -171,6 +171,33 @@ namespace MphRead.Mods.Network
             ReplayBeam = BeamType.None;
         }
 
+        /// <summary>
+        /// Forget one slot's damage history, because the slot has changed
+        /// hands. See <see cref="NetPlayerBridge.ForgetSlot"/>.
+        ///
+        /// The counter is what makes Replay safe, and it is a byte: the new
+        /// occupant would otherwise be compared against the sequence the
+        /// previous one left, and the difference between two unrelated byte
+        /// counters is as likely to read as a two-hundred-hit burst (which
+        /// Replay discards as a resync) as it is to read as nothing.
+        /// </summary>
+        public static void ForgetSlot(int slot)
+        {
+            if (slot < 0 || slot >= Slots)
+            {
+                return;
+            }
+            _sequence[slot] = 0;
+            _attacker[slot] = 0;
+            _beam[slot] = 0;
+            _flags[slot] = 0;
+            _direction[slot] = Vector3.Zero;
+            _lastSeen[slot] = 0;
+            _everSeen[slot] = false;
+            Resolved[slot] = 0;
+            Replayed[slot] = 0;
+        }
+
         public static void Reset()
         {
             Array.Clear(_sequence);

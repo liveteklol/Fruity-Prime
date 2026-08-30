@@ -151,10 +151,22 @@ namespace MphRead.Mods.Network
         /// unoccupied ones are left inactive: invisible, unsimulated, and
         /// waiting for NetSlotManager to switch them on.
         /// </summary>
+        /// <param name="localSlot">
+        /// Which slot is "this machine's own player" -- defaults to
+        /// <see cref="NetSession.LocalSlot"/> for a real connection. Demo
+        /// playback passes -1 explicitly: there is no local player during
+        /// playback, and without this every slot-0 hunter, recolour and
+        /// occupancy check below silently clamped to slot 0 (from
+        /// <c>Math.Max(NetSession.LocalSlot, 0)</c>, since LocalSlot stays
+        /// -1 for the whole session) -- overwriting slot 0's real recorded
+        /// hunter with whatever dummy one the playback call site passed, and
+        /// exempting it alone from the "not occupied, clear Active" pass a
+        /// few lines down.
+        /// </param>
         public static void BuildPlayers(Scene scene, Hunter localHunter, int localRecolor,
-            int teamId = -1)
+            int teamId = -1, int? localSlot = null)
         {
-            int localSlot = Math.Max(NetSession.LocalSlot, 0);
+            int resolvedSlot = localSlot ?? Math.Max(NetSession.LocalSlot, 0);
             for (int slot = 0; slot < PlayerEntity.MaxPlayers; slot++)
             {
                 // Only this machine's hunter is a local choice. Everyone
@@ -164,8 +176,8 @@ namespace MphRead.Mods.Network
                 // whatever its own P2 row said while announcing its P1 row,
                 // and two clients sharing a settings file both ended up
                 // showing the same hunter for everybody.
-                Hunter hunter = slot == localSlot ? localHunter : NetSession.SlotHunter[slot];
-                scene.AddPlayer(hunter, slot == localSlot ? localRecolor : 0, teamId);
+                Hunter hunter = slot == resolvedSlot ? localHunter : NetSession.SlotHunter[slot];
+                scene.AddPlayer(hunter, slot == resolvedSlot ? localRecolor : 0, teamId);
             }
             for (int slot = 0; slot < PlayerEntity.MaxPlayers; slot++)
             {
@@ -181,7 +193,7 @@ namespace MphRead.Mods.Network
                 // then overwrite the Controls that relayed intent fills in.
                 player.IsBot = false;
                 player.BotLevel = 0;
-                if (slot == localSlot)
+                if (slot == resolvedSlot)
                 {
                     continue;
                 }
@@ -201,9 +213,16 @@ namespace MphRead.Mods.Network
             // slot this client drives. A client on slot 1 that skipped this
             // was never its own main player -- its intro sequence never
             // ended, so it kept the spectator camera and never spawned.
-            PlayerEntity.MainPlayerIndex = localSlot;
-            Console.WriteLine($"[net] player slots built, main player = slot {localSlot}");
-            NetLog.Event($"player slots built, main = slot {localSlot}");
+            //
+            // resolvedSlot itself may be -1 (demo playback, no local player
+            // at all) -- Main still has to be a real array index, so this
+            // falls back to slot 0 as a harmless placeholder that
+            // SpectatorMode.Start immediately redirects once a real player
+            // is available, same as it does after every subsequent cycle.
+            int mainIndex = resolvedSlot >= 0 ? resolvedSlot : 0;
+            PlayerEntity.MainPlayerIndex = mainIndex;
+            Console.WriteLine($"[net] player slots built, main player = slot {mainIndex}");
+            NetLog.Event($"player slots built, main = slot {mainIndex}");
         }
     }
 }

@@ -76,17 +76,15 @@ namespace MphRead.Mods
             set => _celBands = Math.Clamp(value, 2, 8);
         }
 
-        private static int _celBands = 4;
+        private static int _celBands = 8;
 
         /// <summary>
         /// How dark the ink line goes, 0 to 1. Zero is no outline at all, and
         /// the renderer then leaves the depth in the cheaper buffer that
         /// cannot be read back.
         ///
-        /// One by default, which is a line of solid black. It used to be 0.75
-        /// -- back when the pass inked most of every flat wall and full
-        /// strength would have been unreadable. Now that it only finds the
-        /// silhouettes and the creases, the line wants to be a line.
+        /// Locked at 0.5 (50%) -- steps and outline strength are no longer
+        /// player-configurable, only the on/off switch above is.
         /// </summary>
         public static float CelEdge
         {
@@ -94,7 +92,7 @@ namespace MphRead.Mods
             set => _celEdge = Math.Clamp(value, 0, 1);
         }
 
-        private static float _celEdge = 1f;
+        private static float _celEdge = 0.5f;
 
         /// <summary>Distance fog, where the room asks for it.</summary>
         public static bool Fog { get; set; } = true;

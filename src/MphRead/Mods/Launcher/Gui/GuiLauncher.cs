@@ -154,8 +154,8 @@ namespace MphRead.Mods.Launcher.Gui
                 // own copy, so after a match this one is stale and would write
                 // the old values back over it.
                 MenuSettings settings = GameState.LoadSettings();
-                // LoadSettings only fills in Features/Cheats/Bugfixes; the rest
-                // of the file reaches the engine through Mods.GameSettings.
+                // LoadSettings only fills in Features; the rest of the file
+                // reaches the engine through Mods.GameSettings.
                 Mods.GameSettings.Apply(settings);
                 LauncherPrefs.Load();
                 Mods.WindowMode.Startup = LauncherPrefs.WindowMode;

@@ -28,6 +28,7 @@ namespace MphRead.Entities
         private HudMeter _healthbarSubMeter = null!;
         private HudMeter _ammoBarMeter = null!;
         private HudObjectInstance _weaponIconInst = null!;
+        private readonly HudObjectInstance[] _weaponListIcons = new HudObjectInstance[9];
         private HudObjectInstance _boostInst = null!;
         private HudObjectInstance _bombInst = null!;
         private HudMeter _enemyHealthMeter = null!;
@@ -325,6 +326,30 @@ namespace MphRead.Entities
             _weaponIconInst.SetCharacterData(weaponIcon.CharacterData, _scene);
             _weaponIconInst.SetPaletteData(weaponIcon.PaletteData, _scene);
             _weaponIconInst.SetAnimationFrames(weaponIcon.AnimParams);
+            // Modern HUD's weapon list: one static icon per weapon, each
+            // pinned to its own frame instead of switching on equip.
+            //
+            // Off the **weapon-select sheet**, not the equipped-weapon icon
+            // beside the ammo bar. Both have a frame per beam, and they are
+            // not the same picture: the equipped icon is a monochrome glyph in
+            // the visor's own green, meant to be read at a glance next to a
+            // green bar, and a column of nine of them is nine green smudges
+            // that have to be told apart by shape. The select sheet is the
+            // touchscreen weapon menu's -- the game's own full-colour art for
+            // each beam, with its own palette -- which is what makes a list
+            // scannable, and is the whole reason Quake's weapon bar works.
+            //
+            // Frame index is the BeamType either way (see the select ring
+            // above, which reads _availableWeapons[inst.CurrentFrame]).
+            HudObject listSheet = HudInfo.GetHudObject(_hudObjects.WeaponSelect);
+            for (int i = 0; i < _weaponListIcons.Length; i++)
+            {
+                var listIcon = new HudObjectInstance(listSheet.Width, listSheet.Height);
+                listIcon.SetCharacterData(listSheet.CharacterData, i, _scene);
+                listIcon.SetPaletteData(listSheet.PaletteData, _scene);
+                listIcon.Enabled = true;
+                _weaponListIcons[i] = listIcon;
+            }
             HudObject boost = HudInfo.GetHudObject(HudElements.Boost);
             _boostInst = new HudObjectInstance(boost.Width, boost.Height);
             _boostInst.SetCharacterData(boost.CharacterData, _scene);
@@ -493,7 +518,17 @@ namespace MphRead.Entities
                 _dialogFrameInst.SetPaletteData(dialogFrame.PaletteData, _scene);
                 _dialogFrameInst.Enabled = true;
             }
+            HudReady = true;
         }
+
+        /// <summary>
+        /// Whether <see cref="SetUpHud"/> has run for this player. Only ever
+        /// true at spawn for whoever was <see cref="Main"/> at the time --
+        /// every other player's HUD fields are left null, which is fine
+        /// until something (spectating) points <see cref="MainPlayerIndex"/>
+        /// at one of them and tries to draw a HUD nothing built.
+        /// </summary>
+        public bool HudReady { get; private set; }
 
         private RulesInfo _rulesInfo = null!;
         private readonly string?[] _rulesLines = new string[8];
@@ -913,7 +948,7 @@ namespace MphRead.Entities
 
         private void HudOnFiredShot()
         {
-            if (ScanVisor)
+            if (ScanVisor || Features.FixedCrosshair)
             {
                 return;
             }
@@ -946,11 +981,37 @@ namespace MphRead.Entities
                     _smallReticle = false;
                 }
             }
-            Matrix.ProjectPosition(_aimPosition, _scene.ViewMatrix, _scene.PerspectiveMatrix, out Vector2 pos);
-            _targetCircleInst.PositionX = MathF.Round(pos.X, 5);
-            _targetCircleInst.PositionY = MathF.Round(pos.Y, 5);
+            if (Features.FixedCrosshair)
+            {
+                // Screen-dead-centre, not reprojected from _aimPosition: aim
+                // and camera facing are smoothed at different rates (see
+                // UpdateAimVecs), so the reprojected point visibly drifts
+                // off-centre on its own even with the fire animation off.
+                // Quake's crosshair doesn't do that.
+                _targetCircleInst.PositionX = 0.5f;
+                _targetCircleInst.PositionY = 0.5f;
+            }
+            else
+            {
+                Matrix.ProjectPosition(_aimPosition, _scene.ViewMatrix, _scene.PerspectiveMatrix, out Vector2 pos);
+                _targetCircleInst.PositionX = MathF.Round(pos.X, 5);
+                _targetCircleInst.PositionY = MathF.Round(pos.Y, 5);
+            }
             _targetCircleInst.Enabled = true;
             _targetCircleInst.ProcessAnimation(_scene);
+        }
+
+        private Vector3 GetCrosshairColor()
+        {
+            if (Health > 60)
+            {
+                return new Vector3(0, 1, 0);
+            }
+            if (Health > 33)
+            {
+                return new Vector3(1, 0.65f, 0);
+            }
+            return new Vector3(1, 0, 0);
         }
 
         private void HudOnMorphStart()
@@ -1222,8 +1283,19 @@ namespace MphRead.Entities
                             _weaponIconInst.PositionY = (_hudObjects.WeaponIconPosY + _objShiftY) / 192f;
                             _weaponIconInst.Alpha = Features.HudOpacity;
                             _scene.DrawHudObject(_weaponIconInst);
-                            _targetCircleInst.Alpha = Features.ReticleOpacity;
-                            _scene.DrawHudObject(_targetCircleInst);
+                            if (Features.CustomCrosshair)
+                            {
+                                _scene.DrawCustomCrosshair(GetCrosshairColor());
+                            }
+                            else
+                            {
+                                _targetCircleInst.Alpha = Features.ReticleOpacity;
+                                _scene.DrawHudObject(_targetCircleInst);
+                            }
+                            if (Features.ModernHud)
+                            {
+                                DrawWeaponList();
+                            }
                         }
                         DrawModeHud();
                         DrawDoubleDamageHud();
@@ -1672,6 +1744,162 @@ namespace MphRead.Entities
             DrawText2D(_hudObjects.AmmoBarPosX + _ammoBarMeter.BarOffsetX + _objShiftX,
                 _hudObjects.AmmoBarPosY + _ammoBarMeter.BarOffsetY + _objShiftY,
                 _ammoBarMeter.Align, _ammoBarPalette, $"{amount:00}", alpha: Features.HudOpacity);
+        }
+
+        /// <summary>
+        /// "Modern HUD": every weapon the player has picked up, with its
+        /// ammo, listed down the right edge -- the equipped one boxed. Uses
+        /// the same weapon-icon sheet and frame convention as the equipped-
+        /// weapon icon (<see cref="HudOnWeaponSwitch"/>), and the same ammo
+        /// read <see cref="DrawAmmoBar"/> uses for the current weapon, just
+        /// for every owned weapon instead of only the equipped one.
+        /// </summary>
+        /// <summary>
+        /// Down the left, under the score, the way Quake's is: one row per
+        /// weapon you are carrying, its own colour art on the left and its
+        /// ammo beside it, the equipped one lit and the rest dimmed.
+        ///
+        /// It used to sit hard against the right edge, over the visor frame
+        /// and under the ammo readout, drawn in the HUD's monochrome green --
+        /// which is a list you have to look *for*, and then read shape by
+        /// shape. The two things that make Quake's work are that it is in one
+        /// clear column with nothing else in it, and that each weapon is a
+        /// different colour, so you find one by its colour instead of reading
+        /// the whole list. Both are copied here; the art is the game's own
+        /// (the touchscreen weapon menu's sheet, see SetUpHud).
+        ///
+        /// Every coordinate is in the DS's 256x192 HUD space, which
+        /// DrawHudObject mode 2 and DrawText2D both scale to the window.
+        /// </summary>
+        /// <summary>
+        /// One colour per weapon for the list, indexed by <see cref="BeamType"/>.
+        ///
+        /// Not the game's own weapon table, which is what this used first.
+        /// <c>WeaponInfo.Colors[0]</c> is the colour of the *shot* -- what the
+        /// projectile is tinted with in mid-air -- and several of those are
+        /// nothing like the colour the weapon is known by: it came out with a
+        /// white Volt Driver and a purple Judicator.
+        ///
+        /// These are the values the melonPrimeDS weapon overlay uses, read out
+        /// of its SVGs (res/assets/weapons), which is the reference the colours
+        /// were asked to match. Only the numbers are here -- nine RGB triples,
+        /// which are facts about which colour goes with which gun. None of
+        /// that project's art is copied or shipped, which is also what
+        /// tools/check-no-game-assets.sh would refuse.
+        /// </summary>
+        private static readonly ColorRgba[] _weaponListColors =
+        {
+            new ColorRgba(0xF8, 0x28, 0x28, 255), // Power Beam
+            new ColorRgba(0xF8, 0xF8, 0x08, 255), // Volt Driver
+            new ColorRgba(0xF8, 0x28, 0x28, 255), // Missile
+            new ColorRgba(0x20, 0xC0, 0x20, 255), // Battlehammer
+            new ColorRgba(0xD0, 0x18, 0x18, 255), // Imperialist
+            new ColorRgba(0x98, 0x38, 0xC0, 255), // Judicator
+            new ColorRgba(0xF8, 0xB0, 0x18, 255), // Magmaul
+            new ColorRgba(0x50, 0x98, 0xD0, 255), // Shock Coil
+            new ColorRgba(0xD0, 0xD0, 0xD0, 255)  // Omega Cannon
+        };
+
+        private void DrawWeaponList()
+        {
+            // Below the score block in the top-left corner, and short enough
+            // that all nine weapons still fit above the bottom edge.
+            // Quake's weapon bar, at Quake's size and in Quake's place.
+            //
+            // Measured off the reference rather than guessed: in that shot the
+            // column starts hard against the left edge, each row is about 3%
+            // of the screen's height and the whole panel about 7.5% of its
+            // width -- which in the DS's 256x192 HUD space, where every
+            // coordinate here lives, is a 6-unit row in a 20-unit panel. That
+            // is a *lot* smaller than a HUD readout, and it is the point: the
+            // bar is meant to be read out of the corner of the eye and take up
+            // nothing.
+            //
+            // Scalable for the same reason as before -- eyesight and screen
+            // size are not design decisions -- and every measurement below is
+            // multiplied, so the panel keeps its proportions. Only the corner
+            // it starts from stays put.
+            float scale = Math.Clamp(Features.WeaponListScale, 0.6f, 2f);
+            // Against the left edge, not inset. The reference has no margin
+            // worth the name and the panel reads as part of the frame because
+            // of it.
+            const float panelX = 2;
+            float rowHeight = 8f * scale;
+            float panelWidth = 26f * scale;
+            // The icon sits in a square block of the row's own height at the
+            // left of it, and the count is right-aligned in what is left.
+            float iconBox = rowHeight - 1f * scale;
+            float ammoRightX = panelX + panelWidth - 1.5f * scale;
+            float y = 46;
+            for (int i = 0; i < _weaponListIcons.Length; i++)
+            {
+                var beam = (BeamType)i;
+                if (!AvailableWeapons[beam])
+                {
+                    continue;
+                }
+                bool equipped = beam == CurrentWeapon;
+                WeaponInfo info = Weapons.Current[i];
+                // The colour this weapon is known by. See _weaponListColors:
+                // deliberately not the game's own beam colour, which is the
+                // colour of the *shot* and is nothing like it for several.
+                ColorRgba tint = _weaponListColors[i];
+                float rowBottom = y + rowHeight - 1f * scale;
+                // The row, dark; the equipped one lighter. That is the whole
+                // of the selection marker now. There used to be a coloured
+                // tab down the left edge as well, which the reference does not
+                // have and does not need: a lit row already says which weapon
+                // is in your hands, and a second marker for the same fact only
+                // made the column wider.
+                _scene.DrawHudFlatBox(panelX, y, panelX + panelWidth, rowBottom,
+                    equipped
+                        ? new Vector4(0.45f, 0.4f, 0.2f, 0.72f * Features.HudOpacity)
+                        : new Vector4(0, 0, 0, 0.42f * Features.HudOpacity));
+                HudObjectInstance icon = _weaponListIcons[i];
+                // The glyph itself in the weapon's colour, on nothing.
+                //
+                // SetData redraws the instance's texture with every pixel that
+                // is not palette index 0 in a flat colour, and index 0 -- the
+                // whole background of these frames -- left transparent. So the
+                // icon is a coloured symbol over the row, not a coloured tile:
+                // filling the square behind it instead, which is what this did
+                // first, reads as a block of colour with something faint on it
+                // rather than as an icon.
+                //
+                // Cheap to call every frame: it rebuilds the texture only when
+                // the frame or the colour has actually changed, and neither
+                // does after the first one.
+                icon.SetData(i, tint, _scene);
+                // The select sheet's frames are drawn for the weapon wheel and
+                // are many times a row's height; scaled down here rather than
+                // given a second, smaller copy of the same art.
+                float iconScale = iconBox / icon.Width;
+                icon.PositionX = (panelX + (iconBox - icon.Width * iconScale) / 2) / 256f;
+                icon.PositionY = (y + (rowHeight - icon.Height * iconScale) / 2) / 192f;
+                // Never faded. A dimmed icon at this size is an empty box.
+                icon.Alpha = Features.HudOpacity;
+                _scene.DrawHudObject(icon, mode: 2, scale: iconScale);
+                // The Power Beam costs no ammo, and a blank where every other
+                // row has a number reads as "unknown" rather than as
+                // "unlimited".
+                string ammo = info.AmmoCost > 0
+                    ? _ammo[info.AmmoType].ToString()
+                    : "--";
+                // White, like the reference's: the colour is carried by the
+                // icon block beside it, and a coloured number as well made
+                // every row a different brightness to read.
+                // Small. This font is drawn for the 16-unit readouts round
+                // the screen edge; its digits are wide and its zero is a
+                // filled slashed box, so at a row's size the count was reading
+                // as the biggest thing in the bar rather than as a footnote to
+                // the icon. Spacing is left to the font: fontSpacing is in HUD
+                // units and does not follow `scale`, so setting it spread the
+                // digits back out and undid the shrink.
+                DrawText2D(ammoRightX, y + 1.6f * scale, Align.Right, palette: 0, ammo,
+                    color: new ColorRgba(230, 234, 242, 255),
+                    alpha: Features.HudOpacity, scale: 0.42f * scale);
+                y += rowHeight;
+            }
         }
 
         private void DrawBoostBombs()
@@ -2853,12 +3081,20 @@ namespace MphRead.Entities
                 aspectFix = _scene.Size.Y / 192f * (256f / _scene.Size.X);
             }
             float spacingY = _textSpacingY == 0 ? (fontSpacing == -1 ? 12 : fontSpacing) : _textSpacingY;
+            // `scale` applies to every alignment.
+            //
+            // It used to be honoured by Align.Left alone: the Right and Centre
+            // branches drew each glyph with DrawHudObject's default scale and
+            // advanced by the font's unscaled widths, so asking for smaller
+            // right-aligned text silently produced text of exactly the same
+            // size. Measured: the ammo counts in the weapon list came out
+            // pixel-for-pixel identical at 0.5, 0.38, 0.28 and 0.15.
+            if (scale != 1)
+            {
+                spacingY *= scale;
+            }
             if (type == Align.Left)
             {
-                if (scale != 1)
-                {
-                    spacingY *= scale;
-                }
                 float startX = x;
                 for (int i = 0; i < length; i++)
                 {
@@ -2921,8 +3157,8 @@ namespace MphRead.Entities
                             ch = text[++i] & 0x3F | ((ch & 0x1F) << 6);
                         }
                         int index = ch - font.MinCharacter;
-                        x -= font.Widths[index] * aspectFix;
-                        float offset = font.Offsets[index] + y;
+                        x -= font.Widths[index] * scale * aspectFix;
+                        float offset = font.Offsets[index] * scale + y;
                         if (orig != ' ')
                         {
                             _textInst.PositionX = x / 256f;
@@ -2935,7 +3171,7 @@ namespace MphRead.Entities
                             {
                                 _textInst.SetData(index, palette, _scene);
                             }
-                            _scene.DrawHudObject(_textInst, mode: 1);
+                            _scene.DrawHudObject(_textInst, mode: 1, scale: scale);
                         }
                     }
                     if (end != length)
@@ -2977,7 +3213,7 @@ namespace MphRead.Entities
                             ch = text[++i] & 0x3F | ((ch & 0x1F) << 6);
                         }
                         int index = ch - font.MinCharacter;
-                        width += font.Widths[index];
+                        width += font.Widths[index] * scale;
                     }
                     // character widths include their rightmost empty pixel, leading to a slight overestimation of the total width before the line break,
                     // making the text shift to the left instead of being centered. fix by flooring (which the game does implicitly with integer division).
@@ -2991,7 +3227,7 @@ namespace MphRead.Entities
                             ch = text[++i] & 0x3F | ((ch & 0x1F) << 6);
                         }
                         int index = ch - font.MinCharacter;
-                        float offset = font.Offsets[index] + y;
+                        float offset = font.Offsets[index] * scale + y;
                         if (orig != ' ')
                         {
                             _textInst.PositionX = x / 256f;
@@ -3006,10 +3242,10 @@ namespace MphRead.Entities
                                 {
                                     _textInst.SetData(index, palette, _scene);
                                 }
-                                _scene.DrawHudObject(_textInst, mode: 1);
+                                _scene.DrawHudObject(_textInst, mode: 1, scale: scale);
                             }
                         }
-                        x += font.Widths[index] * aspectFix;
+                        x += font.Widths[index] * scale * aspectFix;
                     }
                     if (end != length)
                     {

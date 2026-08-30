@@ -147,6 +147,7 @@ namespace MphRead.Droid
             private bool _dialogClickDown;
             private readonly Action _onPauseMenu;
             private bool _menuWasHeld;
+            private bool _spectateCycleHeld;
 
             private EGLDisplay? _display;
             private EGLConfig? _config;
@@ -609,6 +610,14 @@ namespace MphRead.Droid
                 }
             }
 
+            /// <summary>
+            /// One frame of touch, turned into key and button presses.
+            ///
+            /// The presses are collected and committed as a set rather than
+            /// written one action at a time, because actions share binds --
+            /// see <see cref="AndroidInput.Apply"/> for the FIRE/ALT bug that
+            /// came of writing them through.
+            /// </summary>
             private void ApplyInput()
             {
                 PlayerEntity main = PlayerEntity.Main;
@@ -616,6 +625,43 @@ namespace MphRead.Droid
                 {
                     return;
                 }
+                _input.BeginFrame();
+                try
+                {
+                    CollectInput(main);
+                }
+                finally
+                {
+                    _input.CommitFrame();
+                }
+            }
+
+            private void CollectInput(PlayerEntity main)
+            {
+                if (Mods.SpectatorMode.IsSpectating)
+                {
+                    // FIRE moves on to the next player, which is what a left
+                    // click does on the desktop (Renderer.OnMouseDown). The
+                    // menu button still opens the menu, and everything else is
+                    // ignored: PlayerEntity.ProcessInput skips the local
+                    // player's input entirely while this is on, so there is
+                    // nothing else for a thumb to do.
+                    bool cycle = _controls.IsHeld(TouchAction.Shoot);
+                    if (cycle && !_spectateCycleHeld)
+                    {
+                        Mods.SpectatorMode.CycleNext();
+                    }
+                    _spectateCycleHeld = cycle;
+                    bool menuHeld = _controls.IsHeld(TouchAction.Pause);
+                    if (menuHeld && !_menuWasHeld)
+                    {
+                        _onPauseMenu();
+                    }
+                    _menuWasHeld = menuHeld;
+                    _controls.TakeAimDelta();
+                    return;
+                }
+                _spectateCycleHeld = false;
                 PlayerControls controls = main.Controls;
                 TouchControls.Dir dir = _controls.Direction;
                 bool up = (dir & TouchControls.Dir.Up) != 0;
@@ -635,13 +681,27 @@ namespace MphRead.Droid
                 _input.Apply(controls.RollRight, right);
 
                 bool jump = _controls.IsHeld(TouchAction.Jump);
-                _input.Apply(controls.Shoot, _controls.IsHeld(TouchAction.Shoot));
+                // FIRE is the only attack button, and it is both attacks.
+                //
+                // There used to be an ALT button beside it, which is what the
+                // DS did not have: one fire button served the gun on foot and
+                // the alt form's attack in the ball, and the game's own
+                // defaults still say so -- shoot and altAttack are both
+                // MouseButton.Left. A second button for the same bind bought
+                // nothing and cost the first one (see AndroidInput.Apply), so
+                // it is gone and FIRE presses whichever of the two the form
+                // the player is actually in will read. Both while morphing, so
+                // a thumb already down on FIRE as the ball closes is not
+                // dropped on the frame the form changes.
+                bool fire = _controls.IsHeld(TouchAction.Shoot);
+                bool altForm = main.IsAltForm || _controls.IsHeld(TouchAction.Morph);
+                _input.Apply(controls.Shoot, fire && !main.IsAltForm);
+                _input.Apply(controls.AltAttack, fire && altForm);
                 _input.Apply(controls.Jump, jump);
                 // One button on the DS, and the same key here by default:
                 // jumping on foot is boosting in the ball.
                 _input.Apply(controls.Boost, jump);
                 _input.Apply(controls.Morph, _controls.IsHeld(TouchAction.Morph));
-                _input.Apply(controls.AltAttack, _controls.IsHeld(TouchAction.AltAttack));
                 _input.Apply(controls.Zoom, _controls.IsHeld(TouchAction.Zoom));
                 // The DS pause button -- map and status on foot, scoreboard
                 // while it is held in a match -- is SCORE now. MENU is the
@@ -676,7 +736,7 @@ namespace MphRead.Droid
                     {
                         _input.PlacePointer(tap.X, tap.Y);
                     }
-                    _input.SetButton(OpenTK.Windowing.GraphicsLibraryFramework.MouseButton.Left, tap.Down);
+                    _input.ApplyButton(OpenTK.Windowing.GraphicsLibraryFramework.MouseButton.Left, tap.Down);
                     _dialogClickDown = tap.Down;
                     // Swallowed, so the aim does not lurch by however far the
                     // finger travelled once the box is gone.
@@ -689,7 +749,8 @@ namespace MphRead.Droid
                     // Released explicitly rather than left to the next tap:
                     // the box can close on the same frame the finger is still
                     // down, and a mouse button stuck down outlives the dialog.
-                    _input.SetButton(OpenTK.Windowing.GraphicsLibraryFramework.MouseButton.Left, false);
+                    // Nothing to do but stop asking for it: CommitFrame
+                    // releases every button no action asked for this frame.
                     _dialogClickDown = false;
                 }
                 bool weaponMenu = _controls.IsHeld(TouchAction.WeaponMenu);

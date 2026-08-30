@@ -197,6 +197,23 @@ namespace MphRead.Entities
         }
 
         /// <summary>
+        /// Hidden and non-solid on this machine, whether this is the real
+        /// local player (set directly by <see cref="SpectatorMode"/>) or a
+        /// puppet (set from the FlagSpectating bit in its snapshot).
+        /// </summary>
+        internal void ModSetSpectating(bool value)
+        {
+            if (value)
+            {
+                Flags2 |= PlayerFlags2.Spectating;
+            }
+            else
+            {
+                Flags2 &= ~PlayerFlags2.Spectating;
+            }
+        }
+
+        /// <summary>
         /// Whether this player is standing in the map rather than waiting at
         /// the origin to be placed. Spawned is set by Spawn() and never
         /// cleared, so health is what distinguishes "in the match" from

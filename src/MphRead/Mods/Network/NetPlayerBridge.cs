@@ -526,6 +526,10 @@ namespace MphRead.Mods.Network
             player.ModSetWeapon((BeamType)state.CurrentWeapon);
             player.EquipInfo.Zoomed = (state.Flags & PlayerState.FlagZoomed) != 0;
             ApplyForm(player, (state.Flags & PlayerState.FlagAltForm) != 0);
+            // Hidden and non-solid on this machine too, not just the one
+            // whose input is frozen -- Quake 3's spectator, not a player who
+            // merely stopped moving.
+            player.ModSetSpectating((state.Flags & PlayerState.FlagSpectating) != 0);
         }
 
         /// <summary>
@@ -664,6 +668,51 @@ namespace MphRead.Mods.Network
             Array.Clear(_lastReportPosition);
             Array.Clear(_lastReportFrame);
             Array.Clear(_reportSeen);
+        }
+
+        /// <summary>
+        /// Forget everything remembered about one slot, because whoever was in
+        /// it has gone and the next occupant is a different person.
+        ///
+        /// Every array above is indexed by slot and, until this existed, was
+        /// cleared only when the whole session started or stopped, or when the
+        /// room changed. A slot that changed hands mid-match therefore handed
+        /// the newcomer the previous occupant's history -- their last reported
+        /// position and frame number, their spawn barrier, their divergence
+        /// and staleness counters.
+        ///
+        /// That is not a theoretical hazard; StaleSinceSpawn names it in so
+        /// many words: "a peer that reconnects restarts its counter at zero,
+        /// and a slot that changes hands inherits the barrier of whoever held
+        /// it... which is a player nobody can hit and who slides without ever
+        /// taking a step". It is bounded there by a 120-frame give-up, so it
+        /// costs two seconds rather than a session -- but the bound is a
+        /// mitigation for a state that should not exist, and two seconds of a
+        /// player who cannot be hit is still the thing being reported.
+        ///
+        /// Cheap and unambiguous: a slot changing hands means the old
+        /// occupant's history is meaningless by definition, so there is
+        /// nothing to weigh up.
+        /// </summary>
+        public static void ForgetSlot(int slot)
+        {
+            if (slot < 0 || slot >= PlayerEntity.SlotCapacity)
+            {
+                return;
+            }
+            _formMismatch[slot] = 0;
+            _formAttempts[slot] = 0;
+            _lastPressFrame[slot] = 0;
+            _pressSeen[slot] = false;
+            _pressHistory[slot] = 0;
+            _authoritySpawned[slot] = false;
+            _divergedFrames[slot] = 0;
+            _spawnIntentFrame[slot] = 0;
+            _wasInPlay[slot] = false;
+            _staleFrames[slot] = 0;
+            _lastReportPosition[slot] = Vector3.Zero;
+            _lastReportFrame[slot] = 0;
+            _reportSeen[slot] = false;
         }
 
         /// <summary>

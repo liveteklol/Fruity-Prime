@@ -45,7 +45,11 @@ namespace MphRead.Mods.Network
             Stop();
             LastError = null;
             MapRotation rotation = MapRotation.SingleMatch(roomKey, mode, timeLimit, pointGoal);
-            var server = new DedicatedServer(port, maxPlayers, rotation);
+            // GameState.FriendlyFire is whatever the host chose in Match
+            // rules -- previously that only ever applied on their own
+            // machine; broadcasting it here is what makes everyone else's
+            // TakeDamage agree with it too.
+            var server = new DedicatedServer(port, maxPlayers, rotation) { FriendlyFire = GameState.FriendlyFire };
             if (listing != null)
             {
                 server.ServerName = listing.Value.Name;

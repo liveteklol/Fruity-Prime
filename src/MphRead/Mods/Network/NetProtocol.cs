@@ -376,8 +376,15 @@ namespace MphRead.Mods.Network
         /// on.
         /// </summary>
         public const byte FlagEnding = 1 << 1;
+        /// <summary>
+        /// Same-team damage counts. Server-decided and broadcast rather than
+        /// left to each client's own local setting -- see
+        /// <see cref="DedicatedServer.FriendlyFire"/>.
+        /// </summary>
+        public const byte FlagFriendlyFire = 1 << 2;
 
         public readonly bool Ending => (Flags & FlagEnding) != 0;
+        public readonly bool FriendlyFire => (Flags & FlagFriendlyFire) != 0;
 
         public void Write(Span<byte> dest)
         {
@@ -782,6 +789,11 @@ namespace MphRead.Mods.Network
         /// the player holding it and 92 on everyone watching.
         /// </summary>
         public const byte FlagZoomed = 1 << 3;
+        /// <summary>
+        /// Spectating: hidden and non-solid on every client, not just the
+        /// one whose local input is frozen. See <see cref="Mods.SpectatorMode"/>.
+        /// </summary>
+        public const byte FlagSpectating = 1 << 4;
 
         public void Write(Span<byte> dest)
         {

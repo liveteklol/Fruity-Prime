@@ -388,7 +388,7 @@ namespace MphRead.Entities
             // todo: visualize player collision (and rename some "pickup" fields)
             foreach (PlayerEntity player in _scene.GetPlayerEntities())
             {
-                if (player.Health == 0)
+                if (player.Health == 0 || player.Flags2.TestFlag(PlayerFlags2.Spectating))
                 {
                     continue;
                 }
@@ -551,7 +551,7 @@ namespace MphRead.Entities
                             float damage = 0;
                             uint wholeDamage = 0;
                             bool isHeadshot = false;
-                            if (!player.IsAltForm
+                            if (!player.IsAltForm && Beam != BeamType.ShockCoil
                                 && anyRes.Position.Y - player.Position.Y >= Fixed.ToFloat(player.Values.MaxPickupHeight) - 0.3f)
                             {
                                 if (Beam == BeamType.Imperialist)

@@ -146,7 +146,18 @@ namespace MphRead.Mods.Launcher.Gui
                 }
             }, new Rect(0, body.Height - 90 - _bottomInset, body.Width, 90 + _bottomInset));
 
-            DrawBrand(context, body, _bottomInset);
+            // The corner wordmark only over a map picture.
+            //
+            // With no game files there is no picture, so DrawTitleCard has
+            // already put the same mark across the middle of the panel -- and
+            // drawing it again in the corner gave a fresh install two logos,
+            // one under the other, which reads as a layout accident rather
+            // than as branding. (Seen with `-uishot`; it had never been
+            // looked at, because nothing could look at it.)
+            if (_image != null)
+            {
+                DrawBrand(context, body, _bottomInset);
+            }
         }
 
         /// <summary>

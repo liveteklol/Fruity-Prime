@@ -21,9 +21,14 @@ namespace MphRead.Entities
         // todo: visualize EVERYTHING
         private void CheckPlayerCollision()
         {
+            if (Flags2.TestFlag(PlayerFlags2.Spectating))
+            {
+                return;
+            }
             foreach (PlayerEntity other in _scene.GetPlayerEntities())
             {
-                if (!other.LoadFlags.TestFlag(LoadFlags.Active) || other.Health == 0)
+                if (!other.LoadFlags.TestFlag(LoadFlags.Active) || other.Health == 0
+                    || other.Flags2.TestFlag(PlayerFlags2.Spectating))
                 {
                     continue;
                 }

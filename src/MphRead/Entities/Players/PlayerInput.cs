@@ -282,6 +282,16 @@ namespace MphRead.Entities
 
         private void UpdateAimFacing()
         {
+            if (Features.FixedCrosshair)
+            {
+                // The camera's own facing is normally eased 10%/frame toward
+                // the raw aim direction (a DS-camera holdover) -- with the
+                // crosshair pinned to screen-centre there's nothing crisp
+                // left to mask that lag, so it reads as sluggish mouse-look
+                // instead. 1:1 here removes it.
+                _facingVector = _gunVec1;
+                return;
+            }
             float dot = Vector3.Dot(_gunVec1, _facingVector);
             if (dot < Fixed.ToFloat(3956))
             {
@@ -299,13 +309,16 @@ namespace MphRead.Entities
             {
                 amount *= -1;
             }
-            float sensitivity = 1; // itodo: this
+            float sensitivity = 1;
             if (EquipInfo.Zoomed)
             {
-                float fovFactor = CameraInfo.Fov - Fixed.ToFloat(Values.NormalFov) * 2;
-                if (fovFactor != 0) // zero will occur when the camera info is overridden to normal FOV due to cam seq
+                float normalFov = Fixed.ToFloat(Values.NormalFov) * 2;
+                if (normalFov != 0) // zero will occur when the camera info is overridden to normal FOV due to cam seq
                 {
-                    sensitivity /= -Fixed.ToFloat(Values.ZoomSensitivityFactor) * fovFactor;
+                    // constant angular speed while zoomed: turn rate scales with the
+                    // FOV reduction, so it tracks the mouse sensitivity setting the
+                    // same way unzoomed aim does, instead of a fixed per-hunter ratio
+                    sensitivity = CameraInfo.Fov / normalFov;
                 }
             }
             amount *= sensitivity;
@@ -342,13 +355,16 @@ namespace MphRead.Entities
             {
                 amount *= -1;
             }
-            float sensitivity = 1; // itodo: this
+            float sensitivity = 1;
             if (EquipInfo.Zoomed)
             {
-                float fovFactor = CameraInfo.Fov - Fixed.ToFloat(Values.NormalFov) * 2;
-                if (fovFactor != 0) // zero will occur when the camera info is overridden to normal FOV due to cam seq
+                float normalFov = Fixed.ToFloat(Values.NormalFov) * 2;
+                if (normalFov != 0) // zero will occur when the camera info is overridden to normal FOV due to cam seq
                 {
-                    sensitivity /= -Fixed.ToFloat(Values.ZoomSensitivityFactor) * fovFactor;
+                    // constant angular speed while zoomed: turn rate scales with the
+                    // FOV reduction, so it tracks the mouse sensitivity setting the
+                    // same way unzoomed aim does, instead of a fixed per-hunter ratio
+                    sensitivity = CameraInfo.Fov / normalFov;
                 }
             }
             amount *= sensitivity;
@@ -394,7 +410,7 @@ namespace MphRead.Entities
                     _pastAimY[i + 1] = past;
                 }
                 _pastAimY[0] = amount;
-                if (Features.HudSway)
+                if (Features.HudSway && !Features.FixedWeapon)
                 {
                     float average = (sum + amount) / 8;
                     _hudShiftY = Math.Clamp(-MathF.Round(average), -8, 8);
@@ -419,7 +435,7 @@ namespace MphRead.Entities
                     _pastAimX[i + 1] = past;
                 }
                 _pastAimX[0] = amount;
-                if (Features.HudSway)
+                if (Features.HudSway && !Features.FixedWeapon)
                 {
                     float average = (sum + amount) / 8;
                     _hudShiftX = Math.Clamp(MathF.Round(average), -8, 8);
@@ -2114,7 +2130,8 @@ namespace MphRead.Entities
                 {
                     continue;
                 }
-                if (noPlayerInput || i != Mods.Network.NetHooks.LocalSlot) // todo: multiple input?
+                if (noPlayerInput || i != Mods.Network.NetHooks.LocalSlot
+                    || Mods.SpectatorMode.IsSpectating) // todo: multiple input?
                 {
                     continue;
                 }
@@ -2371,7 +2388,18 @@ namespace MphRead.Entities
 
         public bool InvertAimY { get; }
         public bool InvertAimX { get; }
-        public bool ScrollAllWeapons { get; }
+        /// <summary>
+        /// Whether the wheel walks the whole list, Power Beam and Missile
+        /// included, or only the seven affinity slots.
+        ///
+        /// Settable, and <see cref="Mods.InputSettings.ScrollAllWeapons"/> is
+        /// where the player's answer lives. It was a readonly false, and the
+        /// weapon-cycling block above only runs at all when it is true *or*
+        /// the equipped weapon is neither the Power Beam nor the Missile -- so
+        /// with the wheel's own defaults bound, scrolling did nothing
+        /// whatsoever while holding the beam every player spawns with.
+        /// </summary>
+        public bool ScrollAllWeapons { get; set; }
 
         public Keybind[] All { get; }
 
@@ -2384,7 +2412,7 @@ namespace MphRead.Entities
         {
             MouseAim = true;
             KeyboardAim = true;
-            ScrollAllWeapons = false;
+            ScrollAllWeapons = true;
             MoveLeft = moveLeft;
             MoveRight = moveRight;
             MoveUp = moveUp;
@@ -2476,7 +2504,7 @@ namespace MphRead.Entities
                 jump: new Keybind(Keys.Space),
                 morph: new Keybind(Keys.C),
                 boost: new Keybind(Keys.Space),
-                altAttack: new Keybind(Keys.Q),
+                altAttack: new Keybind(MouseButton.Left),
                 scanVisor: new Keybind(Keys.E),
                 scan: new Keybind(Keys.Q),
                 nextWeapon: new Keybind(ButtonType.ScrollDown),

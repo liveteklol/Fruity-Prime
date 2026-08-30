@@ -39,6 +39,11 @@ namespace MphRead.Mods.Launcher
                 LaunchAdventure(plan);
                 return;
             }
+            if (plan.Kind == LaunchKind.Demo)
+            {
+                LaunchDemo(plan);
+                return;
+            }
             // No slot means nothing can be written, which is what a match
             // needs: leaving the story's slot selected would let a multiplayer
             // session's exit commit whatever it had done to the shared
@@ -126,6 +131,39 @@ namespace MphRead.Mods.Launcher
                 renderer.Run();
             }
             CommitAdventureSave();
+        }
+
+        /// <summary>
+        /// Watch a recorded match. Joins the demo file the same way
+        /// <see cref="NetLaunch.Join"/> joins a live server -- blocking until
+        /// the first recorded packets say what room and mode were being
+        /// played -- then loads that room exactly like a normal online
+        /// match, so every mode-specific and room-specific setup runs
+        /// unchanged. <see cref="Mods.SpectatorMode"/> is entered as soon as
+        /// a player becomes available, since there is no local player to
+        /// spawn as here.
+        /// </summary>
+        private static void LaunchDemo(LaunchPlan plan)
+        {
+            PlayerEntity.MaxPlayers = PlayerEntity.SlotCapacity;
+            if (!DemoPlayback.Join(plan.DemoPath))
+            {
+                Console.WriteLine("[demo] could not open or read the demo file");
+                return;
+            }
+            (string RoomKey, GameMode Mode)? room = NetLaunch.ServerRoom();
+            if (room == null)
+            {
+                Console.WriteLine("[demo] the demo has no match info");
+                DemoPlayback.Stop();
+                return;
+            }
+            Menu.SaveSlot = 0;
+            using var renderer = new RenderWindow();
+            NetLaunch.BuildPlayers(renderer.Scene, Hunter.Samus, localRecolor: 0, teamId: -1, localSlot: -1);
+            renderer.AddRoom(room.Value.RoomKey, room.Value.Mode, playerCount: NetLaunch.RoomPlayerCount);
+            renderer.Run();
+            DemoPlayback.Stop();
         }
 
         /// <summary>

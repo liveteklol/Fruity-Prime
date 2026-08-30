@@ -12,6 +12,7 @@ loading everything.
 - launcher/LAUNCHER-SETTINGS.md — settings window layout and toggles
 - launcher/LAUNCHER-FIRSTRUN.md — extraction flow and progress bar
 - multiplayer/NETWORK-BROWSER.md — server discovery, directory, hosting
+- multiplayer/NETWORK-DEMOS.md — recording and replaying a match: format, clocking, the gaps
 - multiplayer/NETWORK-MATCHEND.md — match end, rotation, the double-counted-kill bug
 - multiplayer/NETWORK-DIAGNOSTICS.md — the full damage-bug postmortem, traps, diagnostics
 - render/CEL-SHADING.md — flat colours in place of textures, and the depth-kink ink pass

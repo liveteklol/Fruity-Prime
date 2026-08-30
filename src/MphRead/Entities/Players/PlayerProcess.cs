@@ -1026,6 +1026,39 @@ namespace MphRead.Entities
                 Vector3 prevPos = PrevPosition + PlayerVolumes[(int)Hunter, index].SpherePosition;
                 index = IsAltForm ? 2 : 0;
                 Vector3 curPos = Position + PlayerVolumes[(int)Hunter, index].SpherePosition;
+                // Upstream's one-hop test, for every player including this
+                // one. **Do not put an absolute position lookup in front of
+                // it.**
+                //
+                // That was tried, to cure a local player's NodeRef freezing at
+                // its spawn value: GetNodeRefByPosition was preferred and the
+                // hop kept only as a fallback. It cost far more than it
+                // bought. That lookup bounds a room part by the planes of the
+                // portals opening out of it and nothing else, so a part with
+                // two portals is an unbounded wedge, several parts' wedges
+                // overlap, and it returns a confidently wrong part far more
+                // readily than it returns none. On Elder Passage
+                // (MP4 HIGHGROUND - EXPANDED) it put the player in the
+                // four-node hall "rmHallB" while they stood in the open valley
+                // that all ten of that room's spawn points are authored into,
+                // and RoomEntity.UpdateRoomParts walks the portal graph from
+                // there -- so the room drew as a black screen with the gun and
+                // a few floating item pickups in it, from eight of the ten
+                // spawns, on every platform and in local play as much as
+                // online. Measured with `-maptest ROOM -renderprobe`: 8.7-19%
+                // of the frame lit with the lookup in front, 94-99.9% with it
+                // gone.
+                //
+                // The lookup is not sound enough to override the hop, and it
+                // is not sound enough to be a "have I left this part" check
+                // either -- asked about the correct part 7 at seven of those
+                // ten spawns, it says no. A remote puppet still uses it
+                // (PlayerEntityNetAim.ModRefreshNodeRef) because a puppet's
+                // position is written in rather than walked, so the hop cannot
+                // work there at all and a wrong part costs only that one
+                // player's visibility; here it costs the whole room. Curing
+                // the freeze needs a real point-in-node test against the node
+                // data, not this one.
                 NodeRef = _scene.UpdateNodeRef(NodeRef, prevPos, curPos);
                 if (CameraSequence.Current == null || !IsMainPlayer)
                 {
@@ -1558,10 +1591,23 @@ namespace MphRead.Entities
                 + Fixed.ToFloat(Values.FieldB4) * up;
             float cos = MathF.Cos(MathHelper.DegreesToRadians(_gunViewBob));
             _gunDrawPos.Y += Fixed.ToFloat(20) * cos;
-            _aimVec = _aimPosition - _gunDrawPos;
-            float dot = Vector3.Dot(_aimVec, facing);
-            Vector3 vec = facing * dot;
-            _aimVec = (_aimVec + (vec - _aimVec) / 2).Normalized();
+            if (Features.FixedWeapon)
+            {
+                // Rides rigidly with the camera instead of lagging half a
+                // step behind the aim point -- Quake's static weapon, rather
+                // than the DS game's drifting one. Shot direction is
+                // unaffected: it's recomputed from _aimPosition - _muzzlePos
+                // wherever a beam actually fires (PlayerInput.cs:1014), and
+                // this only moves the muzzle offset point by a few units.
+                _aimVec = facing;
+            }
+            else
+            {
+                _aimVec = _aimPosition - _gunDrawPos;
+                float dot = Vector3.Dot(_aimVec, facing);
+                Vector3 vec = facing * dot;
+                _aimVec = (_aimVec + (vec - _aimVec) / 2).Normalized();
+            }
             _muzzlePos = _gunDrawPos + _aimVec * Fixed.ToFloat(Values.MuzzleOffset);
         }
 

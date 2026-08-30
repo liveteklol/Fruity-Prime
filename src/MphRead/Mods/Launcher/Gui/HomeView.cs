@@ -209,7 +209,7 @@ namespace MphRead.Mods.Launcher.Gui
             _layout.ColumnDefinitions = new ColumnDefinitions("*,Auto");
             _layout.RowDefinitions = new RowDefinitions("*");
             _splash.Height = Double.NaN;
-            _panel.Width = 400;
+            _panel.Width = PanelWidth();
             Grid.SetColumn(_splash, 0);
             Grid.SetRow(_splash, 0);
             Grid.SetColumn(_updateBadge, 0);
@@ -220,6 +220,24 @@ namespace MphRead.Mods.Launcher.Gui
 
         private bool _narrow;
         private bool _laidOut;
+
+        /// <summary>
+        /// How wide the column of cards is beside the picture.
+        ///
+        /// Wider for the server list, because that one is a table and the rest
+        /// are not. Five columns -- name, map, mode, players, ping -- do not
+        /// go into 400 pixels: the map column came out at 89, which is not a
+        /// room name, and the PLAYERS heading needs more than its share of
+        /// that width all by itself. The picture beside it is decoration and
+        /// the list is the thing being read, so the list gets the space while
+        /// it is up.
+        /// </summary>
+        private double PanelWidth()
+        {
+            return ReferenceEquals(_current, _browseCard) ? _browseWidth : 400;
+        }
+
+        private const double _browseWidth = 600;
 
         /// <summary>
         /// Answer a "back" gesture: the pointer's Escape and the phone's back
@@ -300,10 +318,16 @@ namespace MphRead.Mods.Launcher.Gui
         private Task ShowOverlay(Control view, Action<EventHandler> subscribeClosed)
         {
             var done = new TaskCompletionSource();
+            // Held so that *any* way the overlay comes down finishes the wait,
+            // not only the view raising Closed. GoBack takes it down directly
+            // when the view declines Escape, and whoever is awaiting this would
+            // otherwise wait for ever -- which on this path means the settings
+            // never run the code after them (the jump to the game-files card),
+            // and the continuation is never collected.
+            _overlayDone = done;
             subscribeClosed((_, _) =>
             {
                 CloseOverlay();
-                done.TrySetResult();
             });
             _overlay.Children.Clear();
             _overlay.Children.Add(view);
@@ -311,6 +335,8 @@ namespace MphRead.Mods.Launcher.Gui
             Dispatcher.UIThread.Post(() => view.Focus(), DispatcherPriority.Background);
             return done.Task;
         }
+
+        private TaskCompletionSource? _overlayDone;
 
         /// <summary>
         /// The pause menu, over a running match.
@@ -335,6 +361,42 @@ namespace MphRead.Mods.Launcher.Gui
             view.Resumed += (_, _) => { Close(); onResume(); };
             view.LeaveRequested += (_, _) => { Close(); onLeave(); };
             view.QuitRequested += (_, _) => { Close(); onQuit(); };
+            // Spectating and demo recording, which this screen offers and
+            // nothing was listening for.
+            //
+            // PauseMenuView builds the same entries on every platform -- it is
+            // the desktop's pause menu, shown as an overlay here because a
+            // phone has no second window to put it in -- so "Spectate",
+            // "Rejoin match" and "Record demo" were all drawn, all pressable,
+            // and all did nothing but close the menu, because only Resume,
+            // Leave, Quit and Settings were wired up. Same handlers as
+            // PauseMenuWindow's.
+            view.SpectateRequested += (_, _) =>
+            {
+                Close();
+                SpectatorMode.Start();
+                onResume();
+            };
+            view.RejoinRequested += (_, _) =>
+            {
+                Close();
+                SpectatorMode.Rejoin();
+                onResume();
+            };
+            view.RecordToggleRequested += (_, _) =>
+            {
+                if (DemoRecorder.IsRecording)
+                {
+                    Console.WriteLine($"[demo] recording saved to {DemoRecorder.CurrentPath}");
+                    DemoRecorder.Stop();
+                }
+                else
+                {
+                    DemoRecorder.Start();
+                }
+                Close();
+                onResume();
+            };
             view.SettingsRequested += async (_, _) =>
             {
                 await OpenSettings();
@@ -348,6 +410,9 @@ namespace MphRead.Mods.Launcher.Gui
         {
             _overlay.IsVisible = false;
             _overlay.Children.Clear();
+            TaskCompletionSource? done = _overlayDone;
+            _overlayDone = null;
+            done?.TrySetResult();
         }
 
         /// <summary>True when this screen is inside a real window.</summary>
@@ -359,6 +424,10 @@ namespace MphRead.Mods.Launcher.Gui
             _cards.Children.Clear();
             _cards.Children.Add(card);
             _current = card;
+            if (!_narrow)
+            {
+                _panel.Width = PanelWidth();
+            }
             // The splash is a map preview everywhere but the setup card, so it
             // has to be told which one is up.
             if (_matchMap != null)
@@ -390,6 +459,7 @@ namespace MphRead.Mods.Launcher.Gui
         private readonly UpdateBadge _updateBadge = new();
         private MenuEntry _onlineEntry = null!;
         private MenuEntry _hostEntry = null!;
+        private MenuEntry _demoEntry = null!;
         private const string _hostBlurb = "The story, or a match you run";
         private ChoiceRow _adventureSlot = null!;
         private ChoiceRow _adventureHunter = null!;
@@ -404,6 +474,8 @@ namespace MphRead.Mods.Launcher.Gui
             _hostEntry.Click += (_, _) => OpenHost();
             _onlineEntry = new MenuEntry("Join", "Play on a server somebody else is running");
             _onlineEntry.Click += (_, _) => OpenJoin();
+            _demoEntry = new MenuEntry("Watch a demo", "Replay a recorded match");
+            _demoEntry.Click += async (_, _) => await ChooseDemo();
             var settings = new MenuEntry("Settings",
                 "Display, audio, controls, game files, credits");
             settings.Click += async (_, _) => await OpenSettings();
@@ -412,6 +484,7 @@ namespace MphRead.Mods.Launcher.Gui
 
             card.Children.Add(_hostEntry);
             card.Children.Add(_onlineEntry);
+            card.Children.Add(_demoEntry);
             card.Children.Add(settings);
             card.Children.Add(quit);
             return card;
@@ -454,6 +527,7 @@ namespace MphRead.Mods.Launcher.Gui
             bool ready = GameFiles.Ready;
             _onlineEntry.IsEnabled = ready;
             _hostEntry.IsEnabled = ready;
+            _demoEntry.IsEnabled = ready;
             // Game files moved into the settings, so there is no row here to
             // colour any more. What the front screen can still say about a
             // missing extract is that the two entries needing one are dead and
@@ -642,6 +716,76 @@ namespace MphRead.Mods.Launcher.Gui
                 _setupProgress.IsVisible = false;
                 ShowCard(_homeCard);
             }
+        }
+
+        /// <summary>Pick a recorded demo file and hand it to <see cref="MatchStart"/> as a launch plan.</summary>
+        private async Task ChooseDemo()
+        {
+            TopLevel? top = TopLevel.GetTopLevel(this);
+            if (top == null)
+            {
+                return;
+            }
+            var options = new FilePickerOpenOptions
+            {
+                Title = "Watch a demo",
+                AllowMultiple = false,
+                FileTypeFilter = new[]
+                {
+                    new FilePickerFileType($"{Branding.Name} demo") { Patterns = new[] { $"*{DemoFile.Extension}" } },
+                    new FilePickerFileType("Every file") { Patterns = new[] { "*" } }
+                }
+            };
+            try
+            {
+                string demoDir = Paths.Combine(Paths.Export, "_demos");
+                if (Directory.Exists(demoDir))
+                {
+                    options.SuggestedStartLocation =
+                        await top.StorageProvider.TryGetFolderFromPathAsync(demoDir);
+                }
+            }
+            catch (IOException)
+            {
+                // No default folder is a worse first run than one with a
+                // clean slate, not a reason to refuse the picker outright.
+            }
+            IReadOnlyList<IStorageFile> picked = await top.StorageProvider.OpenFilePickerAsync(options);
+            if (picked.Count == 0)
+            {
+                return;
+            }
+            string? path = picked[0].TryGetLocalPath();
+            if (path == null)
+            {
+                return;
+            }
+            // Joined here, not inside MatchStart: a failure has to land back
+            // on a screen that is still open to show it on. Console.WriteLine
+            // is where DemoPlayback.Join otherwise says why -- invisible on
+            // the Windows build, which has no console for anything the
+            // launcher starts (only a typed command gets one). Silently
+            // returning to the menu with the real reason nowhere the player
+            // could see it is the bug this replaces.
+            _demoEntry.IsEnabled = false;
+            _demoEntry.Title = "Loading...";
+            bool joined = await Task.Run(() => DemoPlayback.Join(path));
+            if (!joined)
+            {
+                _demoEntry.IsEnabled = true;
+                _demoEntry.Title = "Watch a demo";
+                _demoEntry.Subtitle = DemoPlayback.LastError ?? "That file could not be read as a demo.";
+                _demoEntry.SubtitleColor = GuiTheme.Warm;
+                return;
+            }
+            Finish(new LaunchPlan
+            {
+                Kind = LaunchKind.Demo,
+                DemoPath = path,
+                Hunter = Hunter.Samus,
+                PlayerName = "",
+                RoomKey = ""
+            });
         }
 
         /// <summary>
@@ -1111,17 +1255,16 @@ namespace MphRead.Mods.Launcher.Gui
             {
                 return;
             }
+            // Over this screen, not in a window of its own.
+            //
+            // It used to open a dialog on the desktop and overlay only on
+            // Android. A second window to pick a map from is a window to find,
+            // move out of the way and close again, for a choice that belongs
+            // to the card it came from -- and it covered the map picture the
+            // front screen exists to show. The overlay fills the launcher
+            // until the choice is made and then it is gone.
             var view = new MapPickerView(_playable, _matchMap.Value);
-            Window? owner = OwnerWindow;
-            if (owner != null)
-            {
-                var picker = new MapPickerWindow(view);
-                await picker.ShowDialog(owner);
-            }
-            else
-            {
-                await ShowOverlay(view, handler => view.Closed += handler);
-            }
+            await ShowOverlay(view, handler => view.Closed += handler);
             if (view.RoomKey == null)
             {
                 return;
@@ -1290,6 +1433,9 @@ namespace MphRead.Mods.Launcher.Gui
 
             card.Children.Add(new Caption("Join"));
             card.Children.Add(_browseNote);
+            // Headings over the list, outside the scroll viewer so they stay
+            // put while it scrolls -- which is the whole point of having them.
+            card.Children.Add(new ServerHeader());
             card.Children.Add(new ScrollViewer
             {
                 Height = 300,
@@ -1344,25 +1490,20 @@ namespace MphRead.Mods.Launcher.Gui
         private void AddServerRow(MasterListing listing)
         {
             string name = listing.ServerName.Length > 0 ? listing.ServerName : listing.Endpoint;
-            var entry = new MenuEntry(name, listing.Endpoint, titleSize: 15);
-            entry.Click += (_, _) =>
+            var row = new ServerRow(name, listing.Endpoint);
+            ToolTip.SetTip(row, listing.Endpoint);
+            row.Clicked += (_, _) =>
             {
                 _onlineAddress.Value = $"{listing.Address}:{listing.Port}";
                 ShowCard(_onlineCard);
                 QueryStatusSoon();
             };
-            _browseList.Children.Add(entry);
+            _browseList.Children.Add(row);
             Task.Run(() =>
             {
                 ServerStatus status = NetStatus.Query(listing.Address, listing.Port,
                     allowJoinProbe: false);
-                Dispatcher.UIThread.Post(() =>
-                {
-                    entry.Subtitle = status.Online
-                        ? $"{listing.Endpoint} -- {Describe(status)}"
-                        : $"{listing.Endpoint} -- did not answer";
-                    entry.SubtitleColor = status.Online ? GuiTheme.TextDim : GuiTheme.Warm;
-                });
+                Dispatcher.UIThread.Post(() => row.SetStatus(status));
             });
         }
 
@@ -1387,16 +1528,10 @@ namespace MphRead.Mods.Launcher.Gui
                 // how you end up on a screen you cannot see.
                 bool gameFiles = false;
                 view.GameFilesRequested += (_, _) => gameFiles = true;
-                Window? owner = OwnerWindow;
-                if (owner != null)
-                {
-                    var window = new SettingsWindow(view);
-                    await window.ShowDialog(owner);
-                }
-                else
-                {
-                    await ShowOverlay(view, handler => view.Closed += handler);
-                }
+                // The same overlay the map picker uses, for the same reason.
+                // The pause menu still opens SettingsWindow: it is over a game
+                // window, and there is no front screen there to lay this on.
+                await ShowOverlay(view, handler => view.Closed += handler);
                 if (gameFiles)
                 {
                     ShowCard(_setupCard);

@@ -1,8 +1,10 @@
 using System;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
 using Avalonia.Threading;
+using MphRead.Mods.Network;
 
 namespace MphRead.Mods.Launcher.Gui
 {
@@ -29,6 +31,9 @@ namespace MphRead.Mods.Launcher.Gui
         public event EventHandler? LeaveRequested;
         public event EventHandler? QuitRequested;
         public event EventHandler? FullscreenRequested;
+        public event EventHandler? SpectateRequested;
+        public event EventHandler? RejoinRequested;
+        public event EventHandler? RecordToggleRequested;
 
         private readonly MenuEntry _resume;
 
@@ -38,6 +43,13 @@ namespace MphRead.Mods.Launcher.Gui
         /// </param>
         public PauseMenuView(bool offerWindowMode)
         {
+            // The host is the size of the game, on every platform: a phone's
+            // overlay is the screen and the desktop's window now covers the
+            // one the match is being played in. So the entries are always a
+            // panel of a stated width in the middle, never a column stretched
+            // across whatever the match happens to be running at -- 1024 or
+            // 3840 -- which is a menu you have to hunt across.
+            const double panelWidth = 420;
             var stack = new StackPanel { Spacing = 4 };
             stack.Children.Add(new Caption("Paused") { Height = 34 });
             _resume = Add(stack, "Resume", offerWindowMode ? "Escape" : "Back",
@@ -57,6 +69,25 @@ namespace MphRead.Mods.Launcher.Gui
             }
             Add(stack, "Settings", "Controls, display, audio",
                 () => SettingsRequested?.Invoke(this, EventArgs.Empty));
+            if (!DemoPlayback.IsActive)
+            {
+                if (SpectatorMode.IsSpectating)
+                {
+                    Add(stack, "Rejoin match", "Score resets to 0",
+                        () => RejoinRequested?.Invoke(this, EventArgs.Empty));
+                }
+                else if (SpectatorMode.CanSpectate)
+                {
+                    Add(stack, "Spectate", "Watch another player",
+                        () => SpectateRequested?.Invoke(this, EventArgs.Empty));
+                }
+                if (NetSession.Active)
+                {
+                    Add(stack, DemoRecorder.IsRecording ? "Stop recording" : "Record demo",
+                        DemoRecorder.IsRecording ? "Saving to a file" : "Watch it back later, like Quake",
+                        () => RecordToggleRequested?.Invoke(this, EventArgs.Empty));
+                }
+            }
             Add(stack, "Leave match", "Back to the launcher",
                 () => LeaveRequested?.Invoke(this, EventArgs.Empty));
             Add(stack, "Quit", $"Close {Branding.Name}",
@@ -65,21 +96,33 @@ namespace MphRead.Mods.Launcher.Gui
             var panel = new Border
             {
                 Background = GuiTheme.PanelBrush,
+                // An edge, because what is behind this is a scrim of nearly
+                // the same colour over a running match: without one the panel
+                // and the dimmed game are two shades of the same dark and the
+                // menu has no shape.
+                BorderBrush = GuiTheme.EdgeBrush,
+                BorderThickness = new Thickness(1),
                 Padding = new Thickness(22, 18, 22, 18),
                 Child = stack
             };
-            if (!offerWindowMode)
+            panel.MaxWidth = panelWidth;
+            panel.CornerRadius = new CornerRadius(6);
+            panel.HorizontalAlignment = HorizontalAlignment.Center;
+            panel.VerticalAlignment = VerticalAlignment.Center;
+            // Scrolled, and a maximum width rather than a fixed one, because
+            // the host is now the game window and the game window can be any
+            // size the player has dragged it to. Seven entries need about 470
+            // pixels of height; below that the fixed-size version simply drew
+            // the bottom ones off the edge, and "Leave match" and "Quit" not
+            // being on screen is not a menu missing some polish, it is a
+            // player who cannot get out of the match.
+            Content = new ScrollViewer
             {
-                // Full-screen overlay: a column of entries spread across a 20:9
-                // phone is a menu you have to hunt across, so it is a panel of
-                // a stated width in the middle. The desktop is left stretching,
-                // because there the window is already this size and a panel
-                // floating inside it would just be a border around a border.
-                panel.Width = 420;
-                panel.HorizontalAlignment = HorizontalAlignment.Center;
-                panel.VerticalAlignment = VerticalAlignment.Center;
-            }
-            Content = panel;
+                Content = panel,
+                Padding = new Thickness(12),
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto
+            };
         }
 
         /// <summary>

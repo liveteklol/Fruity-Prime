@@ -45,12 +45,44 @@ namespace MphRead.Mods
         public static int WindowWidth { get; private set; }
         public static int WindowHeight { get; private set; }
 
+        /// <summary>
+        /// True when the game window has moved or been resized since the menu
+        /// last laid itself out over it. Cleared by whoever acts on it.
+        /// </summary>
+        internal static bool WindowMoved { get; set; }
+
+        /// <summary>
+        /// Take the game window's client rectangle.
+        ///
+        /// Called when the menu opens and then once a frame while it is up.
+        /// The menu is a borderless window laid over the game rather than
+        /// something drawn inside it -- Avalonia cannot render into the GL
+        /// context -- so "part of the window" is a thing it has to keep being:
+        /// a rectangle sampled once at open time detaches the moment anybody
+        /// drags the game window, and what is left behind is exactly the
+        /// floating popup this stopped being.
+        /// </summary>
+        private static void TakeWindowRect(NativeWindow window)
+        {
+            int x = window.ClientLocation.X;
+            int y = window.ClientLocation.Y;
+            int width = window.ClientSize.X;
+            int height = window.ClientSize.Y;
+            if (x == WindowX && y == WindowY
+                && width == WindowWidth && height == WindowHeight)
+            {
+                return;
+            }
+            WindowX = x;
+            WindowY = y;
+            WindowWidth = width;
+            WindowHeight = height;
+            WindowMoved = true;
+        }
+
         public static bool HandleEscape(NativeWindow window)
         {
-            WindowX = window.ClientLocation.X;
-            WindowY = window.ClientLocation.Y;
-            WindowWidth = window.ClientSize.X;
-            WindowHeight = window.ClientSize.Y;
+            TakeWindowRect(window);
 #if MPHREAD_AVALONIA
             if (!Launcher.Gui.GuiLauncher.EnsureSetup())
             {
@@ -77,6 +109,14 @@ namespace MphRead.Mods
 #if MPHREAD_AVALONIA
             if (_open)
             {
+                // Before the toolkit's slice, so a drag that happened since
+                // the last frame is laid out in this one rather than the next.
+                TakeWindowRect(window);
+                if (WindowMoved)
+                {
+                    WindowMoved = false;
+                    Launcher.Gui.PauseMenuWindow.FollowGameWindow();
+                }
                 // The menu's share of this frame. Everything it decided lands
                 // in the flags below before they are read.
                 Launcher.Gui.GuiLauncher.Pump();
@@ -103,6 +143,14 @@ namespace MphRead.Mods
                     // Not worth losing the match over.
                 }
             }
+            // The game window floats above the shell while it is fullscreen,
+            // and stands down while this menu is up. Here rather than in
+            // OpenMenu/Close because both of those are called from the menu's
+            // own event handlers, and a GLFW window attribute belongs to the
+            // thread that created the window -- which is this one, between
+            // frames. Cached inside, so a frame that changes nothing is a
+            // comparison and no call.
+            WindowMode.SyncTopmost(window);
             if (_toggleFullscreen)
             {
                 _toggleFullscreen = false;

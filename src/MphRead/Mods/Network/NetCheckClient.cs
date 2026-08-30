@@ -368,6 +368,11 @@ namespace MphRead.Mods.Network
                 // couple of hundred fresh hits.
                 + $"late={NetSession.SnapshotsOutOfOrder} "
                 + $"intents received={NetSession.IntentsReceived} "
+                // Relayed intents refused as out of order. A handful is UDP
+                // doing what UDP does; a steady stream from one slot is that
+                // slot's occupant being ignored outright -- which is what a
+                // rejoining player looked like before the reset gap.
+                + $"intents late={NetSession.IntentsOutOfOrder} "
                 + $"states applied={NetSession.StatesApplied} "
                 // Non-zero means this client could not keep up with what it
                 // was sent, which reads on the other clients' reports as
@@ -449,7 +454,7 @@ namespace MphRead.Mods.Network
         }
 
         public static int Run(string host, int port, string name, Hunter hunter, double seconds,
-            string? shotDirectory, int width, int height)
+            string? shotDirectory, int width, int height, bool recordDemo = false)
         {
             if (!NetLaunch.Join(host, port, name, hunter))
             {
@@ -462,6 +467,14 @@ namespace MphRead.Mods.Network
             (string RoomKey, GameMode Mode) room = NetLaunch.ServerRoom()!.Value;
             Console.WriteLine($"[netcheck] {name} joined slot {NetSession.LocalSlot}, "
                 + $"loading {room.RoomKey} ({room.Mode})");
+            // Started here rather than from a menu: the point of recording
+            // from the harness is to get a demo out of a client whose role in
+            // the match is known -- above all the authority, whose own
+            // outgoing snapshots nothing else in the session ever sees.
+            if (recordDemo && DemoRecorder.Start())
+            {
+                Console.WriteLine($"[netcheck] {name} is recording to {DemoRecorder.CurrentPath}");
+            }
             NetCheckClient? window = null;
             try
             {
@@ -478,6 +491,11 @@ namespace MphRead.Mods.Network
             }
             finally
             {
+                if (DemoRecorder.IsRecording)
+                {
+                    Console.WriteLine($"[netcheck] {name} recorded {DemoRecorder.CurrentPath}");
+                    DemoRecorder.Stop();
+                }
                 window?.Dispose();
                 NetTestScript.Enabled = false;
                 NetSession.Stop();

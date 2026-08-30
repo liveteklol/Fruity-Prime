@@ -266,3 +266,159 @@ protocol bump and a Pi redeploy. Not needed for correctness.
 Item pickup is simulated on every machine from replicated positions and the
 clients agree exactly on how many items were taken, so it is probably fine, but
 probably is not measured.
+
+
+## Rejoining: per-slot state, and what `run-rejoin.sh` measures
+
+The report: A creates the game, B joins, A quits, B stays, A rejoins the
+same match. B sees A but cannot hit them; A can hit B.
+
+`~/mph-net-test/run-rejoin.sh [seconds] [leave_at] [rejoin_at] [host] [port]`
+builds exactly that topology and adds a control:
+
+- A joins first, so it takes slot 0 and becomes the authority.
+- B joins (slot 1).
+- A leaves. The server promotes B (`DedicatedServer.Remove`), so the
+  authority moves mid-match -- which is half of what makes this scenario
+  different from any other.
+- Then **two** clients join at the same moment: C, which takes slot 0, the
+  one A vacated, and D, which takes slot 2, never used. Both then play the
+  same tour against the same authority for the same time.
+
+A is two processes on purpose: the suspicion is state that is only cleared
+when a session starts or stops, so a rejoin simulated inside one process
+would clear the very thing that needs to survive.
+
+**Not reproduced.** Loopback and against the Pi, the rejoined client in the
+reused slot registers damage in both directions, and if anything more than
+the control:
+
+| | slot | took a hit |
+|---|---|---|
+| C (reused slot) loopback | 0 | 23 |
+| D (fresh slot) loopback | 2 | 6 |
+| C (reused slot) on the Pi | 0 | 13 |
+| D (fresh slot) on the Pi | 2 | 5 |
+
+A later run of the same script, after the fix below, gave C 1 hit and D 0 --
+which is not a regression, it is the variance. Two to four scripted clients
+duelling for a minute engage each other by luck: across runs the same slot
+has come out anywhere between 0 and 23 hits. **The hit counts here answer
+"did damage flow at all in this topology", and nothing finer.** The
+regression gate is `run-check.sh`, which cross-checks what each client did
+against what the others saw and reports mismatches; that is what to run
+after touching any of this.
+
+So slot reuse plus an authority handover does not, on its own, break
+damage. Whatever the report is about needs something this does not have --
+a human's engagement pattern rather than the tour's, the launcher's own
+host path rather than a dedicated server, or a particular moment (a
+rotation, an intermission) to rejoin in.
+
+**One trap to avoid when running this.** An earlier run of this script was
+read as a reproduction: the rejoining client reported `took a hit 0` and
+`authority=True` when the server said the authority was the other client.
+Both were artefacts. The `authority=True` was real but legitimate -- the
+other client had left seconds before the report was printed, so the
+authority had moved back. And `took a hit 0` was a two-player match with
+little engagement, not a client that could not be hurt. **A single run of
+two scripted clients is not evidence of a damage fault**; that is what the
+control client is for.
+
+### What was fixed anyway
+
+Per-slot state was cleared only when the session started or stopped, or the
+room changed -- never when a slot changed hands. So a slot's next occupant
+inherited the previous one's reported position and frame number, spawn
+barrier, divergence and staleness counters, and damage sequence.
+
+`StaleSinceSpawn` names this hazard in its own comment -- "a peer that
+reconnects restarts its counter at zero, and a slot that changes hands
+inherits the barrier of whoever held it... a player nobody can hit and who
+slides without ever taking a step" -- and bounds it with a 120-frame give-up,
+so it costs two seconds rather than a session. Two seconds of a player who
+cannot be hit is still the reported symptom.
+
+`NetPlayerBridge.ForgetSlot` and `NetDamage.ForgetSlot`, called from both
+`NetSlotManager.Activate` and `Deactivate`, clear it. A slot changing hands
+means the old occupant's history is meaningless by definition, so there is
+nothing to weigh up. **This is hardening, not a confirmed fix for the
+report**: the report was not reproduced, so nothing here is known to be the
+cause of it.
+
+### Reproduced: the intent stream's ordering guard
+
+The report *was* reproducible. What the harness had been missing was not the
+topology -- it built that correctly -- but **how long A played before it
+left**, and that turns out to be the whole size of the fault.
+
+`NetSession.HandleSlotIntent` refused any relayed intent whose frame was not
+newer than the last one accepted for that slot. Sound, for reordering. But a
+client's frame counter starts at zero in `NetSession.StartClient`, so a
+player rejoining a match they had been in for five minutes comes back
+numbering from 1 while the authority still holds `_lastSlotIntentFrame` =
+18000 -- and **every intent they send is refused for the next five minutes**.
+The barrier is exactly as tall as their previous session.
+
+That is the asymmetry in the report. The rejoiner's own arrays are fresh, so
+they see everyone normally and their shots at other people are resolved from
+intents the authority does accept. The authority holds the stale counter, so
+the rejoiner's aim and trigger never arrive there, and the rejoiner's puppet
+is pinned to wherever the previous occupant was standing -- which is why
+nobody can hit them and they cannot hit anyone, on the one machine that
+decides either. It clears itself when the counter climbs past the old value,
+which from a player's seat looks like "it started working again after a
+while", and dying and respawning is the thing they happened to be doing
+while they waited.
+
+`run-rejoin.sh 130 60 68` -- A plays for a minute before leaving, so the
+barrier outlasts the rest of the run:
+
+| | slot | intents refused *by the authority* | took a hit |
+|---|---|---|---|
+| before, C (reused slot) | 0 | **1547** | **0** |
+| before, D (fresh slot) | 2 | 0 | 9 |
+| after, C (reused slot) | 0 | **0** | 2 |
+| after, D (fresh slot) | 2 | 0 | 8 |
+
+The hit counts still carry the variance the section above warns about. **The
+number that is not noise is the refusal count**, which is now reported by
+`-netcheck` as `intents late=` beside the snapshot equivalent, and which went
+from 1547 to 0 while the authority's accepted intents went 3591 -> 5452.
+
+The fix is the one the snapshot stream already had: a reset gap.
+`IntentResetGap` = 600 frames in `NetSession` and in `DedicatedServer` --
+below it a packet is a reordered straggler and is dropped, above it the
+sender's counter has restarted and the newcomer is who to believe. Plus
+`NetSession.ForgetSlot`, called beside the other two from
+`NetSlotManager.Activate`/`Deactivate`, which clears the frame counter, the
+last intent and the last snapshot for a slot that has changed hands -- a
+vacated slot was keeping its old occupant's intent flagged *valid*, so the
+authority went on placing, aiming and firing a player who had left.
+
+## Ping: 20 ms to a server 1 ms away
+
+The scoreboard's ping is a round trip the **server** measures (clients never
+exchange packets, so nobody else can measure it for everybody), and it was
+measuring far more than the network:
+
+- the client's Pong was sent from `NetSession.Update`, i.e. **on the next
+  rendered frame** -- half a frame on average, a whole one at worst, more
+  when the frame ran long;
+- `NetTransport.ReceiveLoop` polled `Available` and `Thread.Sleep(1)` between
+  passes, on **both** machines, and `Sleep(1)` is not a millisecond on
+  Windows, where the scheduler tick is 15.6 ms unless something in the
+  process has raised the timer resolution;
+- the server's own loop sleeps a millisecond between passes.
+
+So ICMP 1 ms, scoreboard 20 ms, and none of the difference was the wire.
+
+Two changes. `ReceiveLoop` now **blocks** on `Receive` with a 500 ms timeout
+(there only so shutdown is prompt) instead of polling -- which takes the
+arrival delay off the front of *every* packet the session receives, not just
+pings. And a client's transport answers Ping on its own thread
+(`AnswerPingsImmediately`, opt-in, set in `StartClient`): a Pong echoes an id
+and needs no game state, so there is nothing for it to wait for a frame for.
+
+Measured on loopback, where the true round trip is nil: **8-11 ms before,
+1 ms after.**

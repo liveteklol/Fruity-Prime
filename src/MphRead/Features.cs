@@ -58,13 +58,14 @@ namespace MphRead
 
     public static class Features
     {
+        // These below are read all over gameplay code, but no longer have a
+        // settings-page control (the generic "Features" toggle page is
+        // gone) -- they stay at these code defaults forever now, which is
+        // what leaving them here (rather than only in Load/Commit) means:
+        // still real gameplay tuning, just no longer player-configurable.
         public static bool NoRepeatEncounters { get; set; } = false; // false
         public static bool AllowInvalidTeams { get; set; } = true; // false
         public static bool TopScreenTargetInfo { get; set; } = true;  // "true"
-        public static float HelmetOpacity { get; set; } = 1; // 1
-        public static float VisorOpacity { get; set; } = 0.5f; // 0.5
-        public static float HudOpacity { get; set; } = 1; // 1
-        public static float ReticleOpacity { get; set; } = 1; // 1
         public static bool HudSway { get; set; } = true; // true
         public static bool TargetInfoSway { get; set; } = false; // "false"
         public static bool DelayedIdleSway { get; set; } = true; // false
@@ -78,21 +79,33 @@ namespace MphRead
         public static bool BoostOpensDoors { get; set; } = false; // false
         public static bool AlternateHunters1P { get; set; } = true; // false
 
+        // These, below, are backed by their own named Display-page control
+        // and still persist through Load/Commit.
+        public static float HelmetOpacity { get; set; } = 1; // 1
+        public static float VisorOpacity { get; set; } = 0.5f; // 0.5
+        public static float HudOpacity { get; set; } = 1; // 1
+        public static float ReticleOpacity { get; set; } = 1; // 1
+        /// <summary>Freezes the reticle's fire animation instead of letting it shrink and expand.</summary>
+        public static bool FixedCrosshair { get; set; } = false;
+        /// <summary>Replaces the reticle with a flat-coloured cross, coloured by current HP.</summary>
+        public static bool CustomCrosshair { get; set; } = false;
+        /// <summary>The acquired-weapons-and-ammo panel down the left of the HUD.</summary>
+        public static bool ModernHud { get; set; } = false;
+        /// <summary>
+        /// How big that panel is drawn, as a multiplier on every one of its
+        /// measurements -- row height, panel width, icon and ammo text.
+        ///
+        /// It exists because the right size for it is a matter of eyesight and
+        /// screen, not of design: the same panel that is unreadable on a
+        /// handheld is in the way on a monitor. 1.0 is the compact default.
+        /// </summary>
+        public static float WeaponListScale { get; set; } = 1f;
+        /// <summary>Rides rigidly with the camera instead of lagging behind aim, and stops the mouse-driven HUD shift too -- Quake's static weapon.</summary>
+        public static bool FixedWeapon { get; set; } = false;
+
         public static void Load(IReadOnlyDictionary<string, string> values)
         {
-            if (values.TryGetValue(nameof(NoRepeatEncounters), out string? value) && Boolean.TryParse(value, out bool boolean))
-            {
-                NoRepeatEncounters = boolean;
-            }
-            if (values.TryGetValue(nameof(AllowInvalidTeams), out value) && Boolean.TryParse(value, out boolean))
-            {
-                AllowInvalidTeams = boolean;
-            }
-            if (values.TryGetValue(nameof(TopScreenTargetInfo), out value) && Boolean.TryParse(value, out boolean))
-            {
-                TopScreenTargetInfo = boolean;
-            }
-            if (values.TryGetValue(nameof(HelmetOpacity), out value) && Single.TryParse(value, CultureInfo.InvariantCulture, out float single))
+            if (values.TryGetValue(nameof(HelmetOpacity), out string? value) && Single.TryParse(value, CultureInfo.InvariantCulture, out float single))
             {
                 HelmetOpacity = single;
             }
@@ -108,86 +121,57 @@ namespace MphRead
             {
                 ReticleOpacity = single;
             }
-            if (values.TryGetValue(nameof(HudSway), out value) && Boolean.TryParse(value, out boolean))
+            if (values.TryGetValue(nameof(FixedCrosshair), out value) && Boolean.TryParse(value, out bool boolean))
             {
-                HudSway = boolean;
+                FixedCrosshair = boolean;
             }
-            if (values.TryGetValue(nameof(TargetInfoSway), out value) && Boolean.TryParse(value, out boolean))
+            if (values.TryGetValue(nameof(CustomCrosshair), out value) && Boolean.TryParse(value, out boolean))
             {
-                TargetInfoSway = boolean;
+                CustomCrosshair = boolean;
             }
-            if (values.TryGetValue(nameof(DelayedIdleSway), out value) && Boolean.TryParse(value, out boolean))
+            if (values.TryGetValue(nameof(ModernHud), out value) && Boolean.TryParse(value, out boolean))
             {
-                DelayedIdleSway = boolean;
+                ModernHud = boolean;
             }
-            if (values.TryGetValue(nameof(NoIdleSway), out value) && Boolean.TryParse(value, out boolean))
+            if (values.TryGetValue(nameof(WeaponListScale), out value)
+                && Single.TryParse(value, CultureInfo.InvariantCulture, out single))
             {
-                NoIdleSway = boolean;
+                WeaponListScale = Math.Clamp(single, 0.6f, 2f);
             }
-            if (values.TryGetValue(nameof(NoMapCentering), out value) && Boolean.TryParse(value, out boolean))
+            if (values.TryGetValue(nameof(FixedWeapon), out value) && Boolean.TryParse(value, out boolean))
             {
-                NoMapCentering = boolean;
-            }
-            if (values.TryGetValue(nameof(MaxRoomDetail), out value) && Boolean.TryParse(value, out boolean))
-            {
-                MaxRoomDetail = boolean;
-            }
-            if (values.TryGetValue(nameof(MaxPlayerDetail), out value) && Boolean.TryParse(value, out boolean))
-            {
-                MaxPlayerDetail = boolean;
-            }
-            if (values.TryGetValue(nameof(LogSpatialAudio), out value) && Boolean.TryParse(value, out boolean))
-            {
-                LogSpatialAudio = boolean;
-            }
-            if (values.TryGetValue(nameof(HalfSecondAlarm), out value) && Boolean.TryParse(value, out boolean))
-            {
-                HalfSecondAlarm = boolean;
-            }
-            if (values.TryGetValue(nameof(FullBoostCharge), out value) && Boolean.TryParse(value, out boolean))
-            {
-                FullBoostCharge = boolean;
-            }
-            if (values.TryGetValue(nameof(BoostOpensDoors), out value) && Boolean.TryParse(value, out boolean))
-            {
-                BoostOpensDoors = boolean;
-            }
-            if (values.TryGetValue(nameof(AlternateHunters1P), out value) && Boolean.TryParse(value, out boolean))
-            {
-                AlternateHunters1P = boolean;
+                FixedWeapon = boolean;
             }
         }
 
+        /// <summary>
+        /// Only the properties backed by their own named Display-page
+        /// control (the opacity sliders, and the crosshair toggles below).
+        /// Everything else on this class used to be reachable through the
+        /// generic reflection-built "Features" settings page; now that the
+        /// page is gone, those stay at their code defaults and are
+        /// deliberately left out of both this and <see cref="Load"/>.
+        /// </summary>
         public static FrozenDictionary<string, string> Commit()
         {
             return Frozen.Create<string, string>(
             [
-                new(nameof(NoRepeatEncounters), NoRepeatEncounters.ToString().ToLower()),
-                new(nameof(AllowInvalidTeams), AllowInvalidTeams.ToString().ToLower()),
-                new(nameof(TopScreenTargetInfo), TopScreenTargetInfo.ToString().ToLower()),
                 new(nameof(HelmetOpacity), HelmetOpacity.ToString(CultureInfo.InvariantCulture)),
                 new(nameof(VisorOpacity), VisorOpacity.ToString(CultureInfo.InvariantCulture)),
                 new(nameof(HudOpacity), HudOpacity.ToString(CultureInfo.InvariantCulture)),
                 new(nameof(ReticleOpacity), ReticleOpacity.ToString(CultureInfo.InvariantCulture)),
-                new(nameof(HudSway), HudSway.ToString().ToLower()),
-                new(nameof(TargetInfoSway), TargetInfoSway.ToString().ToLower()),
-                new(nameof(DelayedIdleSway), DelayedIdleSway.ToString().ToLower()),
-                new(nameof(NoIdleSway), NoIdleSway.ToString().ToLower()),
-                new(nameof(NoMapCentering), NoMapCentering.ToString().ToLower()),
-                new(nameof(MaxRoomDetail), MaxRoomDetail.ToString().ToLower()),
-                new(nameof(MaxPlayerDetail), MaxPlayerDetail.ToString().ToLower()),
-                new(nameof(LogSpatialAudio), LogSpatialAudio.ToString().ToLower()),
-                new(nameof(HalfSecondAlarm), HalfSecondAlarm.ToString().ToLower()),
-                new(nameof(FullBoostCharge), FullBoostCharge.ToString().ToLower()),
-                new(nameof(BoostOpensDoors), BoostOpensDoors.ToString().ToLower()),
-                new(nameof(AlternateHunters1P), AlternateHunters1P.ToString().ToLower())
+                new(nameof(FixedCrosshair), FixedCrosshair.ToString().ToLower()),
+                new(nameof(CustomCrosshair), CustomCrosshair.ToString().ToLower()),
+                new(nameof(ModernHud), ModernHud.ToString().ToLower()),
+                new(nameof(WeaponListScale), WeaponListScale.ToString(CultureInfo.InvariantCulture)),
+                new(nameof(FixedWeapon), FixedWeapon.ToString().ToLower())
             ]);
         }
     }
 
     public static class Cheats
     {
-        public static bool FreeWeaponSelect { get; set; } = true;
+        public static bool FreeWeaponSelect { get; set; } = false;
         public static bool UnlimitedJumps { get; set; } = false;
         public static bool NoRandomEncounters { get; set; } = false;
         public static bool UnlockAllDoors { get; set; } = false;

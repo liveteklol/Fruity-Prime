@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using MphRead.Formats.Collision;
 using MphRead.Formats.Culling;
+using MphRead.Mods.Network;
 using MphRead.Sound;
 using OpenTK.Mathematics;
 
@@ -435,8 +436,21 @@ namespace MphRead.Entities
         protected bool IsVisible(NodeRef nodeRef)
         {
             if (nodeRef == NodeRef.None
-                || _scene.CameraMode != CameraMode.Player || _scene.ShowInvisibleEntities) // skdebug
+                || _scene.CameraMode != CameraMode.Player || _scene.ShowInvisibleEntities // skdebug
+                || DemoPlayback.IsActive)
             {
+                // The node-ref culling this gates is an optimisation for a
+                // camera that is really walking the map and crossing its
+                // portals every frame -- exactly what demo playback's
+                // spectate-follow camera doesn't do (it's a puppet driven by
+                // replayed snapshots, same as everyone else being watched).
+                // IsNodeRefVisible's own "PartIndex == -1 -> not visible"
+                // fallback is documented as a workaround for precisely this
+                // kind of unintended camera mode; skip the whole check here
+                // rather than find every way a puppet's node can end up
+                // stale relative to another puppet's. A demo has far fewer
+                // entities than a full match, so always drawing costs
+                // nothing worth trading correctness for.
                 return true;
             }
             return _scene.IsNodeRefVisible(nodeRef);

@@ -121,6 +121,15 @@ namespace MphRead.Mods.Network
         /// </summary>
         public MasterReporter? Reporter { get; set; }
 
+        /// <summary>
+        /// Whether same-team damage counts, for the whole session. This is
+        /// the server's call, broadcast in every <see cref="MatchStatePacket"/>
+        /// so every client applies the same rule -- each client's own local
+        /// setting used to be what decided this, which meant the host turning
+        /// it on in Match rules never reached anyone else.
+        /// </summary>
+        public bool FriendlyFire { get; set; }
+
         public DedicatedServer(int port = NetConfig.DefaultPort, int maxPlayers = 4,
                                MapRotation? rotation = null)
         {
@@ -291,7 +300,8 @@ namespace MphRead.Mods.Network
                     : Math.Max(0, entry.TimeLimit - elapsed),
                 TimeElapsed = elapsed,
                 PlayerCount = (byte)_peers.Count,
-                Flags = ending ? MatchStatePacket.FlagEnding : MatchStatePacket.FlagInProgress,
+                Flags = (byte)((ending ? MatchStatePacket.FlagEnding : MatchStatePacket.FlagInProgress)
+                    | (FriendlyFire ? MatchStatePacket.FlagFriendlyFire : 0)),
                 PointGoal = (ushort)Math.Clamp(entry.PointGoal, 0, UInt16.MaxValue),
                 MatchId = _matchId,
                 RoomKey = entry.RoomKey,
@@ -606,6 +616,12 @@ namespace MphRead.Mods.Network
             }
         }
 
+        /// <summary>
+        /// How far behind a peer's newest intent frame a packet may be and
+        /// still be a reordered straggler rather than a restarted counter.
+        /// </summary>
+        private const uint IntentResetGap = 600;
+
         private void HandleIntent(ReceivedPacket packet, double now)
         {
             Peer? peer = Find(packet.Sender);
@@ -618,7 +634,16 @@ namespace MphRead.Mods.Network
             {
                 IntentPacket intent = IntentPacket.Read(packet.Payload);
                 // UDP reorders; an older frame must not replace a newer one.
-                if (peer.LastIntentFrame != 0 && intent.Frame <= peer.LastIntentFrame)
+                //
+                // Unless it is far enough behind to be a different session
+                // rather than a straggler: a client's counter restarts at
+                // zero when it joins, and a Peer that survived a reconnect --
+                // one that came back to the same endpoint before this server
+                // noticed it had gone -- would otherwise have every packet of
+                // its new session refused until the counter climbed back past
+                // the old one. Same ten seconds NetSession allows.
+                if (peer.LastIntentFrame != 0 && intent.Frame <= peer.LastIntentFrame
+                    && peer.LastIntentFrame - intent.Frame < IntentResetGap)
                 {
                     return;
                 }

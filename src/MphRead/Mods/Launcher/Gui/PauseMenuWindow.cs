@@ -1,10 +1,12 @@
 using System;
+using System.Collections.Generic;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Threading;
 using MphRead.Mods;
+using MphRead.Mods.Network;
 
 namespace MphRead.Mods.Launcher.Gui
 {
@@ -12,10 +14,17 @@ namespace MphRead.Mods.Launcher.Gui
     /// What Escape shows during a match: resume, the window mode, the settings,
     /// and the two ways out.
     ///
-    /// Deliberately small and centred rather than full-screen: the match is
-    /// still running behind it, which is the point -- a networked match cannot
-    /// be paused, and watching it carry on is more honest than pretending it
-    /// stopped.
+    /// Sized to the game window and laid straight over it, so it reads as the
+    /// game's own pause screen rather than as a dialog the game happens to
+    /// have opened. It was a 340x392 box in the middle of the desktop before,
+    /// which is what a settings prompt looks like and not what pressing
+    /// Escape in a game does.
+    ///
+    /// The match is still running behind it, which is the point -- a networked
+    /// match cannot be paused, and watching it carry on is more honest than
+    /// pretending it stopped -- so the fill is a scrim rather than a wall. A
+    /// compositor that will not give a window an alpha channel renders it
+    /// opaque, which loses the view of the match and nothing else.
     ///
     /// Unlike the WinForms menu this replaces, it does not own a thread. The
     /// game's own thread is the one Avalonia was set up on, so the menu is a
@@ -27,8 +36,32 @@ namespace MphRead.Mods.Launcher.Gui
     internal sealed class PauseMenuWindow : Window
     {
         private static PauseMenuWindow? _open;
+        /// <summary>
+        /// The settings dialog, while it is up over a match. Tracked so it can
+        /// be moved with the game window too: it covers the same rectangle,
+        /// and one of the two following the game while the other stays put
+        /// would be worse than neither doing it.
+        /// </summary>
+        private static Window? _openSettings;
         private readonly PauseMenuView _view;
         private bool _settingsOpen;
+
+        /// <summary>
+        /// Lay the in-game windows back over the game window, because it has
+        /// moved or been resized. Called from <see cref="PauseMenu.Poll"/>,
+        /// on the game's own thread, which is the toolkit's thread too.
+        /// </summary>
+        internal static void FollowGameWindow()
+        {
+            if (_open != null)
+            {
+                CoverGameWindow(_open);
+            }
+            if (_openSettings != null)
+            {
+                CoverGameWindow(_openSettings);
+            }
+        }
 
         /// <summary>Open the menu, or bring the one already up to the front.</summary>
         public static bool Open()
@@ -71,29 +104,16 @@ namespace MphRead.Mods.Launcher.Gui
             // windows with one title is what an alt-tab list cannot tell apart.
             Title = $"{Mods.Branding.Name} - paused";
             Icon = GuiTheme.AppIcon.Value;
-            Width = 340;
-            Height = 392;
             CanResize = false;
-            SystemDecorations = SystemDecorations.BorderOnly;
-            Background = GuiTheme.PanelBrush;
+            SystemDecorations = SystemDecorations.None;
+            TransparencyLevelHint = _scrimLevels;
+            Background = GuiTheme.ScrimBrush;
             RequestedThemeVariant = Avalonia.Styling.ThemeVariant.Dark;
-            // Over the game window rather than the middle of the desktop: the
-            // match is still running behind it and that is where the player is
-            // looking. The game may also be borderless fullscreen, which is
-            // what Topmost is for.
+            // The game may be borderless fullscreen, and a menu that
+            // disappears behind the window it belongs to is not a menu.
             Topmost = true;
             ShowInTaskbar = false;
-            if (PauseMenu.WindowWidth > 0 && PauseMenu.WindowHeight > 0)
-            {
-                WindowStartupLocation = WindowStartupLocation.Manual;
-                Position = new PixelPoint(
-                    PauseMenu.WindowX + (PauseMenu.WindowWidth - (int)Width) / 2,
-                    PauseMenu.WindowY + (PauseMenu.WindowHeight - (int)Height) / 2);
-            }
-            else
-            {
-                WindowStartupLocation = WindowStartupLocation.CenterScreen;
-            }
+            CoverGameWindow(this);
 
             // The entries themselves live in PauseMenuView, which Android
             // shows through an overlay because it has no windows to put this
@@ -107,9 +127,103 @@ namespace MphRead.Mods.Launcher.Gui
                 Close();
             };
             _view.SettingsRequested += (_, _) => OpenSettings();
+            _view.SpectateRequested += (_, _) => { SpectatorMode.Start(); Close(); };
+            _view.RejoinRequested += (_, _) => { SpectatorMode.Rejoin(); Close(); };
+            _view.RecordToggleRequested += (_, _) =>
+            {
+                if (DemoRecorder.IsRecording)
+                {
+                    Console.WriteLine($"[demo] recording saved to {DemoRecorder.CurrentPath}");
+                    DemoRecorder.Stop();
+                }
+                else
+                {
+                    DemoRecorder.Start();
+                }
+                Close();
+            };
             _view.LeaveRequested += (_, _) => { PauseMenu.RequestLeave(); Close(); };
             _view.QuitRequested += (_, _) => { PauseMenu.RequestQuit(); Close(); };
             Content = _view;
+        }
+
+        /// <summary>
+        /// Transparency worth asking for, best first. Avalonia walks the list
+        /// and takes the first the platform will give; None is last, and is
+        /// the honest fallback rather than a failure.
+        /// </summary>
+        private static readonly IReadOnlyList<WindowTransparencyLevel> _scrimLevels =
+            new[] { WindowTransparencyLevel.Transparent, WindowTransparencyLevel.None };
+
+        /// <summary>
+        /// Put a window exactly over the game's client area, or over the
+        /// screen when the game has not said where it is yet.
+        ///
+        /// Shared with the settings, which is opened from here and has to land
+        /// on the same rectangle: two in-game screens of different sizes in
+        /// different places is the "popup" shape all over again.
+        ///
+        /// Called twice, once in the constructor and again from OnOpened.
+        /// RenderScaling is 1 until the window has been given a screen, so on
+        /// a display running at anything but 100% the first call gets the
+        /// conversion wrong and only the second one can be right -- but the
+        /// first is still worth making, because it is what stops the window
+        /// appearing in the middle of the desktop for a frame before moving.
+        /// </summary>
+        internal static void CoverGameWindow(Window window)
+        {
+            if (PauseMenu.WindowWidth <= 0 || PauseMenu.WindowHeight <= 0)
+            {
+                window.WindowStartupLocation = WindowStartupLocation.CenterScreen;
+                return;
+            }
+            window.WindowStartupLocation = WindowStartupLocation.Manual;
+            var origin = new PixelPoint(PauseMenu.WindowX, PauseMenu.WindowY);
+            if (window.Position != origin)
+            {
+                window.Position = origin;
+            }
+            // Client pixels, which is what GLFW reports and what Avalonia's
+            // Position is in. Width and Height are device-independent, so the
+            // display's scaling has to come back out of them or the menu
+            // overhangs the game by that factor.
+            //
+            // Not RenderScaling: it is 1 until the window has been given a
+            // screen, so the first call -- the one in the constructor, which
+            // is what stops the window appearing in the middle of the desktop
+            // for a frame -- would get it wrong on any display not running at
+            // 100%. The screen under the game window knows before anybody has
+            // been shown anything.
+            double scale = ScalingAt(window, origin);
+            double width = PauseMenu.WindowWidth / scale;
+            double height = PauseMenu.WindowHeight / scale;
+            // Only when it actually changed. This runs on every frame of a
+            // drag, and assigning a size is a layout pass whether or not the
+            // number moved; a move is not a resize.
+            if (Math.Abs(window.Width - width) > 0.5
+                || Math.Abs(window.Height - height) > 0.5)
+            {
+                window.Width = width;
+                window.Height = height;
+            }
+        }
+
+        private static double ScalingAt(Window window, PixelPoint point)
+        {
+            try
+            {
+                Avalonia.Platform.Screen? screen = window.Screens?.ScreenFromPoint(point);
+                if (screen != null && screen.Scaling > 0)
+                {
+                    return screen.Scaling;
+                }
+            }
+            catch (Exception)
+            {
+                // A backend with no screen information is not a reason to
+                // refuse to draw the menu.
+            }
+            return window.RenderScaling > 0 ? window.RenderScaling : 1;
         }
 
         private static string WindowLabel()
@@ -147,6 +261,7 @@ namespace MphRead.Mods.Launcher.Gui
             {
                 MenuSettings settings = GameState.LoadSettings();
                 var window = new SettingsWindow(settings, inGame: true);
+                _openSettings = window;
                 await window.ShowDialog(this);
             }
             catch (Exception ex)
@@ -159,6 +274,7 @@ namespace MphRead.Mods.Launcher.Gui
             }
             finally
             {
+                _openSettings = null;
                 _settingsOpen = false;
                 Topmost = wasTopmost;
                 Activate();
@@ -168,6 +284,7 @@ namespace MphRead.Mods.Launcher.Gui
         protected override void OnOpened(EventArgs e)
         {
             base.OnOpened(e);
+            CoverGameWindow(this);
             _view.FocusResume();
         }
 

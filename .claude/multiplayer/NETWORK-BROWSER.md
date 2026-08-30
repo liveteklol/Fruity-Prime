@@ -90,14 +90,14 @@ hostname, deliberately unlike the *game* server default (an address on
 purpose), because a directory has to be able to move without a new build
 reaching every operator. **That name does not currently resolve.** Both ends
 are pointed at the Pi's other name instead: launcher via
-`master_host=france-mining.com` in `launcher.txt`, server via
+`master_host=net.livetek.fr` in `launcher.txt`, server via
 `-master 127.0.0.1` (shares the directory's box).
 
 `tools/systemd/mphread-master.service` is the unit; `deploy-server.sh`
 installs both it and the game server's, filling in user/directory, and
 **leaves an existing unit alone** on later deploys — so the two hand-added
 options on the Pi (`-master 127.0.0.1` on the server, `-public
-france-mining.com` on the directory) survive a redeploy and aren't in the
+net.livetek.fr` on the directory) survive a redeploy and aren't in the
 templates.
 
 Two things had to be true before anything appeared in a list, neither visible
@@ -106,7 +106,7 @@ from the code:
 - **`-public` on the directory.** Right for a server behind a router, exactly
   wrong for a server sharing a box with the directory — that heartbeat
   arrives from `127.0.0.1`, and a list of loopback addresses sends every
-  player to their own machine. `-public france-mining.com` tells the
+  player to their own machine. `-public net.livetek.fr` tells the
   directory once what to publish for anything registering from loopback or a
   private range.
 - **UDP 27889 through the firewall**, separately from the game port. `ufw`

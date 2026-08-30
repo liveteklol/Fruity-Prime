@@ -5,12 +5,12 @@
 # executable open while it runs, so overwriting it in place fails.
 #
 # Credentials come from the environment, not this file:
-#   MPH_SERVER_HOST=france-mining.com MPH_SERVER_USER=livetek ./deploy-server.sh
+#   MPH_SERVER_HOST=net.livetek.fr MPH_SERVER_USER=livetek ./deploy-server.sh
 # With an SSH key installed, no password is needed at all -- which is the
 # setup worth moving to.
 set -euo pipefail
 
-HOST="${MPH_SERVER_HOST:-france-mining.com}"
+HOST="${MPH_SERVER_HOST:-net.livetek.fr}"
 USER="${MPH_SERVER_USER:-livetek}"
 REMOTE_DIR="${MPH_SERVER_DIR:-/home/$USER/mphread-server}"
 SERVICE="mphread-server"
