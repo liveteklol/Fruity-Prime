@@ -26,8 +26,22 @@ namespace MphRead.Mods.MapGen
     /// </summary>
     public static class MapNodePacker
     {
-        /// <summary>Distance between candidate standing places.</summary>
-        private const float Spacing = 4f;
+        /// <summary>
+        /// Distance between candidate standing places while working out what
+        /// connects to what. Fine on purpose: a doorway in a real level is
+        /// about two units wide once converted, so a grid any coarser steps
+        /// straight over every one of them and produces a room of separate
+        /// islands that no bot can leave.
+        /// </summary>
+        private const float FineSpacing = 2f;
+
+        /// <summary>
+        /// Distance between the waypoints actually written. The routing table
+        /// is a row per node over every node, so the cost is quadratic and the
+        /// fine grid is far too dense to ship; these are chosen from it, which
+        /// is what lets them be sparse without being disconnected.
+        /// </summary>
+        private const float Spacing = 6f;
         /// <summary>Headroom a hunter needs to stand up.</summary>
         private const float Headroom = 1.9f;
         /// <summary>What a walk can climb, and what a fall can drop.</summary>
@@ -35,8 +49,19 @@ namespace MphRead.Mods.MapGen
         private const float StepDown = 8f;
         /// <summary>Cosine of the steepest slope that counts as floor.</summary>
         private const float WalkNormal = 0.7f;
-        /// <summary>The AI reads a fixed-size neighbour buffer; keep well inside it.</summary>
-        private const int MaxNeighbours = 8;
+        /// <summary>
+        /// The AI walks a node's routes into a buffer of 20 and stops at 19,
+        /// so that is the ceiling; 16 leaves room and is more than a waypoint
+        /// in a real room ever needs.
+        /// </summary>
+        private const int MaxNeighbours = 16;
+        /// <summary>
+        /// How close counts as standing on a node. Not the spacing: the game's
+        /// own rooms put this between 0.6 and 2 units whatever their nodes are
+        /// spaced at, and a bot that thinks it has arrived from five units away
+        /// stops short of every corner.
+        /// </summary>
+        private const float Reach = 1.6f;
         /// <summary>
         /// The routing table is a row per node over every node, so its cost is
         /// quadratic. Past this the spacing is widened instead -- a bot that
@@ -53,20 +78,142 @@ namespace MphRead.Mods.MapGen
 
         public static (byte[] Bytes, int Nodes, int Edges) Pack(IReadOnlyList<BuiltFace> solid)
         {
+            List<Node> fine = Sample(solid, FineSpacing);
+            Connect(solid, fine, FineSpacing);
+            if (Environment.GetEnvironmentVariable("FP_NODEDEBUG") != null)
+            {
+                Console.WriteLine($"  [nodes] fine {fine.Count} nodes,"
+                    + $" {fine.Sum(n => n.Neighbours.Count) / 2} edges,"
+                    + $" largest component {Largest(fine)}");
+            }
             float spacing = Spacing;
             List<Node> nodes;
             while (true)
             {
-                nodes = Sample(solid, spacing);
+                nodes = Decimate(fine, (int)MathF.Round(spacing / FineSpacing));
                 if (nodes.Count <= MaxNodes || spacing > 64)
                 {
                     break;
                 }
                 spacing *= 1.4f;
             }
-            Connect(solid, nodes, spacing);
             int edges = nodes.Sum(n => n.Neighbours.Count) / 2;
+            if (Environment.GetEnvironmentVariable("FP_NODEDEBUG") != null)
+            {
+                Console.WriteLine($"  [nodes] coarse {nodes.Count} nodes, {edges} edges,"
+                    + $" largest component {Largest(nodes)},"
+                    + $" degree max {nodes.Max(n => n.Neighbours.Count)},"
+                    + $" isolated {nodes.Count(n => n.Neighbours.Count == 0)}");
+            }
             return (Write(nodes, spacing), nodes.Count, edges);
+        }
+
+        private static int Largest(List<Node> nodes)
+        {
+            var seen = new bool[nodes.Count];
+            int best = 0;
+            var queue = new Queue<int>();
+            for (int i = 0; i < nodes.Count; i++)
+            {
+                if (seen[i])
+                {
+                    continue;
+                }
+                int size = 0;
+                seen[i] = true;
+                queue.Clear();
+                queue.Enqueue(i);
+                while (queue.Count > 0)
+                {
+                    int current = queue.Dequeue();
+                    size++;
+                    foreach (int neighbour in nodes[current].Neighbours)
+                    {
+                        if (!seen[neighbour])
+                        {
+                            seen[neighbour] = true;
+                            queue.Enqueue(neighbour);
+                        }
+                    }
+                }
+                best = Math.Max(best, size);
+            }
+            return best;
+        }
+
+        /// <summary>
+        /// Thins the fine grid down to the waypoints that are written, keeping
+        /// the connectivity it found.
+        ///
+        /// The thinning is done over the graph and not over the room: two
+        /// points either side of a wall are close together and not connected,
+        /// and picking by distance alone drops one of them and loses whatever
+        /// was behind it. Growing each waypoint outward along the edges
+        /// instead means every corner of the fine grid belongs to one, and two
+        /// waypoints are neighbours exactly when some fine step crosses
+        /// between them -- which is to say, when you can walk it.
+        /// </summary>
+        private static List<Node> Decimate(List<Node> fine, int radius)
+        {
+            radius = Math.Max(1, radius);
+            var owner = new int[fine.Count];
+            Array.Fill(owner, -1);
+            var seeds = new List<int>();
+            var queue = new Queue<(int Node, int Depth)>();
+            for (int i = 0; i < fine.Count; i++)
+            {
+                if (owner[i] != -1)
+                {
+                    continue;
+                }
+                int index = seeds.Count;
+                seeds.Add(i);
+                owner[i] = index;
+                queue.Clear();
+                queue.Enqueue((i, 0));
+                while (queue.Count > 0)
+                {
+                    (int current, int depth) = queue.Dequeue();
+                    if (depth == radius)
+                    {
+                        continue;
+                    }
+                    foreach (int neighbour in fine[current].Neighbours)
+                    {
+                        if (owner[neighbour] == -1)
+                        {
+                            owner[neighbour] = index;
+                            queue.Enqueue((neighbour, depth + 1));
+                        }
+                    }
+                }
+            }
+            var nodes = new List<Node>(seeds.Count);
+            foreach (int seed in seeds)
+            {
+                nodes.Add(new Node() { Position = fine[seed].Position, Cell = fine[seed].Cell });
+            }
+            for (int i = 0; i < fine.Count; i++)
+            {
+                foreach (int j in fine[i].Neighbours)
+                {
+                    int a = owner[i];
+                    int b = owner[j];
+                    if (a == b || a < 0 || b < 0)
+                    {
+                        continue;
+                    }
+                    if (nodes[a].Neighbours.Count < MaxNeighbours && !nodes[a].Neighbours.Contains(b))
+                    {
+                        nodes[a].Neighbours.Add(b);
+                    }
+                    if (nodes[b].Neighbours.Count < MaxNeighbours && !nodes[b].Neighbours.Contains(a))
+                    {
+                        nodes[b].Neighbours.Add(a);
+                    }
+                }
+            }
+            return nodes;
         }
 
         /// <summary>
@@ -377,23 +524,28 @@ namespace MphRead.Mods.MapGen
             int listOffset = 24;
             int nodeOffset = 32;
             int valuesOffset = nodeOffset + nodes.Count * 36;
-            // where each node's two lists land in the shared array
+            // Where each node's routing table lands in the shared array. A run
+            // is a *pair* of 16-bit values, so it is four bytes and not two --
+            // getting that wrong puts every list after the first at an offset
+            // half way into the one before it, and the bots read a routing
+            // table made of the tail of somebody else's.
             var routeOffset = new int[nodes.Count];
-            var neighbourOffset = new int[nodes.Count];
             int cursor = valuesOffset;
             for (int i = 0; i < nodes.Count; i++)
             {
                 routeOffset[i] = cursor;
-                cursor += routes[i].Count * 2;
-                neighbourOffset[i] = cursor;
-                cursor += nodes[i].Neighbours.Count * 2;
+                cursor += routes[i].Count * 4;
             }
             writer.Write((ushort)6);
             writer.Write((ushort)1); // one set
             writer.Write((uint)indexOffset);
             writer.Write((uint)dataOffset);
-            writer.Write((ushort)1); // one index
-            writer.Write((ushort)0); // that index
+            // No set index, which is what the game's own files carry: with one,
+            // the AI can turn it on and index a second set that is not there.
+            // The two bytes it would have occupied stay, because the header
+            // says the data begins two after the index does.
+            writer.Write((ushort)0); // index count
+            writer.Write((ushort)0); // the unused index slot
             writer.Write((uint)listOffset); // the set holds one list
             writer.Write((ushort)1);
             writer.Write((ushort)0x5C);
@@ -405,17 +557,21 @@ namespace MphRead.Mods.MapGen
                 Node node = nodes[i];
                 writer.Write((ushort)NodeType.Navigation);
                 // the id is the index: the routing table is read as indices
-                // into the list and the neighbour list as ids, and making them
-                // the same number is what lets one node answer both
+                // into the list, and elsewhere as ids, and making them the
+                // same number is what lets one node answer both
                 writer.Write((ushort)i);
                 writer.Write((ushort)0);
-                writer.Write((ushort)node.Neighbours.Count);
+                // The second list is left empty, as it is on two thirds of the
+                // nodes in the game's own rooms. Navigation does not come from
+                // it: the routing table below is the graph, and the neighbours
+                // of a node are the distinct places it sends you.
+                writer.Write((ushort)0);
                 writer.Write(Fixed.ToInt(node.Position.X));
                 writer.Write(Fixed.ToInt(node.Position.Y));
                 writer.Write(Fixed.ToInt(node.Position.Z));
-                writer.Write(Fixed.ToInt(spacing));
+                writer.Write(Fixed.ToInt(Reach));
                 writer.Write((uint)routeOffset[i]);
-                writer.Write((uint)neighbourOffset[i]);
+                writer.Write((uint)routeOffset[i]);
                 writer.Write(0u);
             }
             for (int i = 0; i < nodes.Count; i++)
@@ -424,10 +580,6 @@ namespace MphRead.Mods.MapGen
                 {
                     writer.Write(run);
                     writer.Write(hop);
-                }
-                foreach (int neighbour in nodes[i].Neighbours)
-                {
-                    writer.Write((ushort)neighbour);
                 }
             }
             return stream.ToArray();

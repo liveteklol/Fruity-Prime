@@ -130,7 +130,8 @@ namespace MphRead.Mods.MapGen
                 collisionPath: $"{prefix}_Collision.bin",
                 texturePath: null, // the textures are inside the model file
                 entityPath: $"{prefix}_Ent.bin",
-                nodePath: $@"levels\nodeData\{prefix}_Node.bin",
+                // the metadata prepends levels\nodeData\ itself
+                nodePath: $"{prefix}_Node.bin",
                 roomNodeName: null,
                 battleTimeLimit: def.BattleTimeLimit,
                 timeLimit: def.BattleTimeLimit,
@@ -236,8 +237,13 @@ namespace MphRead.Mods.MapGen
         {
             string prefix = def.Name.ToLowerInvariant();
             string model = Path.Combine(ArchiveDirectory(def), $"{prefix}_Model.bin");
-            if (!File.Exists(model))
+            if (!File.Exists(model)
+                || !File.Exists(Path.Combine(EntityDirectory(), $"{prefix}_Ent.bin"))
+                || !File.Exists(Path.Combine(NodeDirectory(), $"{prefix}_Node.bin")))
             {
+                // every file a room is made of, not just the first: a build
+                // from before one of them existed leaves the others in place
+                // and looks up to date
                 return true;
             }
             string? source = MapFiles()

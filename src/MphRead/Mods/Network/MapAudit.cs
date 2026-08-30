@@ -38,6 +38,14 @@ namespace MphRead.Mods.Network
         private readonly bool[] _everSpawned = new bool[PlayerEntity.SlotCapacity];
         private readonly bool[] _everAltForm = new bool[PlayerEntity.SlotCapacity];
         private readonly bool[] _everFired = new bool[PlayerEntity.SlotCapacity];
+        // How far each player actually got. "The bots do not move" was a
+        // report nothing here could confirm or deny: a bot standing still
+        // spawns, so it counted as spawned, and never fires or dies, which
+        // reads the same as one that is losing. This is the metric that
+        // separates them.
+        private readonly Vector3[] _lastSeen = new Vector3[PlayerEntity.SlotCapacity];
+        private readonly bool[] _haveLastSeen = new bool[PlayerEntity.SlotCapacity];
+        private readonly float[] _travelled = new float[PlayerEntity.SlotCapacity];
         // The three states only an affinity weapon can inflict. Counted per
         // slot rather than as a total, because "somebody was frozen" and "one
         // player was frozen forty times" are different reports.
@@ -715,6 +723,17 @@ namespace MphRead.Mods.Network
                 }
                 _lastHealth[slot] = player.Health;
                 _lowestY = Math.Min(_lowestY, player.Position.Y);
+                if (_haveLastSeen[slot])
+                {
+                    float step = (player.Position - _lastSeen[slot]).Length;
+                    // a respawn is a teleport, not a walk
+                    if (step < 5)
+                    {
+                        _travelled[slot] += step;
+                    }
+                }
+                _lastSeen[slot] = player.Position;
+                _haveLastSeen[slot] = true;
             }
             foreach (EntityBase entity in Scene.Entities)
             {
@@ -943,6 +962,17 @@ namespace MphRead.Mods.Network
             var line = new StringBuilder();
             line.Append($"MAPTEST {_room} | players {_players} | frames {_frame}");
             line.Append($" | spawned {spawnedEver}/{_players}");
+            int moved = 0;
+            float furthest = 0;
+            for (int i = 0; i < _players && i < _travelled.Length; i++)
+            {
+                if (_travelled[i] > 20)
+                {
+                    moved++;
+                }
+                furthest = Math.Max(furthest, _travelled[i]);
+            }
+            line.Append($" | moved {moved}/{_players} (furthest {furthest:0} units)");
             line.Append($" | alt form {altEver}/{_players}");
             line.Append($" | fired {firedEver}/{_players}");
             line.Append($" | deaths {totalDeaths}");

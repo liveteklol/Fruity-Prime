@@ -50,6 +50,7 @@ Last full map pass (2026-08-20):
 |---|---|
 | Every multiplayer map, 8 players / 8 AI bots, 22-24 s each | 33/33, zero crashes, both modes |
 | Players placed | 8/8 on 27 maps; 0/8 on the six First Hunt "biodefense chamber" rooms (no spawn points — the only `MAPFAIL`s) |
+| `moved N/M (furthest X units)` | how far each player actually got, summed per frame and ignoring respawn jumps. The metric that separates a bot that cannot navigate from one that is losing: a bot standing still still counts as spawned, and never firing or dying reads the same either way. DUST2 with generated node data gets 7/8 and 785 units over 150 s; MP3 PROVING GROUND gets 8/8 and 369 over 60 |
 | Jump pads / teleporters, stood on in turn | every pad on all 24 maps that have one; both of AD1 TRANSFER LOCK's teleporters moved the player |
 | Afflictions, probed per map | freeze on 14 maps, disrupt on 13, burn on 6 — a sample, not a verdict: ~2 charged shots per state per map, and the probe's first (uncharged) press of each cycle can land a hit that registers as "hit, no affliction," which understates burn's column most |
 | 6 clients against the Pi, 110 s | 3 mismatches, all late-joiner/stop-skew artifacts; pings 6-16 ms, `dropped=0` |

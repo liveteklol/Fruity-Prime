@@ -112,6 +112,17 @@ namespace MphRead
             {
                 nodePath = @"levels\nodeData\mp14_KOTH_node.bin";
             }
+            if (nodePath != null
+                && !System.IO.File.Exists(Paths.Combine(firstHunt ? Paths.FhFileSystem : Paths.FileSystem, nodePath)))
+            {
+                // A room with no node data has bots that wander; a room that
+                // throws while loading it has no match at all. A custom map
+                // generates its own, so the case that happens is an install
+                // where that generation has not run yet -- and taking the
+                // whole match down for it is the wrong trade.
+                Console.WriteLine($"[nodes] {nodePath} is missing; bots in this room will not navigate.");
+                nodePath = null;
+            }
             if (nodePath != null)
             {
                 nodeData = ReadNodeData.ReadData(Paths.Combine(@"", nodePath), firstHunt);

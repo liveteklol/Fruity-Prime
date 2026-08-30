@@ -162,6 +162,52 @@ namespace MphRead.Mods
             return MultiplayerRooms().Where(r => !Exists(r)).ToList();
         }
 
+        /// <summary>
+        /// Renders the previews a custom map is missing, at startup.
+        ///
+        /// The sweep that renders every room runs once, when the game files
+        /// are first set up. A custom map arrives later than that by
+        /// definition -- somebody drops a file into maps/ on an install that
+        /// was set up months ago -- so it had no picture and no way to get one
+        /// but the menu entry nobody knows to press. There are never many, and
+        /// only the ones that are missing are rendered, so the usual cost of
+        /// this is nothing at all.
+        /// </summary>
+        public static void EnsureCustomPreviews(Action<string>? report = null)
+        {
+            if (!Launcher.GameFiles.Ready || !ThumbnailBatch.CanRun)
+            {
+                return;
+            }
+            List<string> missing;
+            try
+            {
+                var custom = MapGen.CustomRooms.Definitions.Select(d => d.Name).ToHashSet();
+                missing = MissingThumbnails().Where(r => custom.Contains(r)).ToList();
+            }
+            catch
+            {
+                return;
+            }
+            if (missing.Count == 0)
+            {
+                return;
+            }
+            report ??= line => Console.WriteLine($"  {line}");
+            report($"Rendering {missing.Count} custom map preview(s)...");
+            try
+            {
+                ThumbnailBatch.Run(missing, ThumbnailBatch.DefaultParallelism,
+                    ThumbnailWidth, ThumbnailHeight, report);
+            }
+            catch (Exception ex)
+            {
+                // a map with no picture is a cosmetic problem; it must not
+                // stand between the player and the front screen
+                report($"could not render: {ex.Message}");
+            }
+        }
+
         public static void EnsureCacheDirectory()
         {
             Directory.CreateDirectory(CacheDirectory);
