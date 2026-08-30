@@ -117,6 +117,11 @@ namespace MphRead.Mods.MapGen
                 }
             }
 
+            int references = 0;
+            foreach (List<ushort>? cell in cells)
+            {
+                references += cell?.Count ?? 0;
+            }
             var dataIndices = new List<ushort>();
             var entries = new List<(ushort Count, ushort Start)>();
             foreach (List<ushort>? cell in cells)
@@ -125,7 +130,7 @@ namespace MphRead.Mods.MapGen
                 if (start > UInt16.MaxValue)
                 {
                     throw new ProgramException(
-                        $"The collision grid needs more than 65535 face references ({partsX}x{partsY}x{partsZ} cells "
+                        $"The collision grid needs {references} face references ({partsX}x{partsY}x{partsZ} cells "
                         + $"over {data.Count} faces), and the format indexes them with 16 bits. "
                         + "Convert at a larger scale, or with fewer solid surfaces.");
                 }

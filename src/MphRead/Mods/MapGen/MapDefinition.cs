@@ -73,12 +73,26 @@ namespace MphRead.Mods.MapGen
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
         };
 
+        /// <summary>
+        /// The folder the map file was read from, so a map that keeps its own
+        /// level and textures in a folder of its own -- maps/dust2/ -- finds
+        /// them beside itself rather than only in maps/. Not part of the file:
+        /// it is where the file was.
+        /// </summary>
+        [JsonIgnore]
+        public string? BaseDirectory { get; set; }
+
         public static MapDefinition Load(string path)
         {
             MapDefinition? result = JsonSerializer.Deserialize<MapDefinition>(File.ReadAllText(path), _options);
             if (result == null)
             {
                 throw new ProgramException($"Could not read map definition {path}.");
+            }
+            result.BaseDirectory = Path.GetDirectoryName(Path.GetFullPath(path));
+            if (result.Import != null)
+            {
+                result.Import.BaseDirectory = result.BaseDirectory;
             }
             return result;
         }
@@ -141,12 +155,20 @@ namespace MphRead.Mods.MapGen
             return null;
         }
 
-        private static IEnumerable<string> Candidates(string name)
+        /// <summary>Set from the map file's own folder; see <see cref="MapDefinition.BaseDirectory"/>.</summary>
+        [JsonIgnore]
+        public string? BaseDirectory { get; set; }
+
+        private IEnumerable<string> Candidates(string name)
         {
             yield return name;
             if (Path.IsPathRooted(name))
             {
                 yield break;
+            }
+            if (BaseDirectory != null)
+            {
+                yield return Path.Combine(BaseDirectory, name);
             }
             yield return Path.Combine(CustomRooms.MapDirectory, name);
             yield return Path.Combine(Mods.Launcher.GameFiles.Root, name);
@@ -207,8 +229,42 @@ namespace MphRead.Mods.MapGen
         /// <summary>Texels per world unit applied to the imported UVs.</summary>
         public float TexScale { get; set; } = 24f;
 
-        /// <summary>Drop geometry this far below the lowest spawn: the void does not need a floor.</summary>
+        /// <summary>
+        /// Draw the level's sky surfaces. With a texture pack that has an
+        /// image for the sky shader this is the level's own sky; without one
+        /// the surfaces are dropped anyway and the result is the same as
+        /// leaving it off. The sky shell is never collision either way.
+        /// </summary>
         public bool KeepSky { get; set; }
+
+        /// <summary>
+        /// Keep the level's player-clip brushes -- its invisible walls.
+        ///
+        /// True is right for a level authored for the game it came from: a
+        /// clip brush is usually there to stop an exploit or to smooth a
+        /// staircase. It is wrong for a level whose clips exist to fence a
+        /// route, which is every race map, where they turn a map you want to
+        /// roam into a corridor.
+        /// </summary>
+        public bool KeepClip { get; set; } = true;
+
+        /// <summary>
+        /// How finely to tessellate a Bezier patch: this many quads along each
+        /// side of each biquadratic piece. 3 is enough for an archway and
+        /// costs 18 triangles a piece; past about 5 the triangles are smaller
+        /// than the texels.
+        /// </summary>
+        public int PatchLevel { get; set; } = 3;
+
+        /// <summary>
+        /// Take the level's own player starts as spawn points. True is right
+        /// for a deathmatch level, which was authored with eight of them in
+        /// the places its author wanted people to appear. It is wrong for
+        /// anything else: a race level has one start, often on a ledge sealed
+        /// off from the course, and a player who spawns there is stuck. Turn
+        /// it off and the map file's own spawns are the only ones.
+        /// </summary>
+        public bool KeepSpawns { get; set; } = true;
     }
 
     /// <summary>

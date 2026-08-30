@@ -467,7 +467,8 @@ namespace MphRead.Mods
                     try
                     {
                         MapGen.MapPacker.Generate(def, MapGen.CustomRooms.ArchiveDirectory(def),
-                            MapGen.CustomRooms.EntityDirectory(), verbose: true);
+                            MapGen.CustomRooms.EntityDirectory(), MapGen.CustomRooms.NodeDirectory(),
+                            verbose: true);
                         count++;
                     }
                     catch (Exception ex)
@@ -500,6 +501,37 @@ namespace MphRead.Mods
                 catch (Exception ex)
                 {
                     Console.WriteLine($"Could not read {q3Maps}: {ex.Message}");
+                    Environment.ExitCode = 1;
+                }
+                return true;
+            }
+
+            // A .pk3 to a room, in one command: the textures baked from the
+            // level's own art, the scale and the extents picked from its
+            // geometry, the spawns from its entities, and a map file written
+            // out. Weapons and powerups are left for a person to place.
+            string? q3Convert = ValueAfter(args, "q3convert");
+            if (q3Convert != null)
+            {
+                float? scale = null;
+                if (Single.TryParse(ValueAfter(args, "scale"), System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out float parsedScale) && parsedScale > 0)
+                {
+                    scale = parsedScale;
+                }
+                int textureSize = Int32.TryParse(ValueAfter(args, "texsize"), out int parsedSize)
+                    && parsedSize >= 8 && parsedSize <= 256
+                        ? parsedSize
+                        : MapGen.MapTextureBake.DefaultSize;
+                try
+                {
+                    Environment.ExitCode = MapGen.Q3Convert.Run(q3Convert, ValueAfter(args, "map"),
+                        ValueAfter(args, "name"), ValueAfter(args, "out"), HasFlag(args, "noclip"),
+                        scale, textureSize);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Could not convert {q3Convert}: {ex.Message}");
                     Environment.ExitCode = 1;
                 }
                 return true;

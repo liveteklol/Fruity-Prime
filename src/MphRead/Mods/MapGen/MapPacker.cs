@@ -15,7 +15,8 @@ namespace MphRead.Mods.MapGen
     /// </summary>
     public static class MapPacker
     {
-        public static void Generate(BuiltMap map, string archiveDir, string entityDir, bool verbose = true)
+        public static void Generate(BuiltMap map, string archiveDir, string entityDir, string nodeDir,
+            bool verbose = true)
         {
             MapDefinition def = map.Definition;
             Directory.CreateDirectory(archiveDir);
@@ -24,23 +25,28 @@ namespace MphRead.Mods.MapGen
             (byte[] model, int vertices) = BuildModel(map);
             byte[] collision = BuildCollision(map);
             byte[] entities = Repack.PackEntities(map.Entities);
+            (byte[] nodes, int nodeCount, int edges) = MapNodePacker.Pack(map.Solid);
             File.WriteAllBytes(Path.Combine(archiveDir, $"{prefix}_Model.bin"), model);
             File.WriteAllBytes(Path.Combine(archiveDir, $"{prefix}_Anim.bin"), new byte[24]);
             File.WriteAllBytes(Path.Combine(archiveDir, $"{prefix}_Collision.bin"), collision);
             File.WriteAllBytes(Path.Combine(entityDir, $"{prefix}_Ent.bin"), entities);
+            Directory.CreateDirectory(nodeDir);
+            File.WriteAllBytes(Path.Combine(nodeDir, $"{prefix}_Node.bin"), nodes);
             if (verbose)
             {
                 Console.WriteLine($"{def.Name}: {map.Faces.Count} polygons ({vertices} vertices), "
                     + $"{map.Solid.Count} collision faces, {map.Entities.Count} entities");
+                Console.WriteLine($"  {nodeCount} bot waypoints, {edges} routes between them");
                 Console.WriteLine($"  model {model.Length:N0} B, collision {collision.Length:N0} B, "
-                    + $"entities {entities.Length:N0} B");
+                    + $"entities {entities.Length:N0} B, nodes {nodes.Length:N0} B");
             }
         }
 
-        public static void Generate(MapDefinition def, string archiveDir, string entityDir, bool verbose = true)
+        public static void Generate(MapDefinition def, string archiveDir, string entityDir, string nodeDir,
+            bool verbose = true)
         {
             BuiltMap map = def.Import == null ? MapBuilder.Build(def) : Q3Import.Build(def, verbose);
-            Generate(map, archiveDir, entityDir, verbose);
+            Generate(map, archiveDir, entityDir, nodeDir, verbose);
         }
 
         private static (byte[], int) BuildModel(BuiltMap map)

@@ -73,13 +73,27 @@ def used_textures(data):
     return sorted(used)
 
 
-def find_image(archives, name):
+def index_archives(archives):
+    """Every file in the archives, keyed by lower-case name.
+
+    A shader name in a .bsp is not the spelling of the file it came from:
+    the compiler upper-cases some of them, and a level whose author worked on
+    Windows can have "SandTrim.JPG" answering to "textures/dust2/SANDTRIM".
+    Matching exactly finds nothing and the map comes out untextured.
+    """
+    found = {}
+    for archive in archives:
+        for name in archive.namelist():
+            found.setdefault(name.lower(), (archive, name))
+    return found
+
+
+def find_image(files, name):
     for extension in (".tga", ".jpg", ".png"):
-        for archive in archives:
-            try:
-                return archive.read(name + extension)
-            except KeyError:
-                continue
+        entry = files.get((name + extension).lower())
+        if entry is not None:
+            archive, actual = entry
+            return archive.read(actual)
     return None
 
 
@@ -101,21 +115,21 @@ def main():
     size = int(sys.argv[5]) if len(sys.argv) > 5 else 64
     colors = 256
     data = read_bsp(bsp_path, map_name)
-    archives = [zipfile.ZipFile(p) for p in paks.split(",")]
+    files = index_archives([zipfile.ZipFile(p) for p in paks.split(",")])
     entries = []
     missing = []
-    for index, name in used_textures(data):
-        raw = find_image(archives, name)
+    for texture, name in used_textures(data):
+        raw = find_image(files, name)
         if raw is None:
             missing.append(name)
             continue
         palette, pixels = bake(Image.open(io.BytesIO(raw)), size, colors)
-        entries.append((index, name, size, size, palette, pixels))
+        entries.append((texture, name, size, size, palette, pixels))
     with open(out, "wb") as handle:
         handle.write(b"FPTX" + struct.pack("<HH", 1, len(entries)))
-        for index, name, width, height, palette, pixels in entries:
+        for texture, name, width, height, palette, pixels in entries:
             encoded = name.encode("utf-8")
-            handle.write(struct.pack("<HHHHH", index, width, height, len(palette), len(encoded)))
+            handle.write(struct.pack("<HHHHH", texture, width, height, len(palette), len(encoded)))
             handle.write(encoded)
             handle.write(struct.pack(f"<{len(palette)}H", *palette))
             handle.write(pixels)

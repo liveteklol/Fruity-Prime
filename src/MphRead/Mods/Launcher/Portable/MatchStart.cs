@@ -34,6 +34,17 @@ namespace MphRead.Mods.Launcher
                 return;
             }
             GameFiles.ApplyPaths();
+            // The custom maps, here rather than only in ModEntry.TryHandle.
+            // A launcher session never reaches TryHandle: the front screen is
+            // dispatched from TryHandleHeadless, which returns as soon as it
+            // has run one, so on Windows -- where double-clicking the binary
+            // *is* the launcher -- nothing ever built the binaries a custom
+            // room is made of. The room is registered from its JSON either
+            // way, so it sat in the map picker and took the process down the
+            // moment somebody picked it. This is the last point before a room
+            // is loaded, and the first at which the game files are known to be
+            // there, which is what generating needs.
+            MapGen.CustomRooms.GenerateMissing();
             if (plan.Kind == LaunchKind.Adventure)
             {
                 LaunchAdventure(plan);
