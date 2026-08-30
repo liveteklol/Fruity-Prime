@@ -17,8 +17,24 @@ namespace MphRead.Mods
     {
         public readonly record struct Entry(string Who, string What, string Where);
 
+        /// <summary>Who made this fork, as distinct from what it is a fork of.</summary>
+        public const string Author = "Livetek";
+
+        /// <summary>What this fork adds, in one line.</summary>
+        public const string ForkWork = "this fork: multiplayer and the dedicated server, "
+            + "the launcher, custom maps, the Android head and the pro HUD";
+
+        /// <summary>
+        /// Where to say thank you, for anyone who wants to.
+        ///
+        /// Https only and opened through the same path the update check uses,
+        /// which refuses anything else and reports when there is no browser to
+        /// open rather than appearing to do nothing.
+        /// </summary>
+        public const string SupportUrl = "https://ko-fi.com/livetek";
+
         public static string Summary =>
-            $"{Branding.Name} is a fork of {Branding.Upstream} by NoneGiven.";
+            $"{Branding.Name} is {Author}'s fork of {Branding.Upstream} by NoneGiven.";
 
         /// <summary>
         /// The attribution as a corner of a screen can carry it: the fork, and
@@ -88,6 +104,10 @@ namespace MphRead.Mods
             Console.WriteLine();
             Console.WriteLine($"  {Branding.NameAndVersion}");
             Console.WriteLine($"  {Summary}");
+            Console.WriteLine();
+            Console.WriteLine($"  {Author}");
+            Console.WriteLine($"      {ForkWork}");
+            Console.WriteLine($"      support this project: {SupportUrl}");
             Console.WriteLine();
             Console.WriteLine("  A significant portion of this project's code is based on the");
             Console.WriteLine("  file format information or source code of these projects:");

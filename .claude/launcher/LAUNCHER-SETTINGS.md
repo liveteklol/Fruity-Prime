@@ -24,7 +24,7 @@ Sections
 
 | Section | What is on it |
 |---|---|
-| Display | window mode; performance and cel shading; **Pro mode HUD**; the helmet switch with its two opacity sliders; crosshair, modern HUD and weapon-list size; fixed weapon |
+| Display | window mode; performance; cel shading; **Pro mode HUD**, which is the whole of the HUD question now |
 | Audio | sound-effect and music volume; the game's text language |
 | Controls | mouse sensitivity, invert either axis, and every key binding, plus reset to defaults |
 | Match rules | point goal, time limit, damage level, team play, friendly fire, hunter radar, affinity weapons |
@@ -64,32 +64,30 @@ Notable toggles
 - Window modes: windowed or borderless fullscreen. `Mods.WindowMode` owns it;
   F11/Alt+Enter toggle at any time. Escape opens the pause menu instead of
   leaving fullscreen.
-- Helmet opacity: one switch over both `HelmetOpacity` and `VisorOpacity`, with a
-  slider each behind it. Clearing only the shell is what leaves a tinted pane
-  with nothing behind it; `-nohelmet` zeroes both.
-- **Pro mode HUD is an override, not a preset.** `Features.ProHud` makes
+- **Pro mode HUD is the only HUD control.** `Features.ProHud` makes
   `ModernHud`, `FixedWeapon`, `FixedCrosshair`, `CustomCrosshair`,
   `WeaponListScale` (1.7) and both helmet opacities (0) *answer* as the pro
-  layout while it is on; each keeps a `*Setting` companion holding what the
-  player chose, and that is what the settings rows are seeded from, what
-  `Features.Commit` writes, and what comes back when it goes off. Writing the
-  overridden values to disk instead would turn one night of pro mode into a
-  permanent change to six settings, which is the bug this shape exists to
-  avoid.
-- **Everything it answers for disappears from the page while it is on**, headings
-  and explanations included -- `BuildDisplay` records the range of the page's
-  children it built after the Pro mode row and `UpdateHudRows` flips
-  `IsVisible` over that range, so a row added to one of those sections later
-  cannot be left behind on its own. A range rather than a hand-written list for
-  that reason; hidden rather than greyed because six rows showing values that
-  are not what the game is drawing are six chances to conclude the switch is
-  broken. It also draws its own energy, ammo and score
-  (`Mods/Render/PlayerEntityProHud.cs`) in place of the game's, which are
-  suppressed in `DrawHudObjects` and `DrawModeScore`.
+  layout while it is on; off, each falls back to its own code default, which is
+  the game as the DS drew it. Neither state is assembled by the player: none of
+  the six has a row any more and none is written to `settings.json` -- only
+  `ProHud` and `ReticleOpacity` are. The setters remain, because `-nohelmet`
+  and upstream's console menu still write several of them. It also draws its
+  own energy, ammo and score (`Mods/Render/PlayerEntityProHud.cs`) in place of
+  the game's, which are suppressed in `DrawHudObjects` and `DrawModeScore`.
+- **No explanations under the rows.** Every `Explain` call is gone from the
+  page except the one on Credits; a settings screen where each answer is a
+  paragraph is a screen nobody reads. The whole Display page now fits without
+  scrolling.
 - **HUD readouts opacity is no longer a setting.** `Features.HudOpacity` stays
-  at 1 and is out of `Load`/`Commit`; the slider is gone. It is still read
-  throughout the HUD, so it remains the hook for anything that wants to fade
-  the readouts.
+  at 1 and is out of `Load`/`Commit`. It is still read throughout the HUD, so
+  it remains the hook for anything that wants to fade the readouts.
+- **Credits carry the fork and a support link.** `Mods.Credits.Author`,
+  `ForkWork` and `SupportUrl` (ko-fi) are the same strings `-credits` prints;
+  the page's button opens the address through `Updater.OpenLink` -- https only,
+  and it puts the address in the row itself when there is no browser to hand it
+  to. `SettingsView.ShowSection` exists so `-uishot` can photograph that page
+  (and any other) from a headless box, where everything but Display is
+  otherwise behind a click.
 - Controls: `Mods.InputSettings` holds the canonical `PlayerControls` and writes
   it to `controls.txt`. A rebind made from the pause menu also goes through
   `ApplyToPlayers`, because the players in a running match already hold their

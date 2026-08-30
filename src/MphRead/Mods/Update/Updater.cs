@@ -112,6 +112,13 @@ namespace MphRead.Mods.Update
         public static bool OpenPage(UpdateInfo update) => OpenUrl(
             update.PageUrl.Length > 0 ? update.PageUrl : UpdateCheck.ReleasesPage);
 
+        /// <summary>
+        /// Open any https address the same way, for the credits page's support
+        /// link. Same refusal of anything that is not https, and the same
+        /// "there is no browser here" answer, as the update page.
+        /// </summary>
+        public static bool OpenLink(string url) => OpenUrl(url);
+
         private static bool OpenUrl(string url)
         {
             if (!url.StartsWith("https://", StringComparison.Ordinal))

@@ -95,6 +95,9 @@ namespace MphRead.Mods.Launcher.Gui
         {
             yield return ("home", new HomeView(settings, rooms), _windowSize);
             yield return ("settings", new SettingsView(settings), _windowSize);
+            var credits = new SettingsView(settings);
+            credits.ShowSection("Credits");
+            yield return ("settings-credits", credits, _windowSize);
             if (rooms.Count > 0)
             {
                 yield return ("mappicker", new MapPickerView(rooms, rooms[0]), _windowSize);

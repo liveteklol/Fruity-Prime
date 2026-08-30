@@ -104,7 +104,7 @@ export ALSOFT_DRIVERS=null PULSE_SERVER=   # else ALSA retries stall frames
 | `FruityPrime -launcher -text` | the text front screen on a machine that has a display. What an SSH session gets anyway |
 | `FruityPrime -update` | check GitHub for a newer release and open its page. Installs nothing; the one command that answers "am I on the latest build" |
 | `FruityPrime -noupdate` | do none of that, on any command that would have |
-| `FruityPrime -credits` | who this is built on, from `Mods/Credits.cs` |
+| `FruityPrime -credits` | who this is built on and who forked it, from `Mods/Credits.cs` -- which also holds the ko-fi address the settings' Credits page offers |
 | `MphRead -fullscreen` / `-windowed` / `-nohelmet` | display choices for the paths that never open a launcher |
 
 ## The launcher
@@ -120,7 +120,7 @@ things you can do on the right.
 | Host | the story from a save slot, or a match: map, mode, hunter, and a `Where` row -- **Local** is an offline match with 0-7 bots and their skill, **Online** asks the directory to run it. The listen-host path (`NetHostSession`, the dedicated server in this process over the loopback) still exists and is still what `LaunchKind.Host` can do, but the card no longer offers it: the port, "let the directory run it" and "list it" rows are built and forced rather than shown, because every one of them is a question about the player's router. Running a server yourself is the dedicated server's job |
 | Join | name, hunter, `host` or `host:port`, and a live line saying what that server is running. **Find a server** opens the browser |
 | Demos | pick a `.fpdemo` and replay it -- on Android too, where the picker cannot filter by pattern and hands back a `content://` document that has to be copied in first |
-| Settings | display, audio, controls, match rules, and profile (name, hunter, server addresses, updates, game files, credits). Also reachable from the pause menu during a match. **Pro mode HUD** is one switch for the whole competitive layout -- no helmet, plain fixed crosshair, weapon list at 170%, fixed weapon, and its own energy, ammo and score readouts in place of the game's -- and it *overrides* the six settings it answers for rather than overwriting them (they disappear from the page while it is on and come back untouched). Cheats, bugfixes, the leftover feature flags and the HUD-readout opacity have **no UI any more** and no longer load from `settings.json` -- they sit at their code defaults |
+| Settings | display, audio, controls, match rules, and profile (name, hunter, server addresses, updates, game files, credits). Also reachable from the pause menu during a match. **Pro mode HUD** is the whole HUD question in one switch -- no helmet, plain fixed crosshair, weapon list at 170%, fixed weapon, and its own energy, ammo and score readouts in place of the game's; off is the game as the DS drew it. The six settings it answers for have no rows at all, and the rows that remain have no explanations under them. Cheats, bugfixes, the leftover feature flags and the HUD-readout opacity likewise have **no UI** and no longer load from `settings.json` -- they sit at their code defaults |
 | Game files | where the .nds goes. Shown first, and everything else greyed out, when there is nothing set up yet |
 
 Gotchas worth keeping in view without opening another file:
