@@ -6,7 +6,7 @@ Deploy script (server and directory)
 
 ```bash
 # server and directory (rebuilds ARM64, installs both units, restarts them)
-MPH_SERVER_HOST=france-mining.com MPH_SERVER_USER=livetek \
+MPH_SERVER_HOST=net.livetek.fr MPH_SERVER_USER=livetek \
   MPH_SERVER_PASS="$(read -rsp 'pi password: ' p; echo "$p")" ./deploy-server.sh
 # MPH_DEPLOY_MASTER=0 to leave the directory alone
 ```

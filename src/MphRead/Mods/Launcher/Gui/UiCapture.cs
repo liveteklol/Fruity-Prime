@@ -151,7 +151,7 @@ namespace MphRead.Mods.Launcher.Gui
 
         private static readonly (string, string, GameMode, int, int)[] _sampleServers =
         {
-            ("france-mining.com", "MP3 PROVING GROUND", GameMode.Battle, 3, 41),
+            ("net.livetek.fr", "MP3 PROVING GROUND", GameMode.Battle, 3, 41),
             ("A very long server name indeed", "MP7 PROCESSOR CORE", GameMode.PrimeHunter, 8, 152),
             ("lan", "MP2 HARVESTER", GameMode.Bounty, 1, 2)
         };

@@ -30,7 +30,7 @@ area is the one being touched.
 | `src/MphRead/Mods/Launcher/` | the launcher: `Gui/` is every window (Avalonia, all platforms), `Portable/` is the logic and the text screen |
 | `~/mph-net-test/` | the test rig: a copy of the build in `bin/`, extracted game files, `run-check.sh`, `compare-reports.py` |
 | `C:\Users\livetek\Desktop\MPH\MphRead-develop\` | the Windows deliverable |
-| `france-mining.com:27888` | the dedicated server on the user's Pi (systemd unit `mphread-server`) |
+| `net.livetek.fr:27888` | the dedicated server on the user's Pi (systemd unit `mphread-server`) |
 
 ## Environment recipe (WSL)
 
@@ -116,10 +116,10 @@ things you can do on the right.
 
 | Entry | What it does |
 |---|---|
-| Play online | name, hunter, `host` or `host:port`, and a live line saying what that server is running. **Find a server** opens the browser |
-| Play offline | map, mode, 0-7 bots and their skill, hunter, and straight into the match |
-| Host a game | the same choices plus a port, or "online, no setup" to host through the directory with no port forwarding at all. Runs the dedicated server in this process and joins it over the loopback |
-| Settings | display, audio, controls, match rules, launcher preferences, features, cheats, bugfixes. Also reachable from the pause menu during a match |
+| Host | the story from a save slot, or a match: map, mode, hunter, and a `Where` row -- **Local** is an offline match with 0-7 bots and their skill, **Online** asks the directory to run it. The listen-host path (`NetHostSession`, the dedicated server in this process over the loopback) still exists and is still what `LaunchKind.Host` can do, but the card no longer offers it: the port, "let the directory run it" and "list it" rows are built and forced rather than shown, because every one of them is a question about the player's router. Running a server yourself is the dedicated server's job |
+| Join | name, hunter, `host` or `host:port`, and a live line saying what that server is running. **Find a server** opens the browser |
+| Watch a demo | pick a `.fpdemo` and replay it |
+| Settings | display, audio, controls, match rules, and profile (name, hunter, server addresses, updates, game files, credits). Also reachable from the pause menu during a match. Cheats, bugfixes and the leftover feature flags have **no UI any more** and no longer load from `settings.json` -- they sit at their code defaults |
 | Game files | where the .nds goes. Shown first, and everything else greyed out, when there is nothing set up yet |
 
 Gotchas worth keeping in view without opening another file:
@@ -243,7 +243,7 @@ renamed, and the CI runner layout: `.claude/build-deploy/BUILD-WORKFLOW.md`.
 
 ```bash
 # server and directory (rebuilds ARM64, installs both units, restarts them)
-MPH_SERVER_HOST=france-mining.com MPH_SERVER_USER=livetek \
+MPH_SERVER_HOST=net.livetek.fr MPH_SERVER_USER=livetek \
   MPH_SERVER_PASS="$(read -rsp 'pi password: ' p; echo "$p")" ./deploy-server.sh
 # MPH_DEPLOY_MASTER=0 to leave the directory alone
 ```
