@@ -1,13 +1,16 @@
 <img src="src/MphRead/Assets/fruity-prime-logo.png" alt="Fruity Prime" width="520">
 
-**Metroid Prime Hunters PC & Android port** 
+**Metroid Prime Hunters on PC and Android.** Online matches for up to 8 players, widescreen, 60 FPS,
+and a launcher that does the setting up for you.
 
-A fork of [NoneGiven/MphRead](https://github.com/NoneGiven/MphRead) with online multiplayer, dedicated
-servers, 8 players, high resolution, ultrawide, a real launcher, and an Android build.
+A fork of [NoneGiven/MphRead](https://github.com/NoneGiven/MphRead).
 
-> Needs your own Metroid Prime Hunters cartridge dump. No Nintendo game data ships here or is downloaded.
+> You bring your own Metroid Prime Hunters cartridge dump. No Nintendo game data ships here or is
+> downloaded.
 
-**[Download](https://github.com/liveteklol/Fruity-Prime/releases)** · [Server how-to](#dedicated-server) · [Support the project ☕](https://ko-fi.com/livetek)
+**[Download](https://github.com/liveteklol/Fruity-Prime/releases)** · [Support the project ☕](https://ko-fi.com/livetek)
+
+<img width="500" height="300" alt="Fruity Prime" src="https://github.com/user-attachments/assets/ec6a2871-2b67-4de0-8b1a-ac6740c8d388" />
 
 ## Features
 
@@ -32,93 +35,44 @@ servers, 8 players, high resolution, ultrawide, a real launcher, and an Android 
 
 ## Support
 
-If this is useful to you: **[ko-fi.com/livetek](https://ko-fi.com/livetek)** ☕
-
-<img width="500" height="300" alt="image" src="https://github.com/user-attachments/assets/ec6a2871-2b67-4de0-8b1a-ac6740c8d388" />
----
-
+If you enjoy it: **[ko-fi.com/livetek](https://ko-fi.com/livetek)** ☕
 
 ## Getting started
 
-1. [Download](https://github.com/liveteklol/Fruity-Prime/releases) your platform's package.
-2. Run it — `FruityPrime.exe` on Windows, `FruityPrime -launcher` on Linux. macOS: `xattr -dr com.apple.quarantine .` first.
-3. **Game files** → pick your `.nds`. It unpacks locally, with a progress bar.
-4. Play. `Escape` = pause menu, `F11` / `Alt+Enter` = fullscreen.
+1. **[Download](https://github.com/liveteklol/Fruity-Prime/releases)** the package for your system
+   and unzip it.
+2. Run it:
+   - **Windows** — double-click `FruityPrime.exe`
+   - **Linux** — `./FruityPrime -launcher`
+   - **macOS** — `xattr -dr com.apple.quarantine .` once, then the same as Linux
+3. Click **Game files** and pick your `.nds`. It unpacks itself, once, with a progress bar.
+4. Play.
 
-Hosting a game: **Host → Battle → Where: Online**. The directory runs the match and you join it. No
-port forwarding, nothing to configure.
+`Escape` opens the menu, `F11` is fullscreen. Your name, hunter, controls and HUD are in
+**Settings**, in the launcher or from that menu.
 
-## Dedicated server
+## Playing with other people
 
-No game files needed. Runs on a Raspberry Pi.
-
-```bash
-# Linux
-./FruityPrime -server -port 27888 -players 8 -servername "My server"
-# Windows (console binary, not FruityPrime.exe)
-FruityPrimeServer.exe -server -port 27888 -players 8 -servername "My server"
-```
-
-| Flag | |
+| | |
 |---|---|
-| `-port N` | UDP port. Default 27888 |
-| `-players N` | slots. Default 4, use 8 |
-| `-servername "NAME"` | shown in the browser |
-| `-rotation FILE` | default `maprotation.txt`, written beside the binary on first run |
-| `-friendlyfire` | team damage on |
-| `-nomaster` | stay off every server list |
-| `-master HOST` `-masterport N` | use another directory than `net.livetek.fr:27889` |
+| **Join** | **Join → Find a server**, pick one from the list |
+| **Host** | **Host → Where: Online** — a public machine runs the match and you join it, so there is nothing to open on your router |
+| **On your own** | **Host → Where: Local**, with up to 7 bots |
 
-**Map rotation**: `maprotation.txt`, one match per line, `#` for comments:
+Everybody in a match needs the same version; the launcher checks for a new one and says so.
 
-```
-MP1 SANCTORUS      | Battle | 7 | 7
-MP3 PROVING GROUND | Battle | 7 | 7
-```
+Want a machine of your own that is always up? [`SERVER.md`](SERVER.md).
 
-`ROOM KEY | mode | minutes | points`. Only the key is required. `FruityPrime -rooms` lists every
-key, the 27 cartridge rooms and any custom map (needs game files, so run it on a machine that has
-them).
+## Custom maps
 
-**Ports**: UDP only. Forward **27888** to the server. The directory uses **27889**.
-
-**Listed by default** on `net.livetek.fr`. Check with `FruityPrime -servers`.
-
-**systemd**: units in `tools/systemd/`:
-
-```bash
-sed -e 's|__USER__|youruser|' -e 's|__DIR__|/home/youruser/fruityprime-server|' \
-    tools/systemd/mphread-server.service | sudo tee /etc/systemd/system/mphread-server.service
-sudo systemctl enable --now mphread-server
-```
-
-`deploy-server.sh` does build + upload + units + restart against a remote box. Stop the service
-before replacing the binary; systemd holds it open.
-
-**Your own directory**: `FruityPrime -masterserver -port 27889`, plus `-public HOST` if a game
-server shares the box, `-hostports A-B` for the range it may run matches on. Point servers at it
-with `-master HOST`, players in *Settings → Servers*.
-
-**Versions must match.** `ProtocolVersion` is **4**; a server refuses a different build at Hello.
-Update the server first.
-
-## Command line
-
-`-launcher [-text]` · `-connect HOST -port N -name X -hunter H` · `-servers` · `-hostgame "ROOM"` ·
-`-server` · `-masterserver` · `-rooms` · `-q3convert FILE.pk3` · `-demoinfo FILE [-replay]` · `-mapgen` · `-mechanics` ·
-`-update` / `-noupdate` · `-credits` · `-fullscreen` / `-windowed` / `-nohelmet` · `-cel on|off` ·
-`-fog on|off` · `-menu`
-
-Full list, test harness included: [`CLAUDE.md`](CLAUDE.md).
+A map is one file: `something.fpmap`. Put it in the `maps` folder beside the game and it is in the
+map list next time you open the launcher, picture and all. **de_dust2** comes with it.
 
 ## Not done yet
 
-- **Adventure co-op.** The launcher's toggle is a placeholder and blocks Start on purpose. The
-  network layer replicates players only, so no enemies, doors, pickups or save state.
+- **Adventure co-op.** The launcher's toggle is a placeholder; the story is one player.
 - **Gamepads**, on any platform.
-- **Android**: no command line (so no exports, no model viewer, no CLI server), no window settings,
-  demo *playback* not wired (recording works), cel shading unverified on real hardware.
-- What is claimed but not yet proven is listed in [`.claude/KNOWN-GAPS.md`](.claude/KNOWN-GAPS.md).
+- **Android**: no command line, no window settings, and cel shading is unverified on real hardware.
 
 ## Building
 
@@ -127,62 +81,24 @@ dotnet publish src/MphRead/MphRead.csproj -c Release \
   -r win-x64|linux-x64|osx-x64|osx-arm64 --self-contained true -p:PublishSingleFile=true
 ```
 
-`-p:MphReadServer=true` for a server build. Android: `dotnet build src/MphRead.Android/MphRead.Android.csproj`
-with the `android` workload. Minimum SDK [.NET 9.0](https://dotnet.microsoft.com/en-us/download/dotnet/9.0).
+Needs [.NET 9.0](https://dotnet.microsoft.com/en-us/download/dotnet/9.0) or later.
+`-p:MphReadServer=true` builds the dedicated server; Android is
+`dotnet build src/MphRead.Android/MphRead.Android.csproj` with the `android` workload. Every command
+line option, and the test harness, are in [`CLAUDE.md`](CLAUDE.md).
 
+## Credits
 
-*Below is upstream MphRead's own README, unchanged.*
+Fruity Prime is Livetek's fork of [MphRead](https://github.com/NoneGiven/MphRead) by **NoneGiven** —
+the model viewer, the renderer, the format parsers and the recreation of the game itself are theirs.
+That work is in turn built on **dsgraph**, [Chemical](https://gitlab.com/ch-mcl/metroid-prime-hunters-file-document),
+[McKay42](https://github.com/McKay42), [Barubary](https://github.com/Barubary/dsdecmp),
+[loveemu](https://github.com/loveemu/loveemu-lab), **Gericom**,
+[CharlesVanEeckhout](https://github.com/CharlesVanEeckhout/actimagine),
+[CyberBotX](https://github.com/CyberBotX/NCSF) and
+[hackyourlife](https://github.com/hackyourlife/mph-viewer), with
+[OpenTK](https://github.com/opentk/opentk), [OpenAL Soft](https://github.com/kcat/openal-soft) and
+[SoundFlow](https://github.com/LSXPrime/SoundFlow) underneath. `FruityPrime -credits` prints the
+list with what each one is for, and the Settings screen shows it too.
 
-# Upstream: MphRead
-
-This project is a reverse engineering and game recreation effort comprising a model viewer, scene renderer, and general parser for file formats used in the Nintendo DS game Metroid Prime Hunters. The renderer is implemented using OpenGL via the [OpenTK](https://github.com/opentk/opentk) library with audio through [OpenAL Soft](https://github.com/kcat/openal-soft) and [SoundFlow](https://github.com/LSXPrime/SoundFlow). Documentation of various game features can be found in the [wiki](https://github.com/NoneGiven/MphRead/wiki).
-
-## Features
-- Recreates the gameplay of the original game
-- Stores save data to allow playing through the story mode
-- Renders individual models or complete game rooms with entities
-- Visualizes collision data for rooms and entities
-- Exports models to COLLADA, textures to PNG, and sound effects to WAV
-- Generates Python scripts to import model animations and more into Blender
-
-## Planned
-- Room editor and save editor
-- Render more things, implement more gameplay logic
-- And even more!
-
-## Usage
-
-After setup, MphRead can be launched from the executable with no arguments, and menu prompts will appear to help you set up the scene.
-
-See the [full setup and export guide](https://github.com/NoneGiven/MphRead/wiki/Setup-&-Export-Guide) for details on setup and command line options.
-
-## Building
-
-If you do not want to build from source, simply download and run the latest [release](https://github.com/NoneGiven/MphRead/releases).
-
-### With Visual Studio
-
-With a recent version of [Visual Studio 2022 or 2026](https://visualstudio.microsoft.com/vs/) installed, you should be able to open the solution and build immediately.
-
-### Without Visual Studio
-
-- Install the .NET SDK. The [latest stable version](https://dotnet.microsoft.com/en-us/download/dotnet/latest) is recommended, while the minimum required version is [.NET 9.0](https://dotnet.microsoft.com/en-us/download/dotnet/9.0).
-- Run `dotnet build` in the `src/MphRead` directory.
-
-## Acknowledgements
-
-A significant portion of this project's code was based on the file format information or source code from several other projects.
-
-- **dsgraph** - The original MPH model viewer, on which all other projects are built.
-- **[Chemical's model format](https://gitlab.com/ch-mcl/metroid-prime-hunters-file-document/-/blob/master/Model/BinModel.md)** - Documentation of the model format.
-- **[McKay42's mph-model-viewer](https://github.com/McKay42/mph-model-viewer)** - COLLADA export method.
-- **[McKay42's mph-arc-extractor](https://github.com/McKay42/mph-arc-extractor)** - ARC file format information.
-- **[Barubary's dsdecmp](https://github.com/Barubary/dsdecmp)** - LZ10 compression routines.
-- **[loveemu's swav2wav](https://github.com/loveemu/loveemu-lab)** - SWAV conversion function.
-- **[Gericom's ffmpeg patch](https://lists.ffmpeg.org/pipermail/ffmpeg-devel/2021-March/277774.html)** - ActImagine VX movie file format information.
-- **[CharlesVanEeckhout's actimagine decoder](https://github.com/CharlesVanEeckhout/actimagine)** - Further understanding of VX video decoding, based on the above ffmpeg patch.
-- **[CyberBotX's NCSF](https://github.com/CyberBotX/NCSF)** - Source code for the NCSF converter and player for Nintendo DS sequenced music.
-
-## Special Thanks
-
-This project's reverse engineering effort was developed parallel to **[hackyourlife's mph-viewer](https://github.com/hackyourlife/mph-viewer)**, a model viewer implementation in C. Major features such as the transparency rendering implementation were derived from its source code.
+Metroid Prime Hunters is Nintendo's. No game data is included with this program: it comes from your
+own cartridge dump.

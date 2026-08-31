@@ -197,7 +197,8 @@ jobs:
           included in this download, and none is downloaded.
 
           Play online joins a server. Play offline is a match against bots.
-          Host a game runs a server on this machine for your friends.
+          Host a game has a public machine run the match and puts you in it,
+          so there is nothing to open on your router.
           F11 or Alt+Enter switches to fullscreen, Escape leaves it.
 
           To run a server for other people without playing on it yourself,
