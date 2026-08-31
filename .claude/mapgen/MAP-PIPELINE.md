@@ -1,11 +1,81 @@
 # Custom maps: the generator and the Quake 3 importer
 
-**No level ships in `maps/`, only recipes.** The game is the 27 multiplayer
+## What ships: one file
+
+**A map is handed out as a `.fpmap` bundle** -- the recipe, the level and the
+baked texture pack in one zip, with the level trimmed to the lumps the importer
+reads (`Q3Bsp.UsedLumps`: entities, textures, planes, models, brushes,
+brushsides, vertexes, meshverts, faces). Everything else a compiler writes --
+lightmaps, light volumes, visdata, the BSP tree -- is for a renderer that
+lights and culls the Quake way, and this importer does neither: in df_dust2
+they are 7.6 MB of the 8.8. Cooked and compressed, de_dust2 is **376 KB**
+against the **2.8 MB** its folder weighed.
+
+| | Command | Note |
+|---|---|---|
+| cook | `-mapbundle ["NAME"] [-mapdir DIR] [-out FILE]` | default output is the top of `maps/`, one file per map |
+| read | nothing | `MapDefinition.Load` opens a bundle like a recipe; `Q3Bsp.Load` already opened a zip and found a level in it by name, which is how it reads a `.pk3` |
+
+- The bundle is a **build artifact**: gitignored, cooked by both workflows
+  before they publish. The folder it is cooked from -- recipe, `.pk3`, `.tex` --
+  is the source, and a `.pk3` is kept out of every package by
+  `CopyToPublishDirectory=Never` while still being copied to a *build* output,
+  which is what the convert-and-test loop uses.
+- **A folder and a bundle of the same name are the same map.** `MapFiles()`
+  lists bundles first and drops any recipe with a bundle's name, so a checkout
+  that has both registers one room and not two.
+- The recipe inside a bundle is rewritten as it is cooked: `import.source`
+  points at `maps/<level>.bsp` *inside* the bundle, so a bundle names nothing
+  outside itself.
+- **Cooking bakes the texture pack if it is not already there**, and refuses
+  to write a bundle it cannot give one to. The pack is derived from the
+  level's own art, so it is gitignored like the room binaries and the game
+  bakes it the first time a map is played -- which means the machine that
+  cooks a release has never played the map and has none, and a bundle carries
+  the level trimmed to the lumps the importer reads, which hold no art at all.
+  Every published bundle before this fix carried `"Textures": ""`: a room with
+  no materials, which came out as an `ArgumentOutOfRangeException` the moment
+  somebody picked DUST2 -- in a Windows GUI process with no console to say so,
+  with the launcher's picture missing for the same reason. Three things now
+  stand between that and a player: `Cook` bakes and then throws,
+  `Q3Import` names the missing pack instead of indexing a list that is not
+  there, and `tools/check-maps-shipped.sh` reads the recipe out of each
+  shipped bundle and checks the pack it names is inside it.
+- **A custom room that failed to build is refused, not loaded.** It is still
+  in the room table -- the table is built once, from the recipes -- so the
+  launcher lists it and the picker shows a frame for it.
+  `CustomRooms.WhyUnplayable` answers why, and `MatchStart.Launch` prints that
+  and returns instead of reaching for binaries that are not there.
+- **It is what put custom maps on Android.** An APK's asset list does not
+  recurse, and the asset glob was `maps\*.json` -- so a map that keeps its
+  level in a folder of its own arrived as neither, and the phone listed 27
+  rooms. One file at the top of `maps/` is visible to both halves.
+- A bundle does not settle whether a level may be handed out. Cooking
+  somebody's level into a smaller container leaves it their level.
+
+**A map is two files: the recipe and the level, and both ship.** The asset
+guard used to refuse a `.pk3` by extension; it now refuses only id Software's
+own paks, by name. What that guard is for is keeping somebody else's
+*commercial* data out -- the cartridge, and a game somebody bought -- and a
+custom map made by a person who wants it played is not that. Whether a
+particular level may be published is a judgement no script can make, so it is
+made by whoever commits it.
+
+The room binaries are still generated on the player's machine, because they
+land where that machine's extracted files are. So is the texture pack: a map
+file that names one and a folder that has only the `.pk3` is the normal state
+of a fresh clone, and the importer bakes it. `tools/check-maps-shipped.sh`
+runs in CI over the repository and over every published package, because a map
+file that arrives without its level registers a room the game then declines to
+build -- the player just sees the 27 cartridge rooms and no sign anything was
+meant to be there.
+
+**Only recipes used to ship.** The game is the 27 multiplayer
 rooms of the cartridge plus whatever the player has the source for; what is
 described below is the hook. `maps/q3dm17.json.example` is the worked example,
-and `maps/dust2/dust2.json` is a real one -- but its `df_dust2.pk3` is the
-player's own, so on a machine without it the room is left out and `-rooms`
-prints 27 again. The three maps that used to travel with the repository --
+and `maps/dust2/dust2.json` is a real one. A map whose level is *not* here --
+the Quake III example, which is id Software's commercial data -- is left out at
+startup and `-rooms` prints 27 again. The three maps that used to travel with the repository --
 `longestyard`, `testbox` and the converted OpenArena level `wrackdm17`, with
 its stripped `.bsp` and its baked `.tex` -- were taken out, along with the GPL
 notice they needed.
@@ -84,6 +154,16 @@ A shader with no image of its own (a light or an effect, defined in a
 `.shader` script rather than a file -- four of wrackdm17's twenty-two) has its
 surfaces dropped rather than painted with somebody else's texture.
 
+**The sky** is baked too, and `keepSky` draws it. A sky shader names no image
+of its own -- `skyparms` points at six box sides or a pair of scrolling cloud
+layers -- so `textures/skies/cloudsky` is answered by `cloudsky_1`, and the
+first suffix that exists is taken. Its surfaces are drawn but never collision,
+and their texture coordinates are **thrown away and reprojected**: Quake never
+reads them, it draws a dome from the shader, so the numbers in the file tile a
+cloud texture some fifty times across the lid and it comes out as a
+checkerboard. Two repeats across the level reads as a sky. Without any of this
+the level has a black ceiling, which on a desert map looks like a bug.
+
 Images are matched **case-insensitively**: a shader name in a `.bsp` is not
 the spelling of the file it came from -- the compiler upper-cases some of them,
 and a level whose author worked on Windows has `SandTrim.JPG` answering to
@@ -136,6 +216,26 @@ other plane of the brush. Bezier patches are skipped and counted -- they are
 control points rather than triangles, and their collision lives with the patch,
 so a skipped one leaves a hole rather than an invisible wall.
 
+**Collision comes from model 0 only.** Models 1 and up are the level's moving
+and triggering parts and their brushes sit in the same list; a trigger's brush
+is a volume, not a wall, but the format keeps the trigger shader's contents and
+in at least one real level those say solid. Importing them put seven invisible
+walls in the middle of df_dust2, standing exactly where its author had put a
+tripwire.
+
+**`keepClip` (default true) keeps the level's player-clip brushes.** True is
+right for a level authored for the game it came from, where a clip usually
+stops an exploit or smooths a staircase. It is wrong for one whose clips fence
+a route, which is every race map: df_dust2 has seventy of them and they turn a
+map you want to roam into a corridor.
+
+**Bezier patches are tessellated**, not dropped. A patch is where a level keeps
+its curves -- an archway, a ramp, a pipe -- and in Quake its collision comes
+from the patch rather than from a brush behind it, so dropping them took out
+both at once: a doorway with a hole where its arch should be, that you could
+also walk through. `patchLevel` (default 3) is how many quads along each side
+of each biquadratic piece.
+
 **Buried brush sides are dropped**, and that is what makes a real level fit.
 A level's walls are stacks of brushes, so most brush sides face into another
 brush and nothing outside the solid can ever touch them -- on df_dust2, 6,119
@@ -184,9 +284,94 @@ platform, spawns, a push trigger and items -- so the importer can be exercised
 with no game data at all. That is how it was tested before any real level was
 available.
 
+## Converting a level, in one command
+
+```bash
+FruityPrime -q3convert path/to/level.pk3 -map LEVELNAME -name ROOM [-noclip]
+```
+
+Bakes the textures, picks the scale, the extents, the kill height and the
+vertex precision from the level's own geometry, writes the spawns from its
+entities, copies the `.pk3` in beside the result, and leaves a
+`maps/<room>/<room>.json` that `-mapgen` can build. `-scale N` overrides the
+scale, `-texsize N` the texture size, `-out DIR` where it lands.
+
+It does **not** place weapons or powerups. Where those go is a judgement about
+how the map plays -- which routes meet, what is worth contesting -- and a
+generator that scattered them evenly would produce a map worse than one with
+none. It prints the list of pickups a custom map may use and stops there.
+
+The texture baking is in `MapTextureBake.cs` now, not only in
+`tools/bake-textures.py`: the archive is a zip, the decoder is the one the
+exporter already uses, and the median-cut quantiser is fifty lines, so a
+conversion that needed a Python with Pillow on it needs nothing. The Python is
+still there and still produces the same file.
+
+**How the scale is chosen.** `TargetExtent` is 130 units and 35 is the floor.
+The floor is the architecture matching exactly -- a 56-unit Quake player
+against Samus's 1.6 -- and it is not the answer, because a level built for a
+player who covers 216 units in a jump, converted for one who covers 7.7, is a
+correct model of a map nobody can cross. Nor is the level's own player a
+guide: df_dust2's crates are 128 and 192 units, which are de_dust2's 64 and 96
+*doubled*, so that level is built at twice the scale of the map it copies. 130
+was arrived at by measuring the crates. It puts the small one at 1.56 units
+against Samus's 1.6 -- waist-high, which is what a crate is.
+
+## Pickups a custom map may use
+
+`MapBuilder.MultiplayerItems`, enforced when the map is built rather than
+written down somewhere. Health, UA and missile pickups in all three sizes,
+Double Damage, Cloak, Deathalt, and the weapons. What is refused is the
+story's permanent upgrades -- energy tank, missile expansion, UA expansion,
+artifact -- which raise a hunter's *capacity* for the rest of the game instead
+of topping it up until the end of the match: one of those in a deathmatch is a
+player who is simply better than everyone else for as long as the session
+lasts. The Quake importer maps mega health and body armour onto the largest
+thing that runs out, for the same reason.
+
+## Bots
+
+A custom room generates its own node data -- `MapNodePacker.cs`, written into
+`levels/nodeData/<room>_Node.bin` alongside the other three files. Without it
+`nodePath` was null and bots wandered.
+
+It samples the collision on a two-unit grid for standing places with headroom,
+connects them where the step is small and no near-vertical surface crosses the
+line, then thins that graph down to the waypoints written -- over the graph,
+not over the room, so two points either side of a wall are never merged.
+**The fine grid has to be finer than the map's doorways**: at six units the
+first attempt stepped straight over every one of df_dust2's and produced a
+room of disconnected islands.
+
+Two lists per node, because the AI reads two. What it navigates with is the
+second one: a routing table giving, for every destination in the room, which
+neighbour to set off towards, run-length encoded as pairs of (how many
+destinations this covers, which node). Traps, all found by comparing the
+output against a cartridge file:
+
+- **A run is a pair of 16-bit values**, so four bytes. Advancing the offsets by
+  two put every list after the first halfway into the one before it.
+- **`indexCount` is 0** in the game's own files, and the two bytes it would
+  occupy stay: the header says the data begins two after the index does. With
+  a count of 1 the AI can select a second set that is not there.
+- **`MaxDistance` is not the spacing.** The game's rooms put it between 0.6 and
+  2 units whatever their nodes are spaced at; a bot that thinks it has arrived
+  from five units away stops short of every corner.
+- **The other list is empty** on two thirds of the nodes in the game's own
+  rooms, so it is left empty here too.
+- A missing node file is tolerated, not fatal: `SceneSetup.LoadNodeData` says
+  so and carries on, because a room whose bots wander is better than a match
+  that will not start.
+
+`-maptest` reports `moved N/M (furthest X units)`. That metric exists because
+"the bots do not move" was a report nothing in the harness could confirm or
+deny -- a bot standing still counts as spawned, and never firing or dying
+reads the same as one that is losing.
+
 ## Commands
 
 ```bash
+FruityPrime -q3convert level.pk3 -map NAME -name ROOM   # a .pk3 to a map file
 FruityPrime -q3maps  path/to/pak.pk3      # what levels are in there
 FruityPrime -q3shaders path/to/pak.pk3 -map wrackdm17   # what it draws with
 FruityPrime -mapgen                       # generate every map in maps/
@@ -274,9 +459,6 @@ listed and crashing. With nothing shipping, the APK now logs
 
 ## Not done yet
 
-- **No navigation mesh.** `nodePath` is null, so bots have no node data.
-  `PlayerAi` handles that without crashing, but they wander.
-- **Bezier patches are dropped**, so a converted level is missing its curves.
 - **A map is left out when its source level is missing**, which is the case
   that happens (the map file travels with the repository, the Quake level it
   was made from does not). A map that fails to build for any *other* reason

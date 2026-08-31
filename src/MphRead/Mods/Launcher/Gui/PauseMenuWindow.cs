@@ -231,14 +231,6 @@ namespace MphRead.Mods.Launcher.Gui
             return WindowMode.IsFullscreen ? "Windowed" : "Fullscreen";
         }
 
-        private static MenuEntry Add(StackPanel stack, string text, string note, Action action)
-        {
-            var entry = new MenuEntry(text, note, titleSize: 17);
-            entry.Click += (_, _) => action();
-            stack.Children.Add(entry);
-            return entry;
-        }
-
         /// <summary>
         /// Open the settings over the menu, not under it.
         ///

@@ -52,10 +52,10 @@ namespace MphRead.Mods.MapGen
         private static (byte[], int) BuildModel(BuiltMap map)
         {
             MapDefinition def = map.Definition;
-            string? packPath = def.Import?.ResolveTextures();
-            if (packPath != null)
+            MapTexturePack? own = def.Import?.LoadTexturePack();
+            if (own != null)
             {
-                return BuildModel(map, MapTexturePack.Load(packPath));
+                return BuildModel(map, own);
             }
             Model source = Read.GetRoomModelInstance(def.TextureSource).Model;
             Recolor recolor = source.Recolors[0];

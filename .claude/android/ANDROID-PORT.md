@@ -308,6 +308,39 @@ which is exactly how it was reported. `ThumbnailMode.Exit()` exists for that,
 while an in-process run is going.
 
 
+## Custom maps
+
+They reach the phone as **`.fpmap` bundles** and could not reach it any other
+way: `AndroidAsset` was globbed as `maps\*.json` and `AssetManager.List` does
+not recurse, so a map that keeps its level in a folder of its own -- which is
+how every converted map is worked on -- matched neither side and the phone
+listed the 27 cartridge rooms. A bundle is one file at the top of `maps/`, and
+`AndroidMaps.Install` unpacks it into the external directory beside the
+extracted game files, where a player can also drop one of their own over USB.
+The room binaries are still built on the device, from that player's own
+textures; `AndroidMaps.EnsureBuilt` is what runs the builder before a match.
+
+## Demos
+
+Watching a recorded match works here too, and needed two things the desktop
+never had to think about:
+
+- **The file picker cannot filter by pattern.** Android filters by MIME type
+  and a `.fpdemo` has none, so `FileTypeFilter` is skipped here exactly as it
+  is for the `.nds` picker -- setting one produces a picker in which every file
+  is refused.
+- **There is no path behind what it hands back.** A `content://` document has
+  no local path, and `DemoPlayback.Join` takes one, so `HomeView.ChooseDemo`
+  copies the document into `GameFiles.Root` and plays it from there. Kept
+  rather than deleted afterwards, unlike the cartridge copy: the reader holds
+  the file for the whole session, and the next demo overwrites it.
+
+`AndroidMatch.BuildDemo` is the rest -- the half of `MatchStart.LaunchDemo`
+that is not a window: join, read the room out of the recording's own
+MatchState, build the players with `localSlot: -1`, load the room.
+`MainActivity.EndMatch` calls `DemoPlayback.Stop`, which `NetSession.Stop`
+does not do for it: a demo feeds the session from a file rather than a socket.
+
 ## Building
 
 ```bash
@@ -329,10 +362,16 @@ The APK lands in `bin/Debug/net9.0-android35.0/fr.livetek.fruityprime-Signed.apk
 `adb install -r` it.
 
 Nobody has to do any of that to get one, though: `build.yml` has an `android`
-job on every push, and its **FruityPrime-android** artifact holds a release APK,
-an untrimmed debug APK beside it, and an INSTALL.txt. `release.yml` puts
-`FruityPrime-<tag>-android.apk` in a tagged release. Both are signed with the
-SDK's debug key -- enough to install, not enough for a store.
+job on every push, and its **FruityPrime-android** artifact holds the release
+APK and an INSTALL.txt. `release.yml` puts `FruityPrime-<tag>-android.apk` in a
+tagged release. Both are signed with the SDK's debug key -- enough to install,
+not enough for a store.
+
+The untrimmed Debug APK is no longer built or collected: it existed to tell a
+crash apart from the trimmer having removed something, which is worth building
+when that question is being asked and not worth handing out beside the real one
+every push. Build it by hand when you need it -- and with
+`-p:EmbedAssembliesIntoApk=true`, or it holds no managed code.
 
 **The trimmer is why `Properties/TrimmerRoots.xml` exists.** A Release publish
 really does run ILLink over this app, and every use of `KeyboardState` and

@@ -77,15 +77,7 @@ namespace MphRead.Mods.Launcher.Gui
         private ToggleRow _filteringRow = null!;
         private ToggleRow _celRow = null!;
         private ToggleRow _fpsRow = null!;
-        private ToggleRow _helmetRow = null!;
-        private SliderRow _helmetOpacity = null!;
-        private SliderRow _visorOpacity = null!;
-        private SliderRow _hudOpacity = null!;
-        private SliderRow _weaponListSize = null!;
-        private ToggleRow _fixedCrosshair = null!;
-        private ToggleRow _customCrosshair = null!;
-        private ToggleRow _modernHud = null!;
-        private ToggleRow _fixedWeapon = null!;
+        private ToggleRow _proHud = null!;
         private SliderRow _sfxVolume = null!;
         private SliderRow _musicVolume = null!;
         private ChoiceRow _languageRow = null!;
@@ -299,6 +291,26 @@ namespace MphRead.Mods.Launcher.Gui
             return page;
         }
 
+        /// <summary>
+        /// Open on a named section rather than the first one.
+        ///
+        /// For <c>-uishot</c>, which is the only way any of these pages can be
+        /// looked at from a machine with no display -- and which could
+        /// otherwise photograph nothing but Display, every other page being
+        /// behind a click.
+        /// </summary>
+        internal void ShowSection(string name)
+        {
+            foreach ((MenuEntry button, Control page) in _sections)
+            {
+                if (String.Equals(button.Title, name, StringComparison.OrdinalIgnoreCase))
+                {
+                    ShowPage(page);
+                    return;
+                }
+            }
+        }
+
         private void ShowPage(Control page)
         {
             foreach ((MenuEntry button, Control candidate) in _sections)
@@ -352,6 +364,22 @@ namespace MphRead.Mods.Launcher.Gui
             StackPanel page = AddSection("Credits");
             Heading(page, "Credits");
             Explain(page, Mods.Credits.Summary);
+            page.Children.Add(new Caption(Mods.Credits.Author));
+            page.Children.Add(new Note(Mods.Credits.ForkWork));
+            // The address is put in the row itself when there is no browser to
+            // hand it to -- a headless session, or a handler that refused --
+            // so the button says something either way rather than appearing to
+            // do nothing. Same fallback the update badge uses.
+            var support = new MenuEntry("\u2615 Support this project", titleSize: 15);
+            support.Click += (_, _) =>
+            {
+                if (!Mods.Update.Updater.OpenLink(Mods.Credits.SupportUrl))
+                {
+                    support.Subtitle = Mods.Credits.SupportUrl;
+                }
+            };
+            page.Children.Add(support);
+            Heading(page, "Built on");
             foreach (Mods.Credits.Entry entry in Mods.Credits.Entries)
             {
                 page.Children.Add(new Caption(entry.Who));
@@ -377,97 +405,33 @@ namespace MphRead.Mods.Launcher.Gui
                 _windowRow = Add(page, new ChoiceRow("Mode",
                     new[] { "Windowed", "Fullscreen (borderless)" },
                     LauncherPrefs.WindowMode == WindowStartMode.BorderlessFullscreen ? 1 : 0));
-                Explain(page, "F11 switches at any time, and so does Alt+Enter. Escape opens the "
-                    + "pause menu, which can switch it too, and gives the mouse back so the "
-                    + "window can be moved or resized.", GuiTheme.Accent);
             }
 
             Heading(page, "Performance");
             _resolutionScale = Add(page, new SliderRow("Render scale",
                 RenderOptions.ResolutionScale,
                 v => $"{Math.Max(RenderOptions.MinScale, v)}%"));
-            Explain(page, "The 3D scene is drawn at this fraction of the window and stretched "
-                + "back up; halving it quarters the pixels. The HUD, the helmet and the text "
-                + "are drawn afterwards at full size, so they stay sharp. The one to reach for "
-                + "first on a device that cannot keep up.");
             _lightingRow = Add(page, new ToggleRow("Lighting", RenderOptions.Lighting));
             _fogRow = Add(page, new ToggleRow("Fog", RenderOptions.Fog));
             _filteringRow = Add(page, new ToggleRow("Texture filtering", RenderOptions.TextureFiltering));
             _fpsRow = Add(page, new ToggleRow("FPS counter", RenderOptions.ShowFps));
-            Explain(page, "The DS had no filtering, so off is both faster and what the game "
-                + "looked like. Lighting and fog take effect on the next room; the render "
-                + "scale takes effect at once. Room and player detail are in Features. The "
-                + "FPS counter draws in the top left and takes effect at once, this match "
-                + "included.");
 
             Heading(page, "Cel shading");
             _celRow = Add(page, new ToggleRow("Cel shading", RenderOptions.CelShading));
-            Explain(page, "Every surface is painted in one flat colour -- the one its "
-                + "texture averages to -- and the shapes in the room are drawn around in "
-                + "ink. Not the same as turning lighting off, which only flattens "
-                + "everything: a wall keeps its own colour and it is the shading across it "
-                + "that goes to steps.");
 
-            Heading(page, "Helmet and HUD");
-            _helmetRow = Add(page, new ToggleRow("Draw the helmet",
-                Features.HelmetOpacity > 0 || Features.VisorOpacity > 0));
-            Explain(page, "All of it: the shell in front of and behind the readouts, and "
-                + "the visor pane over the view.");
-            _helmetRow.Changed += (_, _) => UpdateHelmetRows();
-            _helmetOpacity = Add(page, new SliderRow("Helmet",
-                (int)Math.Round(Features.HelmetOpacity * 100)));
-            _visorOpacity = Add(page, new SliderRow("Visor",
-                (int)Math.Round(Features.VisorOpacity * 100)));
-            Explain(page, "The helmet is three layers: the shell behind the readouts, the "
-                + "shell in front, and the visor pane over the view. Clearing only the "
-                + "shell is what leaves a tinted pane with nothing behind it.");
-            _hudOpacity = Add(page, new SliderRow("HUD readouts",
-                (int)Math.Round(Features.HudOpacity * 100)));
-            Explain(page, "Energy, ammo, the radar and the rest. Separate from the helmet.");
-            UpdateHelmetRows();
-
-            Heading(page, "Crosshair");
-            _fixedCrosshair = Add(page, new ToggleRow("Fixed crosshair", Features.FixedCrosshair));
-            Explain(page, "Stops the reticle shrinking when you fire -- it stays one size, "
-                + "like Quake's.");
-            _customCrosshair = Add(page, new ToggleRow("Custom crosshair", Features.CustomCrosshair));
-            Explain(page, "Replaces the reticle with a plain cross at the centre of the "
-                + "screen, coloured by your current HP: green above 60, orange down to 33, "
-                + "red below that. Also shown with the modern HUD, below.");
-
-            Heading(page, "Modern HUD");
-            _modernHud = Add(page, new ToggleRow("Enable modern HUD", Features.ModernHud));
-            Explain(page, "A column down the left listing every weapon you are carrying "
-                + "and its ammo, each in that weapon's own colour, with the equipped one "
-                + "marked. Only weapons you have actually picked up appear.");
-            _weaponListSize = Add(page, new SliderRow("Weapon list size",
-                ScaleToSlider(Features.WeaponListScale), v => $"{SliderToScale(v) * 100:0}%"));
-            Explain(page, "How big that column is drawn, from 60% to 200%.");
-
-            Heading(page, "Weapon");
-            _fixedWeapon = Add(page, new ToggleRow("Fixed weapon", Features.FixedWeapon));
-            Explain(page, "Stops the gun and the HUD drifting when you move the mouse -- "
-                + "the gun rides square with the camera instead of lagging behind it, "
-                + "like Quake's weapon.");
-        }
-
-        private void UpdateHelmetRows()
-        {
-            bool on = _helmetRow.On;
-            _helmetOpacity.IsEnabled = on;
-            _visorOpacity.IsEnabled = on;
-            if (on && _helmetOpacity.Value == 0)
-            {
-                // On with the shell at zero is the state that started this: the
-                // visor frame still drawn, with nothing behind it.
-                _helmetOpacity.Value = 100;
-                if (_visorOpacity.Value == 0)
-                {
-                    _visorOpacity.Value = 50;
-                }
-            }
-            _helmetOpacity.InvalidateVisual();
-            _visorOpacity.InvalidateVisual();
+            // One switch, and none of what it drives.
+            //
+            // Pro mode is the whole HUD decision now: helmet and visor,
+            // crosshair, weapon list and its size, and where energy, ammo and
+            // the score are drawn. Off is the game as the DS drew it; on is
+            // the competitive layout. The six settings underneath were six
+            // ways to end up somewhere between the two, and a player who has
+            // to answer six questions to get one look has been handed the
+            // design problem. They keep working -- Features still holds them,
+            // -nohelmet still sets two of them -- they simply are not asked
+            // about here.
+            Heading(page, "HUD");
+            _proHud = Add(page, new ToggleRow("Pro mode HUD", Features.ProHud));
         }
 
         // --------------------------------------------------------------- audio
@@ -483,7 +447,6 @@ namespace MphRead.Mods.Launcher.Gui
             string[] languages = Enum.GetNames<Language>();
             _languageRow = Add(page, new ChoiceRow("Text", languages,
                 Math.Max(0, Array.IndexOf(languages, _settings.Language))));
-            Explain(page, "The game's own text, from your own files.");
         }
 
         private static int Percent(string stored, int fallback)
@@ -509,8 +472,6 @@ namespace MphRead.Mods.Launcher.Gui
                 InputSettings.ScrollAllWeapons));
 
             Heading(page, "Keys");
-            Explain(page, "Click a binding and press a key, a mouse button or the wheel. "
-                + "Backspace clears it, Escape leaves it alone.");
             var rows = new List<KeyRow>();
             foreach (PropertyInfo property in InputSettings.Bindings)
             {
@@ -547,26 +508,12 @@ namespace MphRead.Mods.Launcher.Gui
             return 0.1f + value / 100f * 2.9f;
         }
 
-        // The weapon list runs 60%-200%, so the slider's 0-100 is that range
-        // rather than a percentage of its own.
-        private static int ScaleToSlider(float scale)
-        {
-            return Math.Clamp((int)Math.Round((scale - 0.6f) / 1.4f * 100), 0, 100);
-        }
-
-        private static float SliderToScale(int value)
-        {
-            return 0.6f + value / 100f * 1.4f;
-        }
-
         // ---------------------------------------------------------- match rules
 
         private void BuildMatch()
         {
             StackPanel page = AddSection("Match rules");
             Heading(page, "Match rules");
-            Explain(page, "Used by the matches you start yourself. A server you join brings "
-                + "its own.");
             _pointGoal = Add(page, new FieldRow("Point goal", _settings.PointGoal, boxWidth: 120));
             _timeLimit = Add(page, new FieldRow("Time limit", _settings.TimeLimit, boxWidth: 120));
             _timeLimit.Box.Watermark = "m:ss";
@@ -578,8 +525,6 @@ namespace MphRead.Mods.Launcher.Gui
             _radar = Add(page, new ToggleRow("Hunter radar", _settings.HunterRadar == "on"));
             _affinity = Add(page, new ToggleRow("Affinity weapons",
                 _settings.AffinityWeapons == "on"));
-            Explain(page, "Each hunter's own weapon does more, and is the only way to freeze, "
-                + "burn or disrupt anybody.");
         }
 
         /// <summary>
@@ -605,21 +550,14 @@ namespace MphRead.Mods.Launcher.Gui
                 .Append(Hunter.Random.ToString()).ToArray();
             _hunterRow = Add(page, new ChoiceRow("Hunter", hunters,
                 Math.Max(0, Array.IndexOf(hunters, LauncherPrefs.LastHunter.ToString()))));
-            Explain(page, "What the online and offline cards start out on. Either card can "
-                + "still choose something else for one session.");
 
             Heading(page, "Servers");
             _serverRow = Add(page, new FieldRow("Default server",
                 $"{LauncherPrefs.ServerAddress}:{LauncherPrefs.ServerPort}", boxWidth: 220));
             _masterRow = Add(page, new FieldRow("Server directory",
                 $"{LauncherPrefs.MasterHost}:{LauncherPrefs.MasterPort}", boxWidth: 220));
-            Explain(page, "host, or host:port. The directory is what Join lists, and what "
-                + "runs an online match for you: this build never opens a port on your "
-                + "own machine. To run a server yourself, use the dedicated server.");
             _autoUpdate = Add(page, new ToggleRow("Check for updates on startup",
                 LauncherPrefs.AutoUpdate));
-            Explain(page, "Asks GitHub whether there is a newer release and says so. It "
-                + "downloads and installs nothing.");
 
             Heading(page, "Game files");
             var files = new MenuEntry("Game files", GameFiles.Describe(), titleSize: 15);
@@ -630,8 +568,6 @@ namespace MphRead.Mods.Launcher.Gui
                 Close();
             };
             page.Children.Add(files);
-            Explain(page, "Where the extracted ROM lives, and how to point the game at a "
-                + "different one. Nothing else here works without it.");
         }
 
         /// <summary>host, or host:port. Leaves both alone on anything else, so a
@@ -729,14 +665,7 @@ namespace MphRead.Mods.Launcher.Gui
             _settings.CelShading = RenderOptions.OnOff(_celRow.On);
             _settings.CelBands = "8";
             _settings.CelEdge = "50";
-            Features.HelmetOpacity = _helmetRow.On ? _helmetOpacity.Value / 100f : 0;
-            Features.VisorOpacity = _helmetRow.On ? _visorOpacity.Value / 100f : 0;
-            Features.HudOpacity = _hudOpacity.Value / 100f;
-            Features.WeaponListScale = SliderToScale(_weaponListSize.Value);
-            Features.FixedCrosshair = _fixedCrosshair.On;
-            Features.CustomCrosshair = _customCrosshair.On;
-            Features.ModernHud = _modernHud.On;
-            Features.FixedWeapon = _fixedWeapon.On;
+            Features.ProHud = _proHud.On;
             // Audio
             _settings.SfxVolume = (_sfxVolume.Value / 100f).ToString(CultureInfo.InvariantCulture);
             _settings.MusicVolume = (_musicVolume.Value / 100f).ToString(CultureInfo.InvariantCulture);

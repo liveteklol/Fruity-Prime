@@ -1396,8 +1396,20 @@ namespace MphRead
                 {
                     // No local player to spawn as during playback -- watch
                     // as soon as anyone recorded becomes available, rather
-                    // than sitting on an empty room waiting for Escape.
-                    Mods.SpectatorMode.Start();
+                    // than sitting on an empty room waiting for Escape. And
+                    // out of somebody's eyes straight away, unlike spectating
+                    // a live match: there is no "your own view" to have just
+                    // left, so an empty overview would be the whole of what
+                    // opening a demo did.
+                    Mods.SpectatorMode.Start(watchSomeone: true);
+                }
+                // Spectating is asked for from the pause menu, which runs on
+                // this thread but has no scene to hand; it leaves the camera
+                // it wants here and this picks it up between frames.
+                bool? freeCamera = Mods.SpectatorMode.TakeCameraRequest();
+                if (freeCamera.HasValue)
+                {
+                    SetFreeCamera(freeCamera.Value);
                 }
                 PlayerEntity.ProcessInput(_keyboardState, _mouseState,
                     _inputMode == InputMode.CameraOnly || Mods.PauseMenu.Open);
@@ -2181,6 +2193,14 @@ namespace MphRead
                 PlayerEntity.Main.DrawHudModels();
                 UnsetHudLayerUniforms();
             }
+            else if (ScoreboardOverFreeCamera)
+            {
+                // Only the filter that dims the scene behind the scoreboard;
+                // PlayerHud draws nothing else on the free camera.
+                SetHudLayerUniforms();
+                PlayerEntity.Main.DrawHudModels();
+                UnsetHudLayerUniforms();
+            }
 
             // After the weapon, so it is drawn around too, and before the
             // target is put on screen, so the helmet and the HUD are not.
@@ -2271,6 +2291,15 @@ namespace MphRead
                 {
                     PlayerEntity.Main.DrawPauseMenuForeground();
                 }
+            }
+            else if (ScoreboardOverFreeCamera)
+            {
+                // The scoreboard, and nothing else: none of the helmet and
+                // visor layers above belong to a view that is not out of
+                // anybody's eyes. PlayerHud decides that; this only lets it
+                // be asked, since the HUD is otherwise not drawn at all while
+                // the camera is not a player's.
+                PlayerEntity.Main.DrawHudObjects();
             }
             if (_movieFrameIndex != -1)
             {
@@ -4660,34 +4689,59 @@ namespace MphRead
         }
 
         /// <summary>
-        /// Space, during demo playback: an independent free no-clip camera
-        /// with no HUD, instead of following whoever spectator mode has the
-        /// camera on. Reuses the same Roam camera the room/model viewer
-        /// tooling already has -- WASD and the arrow keys already move and
-        /// turn it in <see cref="OnKeyHeld"/>, and the HUD draw calls
-        /// already gate on <c>CameraMode == CameraMode.Player</c>, so
-        /// switching to Roam gets "no HUD" for free rather than needing a
-        /// separate suppression somewhere.
-        /// </summary>
-        /// <summary>
-        /// True while the demo free camera specifically (as opposed to the
-        /// room/model viewer's own Roam camera, which is CameraMode.Roam
+        /// True while the spectator's free camera specifically (as opposed to
+        /// the room/model viewer's own Roam camera, which is CameraMode.Roam
         /// too) is up -- lets <see cref="OnMouseMove"/> turn it without
         /// requiring the viewer tool's held-left-click gesture, since this
         /// is meant to feel like the game's ordinary first-person look.
         /// </summary>
-        private bool _demoFreeCam;
-        public bool IsDemoFreeCam => _demoFreeCam;
+        private bool _freeCam;
+        public bool IsFreeCam => _freeCam;
+        /// <summary>
+        /// Whether the scoreboard should be drawn over the spectator's free
+        /// camera: they are on it, and holding the button for it.
+        ///
+        /// The free camera is CameraMode.Roam, which is what gets it "no HUD"
+        /// for free -- the HUD is only drawn for a player's own camera. A
+        /// scoreboard is the match's rather than a player's, though, and
+        /// somebody watching from the map is exactly who wants to read one,
+        /// so this is the one thing that reaches past that.
+        /// </summary>
+        private static bool ScoreboardOverFreeCamera => Mods.SpectatorMode.FreeCamera
+            && Mods.SpectatorMode.ShowScoreboard
+            && PlayerEntity.Main.LoadFlags.TestFlag(LoadFlags.Active);
 
-        public void ToggleDemoFreeCamera()
+
+        /// <summary>
+        /// The spectator's own no-clip camera: an independent view of the map
+        /// with no HUD, instead of riding along with whoever spectator mode
+        /// has the camera on. What Space toggles while watching, and where
+        /// spectating now starts -- looking at the map rather than out of
+        /// somebody's eyes, the way Quake's spectator does.
+        ///
+        /// Reuses the same Roam camera the room/model viewer tooling already
+        /// has -- WASD and the arrow keys already move and turn it in
+        /// <see cref="OnKeyHeld"/>, and the HUD draw calls already gate on
+        /// <c>CameraMode == CameraMode.Player</c>, so switching to Roam gets
+        /// "no HUD" for free rather than needing a separate suppression
+        /// somewhere.
+        /// </summary>
+        public void SetFreeCamera(bool on)
         {
-            if (_cameraMode == CameraMode.Roam)
+            if (on == _freeCam)
+            {
+                return;
+            }
+            if (!on)
             {
                 _cameraMode = CameraMode.Player;
                 _inputMode = InputMode.All;
-                _demoFreeCam = false;
+                _freeCam = false;
+                Mods.SpectatorMode.NoteFreeCamera(false);
                 return;
             }
+            // Starts where the view already was, so turning it on is a change
+            // of control and not a cut to somewhere else in the room.
             _cameraPosition = PlayerEntity.Main.CameraInfo.Position;
             _cameraFacing = PlayerEntity.Main.CameraInfo.Facing;
             if (_cameraFacing.LengthSquared < 0.0001f)
@@ -4699,7 +4753,13 @@ namespace MphRead
             _cameraUp = Vector3.Cross(_cameraRight, _cameraFacing);
             _cameraMode = CameraMode.Roam;
             _inputMode = InputMode.CameraOnly;
-            _demoFreeCam = true;
+            _freeCam = true;
+            Mods.SpectatorMode.NoteFreeCamera(true);
+        }
+
+        public void ToggleFreeCamera()
+        {
+            SetFreeCamera(!_freeCam);
         }
 
         public void OnMouseClick(bool down)
@@ -4712,7 +4772,7 @@ namespace MphRead
 
         public void OnMouseMove(float deltaX, float deltaY)
         {
-            if ((_leftMouse || _demoFreeCam) && AllowCameraMovement && _inputMode != InputMode.PlayerOnly)
+            if ((_leftMouse || _freeCam) && AllowCameraMovement && _inputMode != InputMode.PlayerOnly)
             {
                 // The spectator's free camera is the player's look, so it
                 // obeys the player's settings.
@@ -4727,7 +4787,7 @@ namespace MphRead
                 float sensitivity = 1f;
                 float invertX = 1f;
                 float invertY = 1f;
-                if (_demoFreeCam)
+                if (_freeCam)
                 {
                     sensitivity = Mods.InputSettings.MouseSensitivity;
                     invertX = Mods.InputSettings.InvertMouseX ? -1f : 1f;
@@ -5859,7 +5919,7 @@ namespace MphRead
 
         private static readonly NativeWindowSettings _nativeWindowSettings = new NativeWindowSettings()
         {
-            ClientSize = new Vector2i(1024, 768),
+            ClientSize = new Vector2i(1280, 768),
             Title = Mods.Branding.Name,
             Profile = ContextProfile.Compatability,
             Flags = ContextFlags.Default,
@@ -5874,14 +5934,20 @@ namespace MphRead
         /// The smallest the game window may be dragged to.
         ///
         /// Not an aesthetic floor: Escape's menu is laid over this window and
-        /// its entries need about 470 pixels of height, so a window shorter
-        /// than that had "Leave match" and "Quit" off the bottom edge -- a
-        /// player who cannot get out of the match. The menu scrolls now and so
-        /// survives anything, but a window this small is not a size anybody
-        /// wants to play at either, and GLFW will honour a minimum where it
-        /// will not honour a request to be sensible.
+        /// its panel needs about 500 *device-independent* pixels of height, so
+        /// a shorter window cut the panel's top and bottom off -- and on a
+        /// display running at 150%, which is the ordinary Windows setting on a
+        /// laptop, 500 of those are 750 real ones. The old 600-pixel floor was
+        /// therefore short by a third before the player did anything wrong,
+        /// which is why the menu came up trimmed however the window was sized.
+        ///
+        /// The menu also scales itself down to whatever it is given now (see
+        /// <c>PauseMenuView</c>), so nothing depends on this any more; a floor
+        /// this low simply is not a size anybody wants to play at either, and
+        /// GLFW will honour a minimum where it will not honour a request to be
+        /// sensible.
         /// </summary>
-        private static readonly Vector2i _minimumSize = new Vector2i(800, 600);
+        private static readonly Vector2i _minimumSize = new Vector2i(1024, 720);
 
         public RenderWindow() : base(_gameWindowSettings, _nativeWindowSettings)
         {
@@ -5944,7 +6010,7 @@ namespace MphRead
         protected override void OnRenderFrame(FrameEventArgs args)
         {
             // The pause menu wants the pointer back.
-            CursorState = (Scene.CameraMode == CameraMode.Player || Scene.IsDemoFreeCam) && !Scene.FrameAdvance
+            CursorState = (Scene.CameraMode == CameraMode.Player || Scene.IsFreeCam) && !Scene.FrameAdvance
                 && !Mods.PauseMenu.Open
                 && !Scene.ShowCursor && !GameState.DialogPause && !GameState.MenuPause
                 ? CursorState.Grabbed
@@ -6022,24 +6088,38 @@ namespace MphRead
                 base.OnKeyDown(e);
                 return;
             }
-            // Space, during demo playback only: free no-clip camera instead
-            // of following whoever spectator mode has the camera on. Not a
-            // real control during a real match -- every player's input is
-            // frozen for the whole session while watching a demo, so there
-            // is nothing this could conflict with.
-            if (e.Key == Keys.Space && Mods.Network.DemoPlayback.IsActive)
+            // Space, while watching rather than playing: the free no-clip
+            // camera instead of riding along with whoever spectator mode has
+            // the camera on, and back again. Not a real control in either
+            // case -- a demo freezes every player's input for the whole
+            // session, and a spectator's own input is dropped by
+            // PlayerInput.ProcessInput -- so there is nothing this can
+            // conflict with, and it is how a spectator gets back to the
+            // overview they started in.
+            if (e.Key == Keys.Space
+                && (Mods.Network.DemoPlayback.IsActive || Mods.SpectatorMode.IsSpectating))
             {
-                Scene.ToggleDemoFreeCamera();
+                if (Mods.Network.DemoPlayback.IsActive)
+                {
+                    Scene.ToggleFreeCamera();
+                }
+                else
+                {
+                    // Spectating a live match: the map or a player, never the
+                    // hidden body you left behind. See SpectatorMode.
+                    Mods.SpectatorMode.ToggleView();
+                }
                 base.OnKeyDown(e);
                 return;
             }
             // Escape opens the pause menu while a player is being driven --
             // the mouse comes back, the window can be resized, and the
             // settings are reachable without leaving the match. Everywhere
-            // else it still means "close this" -- except the demo free
+            // else it still means "close this" -- except the spectator's free
             // camera, which is CameraMode.Roam and would otherwise fall
-            // through to that and quit the game instead of pausing it.
-            if (e.Key == Keys.Escape && (Scene.CameraMode == CameraMode.Player || Scene.IsDemoFreeCam)
+            // through to that and quit the game instead of pausing it, taking
+            // "Rejoin match" with it.
+            if (e.Key == Keys.Escape && (Scene.CameraMode == CameraMode.Player || Scene.IsFreeCam)
                 && Mods.PauseMenu.HandleEscape(this))
             {
                 base.OnKeyDown(e);

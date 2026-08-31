@@ -10,12 +10,21 @@ namespace MphRead.Entities
     {
         public void Draw()
         {
+            if (Flags2.TestFlag(PlayerFlags2.Spectating))
+            {
+                // Before the shadow, not after it. A spectator is out of the
+                // match on every machine, and the shadow is drawn from the
+                // player's volume rather than from the model -- so hiding only
+                // the model left a shadow sliding around the floor under
+                // nobody, which is exactly how it was reported.
+                return;
+            }
             DrawShadow();
             if (IsMainPlayer && ScanVisor)
             {
                 DrawScanModels();
             }
-            if (Flags2.TestFlag(PlayerFlags2.HideModel) || Flags2.TestFlag(PlayerFlags2.Spectating))
+            if (Flags2.TestFlag(PlayerFlags2.HideModel))
             {
                 return;
             }

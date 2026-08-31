@@ -143,6 +143,9 @@ namespace MphRead.Mods.Launcher.Gui
                 // -- and tolerates the files being absent, which is the whole
                 // reason it goes first.
                 GameFiles.ApplyPaths();
+                // A map added after the install was set up has no picture and
+                // no sweep coming to give it one.
+                Mods.ThumbnailGenerator.EnsureCustomPreviews();
             }
             IReadOnlyList<string> rooms = Array.Empty<string>();
 

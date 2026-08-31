@@ -916,17 +916,29 @@ namespace MphRead.Mods.Network
         /// </summary>
         public const int ProtocolVersion = 4;
         /// <summary>
-        /// Frames between intent packets. Not every frame: with N players the
-        /// server relays N*(N-1) of them per frame, and at six players that
-        /// was losing enough to leave gaps in everyone's position stream.
+        /// Frames between intent packets. One, so every frame.
         ///
-        /// It is also the rate at which a remote player's position and aim can
-        /// change, which is why the feature check samples both sides of a
-        /// comparison on this cadence -- a 60 Hz path measured against its
-        /// 30 Hz reconstruction is short by half before a single packet goes
-        /// missing.
+        /// This is the rate at which a remote player exists, not just the rate
+        /// it is corrected at: a puppet is pinned to the position its owner
+        /// reported (see NetPlayerBridge.RestoreReportedPosition, which runs
+        /// after the engine's own movement step), so whatever the engine
+        /// simulates in between is thrown away. At 2 that made every player
+        /// but your own move in 30 Hz steps -- on a 60 Hz screen, in a 60 Hz
+        /// simulation -- and a recorded demo, where every player is a puppet,
+        /// stepped from end to end.
+        ///
+        /// It was 2 because the server relays N*(N-1) intents per frame and at
+        /// six players that was losing enough of them to leave gaps. What made
+        /// that true was a transport whose send queue dropped the *newest*
+        /// packets when it filled, which is the opposite of what a position
+        /// stream wants and was fixed since (see NETWORK-DIAGNOSTICS). Doubled
+        /// traffic is the cost: about 100 bytes on the wire per player per
+        /// frame, so 42 KB/s into each client of an eight-player match.
+        ///
+        /// The feature check samples both sides of a comparison on this
+        /// cadence, which is now every frame.
         /// </summary>
-        public const int IntentSendInterval = 2;
+        public const int IntentSendInterval = 1;
         // A client that has sent nothing for this long is dropped. Generous
         // on purpose: loading a room is synchronous and sends nothing while
         // it runs, and a client dropped mid-load used to be gone for good --

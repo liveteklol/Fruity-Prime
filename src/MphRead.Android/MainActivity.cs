@@ -778,6 +778,9 @@ namespace MphRead.Droid
             AndroidApp.Home?.Reset();
             NetSession.Stop();
             NetHostSession.Stop();
+            // A demo feeds NetSession from a file rather than a socket, so
+            // stopping the session is not what closes it.
+            DemoPlayback.Stop();
             Window?.ClearFlags(WindowManagerFlags.KeepScreenOn);
             GoImmersive(true);
             RequestedOrientation = _orientationBefore;

@@ -161,12 +161,37 @@
     </None>
   </ItemGroup>
 
-  <!-- Custom map sources. These are text: the room binaries they describe are
-       generated on the player's machine from the player's own extracted files
-       and never travel with the build. -->
+  <!-- Custom maps: the map file, and the level it converts. The room binaries
+       are still generated on the player's machine, because they land where
+       that machine's extracted files are, but everything needed to generate
+       them ships, so a downloaded release has its custom maps ready and the
+       first launch builds them.
+
+       A map is handed out as one .fpmap bundle: recipe, level and baked
+       textures in a single file, with the level trimmed to the lumps the
+       importer reads (see Mods/MapGen/MapBundle.cs): 376 KB for de_dust2
+       against the 2.8 MB its folder weighed. The folder is what a map is
+       *worked on* as, so it is still copied to the build output for the loop
+       of converting and testing one, but a .pk3 is somebody else's level in
+       somebody else's container, and CopyToPublishDirectory keeps it out of
+       what players download. The workflow cooks the bundle before it
+       publishes. -->
   <ItemGroup>
-    <None Include="..\..\maps\**\*.json;..\..\maps\**\*.bsp;..\..\maps\**\*.tex" Link="maps\%(RecursiveDir)%(Filename)%(Extension)">
+    <!-- What ships: the bundles, and any map file loose at the top of maps/. -->
+    <None Include="..\..\maps\**\*.fpmap;..\..\maps\*.json;..\..\maps\*.bsp;..\..\maps\*.tex" Link="maps\%(RecursiveDir)%(Filename)%(Extension)">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <!-- What a map is worked on as: a folder holding the recipe, somebody
+         else's .pk3 and the textures baked from it. Copied to a build output,
+         because that is the convert-and-test loop, and never published: a
+         package carrying the folder as well as the bundle would carry the
+         same map twice, one copy of it naming a .pk3 that is deliberately not
+         there. -->
+    <None Include="..\..\maps\**\*.json;..\..\maps\**\*.bsp;..\..\maps\**\*.tex;..\..\maps\**\*.pk3"
+          Exclude="..\..\maps\*.json;..\..\maps\*.bsp;..\..\maps\*.tex"
+          Link="maps\%(RecursiveDir)%(Filename)%(Extension)">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Never</CopyToPublishDirectory>
     </None>
   </ItemGroup>
 

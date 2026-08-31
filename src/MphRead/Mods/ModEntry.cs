@@ -45,6 +45,65 @@ namespace MphRead.Mods
                 return true;
             }
 
+            // Where the maps are. Read for every invocation and before
+            // anything reads the map list, which is loaded once -- and against
+            // the directory the command was typed in rather than the one the
+            // process moved itself to (see ConsoleSetup.LaunchDirectory), so
+            // `-mapdir maps` from a checkout means that checkout's maps.
+            string? mapDir = ValueAfter(args, "mapdir");
+            if (mapDir != null)
+            {
+                MapGen.CustomRooms.MapDirectory = System.IO.Path.GetFullPath(
+                    System.IO.Path.Combine(ConsoleSetup.LaunchDirectory, mapDir));
+            }
+
+            // Cooking a bundle is here, before the game-file check, for the
+            // reason the dedicated server is: it reads a recipe, the level
+            // beside it and the textures baked from it, and touches no
+            // extracted game data at all. The workflow runs it on a runner
+            // that has none, where the check exits with "press any key" on a
+            // console nobody is looking at -- and then throws, because there
+            // is no console to read a key from either.
+            if (HasFlag(args, "mapbundle"))
+            {
+                string? which = ValueAfter(args, "mapbundle");
+                string? outPath = ValueAfter(args, "out");
+                int cooked = 0;
+                int failed = 0;
+                foreach (MapGen.MapDefinition def in MapGen.CustomRooms.Definitions)
+                {
+                    if (which != null && !which.Equals(def.Name, StringComparison.OrdinalIgnoreCase)
+                        && !which.Equals("all", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+                    if (def.SourcePath == null || def.BundlePath != null || def.Import == null)
+                    {
+                        // Already a bundle, or a map that builds from its own
+                        // description and has no level to carry.
+                        continue;
+                    }
+                    try
+                    {
+                        MapGen.MapBundle.Cook(def, def.SourcePath, outPath);
+                        cooked++;
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"{def.Name}: {ex.Message}");
+                        failed++;
+                    }
+                }
+                if (cooked == 0 && failed == 0)
+                {
+                    Console.WriteLine("No map to bundle. A bundle is cooked from a recipe and the "
+                        + $"level it converts; put both in {MapGen.CustomRooms.MapDirectory}.");
+                }
+                Environment.ExitCode = failed == 0 ? 0 : 1;
+                return true;
+            }
+
+
             // The explicit check, so there is always one command that answers
             // "am I on the latest build". Nothing is downloaded here either:
             // it prints the release page and opens it if there is a desktop to
@@ -591,6 +650,19 @@ namespace MphRead.Mods
                 // target every other capture reads, so seeing it needs a real
                 // window and a read from its buffer.
                 Network.MapAudit.ShowWindow = HasFlag(args, "hudshots");
+                // -size WxH, so a HUD capture can be taken at a window shape
+                // other than the one this happens to default to.
+                string? sizeValue = ValueAfter(args, "size");
+                if (sizeValue != null)
+                {
+                    string[] parts = sizeValue.ToLowerInvariant().Split('x');
+                    if (parts.Length == 2 && Int32.TryParse(parts[0], out int sizeWidth)
+                        && Int32.TryParse(parts[1], out int sizeHeight)
+                        && sizeWidth > 0 && sizeHeight > 0)
+                    {
+                        Network.MapAudit.WindowSize = new OpenTK.Mathematics.Vector2i(sizeWidth, sizeHeight);
+                    }
+                }
                 Environment.ExitCode = Network.MapAudit.Run(mapTest, players, seconds, mapMode,
                     bots: HasFlag(args, "bots"), shotDirectory: ValueAfter(args, "shots"),
                     renderProbe: HasFlag(args, "renderprobe"),
@@ -793,6 +865,15 @@ namespace MphRead.Mods
             {
                 RenderOptions.Fog = RenderOptions.ParseOnOff(fog, RenderOptions.Fog);
             }
+            string? fps = ValueAfter(args, "fps");
+            if (fps != null && !fps.StartsWith('-'))
+            {
+                RenderOptions.ShowFps = RenderOptions.ParseOnOff(fps, RenderOptions.ShowFps);
+            }
+            else if (HasFlag(args, "fps"))
+            {
+                RenderOptions.ShowFps = true;
+            }
             string? bands = ValueAfter(args, "celbands");
             if (bands != null && Int32.TryParse(bands, out int bandCount))
             {
@@ -802,6 +883,18 @@ namespace MphRead.Mods
             if (edge != null && Int32.TryParse(edge.TrimEnd('%'), out int edgePercent))
             {
                 RenderOptions.CelEdge = edgePercent / 100f;
+            }
+            // The whole competitive HUD, for the same paths and the same
+            // reason: it is a mode whose point is what the picture looks like,
+            // and every command that can photograph one opens no launcher.
+            string? proHud = ValueAfter(args, "prohud");
+            if (proHud != null && !proHud.StartsWith('-'))
+            {
+                Features.ProHud = RenderOptions.ParseOnOff(proHud, Features.ProHud);
+            }
+            else if (HasFlag(args, "prohud"))
+            {
+                Features.ProHud = true;
             }
         }
 

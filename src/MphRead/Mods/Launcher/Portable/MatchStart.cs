@@ -82,6 +82,18 @@ namespace MphRead.Mods.Launcher
                 return;
             }
 
+            // A custom map that failed to build is still a room in the table --
+            // the launcher lists it and the picker shows a frame for it -- and
+            // loading one reaches for binaries that are not there. On Windows
+            // that is a process with no console dying on a null path, which
+            // says nothing to the player and nothing to anybody debugging it.
+            string? unplayable = MapGen.CustomRooms.WhyUnplayable(roomKey);
+            if (unplayable != null)
+            {
+                Console.WriteLine($"[launcher] {unplayable}");
+                return;
+            }
+
             using var renderer = new RenderWindow();
             // GameState's own list, not the mode's name: Capture is a team
             // mode that does not end in "Teams", and testing the name left

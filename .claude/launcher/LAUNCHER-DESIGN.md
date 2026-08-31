@@ -73,11 +73,60 @@ it once after the launcher closes, because on X11 the window's destroy request
 would otherwise sit unflushed in the connection's buffer for the whole match and
 leave a launcher painted over the game.
 
+Menu entries
+
+- **No descriptions under the titles, anywhere.** An entry called "Join" did
+  not need a line saying it joins, and in the pause menu the second saying is
+  what made a seven-line menu tall enough to be cut off. The only subtitles
+  left are the ones reporting something the player could not otherwise know --
+  missing game files on "Host", a demo that would not open, the map-preview
+  progress -- and those are set when they happen, so `MenuEntry` takes its
+  height from the subtitle (42 bare, 54 with one) in `OnPropertyChanged`
+  rather than deciding it once in the constructor.
+
 Pause menu
 
 - `Escape` in a match opens it on every platform now (`Mods/PauseMenu.cs` +
-  `Gui/PauseMenuWindow.cs`): Resume, Fullscreen/Windowed, Settings, Leave match,
-  Quit.
+  `Gui/PauseMenuWindow.cs`): Resume, Fullscreen/Windowed, Settings, Spectate or
+  Rejoin, Record demo, Leave match, Quit.
+- **It scales itself down rather than being cut off.** The panel's natural
+  height is worked out from the entries put in it (each states its own
+  `Height`), and `PauseMenuView.FitToHost` puts a `ScaleTransform` on a
+  `LayoutTransformControl` around it, down to half size, when the window is
+  shorter than that. The scroller under it is the last resort, not the plan:
+  what a scrollbar produces here is a panel with its top and bottom cut off.
+  A display at 150% is what made this ordinary -- the panel needs ~500
+  device-independent pixels, which is 750 real ones, and the game window's
+  floor was 600. That floor is now 1024x720 and the default window 1280x768.
+- **Spectating starts on the free camera** (`Mods/SpectatorMode.cs`): "Spectate"
+  puts you on the map with no HUD, a left click moves into the players and
+  cycles through them, and Space toggles between the two -- `ToggleView`, not
+  the camera directly, because the camera on its own would put you back behind
+  your own hidden, frozen body with your own HUD on. **The HUD follows the
+  camera, not the spectating**: on the free camera there is none -- it is
+  CameraMode.Roam, and the scene only draws a HUD for a player's own camera --
+  and following somebody shows theirs, which is what watching a recording back
+  has always done and what makes watching a live match worth anything. It used
+  to be hidden in both (`DrawHudObjects`/`DrawHudModels` returned early on
+  `IsSpectating`), which left a spectator watching a hunter with no sign of
+  what they were playing with.
+  **The scoreboard is the exception on the free camera**: it is the match's
+  and not a player's, so holding the show-score button draws it (and the
+  filter that dims the scene) over the map. It cannot come from the usual
+  place -- every keybind's state is filled in by the input pass spectating
+  steps out of -- so `PlayerEntity.ProcessInput` reads that one bind off the
+  keyboard snapshot against `InputSettings.Current` and leaves it in
+  `SpectatorMode.ShowScoreboard`, which `Scene.ScoreboardOverFreeCamera` and
+  `PlayerHud.ShowScoreboard` read.
+  A spectator is also **drawn not at all** (`PlayerDraw.Draw` returns before
+  `DrawShadow`, which is cast from the volume and so survived hiding the model)
+  and is **not a target** (`PlayerAi`'s opponent and teammate searches ask
+  `ModInPlay`, not `Health > 0`). The camera is
+  the scene's, and the menu runs on the game's thread but has no scene to hand,
+  so `Start`/`Rejoin` leave a `bool?` in `SpectatorMode` that
+  `Scene.OnRenderFrame` acts on -- the same shape as this menu's own window
+  work. Demo playback is the exception: it calls `Start(watchSomeone: true)`
+  and goes straight to a player, having no view of its own to have just left.
 - It talks to the game through volatile flags. GLFW window calls -- closing it,
   changing its border -- belong to the thread that created the window, so the
   menu asks and `PauseMenu.Poll` does it on the game's own thread.

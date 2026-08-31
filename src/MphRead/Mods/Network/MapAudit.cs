@@ -38,6 +38,14 @@ namespace MphRead.Mods.Network
         private readonly bool[] _everSpawned = new bool[PlayerEntity.SlotCapacity];
         private readonly bool[] _everAltForm = new bool[PlayerEntity.SlotCapacity];
         private readonly bool[] _everFired = new bool[PlayerEntity.SlotCapacity];
+        // How far each player actually got. "The bots do not move" was a
+        // report nothing here could confirm or deny: a bot standing still
+        // spawns, so it counted as spawned, and never fires or dies, which
+        // reads the same as one that is losing. This is the metric that
+        // separates them.
+        private readonly Vector3[] _lastSeen = new Vector3[PlayerEntity.SlotCapacity];
+        private readonly bool[] _haveLastSeen = new bool[PlayerEntity.SlotCapacity];
+        private readonly float[] _travelled = new float[PlayerEntity.SlotCapacity];
         // The three states only an affinity weapon can inflict. Counted per
         // slot rather than as a total, because "somebody was frozen" and "one
         // player was frozen forty times" are different reports.
@@ -156,7 +164,7 @@ namespace MphRead.Mods.Network
             // Bigger for -hudshots: the HUD is authored for a 256x192 screen
             // and scaled to the window, so at 320x180 a weapon icon is a few
             // pixels and a capture of it says nothing.
-            ClientSize = ShowWindow ? new Vector2i(1024, 576) : new Vector2i(320, 180),
+            ClientSize = WindowSize ?? (ShowWindow ? new Vector2i(1024, 576) : new Vector2i(320, 180)),
             Title = "MphRead map audit",
             Profile = ContextProfile.Compatability,
             // Explicitly, exactly as the game's own window does. Left
@@ -179,6 +187,16 @@ namespace MphRead.Mods.Network
 
         /// <summary>Set by -hudshots before the window is built.</summary>
         public static bool ShowWindow { get; set; }
+
+        /// <summary>
+        /// What -size WxH asked for, before the window is built.
+        ///
+        /// The HUD is laid out in a 4:3 space and stretched to the window, so
+        /// how it looks is partly a question about the window's shape -- a
+        /// panel that is right at 16:9 can be two thirds too wide at 21:9.
+        /// One fixed capture size cannot answer that; this lets a shell loop.
+        /// </summary>
+        public static Vector2i? WindowSize { get; set; }
 
         public Scene Scene { get; }
 
@@ -715,6 +733,17 @@ namespace MphRead.Mods.Network
                 }
                 _lastHealth[slot] = player.Health;
                 _lowestY = Math.Min(_lowestY, player.Position.Y);
+                if (_haveLastSeen[slot])
+                {
+                    float step = (player.Position - _lastSeen[slot]).Length;
+                    // a respawn is a teleport, not a walk
+                    if (step < 5)
+                    {
+                        _travelled[slot] += step;
+                    }
+                }
+                _lastSeen[slot] = player.Position;
+                _haveLastSeen[slot] = true;
             }
             foreach (EntityBase entity in Scene.Entities)
             {
@@ -943,6 +972,17 @@ namespace MphRead.Mods.Network
             var line = new StringBuilder();
             line.Append($"MAPTEST {_room} | players {_players} | frames {_frame}");
             line.Append($" | spawned {spawnedEver}/{_players}");
+            int moved = 0;
+            float furthest = 0;
+            for (int i = 0; i < _players && i < _travelled.Length; i++)
+            {
+                if (_travelled[i] > 20)
+                {
+                    moved++;
+                }
+                furthest = Math.Max(furthest, _travelled[i]);
+            }
+            line.Append($" | moved {moved}/{_players} (furthest {furthest:0} units)");
             line.Append($" | alt form {altEver}/{_players}");
             line.Append($" | fired {firedEver}/{_players}");
             line.Append($" | deaths {totalDeaths}");

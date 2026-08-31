@@ -98,6 +98,30 @@ namespace MphRead.Mods.Launcher.Gui
                 SubtitleColorProperty, PrimaryProperty, SelectedProperty, IsEnabledProperty);
         }
 
+        /// <summary>Two line heights: one for a bare label, one with a line under it.</summary>
+        private const double PlainHeight = 42;
+        private const double SubtitledHeight = 54;
+
+        /// <summary>
+        /// The height follows the subtitle, rather than being decided once in
+        /// the constructor.
+        ///
+        /// The menus carry no descriptions any more -- an entry called "Join"
+        /// did not need a line explaining that it joins -- but a few of them
+        /// still say something the player has to see: that the game files are
+        /// missing, that a demo would not open. Those arrive after the entry
+        /// is built, and an entry built at the bare height would have drawn
+        /// them off its own bottom edge.
+        /// </summary>
+        protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
+        {
+            base.OnPropertyChanged(change);
+            if (change.Property == SubtitleProperty)
+            {
+                Height = Subtitle.Length > 0 ? SubtitledHeight : PlainHeight;
+            }
+        }
+
         public MenuEntry(string title, string subtitle = "", double titleSize = 21)
         {
             Title = title;
@@ -108,7 +132,7 @@ namespace MphRead.Mods.Launcher.Gui
             // Escape expects to be able to answer "play again?".
             Focusable = true;
             Cursor = new Cursor(StandardCursorType.Hand);
-            Height = subtitle.Length > 0 ? 54 : 42;
+            Height = subtitle.Length > 0 ? SubtitledHeight : PlainHeight;
         }
 
         /// <summary>

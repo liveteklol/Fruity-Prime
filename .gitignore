@@ -353,11 +353,12 @@ maps/*.pk3
 maps/*.bsp
 maps/*.tex
 
-# Custom map source levels, and the texture packs baked from them. A .json in
-# maps/ is a conversion recipe and belongs in git; the level it converts is
-# somebody else's game data, exactly like the cartridge dump, and the .tex is
-# that game's art in another format. Force one in with `git add -f` if it is
-# yours to publish.
-maps/**/*.pk3
-maps/**/*.bsp
+# Texture packs baked from a custom map's level. Derived, like the room
+# binaries: the game bakes one when the map file names it and it is not there,
+# so what belongs in git is the level and the recipe, not this.
 maps/**/*.tex
+
+# Map bundles. Cooked from a recipe and the level beside it (-mapbundle), which
+# is what the workflow does before it publishes, so this is a build artifact
+# and not a source: what belongs in git is the folder it is cooked from.
+maps/**/*.fpmap

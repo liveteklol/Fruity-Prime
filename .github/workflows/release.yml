@@ -81,6 +81,19 @@ jobs:
       - name: nothing from the game is tracked
         run: tools/check-no-game-assets.sh
 
+      - name: every custom map has the level it converts
+        run: tools/check-maps-shipped.sh
+
+      # Cook every custom map into the one file it ships as. The recipe, the
+      # level it converts and the textures baked from it go into a .fpmap,
+      # with the level trimmed to the lumps the importer actually reads: 376 KB
+      # for de_dust2 against the 2.8 MB its folder weighs. That bundle is what
+      # the packages carry, and it is what somebody can be handed on its own --
+      # the .pk3 it was cooked from is a source and is kept out of the output
+      # by CopyToPublishDirectory. It is not committed, so it is cooked here.
+      - name: cook the map bundles
+        run: dotnet run --project src/MphRead/MphRead.csproj -c Release -- -mapdir maps -mapbundle
+
       - name: publish every target
         env:
           VERSION: ${{ steps.name.outputs.version }}
@@ -137,6 +150,13 @@ jobs:
           tools/check-no-game-assets.sh publish/win-x64 publish/linux-x64
           publish/osx-x64 publish/osx-arm64
           publish/linux-arm64 publish/win-x64-server publish/linux-x64-server
+
+      # What a downloaded release is judged on: the maps are there and ready.
+      - name: the custom maps reached every package
+        run: >
+          for d in publish/win-x64 publish/linux-x64 publish/osx-x64
+          publish/osx-arm64 publish/linux-arm64; do
+          tools/check-maps-shipped.sh "$d" || exit 1; done
 
       # A GUI game and a console server, which is what makes one
       # double-clickable and the other scriptable. Checked before a tag exists,

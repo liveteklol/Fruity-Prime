@@ -79,18 +79,91 @@ namespace MphRead
         public static bool BoostOpensDoors { get; set; } = false; // false
         public static bool AlternateHunters1P { get; set; } = true; // false
 
-        // These, below, are backed by their own named Display-page control
-        // and still persist through Load/Commit.
-        public static float HelmetOpacity { get; set; } = 1; // 1
-        public static float VisorOpacity { get; set; } = 0.5f; // 0.5
+        /// <summary>
+        /// Pro mode HUD: the whole competitive layout as one switch, instead
+        /// of the seven separate questions below that had to be answered the
+        /// same way to get it.
+        ///
+        /// It is not a preset that copies values into those settings -- it
+        /// overrides them while it is on, and every one of them falls back to
+        /// its code default when it goes off -- which is the game as the DS
+        /// drew it. Neither state is a set of choices the player has to
+        /// assemble: none of the six has a row in the settings any more, and
+        /// none of them is written to settings.json. One switch decides the
+        /// HUD, and the six ways of ending up somewhere between the two
+        /// answers went with the rows that offered them.
+        ///
+        /// Turning off the helmet is part of it: the shell and the visor pane
+        /// are what the readouts are drawn into, and the point of this mode is
+        /// that the middle of the screen is the game.
+        /// </summary>
+        public static bool ProHud { get; set; } = false;
+
+        /// <summary>
+        /// How big the weapon list is drawn under <see cref="ProHud"/>.
+        /// Large enough to read without looking straight at it, which is the
+        /// whole job of that column.
+        /// </summary>
+        public const float ProHudWeaponListScale = 1.7f;
+
+        // These, below, read as what the game should actually draw: Pro
+        // mode's answer while that is on, the field's own default otherwise.
+        // The setters are still here and still used -- `-nohelmet` writes two
+        // of them, and upstream's console menu writes several -- they simply
+        // have no launcher control and no line in settings.json any more.
+        public static float HelmetOpacity
+        {
+            get => ProHud ? 0 : _helmetOpacity;
+            set => _helmetOpacity = value;
+        }
+
+        private static float _helmetOpacity = 1; // 1
+
+        public static float VisorOpacity
+        {
+            get => ProHud ? 0 : _visorOpacity;
+            set => _visorOpacity = value;
+        }
+
+        private static float _visorOpacity = 0.5f; // 0.5
+
+        /// <summary>
+        /// How solid the readouts are drawn. No longer a setting: a HUD you
+        /// have dimmed to a third is a HUD you cannot read in a fight, and it
+        /// was one slider's worth of a question nobody was better off being
+        /// asked. Still read all over the HUD code, and still the thing to
+        /// change if a screen ever needs to fade the readouts out.
+        /// </summary>
         public static float HudOpacity { get; set; } = 1; // 1
         public static float ReticleOpacity { get; set; } = 1; // 1
+
         /// <summary>Freezes the reticle's fire animation instead of letting it shrink and expand.</summary>
-        public static bool FixedCrosshair { get; set; } = false;
+        public static bool FixedCrosshair
+        {
+            get => ProHud || _fixedCrosshair;
+            set => _fixedCrosshair = value;
+        }
+
+        private static bool _fixedCrosshair = false;
+
         /// <summary>Replaces the reticle with a flat-coloured cross, coloured by current HP.</summary>
-        public static bool CustomCrosshair { get; set; } = false;
+        public static bool CustomCrosshair
+        {
+            get => ProHud || _customCrosshair;
+            set => _customCrosshair = value;
+        }
+
+        private static bool _customCrosshair = false;
+
         /// <summary>The acquired-weapons-and-ammo panel down the left of the HUD.</summary>
-        public static bool ModernHud { get; set; } = false;
+        public static bool ModernHud
+        {
+            get => ProHud || _modernHud;
+            set => _modernHud = value;
+        }
+
+        private static bool _modernHud = false;
+
         /// <summary>
         /// How big that panel is drawn, as a multiplier on every one of its
         /// measurements -- row height, panel width, icon and ammo text.
@@ -99,72 +172,53 @@ namespace MphRead
         /// screen, not of design: the same panel that is unreadable on a
         /// handheld is in the way on a monitor. 1.0 is the compact default.
         /// </summary>
-        public static float WeaponListScale { get; set; } = 1f;
+        public static float WeaponListScale
+        {
+            get => ProHud ? ProHudWeaponListScale : _weaponListScale;
+            set => _weaponListScale = value;
+        }
+
+        private static float _weaponListScale = 1f;
+
         /// <summary>Rides rigidly with the camera instead of lagging behind aim, and stops the mouse-driven HUD shift too -- Quake's static weapon.</summary>
-        public static bool FixedWeapon { get; set; } = false;
+        public static bool FixedWeapon
+        {
+            get => ProHud || _fixedWeapon;
+            set => _fixedWeapon = value;
+        }
+
+        private static bool _fixedWeapon = false;
 
         public static void Load(IReadOnlyDictionary<string, string> values)
         {
-            if (values.TryGetValue(nameof(HelmetOpacity), out string? value) && Single.TryParse(value, CultureInfo.InvariantCulture, out float single))
-            {
-                HelmetOpacity = single;
-            }
-            if (values.TryGetValue(nameof(VisorOpacity), out value) && Single.TryParse(value, CultureInfo.InvariantCulture, out single))
-            {
-                VisorOpacity = single;
-            }
-            if (values.TryGetValue(nameof(HudOpacity), out value) && Single.TryParse(value, CultureInfo.InvariantCulture, out single))
-            {
-                HudOpacity = single;
-            }
-            if (values.TryGetValue(nameof(ReticleOpacity), out value) && Single.TryParse(value, CultureInfo.InvariantCulture, out single))
+            if (values.TryGetValue(nameof(ReticleOpacity), out string? value)
+                && Single.TryParse(value, CultureInfo.InvariantCulture, out float single))
             {
                 ReticleOpacity = single;
             }
-            if (values.TryGetValue(nameof(FixedCrosshair), out value) && Boolean.TryParse(value, out bool boolean))
+            if (values.TryGetValue(nameof(ProHud), out value) && Boolean.TryParse(value, out bool boolean))
             {
-                FixedCrosshair = boolean;
-            }
-            if (values.TryGetValue(nameof(CustomCrosshair), out value) && Boolean.TryParse(value, out boolean))
-            {
-                CustomCrosshair = boolean;
-            }
-            if (values.TryGetValue(nameof(ModernHud), out value) && Boolean.TryParse(value, out boolean))
-            {
-                ModernHud = boolean;
-            }
-            if (values.TryGetValue(nameof(WeaponListScale), out value)
-                && Single.TryParse(value, CultureInfo.InvariantCulture, out single))
-            {
-                WeaponListScale = Math.Clamp(single, 0.6f, 2f);
-            }
-            if (values.TryGetValue(nameof(FixedWeapon), out value) && Boolean.TryParse(value, out boolean))
-            {
-                FixedWeapon = boolean;
+                ProHud = boolean;
             }
         }
 
         /// <summary>
-        /// Only the properties backed by their own named Display-page
-        /// control (the opacity sliders, and the crosshair toggles below).
-        /// Everything else on this class used to be reachable through the
-        /// generic reflection-built "Features" settings page; now that the
-        /// page is gone, those stay at their code defaults and are
-        /// deliberately left out of both this and <see cref="Load"/>.
+        /// What the launcher can still be asked about, which is one switch.
+        ///
+        /// Everything else here was reachable either through the generic
+        /// reflection-built "Features" page or through a Display-page row of
+        /// its own, and both are gone: the HUD is <see cref="ProHud"/>'s
+        /// decision and the rest sit at their code defaults. What is left out
+        /// of this is left out of <see cref="Load"/> too, so an old
+        /// settings.json cannot go on answering a question nobody is asked
+        /// any more.
         /// </summary>
         public static FrozenDictionary<string, string> Commit()
         {
             return Frozen.Create<string, string>(
             [
-                new(nameof(HelmetOpacity), HelmetOpacity.ToString(CultureInfo.InvariantCulture)),
-                new(nameof(VisorOpacity), VisorOpacity.ToString(CultureInfo.InvariantCulture)),
-                new(nameof(HudOpacity), HudOpacity.ToString(CultureInfo.InvariantCulture)),
                 new(nameof(ReticleOpacity), ReticleOpacity.ToString(CultureInfo.InvariantCulture)),
-                new(nameof(FixedCrosshair), FixedCrosshair.ToString().ToLower()),
-                new(nameof(CustomCrosshair), CustomCrosshair.ToString().ToLower()),
-                new(nameof(ModernHud), ModernHud.ToString().ToLower()),
-                new(nameof(WeaponListScale), WeaponListScale.ToString(CultureInfo.InvariantCulture)),
-                new(nameof(FixedWeapon), FixedWeapon.ToString().ToLower())
+                new(nameof(ProHud), ProHud.ToString().ToLower())
             ]);
         }
     }
