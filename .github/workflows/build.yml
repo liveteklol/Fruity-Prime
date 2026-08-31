@@ -78,6 +78,16 @@ jobs:
         with:
           dotnet-version: '9.0.x'
 
+      # Cook every custom map into the one file it ships as. The recipe, the
+      # level it converts and the textures baked from it go into a .fpmap,
+      # with the level trimmed to the lumps the importer actually reads: 376 KB
+      # for de_dust2 against the 2.8 MB its folder weighs. That bundle is what
+      # the packages carry, and it is what somebody can be handed on its own --
+      # the .pk3 it was cooked from is a source and is kept out of the output
+      # by CopyToPublishDirectory. It is not committed, so it is cooked here.
+      - name: cook the map bundles
+        run: dotnet run --project src/MphRead/MphRead.csproj -c Release -- -mapdir maps -mapbundle
+
       # Every target is net9.0 and every launcher is Avalonia, so all six of
       # these come off one Ubuntu runner.
       - name: publish ${{ matrix.summary }}
@@ -155,6 +165,16 @@ jobs:
 
       - name: install the android workload
         run: dotnet workload install android
+
+      # Cook every custom map into the one file it ships as. The recipe, the
+      # level it converts and the textures baked from it go into a .fpmap,
+      # with the level trimmed to the lumps the importer actually reads: 376 KB
+      # for de_dust2 against the 2.8 MB its folder weighs. That bundle is what
+      # the packages carry, and it is what somebody can be handed on its own --
+      # the .pk3 it was cooked from is a source and is kept out of the output
+      # by CopyToPublishDirectory. It is not committed, so it is cooked here.
+      - name: cook the map bundles
+        run: dotnet run --project src/MphRead/MphRead.csproj -c Release -- -mapdir maps -mapbundle
 
       # net9.0-android35.0 wants platform 35 and its build tools, which a
       # runner image does not necessarily carry. This target asks for exactly

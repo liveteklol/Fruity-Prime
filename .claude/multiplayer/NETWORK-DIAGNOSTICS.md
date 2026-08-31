@@ -92,6 +92,49 @@ Four more came out of it, three of them only at a rotation:
    reports pads and teleporters; the check now asks and grants the same grace it
    gives a respawn.
 
+## Intents go every frame now
+
+`NetConfig.IntentSendInterval` is **1**, so a player publishes position and aim
+at 60 Hz rather than 30.
+
+This is not a smoothing question, it is what a remote player *is*: a puppet is
+pinned to the position its owner reported (`NetPlayerBridge.RestoreReportedPosition`
+runs after the engine's own movement step), so whatever the local simulation
+does between intents is thrown away. At 2, everybody but yourself moved in 30 Hz
+steps on a 60 Hz screen, and a recorded demo -- where every player is a puppet,
+including the recorder's own -- stepped from end to end. That is what "the demo
+looks like 30 fps" was. Measured in the file: a two-player recording carried
+**53.8 SlotIntent/s before and 104.7 after** (~27/s per player, then ~52/s),
+and grew from 3.0 to 4.2 KiB/s on disk.
+
+It was 2 because the server relays N*(N-1) intents a frame and at six players
+that was losing enough of them to leave gaps. What made that true was fault 12
+below: a send queue that dropped the *newest* packets when it filled, which has
+since been fixed.
+
+Four eight-client 120 s loopback runs, two each way:
+
+| | mismatches | scoreboards |
+|---|---|---|
+| 30 Hz | 15 (11 unmorph, 4 alt-attack) | agree |
+| 30 Hz | 5 (3 unmorph, 1 alt-attack) | disagree by 2 |
+| 60 Hz | 9 (6 unmorph, 2 teleports) | disagree by 5 |
+| 60 Hz | 14 (13 unmorph) | disagree by 4 |
+
+**What that shows is that it is not worse, and nothing finer than that.** The
+run-to-run spread (5 to 15) swamps the difference between the cadences, and the
+scoreboard drifts in three runs of four at both -- so it is this harness on this
+machine, not the change. Eight clients on one box measure the box; `run-remote.sh`
+against the Pi is the instrument for anything sharper. The cost is about 100
+bytes on the wire per player per frame, so ~42 KB/s into each client of an
+eight-player match.
+
+No protocol bump: the layout did not move and nothing reads the cadence, so a
+build sending at 30 and one sending at 60 understand each other exactly as
+before -- the older one is simply seen in coarser steps. `ProtocolVersion` is
+for a build that would read the bytes correctly and then play a different game,
+which this is not.
+
 ## What is left at 250 ms and is not a bug
 
 `alt-attack` at ~40% (one-frame presses collapsing into one intent window),
@@ -200,8 +243,8 @@ quite that:
     Eight clients on one machine produce ~2000 packets/s between them, so one
     130 ms frame overflows it. Queue is 2048 now, socket buffers 1 MB, and an
     overflow drops the oldest.
-13. **The check compared two different sample rates.** A player publishes
-    position/aim every `IntentSendInterval` frames (30 Hz), but
+13. **The check compared two different sample rates.** A player published
+    position/aim every `IntentSendInterval` frames, which was then 30 Hz, but
     `NetFeatureCheck` measured the *local* player's path every frame (60 Hz)
     and compared lengths -- looked clean with one opponent (aim moves slowly),
     fell apart with seven (aim slews several times a second, the 30 Hz

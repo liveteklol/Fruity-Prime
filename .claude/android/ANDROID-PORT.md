@@ -308,6 +308,18 @@ which is exactly how it was reported. `ThumbnailMode.Exit()` exists for that,
 while an in-process run is going.
 
 
+## Custom maps
+
+They reach the phone as **`.fpmap` bundles** and could not reach it any other
+way: `AndroidAsset` was globbed as `maps\*.json` and `AssetManager.List` does
+not recurse, so a map that keeps its level in a folder of its own -- which is
+how every converted map is worked on -- matched neither side and the phone
+listed the 27 cartridge rooms. A bundle is one file at the top of `maps/`, and
+`AndroidMaps.Install` unpacks it into the external directory beside the
+extracted game files, where a player can also drop one of their own over USB.
+The room binaries are still built on the device, from that player's own
+textures; `AndroidMaps.EnsureBuilt` is what runs the builder before a match.
+
 ## Demos
 
 Watching a recorded match works here too, and needed two things the desktop

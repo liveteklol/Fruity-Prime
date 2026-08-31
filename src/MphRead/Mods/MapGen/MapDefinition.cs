@@ -273,7 +273,9 @@ namespace MphRead.Mods.MapGen
             byte[]? bundled = ReadBundledTextures();
             if (bundled != null)
             {
-                return MapTexturePack.Load(bundled, Textures);
+                // ReadBundledTextures returns nothing without a name to look
+                // one up by, so there is one here.
+                return MapTexturePack.Load(bundled, Textures ?? "");
             }
             string? path = ResolveTextures();
             return path == null ? null : MapTexturePack.Load(path);

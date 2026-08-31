@@ -355,6 +355,19 @@ namespace MphRead.Mods
             // the one place every entry point passes through, launcher
             // included, and after the game-file check -- means a map file is
             // enough to have a working room.
+            // Where the maps are, for a command that is not the game: the
+            // workflow cooks the repository's maps/ into bundles, and the
+            // default is beside the executable, which in a build is a copy.
+            // Before anything reads the map list, which is loaded once.
+            string? mapDir = ValueAfter(args, "mapdir");
+            if (mapDir != null)
+            {
+                // Against the directory the command was typed in, not the one
+                // the process moved itself to (see ConsoleSetup.LaunchDirectory):
+                // `-mapdir maps` from a checkout means the checkout's maps.
+                MapGen.CustomRooms.MapDirectory = System.IO.Path.GetFullPath(
+                    System.IO.Path.Combine(ConsoleSetup.LaunchDirectory, mapDir));
+            }
             if (!HasFlag(args, "mapgen"))
             {
                 MapGen.CustomRooms.GenerateMissing();

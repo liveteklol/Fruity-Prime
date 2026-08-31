@@ -357,3 +357,8 @@ maps/*.tex
 # binaries: the game bakes one when the map file names it and it is not there,
 # so what belongs in git is the level and the recipe, not this.
 maps/**/*.tex
+
+# Map bundles. Cooked from a recipe and the level beside it (-mapbundle), which
+# is what the workflow does before it publishes, so this is a build artifact
+# and not a source: what belongs in git is the folder it is cooked from.
+maps/**/*.fpmap

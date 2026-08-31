@@ -28,9 +28,28 @@ if [ ! -d "$maps" ]; then
   exit 0
 fi
 
+# A bundle is a map and its level in one file, so there is nothing beside it to
+# look for: what has to be true is that the level is inside. Read the index
+# without unpacking anything -- unzip -l is in every runner image, and a bundle
+# with no .bsp in it is exactly the failure this script exists to catch.
+while IFS= read -r file; do
+  found=$((found + 1))
+  name=$(basename "$file")
+  if unzip -l "$file" 2>/dev/null | grep -qiE '\.bsp$'; then
+    echo "ok:      $name carries its level inside it"
+  else
+    echo "MISSING: $name is a bundle with no level in it"
+    fail=1
+  fi
+done < <(find "$maps" -name '*.fpmap' | sort)
+
 # The level a map converts is named by import.source. Read it without a JSON
 # parser: the field is one line in every file this writes, and a dependency on
 # jq for a five-line check is worse than a grep.
+#
+# A recipe that has been cooked into a bundle beside it is the bundle's
+# business, not its own: the working copy of a map keeps somebody's .pk3 in a
+# folder, and that folder is not what ships.
 while IFS= read -r file; do
   found=$((found + 1))
   name=$(basename "$file")
@@ -40,7 +59,10 @@ while IFS= read -r file; do
     echo "ok:      $name builds from its own description, no level needed"
     continue
   fi
-  if [ -f "$(dirname "$file")/$source" ]; then
+  bundle="$maps/$(basename "$file" .json).fpmap"
+  if [ -f "$bundle" ]; then
+    echo "ok:      $name ships as $(basename "$bundle")"
+  elif [ -f "$(dirname "$file")/$source" ]; then
     echo "ok:      $name has $source beside it"
   else
     echo "MISSING: $name converts $source, which is not in $(dirname "$file")"

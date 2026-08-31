@@ -1,5 +1,39 @@
 # Custom maps: the generator and the Quake 3 importer
 
+## What ships: one file
+
+**A map is handed out as a `.fpmap` bundle** -- the recipe, the level and the
+baked texture pack in one zip, with the level trimmed to the lumps the importer
+reads (`Q3Bsp.UsedLumps`: entities, textures, planes, models, brushes,
+brushsides, vertexes, meshverts, faces). Everything else a compiler writes --
+lightmaps, light volumes, visdata, the BSP tree -- is for a renderer that
+lights and culls the Quake way, and this importer does neither: in df_dust2
+they are 7.6 MB of the 8.8. Cooked and compressed, de_dust2 is **376 KB**
+against the **2.8 MB** its folder weighed.
+
+| | Command | Note |
+|---|---|---|
+| cook | `-mapbundle ["NAME"] [-mapdir DIR] [-out FILE]` | default output is the top of `maps/`, one file per map |
+| read | nothing | `MapDefinition.Load` opens a bundle like a recipe; `Q3Bsp.Load` already opened a zip and found a level in it by name, which is how it reads a `.pk3` |
+
+- The bundle is a **build artifact**: gitignored, cooked by both workflows
+  before they publish. The folder it is cooked from -- recipe, `.pk3`, `.tex` --
+  is the source, and a `.pk3` is kept out of every package by
+  `CopyToPublishDirectory=Never` while still being copied to a *build* output,
+  which is what the convert-and-test loop uses.
+- **A folder and a bundle of the same name are the same map.** `MapFiles()`
+  lists bundles first and drops any recipe with a bundle's name, so a checkout
+  that has both registers one room and not two.
+- The recipe inside a bundle is rewritten as it is cooked: `import.source`
+  points at `maps/<level>.bsp` *inside* the bundle, so a bundle names nothing
+  outside itself.
+- **It is what put custom maps on Android.** An APK's asset list does not
+  recurse, and the asset glob was `maps\*.json` -- so a map that keeps its
+  level in a folder of its own arrived as neither, and the phone listed 27
+  rooms. One file at the top of `maps/` is visible to both halves.
+- A bundle does not settle whether a level may be handed out. Cooking
+  somebody's level into a smaller container leaves it their level.
+
 **A map is two files: the recipe and the level, and both ship.** The asset
 guard used to refuse a `.pk3` by extension; it now refuses only id Software's
 own paks, by name. What that guard is for is keeping somebody else's
