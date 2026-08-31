@@ -5,6 +5,9 @@
 # Produces one archive per target, each holding binaries and a note, and
 # nothing else: the game's own files are unpacked from the player's cartridge
 # dump by the launcher, on their machine, and are never part of a release.
+#
+# What it leaves is a *draft*. The packages are built, checked and uploaded,
+# and publishing them is a person pressing the button.
 name: release
 
 on:
@@ -354,12 +357,43 @@ jobs:
           cp publish/android/*-Signed.apk "dist/FruityPrime-$TAG-android.apk"
           ls -la dist
 
+      # A draft: everything is built and uploaded, and a person presses the
+      # button. This is the one workflow whose output people download, and a
+      # tag can be pushed by accident; a draft is the step where somebody reads
+      # the notes and looks at the file list before any of it is public.
+      #
+      # Not flagged a prerelease, though the notes say beta. GitHub's
+      # releases/latest -- which is exactly what the in-app update check asks
+      # for (Mods/Update/UpdateCheck.cs) -- skips prereleases, so flagging one
+      # would quietly turn the updater off for every player.
+      #
+      # Rerunning the same tag updates the draft rather than failing: the
+      # create/upload arms are chosen by whether the release is already there,
+      # instead of running create and treating any error at all as "it exists".
       - name: release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.name.outputs.tag }}
         run: |
-          gh release create "$TAG" dist/* \
-            --title "Fruity Prime $TAG" \
-            --notes "Built from ${{ github.sha }}. No game data is included: the launcher unpacks it from your own cartridge dump on first run. The Android APK is new and has had far less use than the desktop builds -- game files go in Android/data/fr.livetek.fruityprime/files." \
-            --verify-tag || gh release upload "$TAG" dist/* --clobber
+          set -euo pipefail
+          cat > notes.md <<'NOTE'
+          **Beta.** It plays, it is not finished -- expect rough edges, and please say what you
+          hit in [Issues](https://github.com/liveteklol/Fruity-Prime/issues).
+
+          You bring your own Metroid Prime Hunters cartridge dump. No game data is included here
+          and none is downloaded.
+
+          - **Windows** -- the `win-x64` zip, run `FruityPrime.exe`
+          - **Linux / macOS** -- the `.tar.gz`, run `./FruityPrime -launcher`
+          - **Android** -- the `.apk`
+          - **Running a server** -- the `server-` packages, which need no game files
+
+          Setup and everything else is in the [README](https://github.com/liveteklol/Fruity-Prime#readme).
+          NOTE
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+            gh release edit "$TAG" --title "Fruity Prime $TAG" --notes-file notes.md
+          else
+            gh release create "$TAG" dist/* --draft --verify-tag \
+              --title "Fruity Prime $TAG" --notes-file notes.md
+          fi

@@ -223,8 +223,11 @@ time: `.claude/testing/TEST-HARNESS.md` and `.claude/testing/TEST-METRICS.md`
 
 `.github/workflows/build.yml` publishes `win-x64`, `linux-x64`,
 `linux-x64-server`, `linux-arm64`, `osx-x64` and `osx-arm64` on every push and
-PR; `release.yml` publishes those six plus the Windows server (seven packages)
-on a pushed `v*` tag:
+PR; `release.yml` builds those six plus the Windows server (seven packages) and
+the APK on a pushed `v*` tag, and leaves them on a **draft** release for a
+person to read and publish -- it is never published by the workflow itself,
+and it is deliberately not flagged a prerelease, since GitHub's
+`releases/latest` (what the in-app update check asks) skips those:
 
 ```bash
 git tag v0.36.0 && git push origin v0.36.0
