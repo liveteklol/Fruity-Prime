@@ -362,10 +362,16 @@ The APK lands in `bin/Debug/net9.0-android35.0/fr.livetek.fruityprime-Signed.apk
 `adb install -r` it.
 
 Nobody has to do any of that to get one, though: `build.yml` has an `android`
-job on every push, and its **FruityPrime-android** artifact holds a release APK,
-an untrimmed debug APK beside it, and an INSTALL.txt. `release.yml` puts
-`FruityPrime-<tag>-android.apk` in a tagged release. Both are signed with the
-SDK's debug key -- enough to install, not enough for a store.
+job on every push, and its **FruityPrime-android** artifact holds the release
+APK and an INSTALL.txt. `release.yml` puts `FruityPrime-<tag>-android.apk` in a
+tagged release. Both are signed with the SDK's debug key -- enough to install,
+not enough for a store.
+
+The untrimmed Debug APK is no longer built or collected: it existed to tell a
+crash apart from the trimmer having removed something, which is worth building
+when that question is being asked and not worth handing out beside the real one
+every push. Build it by hand when you need it -- and with
+`-p:EmbedAssembliesIntoApk=true`, or it holds no managed code.
 
 **The trimmer is why `Properties/TrimmerRoots.xml` exists.** A Release publish
 really does run ILLink over this app, and every use of `KeyboardState` and

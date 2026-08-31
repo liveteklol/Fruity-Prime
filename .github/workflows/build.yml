@@ -202,39 +202,26 @@ jobs:
           -p:JavaSdkDirectory="$JAVA_HOME"
           -o publish/android
 
-      # And an untrimmed one beside it, so that a crash on a device can be told
-      # apart from the trimmer having removed something.
-      #
-      # EmbedAssembliesIntoApk is the whole point of this step. A Debug build
-      # defaults it to false and expects `dotnet build -t:Run` to push the
-      # assemblies over adb afterwards (fast deployment); an APK built that way
-      # and installed by hand holds no managed code at all and aborts at
-      # startup with "No assemblies found in .../.__override__". It is a real
-      # trap: the build succeeds, the APK installs, and it dies before any of
-      # this project's code runs.
-      - name: build a debug APK to fall back on
-        run: >
-          dotnet build src/MphRead.Android/MphRead.Android.csproj
-          -c Debug -p:EmbedAssembliesIntoApk=true
-          -p:AndroidSdkDirectory="$ANDROID_HOME"
-          -p:JavaSdkDirectory="$JAVA_HOME"
-
-      - name: collect the APKs
+      # One APK, the one people install. An untrimmed Debug build was
+      # collected beside it, as a way of telling a crash on a device apart
+      # from the trimmer having removed something -- which is a thing to build
+      # when that question is actually being asked, not to hand out with every
+      # push: it is much bigger, much slower, and two APKs in one folder is an
+      # invitation to install the wrong one. Building one by hand needs
+      # `-p:EmbedAssembliesIntoApk=true`, or it holds no managed code at all
+      # (see .claude/android/ANDROID-PORT.md).
+      - name: collect the APK
         run: |
           set -euo pipefail
           mkdir -p artifact
           cp publish/android/*-Signed.apk artifact/FruityPrime-release.apk
-          cp src/MphRead.Android/bin/Debug/net9.0-android35.0/*-Signed.apk \
-            artifact/FruityPrime-debug.apk
           cat > artifact/INSTALL.txt <<'NOTE'
           Fruity Prime for Android.
 
             adb install -r FruityPrime-release.apk
 
-          Both APKs are signed with the SDK's debug key, which is enough to
-          install and not enough for a store. Install the release one; the
-          debug one is untrimmed, much bigger and slower, and is here so that a
-          crash can be told apart from the trimmer having removed something.
+          It is signed with the SDK's debug key, which is enough to install and
+          not enough for a store.
 
           The game's own files are yours and are not in here. Extract them on a
           desktop, then copy paths.txt and the extracted folders into

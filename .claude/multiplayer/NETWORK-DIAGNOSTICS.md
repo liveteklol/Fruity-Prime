@@ -311,6 +311,38 @@ clients agree exactly on how many items were taken, so it is probably fine, but
 probably is not measured.
 
 
+## A vacated slot kept its occupant's score
+
+Reported as: kill somebody, leave the match, reconnect to the same server, and
+the kill is still there against your name.
+
+It is the same shape as every other rejoin fault -- per-slot state describing
+whoever *used* to be in the slot -- and the score was the one piece nobody had
+cleared. `NetSlotManager` already forgot the simulation's state, the wire's and
+the damage sequence's when a slot changed hands (three `ForgetSlot` calls);
+`NetScoreboard.ForgetSlot` is the fourth, and it runs both when a slot is
+vacated and when it is taken, because a slot can be refilled before this
+machine has run a frame with it empty.
+
+It has to happen on every machine and not only on the one that left: the
+scoreboard belongs to the authority, which publishes Points, Kills and Deaths
+per slot in each snapshot for everyone else to adopt. Team totals are not
+touched -- `GameState.UpdateStandings` recomputes them from the per-slot
+figures every update, so clearing the slot clears the team, and clearing a team
+total directly would be wrong in a team mode.
+
+Measured with four scripted clients on a 15-minute match, A leaving at 50 s and
+D taking its slot:
+
+| | A's slot when it left | slot 0 at the end |
+|---|---|---|
+| before | 0k/7d/-7p | 0k/**11d**/-11p (A's 7 plus D's 4) |
+| after | 0k/6d/-6p | D's own 0k/4d/-4p, and 0k/0d/0p once D also left |
+
+The rig's default `maprotation.txt` runs one-minute matches, and a rotation
+resets every score (`NetRoomChange.ResetScores`) -- which hides this fault
+completely. Any measurement of a scoreboard needs a match longer than the run.
+
 ## Rejoining: per-slot state, and what `run-rejoin.sh` measures
 
 The report: A creates the game, B joins, A quits, B stays, A rejoins the
