@@ -228,9 +228,14 @@ the APK on a pushed `v*` tag, and leaves them on a **draft** release for a
 person to read and publish -- it is never published by the workflow itself,
 and it is deliberately not flagged a prerelease, since GitHub's
 `releases/latest` (what the in-app update check asks) skips those:
+Releases here are numbered from **v0.1.0** and are their own line, not
+upstream's: `Program.Version` (0.35.1.0) is upstream's data-format number and
+is what `paths.txt` is checked against, while the tag is what
+`BuildVersion.Current` reads. The two never meet, which is why the release
+numbering could start over without invalidating anybody's extracted files.
 
 ```bash
-git tag v0.36.0 && git push origin v0.36.0
+git tag v0.2.0 && git push origin v0.2.0
 ```
 
 `tools/check-no-game-assets.sh` (no Nintendo asset ever published) and
