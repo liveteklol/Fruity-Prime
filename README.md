@@ -26,8 +26,6 @@ A fork of [NoneGiven/MphRead](https://github.com/NoneGiven/MphRead).
 - **Keyboard & mouse**
 - **Cel shading**
 - **Modern HUD**
-- **A real launcher**
-- **Map previews**
 - **Story mode**
 - **Auto Update check**
 
