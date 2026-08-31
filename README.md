@@ -10,8 +10,6 @@ A fork of [NoneGiven/MphRead](https://github.com/NoneGiven/MphRead).
 
 **[Download](https://github.com/liveteklol/Fruity-Prime/releases)** · [Support the project ☕](https://ko-fi.com/livetek)
 
-<img width="500" height="300" alt="Fruity Prime" src="https://github.com/user-attachments/assets/ec6a2871-2b67-4de0-8b1a-ac6740c8d388" />
-
 ## Features
 
 - **Widescreen**
@@ -36,6 +34,8 @@ A fork of [NoneGiven/MphRead](https://github.com/NoneGiven/MphRead).
 ## Support
 
 If you enjoy it: **[ko-fi.com/livetek](https://ko-fi.com/livetek)** ☕
+
+<img width="500" height="300" alt="Fruity Prime" src="https://github.com/user-attachments/assets/ec6a2871-2b67-4de0-8b1a-ac6740c8d388" />
 
 ## Getting started
 
