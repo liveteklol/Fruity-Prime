@@ -177,10 +177,19 @@
        what players download. The workflow cooks the bundle before it
        publishes. -->
   <ItemGroup>
-    <None Include="..\..\maps\**\*.json;..\..\maps\**\*.bsp;..\..\maps\**\*.tex;..\..\maps\**\*.fpmap" Link="maps\%(RecursiveDir)%(Filename)%(Extension)">
+    <!-- What ships: the bundles, and any map file loose at the top of maps/. -->
+    <None Include="..\..\maps\**\*.fpmap;..\..\maps\*.json;..\..\maps\*.bsp;..\..\maps\*.tex" Link="maps\%(RecursiveDir)%(Filename)%(Extension)">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <None Include="..\..\maps\**\*.pk3" Link="maps\%(RecursiveDir)%(Filename)%(Extension)">
+    <!-- What a map is worked on as: a folder holding the recipe, somebody
+         else's .pk3 and the textures baked from it. Copied to a build output,
+         because that is the convert-and-test loop, and never published: a
+         package carrying the folder as well as the bundle would carry the
+         same map twice, one copy of it naming a .pk3 that is deliberately not
+         there. -->
+    <None Include="..\..\maps\**\*.json;..\..\maps\**\*.bsp;..\..\maps\**\*.tex;..\..\maps\**\*.pk3"
+          Exclude="..\..\maps\*.json;..\..\maps\*.bsp;..\..\maps\*.tex"
+          Link="maps\%(RecursiveDir)%(Filename)%(Extension)">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>Never</CopyToPublishDirectory>
     </None>

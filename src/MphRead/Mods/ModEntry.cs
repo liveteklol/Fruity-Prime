@@ -45,6 +45,65 @@ namespace MphRead.Mods
                 return true;
             }
 
+            // Where the maps are. Read for every invocation and before
+            // anything reads the map list, which is loaded once -- and against
+            // the directory the command was typed in rather than the one the
+            // process moved itself to (see ConsoleSetup.LaunchDirectory), so
+            // `-mapdir maps` from a checkout means that checkout's maps.
+            string? mapDir = ValueAfter(args, "mapdir");
+            if (mapDir != null)
+            {
+                MapGen.CustomRooms.MapDirectory = System.IO.Path.GetFullPath(
+                    System.IO.Path.Combine(ConsoleSetup.LaunchDirectory, mapDir));
+            }
+
+            // Cooking a bundle is here, before the game-file check, for the
+            // reason the dedicated server is: it reads a recipe, the level
+            // beside it and the textures baked from it, and touches no
+            // extracted game data at all. The workflow runs it on a runner
+            // that has none, where the check exits with "press any key" on a
+            // console nobody is looking at -- and then throws, because there
+            // is no console to read a key from either.
+            if (HasFlag(args, "mapbundle"))
+            {
+                string? which = ValueAfter(args, "mapbundle");
+                string? outPath = ValueAfter(args, "out");
+                int cooked = 0;
+                int failed = 0;
+                foreach (MapGen.MapDefinition def in MapGen.CustomRooms.Definitions)
+                {
+                    if (which != null && !which.Equals(def.Name, StringComparison.OrdinalIgnoreCase)
+                        && !which.Equals("all", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+                    if (def.SourcePath == null || def.BundlePath != null || def.Import == null)
+                    {
+                        // Already a bundle, or a map that builds from its own
+                        // description and has no level to carry.
+                        continue;
+                    }
+                    try
+                    {
+                        MapGen.MapBundle.Cook(def, def.SourcePath, outPath);
+                        cooked++;
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"{def.Name}: {ex.Message}");
+                        failed++;
+                    }
+                }
+                if (cooked == 0 && failed == 0)
+                {
+                    Console.WriteLine("No map to bundle. A bundle is cooked from a recipe and the "
+                        + $"level it converts; put both in {MapGen.CustomRooms.MapDirectory}.");
+                }
+                Environment.ExitCode = failed == 0 ? 0 : 1;
+                return true;
+            }
+
+
             // The explicit check, so there is always one command that answers
             // "am I on the latest build". Nothing is downloaded here either:
             // it prints the release page and opens it if there is a desktop to
@@ -355,19 +414,6 @@ namespace MphRead.Mods
             // the one place every entry point passes through, launcher
             // included, and after the game-file check -- means a map file is
             // enough to have a working room.
-            // Where the maps are, for a command that is not the game: the
-            // workflow cooks the repository's maps/ into bundles, and the
-            // default is beside the executable, which in a build is a copy.
-            // Before anything reads the map list, which is loaded once.
-            string? mapDir = ValueAfter(args, "mapdir");
-            if (mapDir != null)
-            {
-                // Against the directory the command was typed in, not the one
-                // the process moved itself to (see ConsoleSetup.LaunchDirectory):
-                // `-mapdir maps` from a checkout means the checkout's maps.
-                MapGen.CustomRooms.MapDirectory = System.IO.Path.GetFullPath(
-                    System.IO.Path.Combine(ConsoleSetup.LaunchDirectory, mapDir));
-            }
             if (!HasFlag(args, "mapgen"))
             {
                 MapGen.CustomRooms.GenerateMissing();
@@ -493,46 +539,6 @@ namespace MphRead.Mods
                 if (count == 0 && failed == 0)
                 {
                     Console.WriteLine($"No maps to generate. Put a map JSON in {MapGen.CustomRooms.MapDirectory}.");
-                }
-                Environment.ExitCode = failed == 0 ? 0 : 1;
-                return true;
-            }
-
-            // Cook a map into the one file it is handed out as.
-            if (HasFlag(args, "mapbundle"))
-            {
-                string? which = ValueAfter(args, "mapbundle");
-                string? outPath = ValueAfter(args, "out");
-                int cooked = 0;
-                int failed = 0;
-                foreach (MapGen.MapDefinition def in MapGen.CustomRooms.Definitions)
-                {
-                    if (which != null && !which.Equals(def.Name, StringComparison.OrdinalIgnoreCase)
-                        && !which.Equals("all", StringComparison.OrdinalIgnoreCase))
-                    {
-                        continue;
-                    }
-                    if (def.SourcePath == null || def.BundlePath != null || def.Import == null)
-                    {
-                        // Already a bundle, or a map that builds from its own
-                        // description and has no level to carry.
-                        continue;
-                    }
-                    try
-                    {
-                        MapGen.MapBundle.Cook(def, def.SourcePath, outPath);
-                        cooked++;
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"{def.Name}: {ex.Message}");
-                        failed++;
-                    }
-                }
-                if (cooked == 0 && failed == 0)
-                {
-                    Console.WriteLine("No map to bundle. A bundle is cooked from a recipe and the "
-                        + $"level it converts; put both in {MapGen.CustomRooms.MapDirectory}.");
                 }
                 Environment.ExitCode = failed == 0 ? 0 : 1;
                 return true;
