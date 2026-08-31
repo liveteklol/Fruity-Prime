@@ -151,7 +151,7 @@ namespace MphRead.Mods
         /// watching -- and on the free camera it is the only thing on screen
         /// at all. It cannot come from the usual place: the keybind states
         /// every other control reads are updated in the loop that spectating
-        /// steps out of, so <see cref="PlayerEntity.ProcessInput"/> reads this
+        /// steps out of, so <c>PlayerEntity.ProcessInput</c> reads this
         /// one off the keyboard itself and leaves it here.
         /// </summary>
         public static bool ShowScoreboard { get; private set; }
