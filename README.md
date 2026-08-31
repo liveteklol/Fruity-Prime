@@ -1,7 +1,8 @@
 <img src="src/MphRead/Assets/fruity-prime-logo.png" alt="Fruity Prime" width="520">
 
-**Metroid Prime Hunters, playable again.** A fork of
-[NoneGiven/MphRead](https://github.com/NoneGiven/MphRead) with online multiplayer, dedicated
+**Metroid Prime Hunters PC & Android port** 
+
+A fork of [NoneGiven/MphRead](https://github.com/NoneGiven/MphRead) with online multiplayer, dedicated
 servers, 8 players, high resolution, ultrawide, a real launcher, and an Android build.
 
 > Needs your own Metroid Prime Hunters cartridge dump. No Nintendo game data ships here or is downloaded.
@@ -10,27 +11,32 @@ servers, 8 players, high resolution, ultrawide, a real launcher, and an Android 
 
 ## Features
 
-- **Widescreen**: 16:9 and 21:9 ultrawide, a wider view rather than a stretched one
-- **High resolution**: any window size, borderless fullscreen, 25-100% render scale
-- **60 FPS**: fixed 60 Hz everywhere, with an FPS counter
-- **8 players**: eight in a match, where the DS allowed four
-- **Online**: server browser, join by address, host with zero router setup
-- **Dedicated servers**: no game files needed, map rotation, runs on a Raspberry Pi
-- **Demo recording**: record mid-match, replay it later, spectate live matches Quake-3 style
-- **Custom maps**: convert a Quake 3 `.pk3` in one command, or build one from JSON. Dust II ships with the release
-- **Bots**: 0 to 7 offline, three skill levels, and they navigate custom maps
+- **Widescreen**
+- **High resolution**
+- **Windows / Linux / Android port**
+- **60 FPS**
+- **8 players**
+- **Online**
+- **Dedicated servers**
+- **Demo recording**
+- **Custom maps**
+- **Bots**: 0 to 7 offline
 - **All 12 modes**: Battle, Survival, Capture, Bounty, Defender, Nodes, Prime Hunter, and teams
-- **Keyboard & mouse**: fully rebindable, aim sensitivity, inverted axes
-- **Cel shading**: flat colours and inked edges, plus fog, lighting and filtering toggles
-- **Modern HUD**: resizable weapon list, custom crosshair, helmet/visor/HUD opacity, no-helmet mode
-- **A real launcher**: Host, Join, Watch a demo, Settings, on Windows, Linux, macOS and Android
-- **Map previews**: rendered on your own machine, nothing downloaded
-- **Story mode**: 3 save slots, straight from the launcher, upstream bug fixes on by default
-- **Android**: real APK, GL ES 3.0 renderer, touch controls, online play
-- **Update check**: tells you when a newer release is out; installs nothing
+- **Keyboard & mouse**
+- **Cel shading**
+- **Modern HUD**
+- **A real launcher**
+- **Map previews**
+- **Story mode**
+- **Auto Update check**
 
-Plus everything upstream already did: model viewer, scene renderer, collision view, COLLADA/PNG/WAV
-export, Blender scripts.
+## Support
+
+If this is useful to you: **[ko-fi.com/livetek](https://ko-fi.com/livetek)** ☕
+
+<img width="500" height="300" alt="image" src="https://github.com/user-attachments/assets/ec6a2871-2b67-4de0-8b1a-ac6740c8d388" />
+---
+
 
 ## Getting started
 
@@ -124,11 +130,6 @@ dotnet publish src/MphRead/MphRead.csproj -c Release \
 `-p:MphReadServer=true` for a server build. Android: `dotnet build src/MphRead.Android/MphRead.Android.csproj`
 with the `android` workload. Minimum SDK [.NET 9.0](https://dotnet.microsoft.com/en-us/download/dotnet/9.0).
 
-## Support
-
-If this is useful to you: **[ko-fi.com/livetek](https://ko-fi.com/livetek)** ☕
-
----
 
 *Below is upstream MphRead's own README, unchanged.*
 
