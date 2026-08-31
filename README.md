@@ -12,7 +12,7 @@ A fork of [NoneGiven/MphRead](https://github.com/NoneGiven/MphRead).
 
 ## Features
 
-- **Widescreen**
+- **Ultra Widescreen support**
 - **High resolution**
 - **Windows / Linux / Android port**
 - **60 FPS**
