@@ -27,6 +27,25 @@ against the **2.8 MB** its folder weighed.
 - The recipe inside a bundle is rewritten as it is cooked: `import.source`
   points at `maps/<level>.bsp` *inside* the bundle, so a bundle names nothing
   outside itself.
+- **Cooking bakes the texture pack if it is not already there**, and refuses
+  to write a bundle it cannot give one to. The pack is derived from the
+  level's own art, so it is gitignored like the room binaries and the game
+  bakes it the first time a map is played -- which means the machine that
+  cooks a release has never played the map and has none, and a bundle carries
+  the level trimmed to the lumps the importer reads, which hold no art at all.
+  Every published bundle before this fix carried `"Textures": ""`: a room with
+  no materials, which came out as an `ArgumentOutOfRangeException` the moment
+  somebody picked DUST2 -- in a Windows GUI process with no console to say so,
+  with the launcher's picture missing for the same reason. Three things now
+  stand between that and a player: `Cook` bakes and then throws,
+  `Q3Import` names the missing pack instead of indexing a list that is not
+  there, and `tools/check-maps-shipped.sh` reads the recipe out of each
+  shipped bundle and checks the pack it names is inside it.
+- **A custom room that failed to build is refused, not loaded.** It is still
+  in the room table -- the table is built once, from the recipes -- so the
+  launcher lists it and the picker shows a frame for it.
+  `CustomRooms.WhyUnplayable` answers why, and `MatchStart.Launch` prints that
+  and returns instead of reaching for binaries that are not there.
 - **It is what put custom maps on Android.** An APK's asset list does not
   recurse, and the asset glob was `maps\*.json` -- so a map that keeps its
   level in a folder of its own arrived as neither, and the phone listed 27

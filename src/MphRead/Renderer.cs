@@ -2193,6 +2193,14 @@ namespace MphRead
                 PlayerEntity.Main.DrawHudModels();
                 UnsetHudLayerUniforms();
             }
+            else if (ScoreboardOverFreeCamera)
+            {
+                // Only the filter that dims the scene behind the scoreboard;
+                // PlayerHud draws nothing else on the free camera.
+                SetHudLayerUniforms();
+                PlayerEntity.Main.DrawHudModels();
+                UnsetHudLayerUniforms();
+            }
 
             // After the weapon, so it is drawn around too, and before the
             // target is put on screen, so the helmet and the HUD are not.
@@ -2283,6 +2291,15 @@ namespace MphRead
                 {
                     PlayerEntity.Main.DrawPauseMenuForeground();
                 }
+            }
+            else if (ScoreboardOverFreeCamera)
+            {
+                // The scoreboard, and nothing else: none of the helmet and
+                // visor layers above belong to a view that is not out of
+                // anybody's eyes. PlayerHud decides that; this only lets it
+                // be asked, since the HUD is otherwise not drawn at all while
+                // the camera is not a player's.
+                PlayerEntity.Main.DrawHudObjects();
             }
             if (_movieFrameIndex != -1)
             {
@@ -4680,6 +4697,20 @@ namespace MphRead
         /// </summary>
         private bool _freeCam;
         public bool IsFreeCam => _freeCam;
+        /// <summary>
+        /// Whether the scoreboard should be drawn over the spectator's free
+        /// camera: they are on it, and holding the button for it.
+        ///
+        /// The free camera is CameraMode.Roam, which is what gets it "no HUD"
+        /// for free -- the HUD is only drawn for a player's own camera. A
+        /// scoreboard is the match's rather than a player's, though, and
+        /// somebody watching from the map is exactly who wants to read one,
+        /// so this is the one thing that reaches past that.
+        /// </summary>
+        private static bool ScoreboardOverFreeCamera => Mods.SpectatorMode.FreeCamera
+            && Mods.SpectatorMode.ShowScoreboard
+            && PlayerEntity.Main.LoadFlags.TestFlag(LoadFlags.Active);
+
 
         /// <summary>
         /// The spectator's own no-clip camera: an independent view of the map

@@ -73,6 +73,16 @@ namespace MphRead.Entities
 
         private ModelInstance _filterModel = null!;
         private bool _showScoreboard = false;
+
+        /// <summary>
+        /// Whether the scoreboard is up: this player holding the button for
+        /// it, or somebody spectating this player holding it. A spectator's
+        /// own button state is kept by <see cref="Mods.SpectatorMode"/>,
+        /// because the input pass that fills in <see cref="_showScoreboard"/>
+        /// is the one spectating skips.
+        /// </summary>
+        private bool ShowScoreboard => _showScoreboard
+            || Mods.SpectatorMode.ShowScoreboard && IsMainPlayer;
         private int _iceLayerBindingId = -1;
         private int _helmetBindingId = -1;
         private int _helmetDropBindingId = -1;
@@ -709,7 +719,7 @@ namespace MphRead.Entities
             {
                 if (!IsAltForm && !IsMorphing && !IsUnmorphing)
                 {
-                    if (!Flags1.TestFlag(PlayerFlags1.WeaponMenuOpen) && !_showScoreboard
+                    if (!Flags1.TestFlag(PlayerFlags1.WeaponMenuOpen) && !ShowScoreboard
                         && GameState.MatchState == MatchState.InProgress)
                     {
                         if (_drawIceLayer)
@@ -1229,18 +1239,24 @@ namespace MphRead.Entities
             {
                 DrawFps();
             }
-            if (Mods.SpectatorMode.IsSpectating && !Mods.Network.DemoPlayback.IsActive)
+            if (Mods.SpectatorMode.FreeCamera)
             {
-                // Watching, not playing. The HUD belongs to whoever is in the
-                // match, and a spectator is not: their own readouts would be
-                // of a body that is hidden, non-solid and taking no input, and
-                // the readouts of whoever they are following are not theirs to
-                // have. It comes back with Rejoin and not before.
+                // Looking at the map, not out of anybody's eyes: there is no
+                // player whose readouts these would be. Following one is the
+                // other case and keeps their HUD -- watching a hunter play
+                // without seeing what they are playing with tells you very
+                // little, and it is what watching a recording back has always
+                // shown.
                 //
-                // Demo playback is the exception. It is spectating too, but
-                // there is nothing to rejoin and no match of your own being
-                // shown instead -- the HUD of whoever is being watched is the
-                // whole point of watching a recording back.
+                // The scoreboard is the exception, because it is the match's
+                // and not a player's: it is what somebody watching from the
+                // map is most likely to want, and holding the button for it
+                // still answers here.
+                if (ShowScoreboard && !GameState.MenuPause)
+                {
+                    DrawMatchTime();
+                    DrawScoreboard();
+                }
                 return;
             }
             if (GameState.MenuPause)
@@ -1275,7 +1291,7 @@ namespace MphRead.Entities
                     _scene.DrawHudObject(_weaponSelectInsts[i], mode: 1);
                 }
             }
-            else if (_showScoreboard)
+            else if (ShowScoreboard)
             {
                 DrawMatchTime();
                 DrawScoreboard();
@@ -1354,10 +1370,15 @@ namespace MphRead.Entities
             {
                 return;
             }
-            if (Mods.SpectatorMode.IsSpectating && !Mods.Network.DemoPlayback.IsActive)
+            if (Mods.SpectatorMode.FreeCamera)
             {
                 // The other half of the HUD -- the locator icons and the
-                // screen filter. See DrawHudObjects.
+                // screen filter. See DrawHudObjects, including why the
+                // scoreboard is still drawn, which is what this dims for.
+                if (ShowScoreboard)
+                {
+                    _scene.DrawHudFilterModel(_filterModel);
+                }
                 return;
             }
             if (CameraSequence.Current?.IsIntro == true)
@@ -1368,7 +1389,7 @@ namespace MphRead.Entities
             {
                 _scene.DrawHudFilterModel(_filterModel, alpha: 12 / 31f);
             }
-            else if (Flags1.TestFlag(PlayerFlags1.WeaponMenuOpen) || _showScoreboard || GameState.MatchState == MatchState.Ending)
+            else if (Flags1.TestFlag(PlayerFlags1.WeaponMenuOpen) || ShowScoreboard || GameState.MatchState == MatchState.Ending)
             {
                 _scene.DrawHudFilterModel(_filterModel);
             }

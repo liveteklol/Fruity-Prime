@@ -244,6 +244,37 @@ namespace MphRead.Mods.MapGen
             }
         }
 
+        /// <summary>
+        /// Why this room cannot be loaded, or null when it can.
+        ///
+        /// Only a custom map can answer with a reason. A custom room is
+        /// registered from its recipe and built from it separately (see
+        /// <see cref="GenerateMissing"/>), so the case this exists for is a
+        /// map that is listed -- the launcher offers it, the picker shows a
+        /// frame for it -- and whose build failed. That used to be a crash
+        /// the moment somebody picked it, in a process with no console to say
+        /// why, which is the worst way for a bad map file to be reported.
+        /// </summary>
+        public static string? WhyUnplayable(string roomName)
+        {
+            MapDefinition? def = null;
+            foreach (MapDefinition candidate in Definitions)
+            {
+                if (candidate.Name.Equals(roomName, StringComparison.OrdinalIgnoreCase))
+                {
+                    def = candidate;
+                    break;
+                }
+            }
+            if (def == null || !NeedsGenerating(def))
+            {
+                return null;
+            }
+            string file = Path.GetFileName(def.SourcePath) ?? "its map file";
+            return $"{def.Name} could not be built from {file}, so there is no room to load. "
+                + "The [mapgen] line above says what went wrong with it.";
+        }
+
         private static bool NeedsGenerating(MapDefinition def)
         {
             string prefix = def.Name.ToLowerInvariant();

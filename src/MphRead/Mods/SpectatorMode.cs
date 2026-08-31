@@ -142,6 +142,26 @@ namespace MphRead.Mods
             _cameraRequest = true;
         }
 
+        /// <summary>
+        /// The spectator holding the show-score button, which is the one
+        /// control they keep.
+        ///
+        /// A scoreboard is the match's and not a player's, so it is the piece
+        /// of HUD that still means something to somebody who is only
+        /// watching -- and on the free camera it is the only thing on screen
+        /// at all. It cannot come from the usual place: the keybind states
+        /// every other control reads are updated in the loop that spectating
+        /// steps out of, so <see cref="PlayerEntity.ProcessInput"/> reads this
+        /// one off the keyboard itself and leaves it here.
+        /// </summary>
+        public static bool ShowScoreboard { get; private set; }
+
+        /// <summary>The input pass reporting the show-score button. See <see cref="ShowScoreboard"/>.</summary>
+        internal static void NoteScoreboard(bool down)
+        {
+            ShowScoreboard = down && IsSpectating;
+        }
+
         /// <summary>The scene reporting what it did with the camera. See <see cref="FreeCamera"/>.</summary>
         internal static void NoteFreeCamera(bool on)
         {
@@ -200,6 +220,7 @@ namespace MphRead.Mods
             int localSlot = Network.NetHooks.LocalSlot;
             PlayerEntity.MainPlayerIndex = localSlot;
             IsSpectating = false;
+            ShowScoreboard = false;
             // Back behind your own eyes, whichever of the two spectator
             // cameras was up.
             _cameraRequest = false;
@@ -217,6 +238,7 @@ namespace MphRead.Mods
         {
             IsSpectating = false;
             FreeCamera = false;
+            ShowScoreboard = false;
             _cameraRequest = null;
         }
 

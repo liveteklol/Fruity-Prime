@@ -67,6 +67,28 @@ namespace MphRead.Mods.MapGen
             string mapName = import.MapName ?? Path.GetFileNameWithoutExtension(level);
             byte[] trimmed = Q3Bsp.Trim(Q3Bsp.ReadLevel(level, import.MapName));
             string? texturePath = import.ResolveTextures();
+            if (texturePath == null && !String.IsNullOrEmpty(import.Textures))
+            {
+                // Bake it now, because a bundle cannot be baked from later.
+                // The pack is derived from the level's own art, so it is not
+                // in git and a fresh clone does not have one -- the game bakes
+                // it the first time the map is played. A bundle carries the
+                // level trimmed to the lumps the importer reads, and the art
+                // is in none of them: it lives in the .pk3 beside the recipe,
+                // which the bundle exists not to hand out. So a bundle cooked
+                // where the pack was not already sitting there -- a CI runner,
+                // every time -- shipped a map with no textures, which is a map
+                // with no materials, which crashed the moment it was picked.
+                texturePath = Q3Import.BakeTextures(
+                    Q3Bsp.Load(level, import.MapName), import, verbose);
+                if (texturePath == null)
+                {
+                    throw new ProgramException($"{definition.Name}: its textures "
+                        + $"({import.Textures}) are not beside its recipe and could not be baked "
+                        + "from " + Path.GetFileName(level) + ". A bundle without them is a room "
+                        + "with no materials, so this is a failure and not a bundle.");
+                }
+            }
             // The top of maps/ by default, not beside the recipe. The working
             // copy of a map is a folder with somebody's .pk3 in it; the bundle
             // is the one file that goes out, and it goes where every platform

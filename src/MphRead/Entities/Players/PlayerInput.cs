@@ -2108,6 +2108,20 @@ namespace MphRead.Entities
             }
         }
 
+        /// <summary>
+        /// Whether a keybind is held, from a snapshot alone -- for the paths
+        /// that read one control without running the pass that updates them
+        /// all. Scroll binds have no state to read here and answer false.
+        /// </summary>
+        private static bool IsDown(Keybind control, KeyboardState keyboard, MouseState mouse)
+        {
+            if (control.Type == ButtonType.Key)
+            {
+                return control.Key != Keys.Unknown && keyboard.IsKeyDown(control.Key);
+            }
+            return control.Type == ButtonType.Mouse && mouse.IsButtonDown(control.MouseButton);
+        }
+
         private static bool _isScrollingUp = false;
         private static bool _isScrollingDown = false;
 
@@ -2115,6 +2129,18 @@ namespace MphRead.Entities
         {
             KeyboardState keyboardSnap = keyboardState.GetSnapshot();
             MouseState mouseSnap = mouseState.GetSnapshot();
+            if (Mods.SpectatorMode.IsSpectating)
+            {
+                // The one control somebody watching keeps, because a
+                // scoreboard is the match's and not a player's. Read straight
+                // off the snapshot and against the bindings themselves: the
+                // pass below fills in each keybind's state from the player it
+                // belongs to, and a spectator's own player is skipped there
+                // while the player they are watching takes somebody else's
+                // input entirely.
+                Mods.SpectatorMode.NoteScoreboard(
+                    IsDown(Mods.InputSettings.Current.Pause, keyboardSnap, mouseSnap));
+            }
             for (int i = 0; i < Players.Count; i++)
             {
                 PlayerEntity player = Players[i];

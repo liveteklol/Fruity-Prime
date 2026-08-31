@@ -102,11 +102,22 @@ Pause menu
   puts you on the map with no HUD, a left click moves into the players and
   cycles through them, and Space toggles between the two -- `ToggleView`, not
   the camera directly, because the camera on its own would put you back behind
-  your own hidden, frozen body with your own HUD on. **No HUD at all while
-  spectating a live match** (`DrawHudObjects`/`DrawHudModels` return early):
-  your readouts are of a body that is out of the match, and the readouts of
-  whoever you are following are not yours. Demo playback is exempt -- there is
-  nothing to rejoin, and the watched player's HUD is the point of a replay.
+  your own hidden, frozen body with your own HUD on. **The HUD follows the
+  camera, not the spectating**: on the free camera there is none -- it is
+  CameraMode.Roam, and the scene only draws a HUD for a player's own camera --
+  and following somebody shows theirs, which is what watching a recording back
+  has always done and what makes watching a live match worth anything. It used
+  to be hidden in both (`DrawHudObjects`/`DrawHudModels` returned early on
+  `IsSpectating`), which left a spectator watching a hunter with no sign of
+  what they were playing with.
+  **The scoreboard is the exception on the free camera**: it is the match's
+  and not a player's, so holding the show-score button draws it (and the
+  filter that dims the scene) over the map. It cannot come from the usual
+  place -- every keybind's state is filled in by the input pass spectating
+  steps out of -- so `PlayerEntity.ProcessInput` reads that one bind off the
+  keyboard snapshot against `InputSettings.Current` and leaves it in
+  `SpectatorMode.ShowScoreboard`, which `Scene.ScoreboardOverFreeCamera` and
+  `PlayerHud.ShowScoreboard` read.
   A spectator is also **drawn not at all** (`PlayerDraw.Draw` returns before
   `DrawShadow`, which is cast from the volume and so survived hiding the model)
   and is **not a target** (`PlayerAi`'s opponent and teammate searches ask

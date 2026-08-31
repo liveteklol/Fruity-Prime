@@ -45,6 +45,22 @@ namespace MphRead.Mods.MapGen
             IReadOnlyList<(int, int)> textureSizes = pack == null
                 ? GetTextureSizes(def)
                 : pack.Entries.Select(e => ((int)e.Width, (int)e.Height)).ToList();
+            if (textureSizes.Count == 0)
+            {
+                // Neither its own art nor a borrowed room's: every face would
+                // index a material that is not there, which came out as an
+                // index-out-of-range with nothing in it to say what was
+                // missing. The case that produced it is a bundle cooked on a
+                // machine where the baked pack was not beside the recipe --
+                // a CI runner, where it is derived and therefore not in git --
+                // so the bundle carried a level with no textures at all.
+                throw new ProgramException(String.IsNullOrEmpty(import.Textures)
+                    ? $"{def.Name} names no texture pack and maps no shaders onto a shipped "
+                        + "room's materials, so it has no materials at all. A bundle cooked "
+                        + "without its baked textures is the usual cause."
+                    : $"{def.Name} has no textures: {import.Textures} is not beside its recipe, "
+                        + "not in its bundle, and could not be baked from the level.");
+            }
             int unpainted = 0;
 
             // How big the sky's own texture should be drawn. A sky surface's
@@ -513,7 +529,7 @@ namespace MphRead.Mods.MapGen
         /// natives being desktop builds left out of the APK on purpose. There,
         /// this fails and says so, and the pack has to arrive already baked.
         /// </summary>
-        private static string? BakeTextures(Q3Bsp bsp, MapImport import, bool verbose)
+        internal static string? BakeTextures(Q3Bsp bsp, MapImport import, bool verbose)
         {
             string? level = import.Resolve();
             if (String.IsNullOrEmpty(import.Textures) || level == null)

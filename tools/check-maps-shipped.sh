@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Fail if a custom map would reach a player without the level it converts.
 #
-# A map in maps/ is two files: the recipe, and the level. The recipe alone
+# A map in maps/ is the recipe, the level it converts and the textures baked
+# from that level -- in a folder, or cooked into one .fpmap. The recipe alone
 # registers a room that the game then declines to build -- the player sees the
 # 27 cartridge rooms and no sign that anything was meant to be there. That is
 # the right behaviour for a level nobody may publish, and a silent regression
@@ -41,6 +42,28 @@ while IFS= read -r file; do
     echo "MISSING: $name is a bundle with no level in it"
     fail=1
   fi
+  # And its textures, which are the half that goes missing quietly. The pack is
+  # baked from the level's own art, so it is derived and not in git -- a bundle
+  # cooked where nobody had baked one carried a level and no art, and the room
+  # it built had no materials at all: listed in the launcher, and a crash when
+  # picked. The recipe inside names the pack; the pack has to be in there too.
+  recipe=$(unzip -p "$file" '*.json' 2>/dev/null)
+  textures=$(printf '%s' "$recipe" \
+    | grep -oiE '"textures"[[:space:]]*:[[:space:]]*"[^"]*"' \
+    | head -n1 | sed -E 's/.*:[[:space:]]*"([^"]*)".*/\1/')
+  if [ -n "$textures" ]; then
+    if unzip -l "$file" 2>/dev/null | grep -qiF "$textures"; then
+      echo "ok:      $name carries its textures ($textures)"
+    else
+      echo "MISSING: $name names $textures and does not carry it"
+      fail=1
+    fi
+  elif printf '%s' "$recipe" | grep -qE '"Materials"[[:space:]]*:[[:space:]]*\[\]'; then
+    echo "MISSING: $name has no textures in it and borrows none, so its room has no materials"
+    fail=1
+  else
+    echo "ok:      $name wears a shipped room's textures"
+  fi
 done < <(find "$maps" -name '*.fpmap' | sort)
 
 # The level a map converts is named by import.source. Read it without a JSON
@@ -76,8 +99,9 @@ if [ "$found" -eq 0 ]; then
 fi
 if [ "$fail" -ne 0 ]; then
   echo
-  echo "A map whose level is absent is left out of the room list at startup."
-  echo "Either ship the level beside it, or take the map file out."
+  echo "A map whose level is absent is left out of the room list at startup; one"
+  echo "that arrives without its textures is listed and cannot be built. Either"
+  echo "ship what it needs beside it, or take the map file out."
   exit 1
 fi
 echo "every map in $what has what it needs"
