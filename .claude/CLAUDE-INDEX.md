@@ -19,7 +19,7 @@ loading everything.
 - mapgen/MAP-PIPELINE.md — custom maps: the generator, the Quake 3 importer, the format traps
 - testing/TEST-HARNESS.md — netcheck/maptest, map sweeps, the world and affliction probes
 - testing/TEST-METRICS.md — reading results, common traps, last verified status
-- build-deploy/BUILD-WORKFLOW.md — CI workflows, tagging, binaries, asset guard
+- build-deploy/BUILD-WORKFLOW.md — CI workflows, tagging and the bump, release notes, binaries, asset guard
 - build-deploy/DEPLOY-SERVERS.md — deploy script and publish commands
 
 Usage: these are the token-optimised detail store for CLAUDE.md. Keep them

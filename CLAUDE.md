@@ -238,6 +238,20 @@ numbering could start over without invalidating anybody's extracted files.
 git tag v0.2.0 && git push origin v0.2.0
 ```
 
+Or run `release` from the Actions tab with the tag box empty and a **bump**
+picked (`patch`/`minor`/`major`): the workflow reads the newest `v*` tag,
+works out the next one, creates it on the commit the run was dispatched from
+and builds that. Nothing to clone, nothing to type. That is the only
+auto-tagging there is -- a push to master tags nothing, because every push
+would then be a release, and the draft still waits for a person either way.
+It lives inside `release.yml` rather than in a workflow of its own because a
+tag pushed with the default `GITHUB_TOKEN` does not trigger another workflow.
+
+The release notes are a standing block (beta, bring your own cartridge, which
+package is which) with GitHub's own generated changelog appended under a rule
+-- every commit and merged PR since the previous tag. If the generator fails
+the block still goes out, with a warning in the log.
+
 `tools/check-no-game-assets.sh` (no Nintendo asset ever published) and
 `tools/check-dedicated-server.sh` (the server actually starts) both run in CI
 and are worth running locally before pushing:
@@ -247,8 +261,8 @@ tools/check-no-game-assets.sh                    # the repository
 tools/check-no-game-assets.sh publish/win-x64    # a build
 ```
 
-Tagging gotcha, PE-header subsystem split, why only the Windows server is
-renamed, and the CI runner layout: `.claude/build-deploy/BUILD-WORKFLOW.md`.
+Tagging (including the bump path and its traps), PE-header subsystem
+split, why only the Windows server is renamed, and the CI runner layout: `.claude/build-deploy/BUILD-WORKFLOW.md`.
 
 ## Deployment
 

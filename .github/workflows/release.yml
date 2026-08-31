@@ -2,6 +2,11 @@
 #
 #   git tag v0.9.0 && git push origin v0.9.0
 #
+# Or, from the Actions tab, with nothing typed and nothing cloned: pick a
+# `bump` and this workflow creates the tag itself before building it. That is
+# the whole of the auto-tagging here -- there is deliberately none on a push
+# to master, because every push would then be a release.
+#
 # Produces one archive per target, each holding binaries and a note, and
 # nothing else: the game's own files are unpacked from the player's cartridge
 # dump by the launcher, on their machine, and are never part of a release.
@@ -15,9 +20,18 @@ on:
     tags: ["v*"]
   workflow_dispatch:
     inputs:
+      # Neither is required: give a tag to rebuild one that exists, or leave it
+      # empty and pick a bump to have the next one created here. Both empty is
+      # the one combination that fails, and it says so.
       tag:
-        description: Tag to build and release
-        required: true
+        description: Existing tag to build (leave empty to bump instead)
+        required: false
+      bump:
+        description: Create the next tag from the newest one, when no tag is given
+        required: false
+        default: none
+        type: choice
+        options: [none, patch, minor, major]
 
 permissions:
   contents: write
@@ -31,37 +45,92 @@ jobs:
       # never pushed" into one clear line instead of actions/checkout quietly
       # retrying a fetch for a ref that was never going to exist -- which is
       # exactly the failure a workflow_dispatch run with a typo produces.
-      - name: resolve and verify the tag
+      #
+      # It is also where a tag gets *created*, for a dispatch run that asked
+      # for a bump. Doing it here rather than in a workflow of its own is not
+      # tidiness: a tag pushed with the default GITHUB_TOKEN does not trigger
+      # another workflow (GitHub's anti-recursion rule), so a separate tag.yml
+      # would need a PAT or a GitHub App to make this one run. One workflow
+      # that can mint its own tag needs no second credential at all.
+      - name: resolve the tag
         id: name
         env:
           GH_TOKEN: ${{ github.token }}
-          # Evaluated by the expressions engine, not by bash: inputs.tag wins
-          # whenever it is set, ref_name only as the fallback. GITHUB_REF_NAME
-          # is *always* set -- for workflow_dispatch it is whichever branch was
-          # picked to run the workflow from, "master" more often than not --
-          # so a bash ${GITHUB_REF_NAME:-...} fallback never reaches the input
-          # at all and silently rebuilds the wrong thing. This is what the
-          # original checkout step did correctly before this step existed.
-          RAW_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+          # Evaluated by the expressions engine, not by bash, and kept in two
+          # separate variables on purpose. GITHUB_REF_NAME is *always* set --
+          # for workflow_dispatch it is whichever branch was picked to run the
+          # workflow from, "master" more often than not -- so any fallback that
+          # can reach it from a dispatch run silently rebuilds that branch
+          # instead of failing. PUSHED_TAG is empty unless a tag push is what
+          # started this, which is the only event where ref_name is a tag.
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+          BUMP: ${{ github.event.inputs.bump }}
+          PUSHED_TAG: ${{ github.event_name == 'push' && github.ref_name || '' }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          TAG="$RAW_TAG"
-          # This project's tags are always v-prefixed (push: tags: ["v*"]);
-          # a bare version number typed into workflow_dispatch is that tag,
-          # not a different one worth failing over.
-          if [[ "$TAG" != v* ]]; then
-            TAG="v$TAG"
-          fi
-          if ! gh api "repos/${{ github.repository }}/git/ref/tags/$TAG" >/dev/null 2>&1; then
-            echo "::error::No tag '$TAG' exists in ${{ github.repository }}. Push one first:"
-            echo "::error::  git tag $TAG && git push origin $TAG"
+          TAG="${INPUT_TAG:-$PUSHED_TAG}"
+
+          if [ -n "$TAG" ]; then
+            # This project's tags are always v-prefixed (push: tags: ["v*"]);
+            # a bare version number typed into workflow_dispatch is that tag,
+            # not a different one worth failing over.
+            if [[ "$TAG" != v* ]]; then
+              TAG="v$TAG"
+            fi
+            if ! gh api "repos/$REPO/git/ref/tags/$TAG" >/dev/null 2>&1; then
+              echo "::error::No tag '$TAG' exists in $REPO. Push one first:"
+              echo "::error::  git tag $TAG && git push origin $TAG"
+              exit 1
+            fi
+            echo "Building the existing tag $TAG."
+          elif [ "${BUMP:-none}" != none ]; then
+            # The newest release tag, sorted as versions rather than as text --
+            # the refs API returns them in ref order, where v0.10.0 sorts
+            # before v0.9.0. Anything not vX.Y.Z is not a release of this
+            # project and does not get a vote.
+            LATEST=$(gh api "repos/$REPO/git/refs/tags" --paginate --jq '.[].ref' 2>/dev/null \
+              | sed 's#^refs/tags/##' \
+              | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+              | sort -V | tail -1 || true)
+            if [ -z "$LATEST" ]; then
+              # Nothing to bump from. Releases here are numbered from v0.1.0
+              # (CLAUDE.md), so that is the first tag whichever bump was asked
+              # for -- a "patch" off an imagined v0.0.0 would give v0.0.1.
+              TAG=v0.1.0
+              echo "No release tag exists yet; starting at $TAG."
+            else
+              IFS=. read -r MAJOR MINOR PATCH <<< "${LATEST#v}"
+              case "$BUMP" in
+                major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+                minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+                patch) PATCH=$((PATCH + 1)) ;;
+              esac
+              TAG="v$MAJOR.$MINOR.$PATCH"
+              echo "Newest release tag is $LATEST; $BUMP bump gives $TAG."
+            fi
+            if gh api "repos/$REPO/git/ref/tags/$TAG" >/dev/null 2>&1; then
+              echo "::error::$TAG already exists. Build it by name, or bump past it."
+              exit 1
+            fi
+            # On the commit this run was dispatched from, which is the tip of
+            # whichever branch the dropdown picked.
+            gh api -X POST "repos/$REPO/git/refs" \
+              -f ref="refs/tags/$TAG" -f sha="$SHA" >/dev/null
+            echo "Created $TAG at ${SHA:0:7}."
+            echo "created=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Give a tag to build, or pick a bump to create the next one."
             exit 1
           fi
+
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           # The bare number, for -p:Version. The updater compares this against
           # the tag on GitHub, so a build that is not stamped here is one that
           # can never know it is out of date.
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "### Fruity Prime $TAG" >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/checkout@v7
         with:
@@ -390,6 +459,24 @@ jobs:
 
           Setup and everything else is in the [README](https://github.com/liveteklol/Fruity-Prime#readme).
           NOTE
+
+          # What actually changed, from GitHub's own generator: every commit
+          # and merged PR since the previous release tag, which it works out
+          # itself from the tag name. Without this the notes are the same
+          # words every time and say nothing about the build being downloaded.
+          #
+          # Appended rather than substituted, and never fatal: a rate limit or
+          # a tag with no predecessor leaves the standing block, which is the
+          # part that has to be there. The changelog is the part that is nice
+          # to have.
+          CHANGES=$(gh api -X POST "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
+            -f tag_name="$TAG" --jq .body 2>/dev/null || true)
+          if [ -n "$CHANGES" ]; then
+            printf '\n---\n\n%s\n' "$CHANGES" >> notes.md
+          else
+            echo "::warning::No changelog could be generated for $TAG; the notes are the standing block alone."
+          fi
+
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" dist/* --clobber
             gh release edit "$TAG" --title "Fruity Prime $TAG" --notes-file notes.md

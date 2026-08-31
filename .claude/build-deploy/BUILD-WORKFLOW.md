@@ -7,26 +7,67 @@ Workflows
 | Workflow | When | What |
 |---|---|---|
 | `.github/workflows/build.yml` | every push and PR | publishes `win-x64`, `linux-x64`, `linux-x64-server`, `linux-arm64`, `osx-x64` and `osx-arm64` on one Ubuntu runner (every target is `net9.0`, so none needs a runner of its own), plus a Windows-runner job that builds and starts the Windows dedicated server |
-| `.github/workflows/release.yml` | a `v*` tag, or by hand | those six plus the Windows server: seven packages attached to a GitHub release |
+| `.github/workflows/release.yml` | a `v*` tag, or by hand -- naming a tag or picking a bump that creates one | those six plus the Windows server: seven packages attached to a GitHub release |
 
 Tagging
 
-A release needs a real, **pushed** tag before it needs anything else:
+Two ways in, both landing on the same `resolve the tag` step, which runs
+before anything is checked out (`gh api` needs no local repo, and this is
+where a typo becomes one clear line instead of `actions/checkout` retrying a
+fetch for a ref that never existed).
+
+**Build a tag that exists.** Push it, or type it into the dispatch form:
 
 ```
-git tag v0.36.0 && git push origin v0.36.0
+git tag v0.2.0 && git push origin v0.2.0
 ```
 
-Running it by hand from the Actions tab also needs the tag to exist first: the
-workflow's first step resolves and verifies it with
-`gh api .../git/ref/tags/$TAG` (prefixing a bare number with `v`) and fails
-with one clear line if nothing matches. The tag comes from
-`github.event.inputs.tag || github.ref_name` -- an **expressions-engine** `||`
-evaluated before bash runs, not a bash `${GITHUB_REF_NAME:-...}` fallback.
-`GITHUB_REF_NAME` is always set, and for a dispatch run it is whichever branch
-the dropdown defaulted to (almost always `master`), not the typed tag -- a
-bash fallback would silently rebuild that branch instead of failing loudly.
-Hit once already: a run dispatched with nothing typed resolved to `vmaster`.
+A bare number typed into the form is `v`-prefixed for you; a tag that was
+never pushed fails with the `git tag ... && git push ...` line spelled out.
+
+**Bump.** Leave the tag box empty and pick `patch`/`minor`/`major`. The step
+lists `refs/tags`, keeps only `vX.Y.Z`, sorts with `sort -V` (the API returns
+ref order, where `v0.10.0` sorts *before* `v0.9.0` -- this is why the sort is
+not `tail -1` on the raw list), increments, and creates the ref on
+`github.sha`, which is the tip of whichever branch the dropdown picked. With
+no release tag at all it starts at `v0.1.0` rather than bumping an imagined
+`v0.0.0` to `v0.0.1`. Both boxes empty is the one combination that errors.
+
+Three things worth not rediscovering:
+
+- **The bump lives inside `release.yml` on purpose.** A tag pushed by a
+  separate workflow using the default `GITHUB_TOKEN` does not trigger another
+  workflow -- GitHub's anti-recursion rule -- so a `tag.yml` would need a PAT
+  or a GitHub App just to make the release run. One workflow that mints its
+  own tag needs no second credential.
+- **`INPUT_TAG` and `PUSHED_TAG` are separate variables** for the same reason
+  the old `github.event.inputs.tag || github.ref_name` was an
+  expressions-engine `||` and not a bash `${GITHUB_REF_NAME:-...}` fallback.
+  `GITHUB_REF_NAME` is always set, and for a dispatch run it is whichever
+  branch the dropdown defaulted to (almost always `master`). Hit once already:
+  a run dispatched with nothing typed resolved to `vmaster`. A single
+  `||`-chained variable breaks again the moment the tag box is allowed to be
+  empty, which is exactly what the bump does -- hence
+  `PUSHED_TAG: ${{ github.event_name == 'push' && github.ref_name || '' }}`,
+  empty for every event that is not a tag push.
+- **Nothing auto-tags on a push to master**, deliberately: every push would
+  be a release. Nothing derives a version from commit messages either -- the
+  history here is not conventional-commits shaped, and the human gate already
+  exists downstream, since the release comes out as a draft either way.
+
+Release notes
+
+A standing block (beta, bring your own cartridge dump, which package is which,
+a link to the README) with GitHub's own changelog appended under a `---`:
+`gh api -X POST .../releases/generate-notes -f tag_name=$TAG --jq .body`,
+which picks the previous tag itself. Appended rather than substituted, and
+never fatal -- a rate limit or a tag with no predecessor leaves the standing
+block and a `::warning::` in the log. Before this the notes were the same
+words on every release and said nothing about the build being downloaded.
+
+Rerunning the same tag updates the draft instead of failing: the
+create-vs-upload arms are chosen by `gh release view`, so the notes are
+regenerated and the assets `--clobber`ed.
 
 Two Windows executables, one PE header field
 
