@@ -56,6 +56,37 @@ namespace MphRead.Mods.Network
         public static readonly bool[] RemoteIntentValid = new bool[PlayerEntity.SlotCapacity];
 
         /// <summary>
+        /// The local frame each slot's intent last arrived on, so a receiver
+        /// can tell a current one from one that stopped coming.
+        ///
+        /// The intent carries where its owner says they are, and every client
+        /// pins that slot's puppet there (ApplyReportedPosition). When a
+        /// player's line goes away the intents stop, the last one stays in
+        /// the array, and the pin keeps pulling the puppet back to where they
+        /// were while the authority's snapshots -- which do not stop -- keep
+        /// moving it. On everyone's screen the missing player strobes between
+        /// two places at 60 Hz for as long as the outage lasts: 1600 to 2176
+        /// position snaps per client in a 200 s run with 52 s of cuts in it,
+        /// against zero in the same run with no cuts.
+        /// </summary>
+        public static readonly uint[] RemoteIntentArrived = new uint[PlayerEntity.SlotCapacity];
+
+        /// <summary>
+        /// How long ago, in frames, this slot's owner last said anything.
+        /// <see cref="UInt32.MaxValue"/> when they never have.
+        /// </summary>
+        public static uint RemoteIntentAge(int slot)
+        {
+            if (slot < 0 || slot >= RemoteIntentArrived.Length || RemoteIntentArrived[slot] == 0)
+            {
+                return UInt32.MaxValue;
+            }
+            return NetFrame >= RemoteIntentArrived[slot]
+                ? NetFrame - RemoteIntentArrived[slot]
+                : 0;
+        }
+
+        /// <summary>
         /// Counters the log reads to tell "nothing arrived" from "it arrived
         /// and was ignored". Two clients that are demonstrably exchanging
         /// packets can still each hold a scene containing only themselves,
@@ -230,9 +261,18 @@ namespace MphRead.Mods.Network
             LocalSlot = 0;
             Array.Clear(RemoteStateValid);
             Array.Clear(RemoteIntentValid);
+            Array.Clear(RemoteIntentArrived);
             Array.Clear(SlotPing);
             Array.Clear(_lastSlotIntentFrame);
             _lastServerPacket = 0;
+            ReAnnouncements = 0;
+            LongestServerSilence = 0;
+            AuthorityStandDowns = 0;
+            AuthorityFrames = 0;
+            Refused = false;
+            SnapshotStreamResets = 0;
+            _lateSnapshotRun = 0;
+            _reAnnounced = false;
             Array.Clear(SlotOccupied);
             SnapshotsReceived = 0;
             SnapshotsSent = 0;
@@ -312,6 +352,10 @@ namespace MphRead.Mods.Network
                 return;
             }
             NetFrame++;
+            if (IsAuthority)
+            {
+                AuthorityFrames++;
+            }
             foreach (ReceivedPacket packet in _transport.Drain())
             {
                 DemoRecorder.Record(packet);
@@ -335,7 +379,10 @@ namespace MphRead.Mods.Network
                 // normally get it straight back. Without this a client that
                 // was dropped once kept playing alone forever, sending
                 // packets to a server that ignored every one of them.
-                Console.WriteLine("[net] no word from the server; re-announcing");
+                ReAnnouncements++;
+                _reAnnounced = true;
+                Console.WriteLine("[net] no word from the server; re-announcing "
+                    + $"(#{ReAnnouncements}, silent for {time - _lastServerPacket:0.0} s)");
                 NetLog.Event("server silent, re-announcing");
                 SendHello();
                 SendIdentify();
@@ -357,10 +404,56 @@ namespace MphRead.Mods.Network
 
         private static double _lastServerPacket;
 
+        /// <summary>
+        /// How many times this client found the server silent long enough to
+        /// re-announce itself. Zero on a healthy connection; one per outage
+        /// on a line that comes and goes, which is the number a report about
+        /// a dropped connection should carry instead of a grep for a console
+        /// line.
+        /// </summary>
+        public static int ReAnnouncements { get; private set; }
+
+        /// <summary>
+        /// The longest the server went without a word, in seconds. The
+        /// measurement a player's "it froze for a moment" is actually about.
+        /// </summary>
+        public static double LongestServerSilence { get; private set; }
+
+        /// <summary>
+        /// How many times this client gave the simulation back on being
+        /// re-admitted. Non-zero means it was out of touch long enough for the
+        /// server to have moved the authority.
+        /// </summary>
+        public static int AuthorityStandDowns { get; private set; }
+
+        /// <summary>Set when a Hello goes out because the server had gone quiet.</summary>
+        private static bool _reAnnounced;
+
+        /// <summary>
+        /// Frames this client has spent believing it runs the simulation.
+        /// Printed beside the snap count because the two only make sense
+        /// together: snaps are counted on the authority and nowhere else, so
+        /// a client reporting a thousand of them while never having been the
+        /// authority is a contradiction worth seeing rather than reasoning
+        /// about.
+        /// </summary>
+        public static long AuthorityFrames { get; private set; }
+
+        /// <summary>The server said no, in as many words. See <see cref="RefusedPacket"/>.</summary>
+        public static bool Refused { get; private set; }
+
+        /// <summary>What it said. Only meaningful while <see cref="Refused"/>.</summary>
+        public static RefusedPacket RefusedReason { get; private set; }
+
         private static void Handle(ReceivedPacket packet, double time)
         {
             if (Role == NetRole.Client)
             {
+                if (_lastServerPacket > 0 && time > _lastServerPacket)
+                {
+                    LongestServerSilence = Math.Max(LongestServerSilence,
+                        time - _lastServerPacket);
+                }
                 _lastServerPacket = time;
             }
             switch (packet.Type)
@@ -369,6 +462,36 @@ namespace MphRead.Mods.Network
                     HandleHello(packet, time);
                     break;
                 case PacketType.Welcome when Role == NetRole.Client:
+                    if (_reAnnounced)
+                    {
+                        // Re-admitted after the server had stopped talking to
+                        // us. While we were away it may have given the
+                        // simulation to somebody else -- it promotes the next
+                        // peer the moment it drops one (DedicatedServer.Remove)
+                        // -- and it has no way to say so: PacketType.Authority
+                        // only ever promotes. So stand down here and wait to be
+                        // told again; the server re-sends Authority to whoever
+                        // holds it once a second, so a client that really is
+                        // still the authority has it back within one.
+                        //
+                        // Without this, an authority whose line dropped for
+                        // longer than the server's timeout came back believing
+                        // it still ran the match: it ignored every snapshot it
+                        // received, its own were dropped by the server as
+                        // coming from a non-authority, and it played on in a
+                        // private copy of the match that looked entirely
+                        // healthy from inside. Found by cutting the
+                        // authority's line for 40 s against the Pi.
+                        _reAnnounced = false;
+                        if (IsAuthority)
+                        {
+                            IsAuthority = false;
+                            AuthorityStandDowns++;
+                            Console.WriteLine("[net] re-admitted; standing down as the "
+                                + "simulation authority until the server says otherwise");
+                            NetLog.Event("re-admitted, authority relinquished");
+                        }
+                    }
                     if (packet.Payload.Length >= 1)
                     {
                         LocalSlot = packet.Payload[0];
@@ -392,6 +515,17 @@ namespace MphRead.Mods.Network
                         _authorityNeedsStateApply = true;
                         Console.WriteLine("[net] this client is now the simulation authority");
                         NetLog.Event("became the simulation authority");
+                    }
+                    break;
+                case PacketType.Refused when Role == NetRole.Client:
+                    if (packet.Payload.Length >= 1 && LocalSlot < 0)
+                    {
+                        // Only while still waiting to be let in. A refusal
+                        // arriving mid-match would be a stale datagram from
+                        // the join, and acting on one of those would throw a
+                        // player out of a match they are already in.
+                        RefusedReason = RefusedPacket.Read(packet.Payload);
+                        Refused = true;
                     }
                     break;
                 case PacketType.Roster when Role == NetRole.Client:
@@ -520,6 +654,7 @@ namespace MphRead.Mods.Network
             _lastSlotIntentFrame[slot] = intent.Frame;
             RemoteIntents[slot] = intent;
             RemoteIntentValid[slot] = true;
+            RemoteIntentArrived[slot] = Math.Max(NetFrame, 1);
             IntentsReceived++;
         }
 
@@ -667,6 +802,23 @@ namespace MphRead.Mods.Network
         /// </summary>
         private const uint SnapshotResetGap = 600;
 
+        /// <summary>
+        /// How many consecutive "older than what I have" snapshots it takes
+        /// before the stream is treated as a new source rather than as
+        /// stragglers. A fifth of a second: longer than any reordering seen
+        /// on a real path, shorter than a player would notice.
+        /// </summary>
+        private const int LateSnapshotsBeforeReset = 12;
+
+        private static int _lateSnapshotRun;
+
+        /// <summary>
+        /// How many times this client re-based its snapshot ordering on a new
+        /// source. One per authority handover is expected; a stream of them
+        /// means two machines are publishing.
+        /// </summary>
+        public static int SnapshotStreamResets { get; private set; }
+
         /// <summary>Reordered snapshots thrown away, for the report.</summary>
         public static long SnapshotsOutOfOrder { get; private set; }
 
@@ -691,8 +843,29 @@ namespace MphRead.Mods.Network
                 && _lastSnapshotFrame - header.Frame < SnapshotResetGap)
             {
                 SnapshotsOutOfOrder++;
-                return;
+                // A straggler is a packet; this is a stream. When the server
+                // moves the authority to another client, the snapshots start
+                // coming from a machine whose own frame counter is its own --
+                // typically a few seconds behind, because it joined a few
+                // seconds later -- and every one of them looks late. Refusing
+                // the lot freezes every puppet on every screen until the new
+                // authority's counter climbs past the old one's: 159 and 169
+                // consecutive refusals, about 2.7 s, measured on two clients
+                // in one churn run against the Pi.
+                //
+                // Genuine reordering never lasts: a late datagram arrives
+                // among packets that are not late, and each of those resets
+                // this. A fifth of a second of nothing but "older" is a new
+                // source, so take it and re-base on it.
+                if (++_lateSnapshotRun < LateSnapshotsBeforeReset)
+                {
+                    return;
+                }
+                NetLog.Event($"snapshot stream re-based: {_lateSnapshotRun} in a row "
+                    + $"older than {_lastSnapshotFrame} (now {header.Frame})");
+                SnapshotStreamResets++;
             }
+            _lateSnapshotRun = 0;
             _lastSnapshotFrame = header.Frame;
             SnapshotsReceived++;
             // Rng.cs reproduces the game's original LCG and its state is

@@ -41,6 +41,7 @@ namespace MphRead.Mods.Network
             NetSession.StartClient(address, port);
             if (!NetSession.Active)
             {
+                LastJoinError = $"Could not open a socket for {address}:{port}.";
                 return false;
             }
             var clock = Stopwatch.StartNew();
@@ -48,6 +49,16 @@ namespace MphRead.Mods.Network
             while (clock.ElapsedMilliseconds < timeoutMs)
             {
                 NetSession.Update(clock.Elapsed.TotalSeconds);
+                if (NetSession.Refused)
+                {
+                    // The server answered the Hello with a no. Nothing is
+                    // gained by spending the rest of the eight seconds asking
+                    // again, and the player gets the actual reason instead of
+                    // a list of three.
+                    LastJoinError = NetSession.RefusedReason.Describe($"{address}:{port}");
+                    Console.WriteLine($"[net] {LastJoinError}");
+                    return false;
+                }
                 if (NetSession.LocalSlot >= 0 && NetSession.ServerMatch?.RoomKey.Length > 0)
                 {
                     MatchStatePacket state = NetSession.ServerMatch.Value;
@@ -67,8 +78,54 @@ namespace MphRead.Mods.Network
                 }
                 Thread.Sleep(20);
             }
-            Console.WriteLine("[net] the server did not answer in time");
+            LastJoinError = DescribeJoinFailure(address, port);
+            Console.WriteLine($"[net] {LastJoinError}");
             return false;
+        }
+
+        /// <summary>
+        /// Why the last <see cref="Join"/> failed, in a sentence a player can
+        /// act on. Empty before the first failure.
+        /// </summary>
+        public static string LastJoinError { get; private set; } = "";
+
+        /// <summary>
+        /// Turn a silence into an answer.
+        ///
+        /// A server refuses a Hello by ignoring it -- when it is full, and
+        /// when the client is a different build -- so all three of "off",
+        /// "full" and "wrong version" reach the client as the same eight
+        /// seconds of nothing, and every screen in this program guessed all
+        /// three at once: "it may be off, full, or UDP may be blocked."
+        ///
+        /// The server does answer a StatusQuery in two of those three cases,
+        /// and that reply carries both the player count and the protocol
+        /// version, so the guess is unnecessary: ask, and say which it was.
+        /// Client-side on purpose -- it works against servers already
+        /// deployed, which an explicit refusal packet would not.
+        /// </summary>
+        private static string DescribeJoinFailure(string address, int port)
+        {
+            ServerStatus status = NetStatus.Query(address, port,
+                allowJoinProbe: false, timeoutMs: 1500);
+            if (!status.Online)
+            {
+                return $"No answer from {address}:{port}. The server may be off, "
+                    + "or UDP may be blocked between here and it.";
+            }
+            if (status.MaxPlayers > 0 && status.Players >= status.MaxPlayers)
+            {
+                return $"{address}:{port} is full ({status.Players}/{status.MaxPlayers} "
+                    + "players). Try again when somebody leaves.";
+            }
+            if (status.Protocol > 0 && status.Protocol != NetConfig.ProtocolVersion)
+            {
+                return $"{address}:{port} is running protocol {status.Protocol} and this "
+                    + $"build speaks {NetConfig.ProtocolVersion}. One of you needs updating.";
+            }
+            return $"{address}:{port} answered, but would not admit this client "
+                + $"({status.Players}/{status.MaxPlayers} players). "
+                + "It may have filled up while joining.";
         }
 
         /// <summary>

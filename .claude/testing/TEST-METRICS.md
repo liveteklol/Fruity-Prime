@@ -15,6 +15,10 @@ Key lines and their meaning
 | `untested` | the feature was never performed, so nothing is being claimed — not a pass, and not a fail either; it's a question about the harness |
 | `dropped=N` in the packets line | this client couldn't keep up with what it was sent. Non-zero here reads on *other* clients' reports as "they never saw me turn" |
 | `pings: slot 0 12 ms ...` | what the server measured per slot, which is what the scoreboard draws |
+| `restreams=N` in the packets line | times this client re-based its snapshot ordering on a new source. One per authority handover is right; a stream of them means two machines are publishing |
+| `server silence: N re-announce(s), longest gap X s, M authority stand-down(s)` | what a dropped connection looked like from inside. A stand-down is this client giving the simulation back after being re-admitted |
+| `scoreboard mid-run:` | the board sampled two thirds of the way in, while everyone was still connected. **This is the one to compare between clients** -- the final board cannot be compared, because a departing player's score is cleared on everybody else's copy and clients stop seconds apart |
+| `spectating: N frame(s)` vs `slot K was spectating on M of my frame(s)` | what a spectator meant to do, against what reached everyone else. The two must be close; they were 6001 against 189 before `PlayerEntity.Spawn`'s flag wipe was fixed |
 | `alt-attack` | rising edges on the alt-attack button, both sides — separates "the press never arrived" from "it arrived and laid no bomb" |
 | `jumppads 7 (7/7 launched)` | seven in the room, seven tried, seven launched the player standing on them |
 | `afflicted freeze 1 burn 2 disrupt 0` | how many players were frozen/burned/disrupted at least once during the run |
@@ -31,15 +35,45 @@ Common traps
 - Testing a rotation with only one map in it misses nothing — testing it with only *more than one* map misses the "is this a new match" class of bug, which needs the single-map case too. Test both `maprotation-test.txt` (three maps) and `maprotation-one.txt` (one), each with a two-point goal so a match ends inside a run.
 - A run with match restarts in it is not a clean read of the tour: `NetTestScript`'s 15 phases key to the *server's* clock, and a restart resets it, so clients that finish loading a fraction of a second apart land in different phases. Expect `alt form`/`their form stayed wrong for N frames` failures a restart-free run doesn't produce — 181 frames in particular is the correction machinery's full budget working as designed (90 frames grace, a transition attempt, 90 more, then forced), and the check fails at 60, below that budget.
 - Reading one client's column of a cross-check as a defect before checking the others: low for *every* observer is systematic (a rate, a sampling difference); low for one is that client's own story, usually a late join.
+- Comparing final scoreboards in any run where somebody leaves. A leaver's
+  score is cleared on every other client (`NetSlotManager.Deactivate`, and
+  deliberately -- somebody who has gone is not on the board), and every run
+  staggers its exits, so the last client to print is the only row still
+  standing. One churn run read "scoreboards disagree by up to 11" for exactly
+  this reason and nothing else. Compare `scoreboard mid-run:`.
+- Reading a cross-check where both sides derive the number from the same
+  place. `spectating` originally counted the entity flag on both the owner's
+  machine and the observers', so when a respawn wiped that flag at the source
+  both sides counted the same zero and agreed perfectly about a feature that
+  was reaching nobody. A cross-check is only worth having if the two sides can
+  disagree: the owner's side now counts what it *decided* (`SpectatorMode`).
 - Reading `damage pipeline` as healthy just because both ends are non-zero: `25/0` against `0/258` is a byte counter that ran backwards and nearly wrapped forward, not noise on a working pipeline — the three-digit number is the tell.
 
-## Last verified status (2026-08-23)
+## Last verified status (2026-09-01, the hard-case batch)
+
+Full detail, including the eight faults it found, in
+`.claude/testing/TEST-HARD-CASES.md`.
+
+| Check | Result |
+|---|---|
+| 8 real clients, 220 s, against the Pi | 0 mismatches, 0 position snaps, 2 ms pings, `dropped=0` |
+| Map rotation with real clients | **was killing every client**; fixed (`NodeRef.None` on rebuild), 0 of 3 crashed afterwards and both rotations were followed |
+| A player's line cut for 1, 3, 8 and 40 s | heals by itself under the 30 s timeout; at 40 s the peer is dropped, the authority moves, and the same slot comes back within a second of the line returning |
+| Latency 100 / 200 / 300 / 500 ms (kernel `netem`) | scoreboards identical at every level; snaps 0/0/18/190 |
+| Loss 5 / 15 / 30 %, both legs | no divergence; hit registration is what degrades |
+| Every player spectating | replicates properly now; nobody can be hit; match and rotation carry on |
+| Six clients recording demos | 13 KiB/s each, every file replays |
+| Ninth player at a full server | `Refused` reason 1 in 11 ms (server deployed 2026-09-01); a protocol-3 Hello gets reason 2 |
+| Pi 3B ceiling | 20 concurrent hosted matches / 160 players; past that new players cannot join while those inside keep 98.7 % delivery |
+| Server journal across 3.5 h of hostile testing | zero exceptions or errors |
+
+## Previous verified status (2026-08-23)
 
 | Check | Result |
 |---|---|
 | 3 clients, 130 s, `run-check.sh` | PASS on all three, 0 mismatches, scoreboards agree within 0 events |
 | Damage pipeline on that run | 69/56/49 resolved on the authority, 69/56/48-49 replayed on both observers (shortfall = one hit still in flight at cutoff) |
-| Match won on points, 3-map rotation, 4 clients | every rotation announced once, all four peers carried across |
+| Match won on points, 3-map rotation, 4 clients | every rotation announced once, all four peers carried across. **Superseded 2026-08-31: with real clients on the Pi, a rotation to a DIFFERENT room killed every client outright** -- `ArgumentOutOfRangeException` in `RoomEntity.DrawRoomParts`, a pooled player's `NodeRef` into the old room indexing the new room's part arrays. Reproduced 3/3 on the build before this batch's changes and 0/3 after `NetRoomChange.RebuildPlayers` hands each slot `NodeRef.None`. A rotation to the SAME room (a one-map rotation) never hit it, which is why five consecutive matches on one map passed while the first change of map did not |
 | Match won on points, one-map rotation | correctly reloads the same room — the case that used to strand everybody |
 | Authority leaving mid-session | promoted to the next peer, session continued |
 | `tools/check-dedicated-server.sh` | server and directory both start from a published build, register, and answer |

@@ -18,6 +18,7 @@ loading everything.
 - render/CEL-SHADING.md — flat colours in place of textures, and the depth-kink ink pass
 - mapgen/MAP-PIPELINE.md — custom maps: the generator, the Quake 3 importer, the format traps
 - testing/TEST-HARNESS.md — netcheck/maptest, map sweeps, the world and affliction probes
+- testing/TEST-HARD-CASES.md — disconnects, blackouts, latency, loss, capacity, spectators, the Pi's ceiling
 - testing/TEST-METRICS.md — reading results, common traps, last verified status
 - build-deploy/BUILD-WORKFLOW.md — CI workflows, tagging and the bump, release notes, binaries, asset guard
 - build-deploy/DEPLOY-SERVERS.md — deploy script and publish commands

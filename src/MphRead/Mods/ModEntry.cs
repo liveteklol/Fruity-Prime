@@ -732,9 +732,34 @@ namespace MphRead.Mods
                 {
                     seconds = parsedSeconds;
                 }
+                // Watching instead of playing. -spectate on its own means
+                // "from the moment the map is up"; with a number it is the
+                // second to stop playing at, and -rejoin the second to come
+                // back. Spectating is the one player state the scripted tour
+                // cannot reach on its own -- the tour exists to drive a
+                // hunter, and this is a player who has stopped driving one.
+                double spectateAt = -1;
+                double rejoinAt = -1;
+                if (HasFlag(args, "spectate"))
+                {
+                    spectateAt = 0;
+                    string? spectateValue = ValueAfter(args, "spectate");
+                    if (spectateValue != null && Double.TryParse(spectateValue,
+                        System.Globalization.CultureInfo.InvariantCulture, out double parsedSpectate))
+                    {
+                        spectateAt = parsedSpectate;
+                    }
+                }
+                string? rejoinValue = ValueAfter(args, "rejoin");
+                if (rejoinValue != null && Double.TryParse(rejoinValue,
+                    System.Globalization.CultureInfo.InvariantCulture, out double parsedRejoin))
+                {
+                    rejoinAt = parsedRejoin;
+                }
                 Environment.ExitCode = Network.NetCheckClient.Run(check, ParsePort(args),
                     ParseName(args), ParseHunter(args), seconds, shots, width, height,
-                    recordDemo: HasFlag(args, "recorddemo"));
+                    recordDemo: HasFlag(args, "recorddemo"),
+                    spectateAt: spectateAt, rejoinAt: rejoinAt);
                 return true;
             }
 

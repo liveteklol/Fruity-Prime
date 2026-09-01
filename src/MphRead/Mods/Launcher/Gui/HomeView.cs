@@ -1060,7 +1060,7 @@ namespace MphRead.Mods.Launcher.Gui
             if (!joined)
             {
                 NetSession.Stop();
-                _onlineStatus.Text = "Could not join. It may be off, full, or UDP may be blocked.";
+                _onlineStatus.Text = NetLaunch.LastJoinError;
                 _onlineStatus.Foreground = GuiTheme.BadBrush;
                 StartStatusPolling();
                 return;

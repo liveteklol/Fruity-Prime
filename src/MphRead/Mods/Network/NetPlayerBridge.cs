@@ -204,6 +204,12 @@ namespace MphRead.Mods.Network
             {
                 buttons |= IntentButtons.InPlayState;
             }
+            // Watching rather than playing. The only route this has to the
+            // rest of the match: see IntentButtons.SpectatingState.
+            if (player.Flags2.TestFlag(PlayerFlags2.Spectating))
+            {
+                buttons |= IntentButtons.SpectatingState;
+            }
             return new IntentPacket
             {
                 Buttons = buttons,
@@ -275,6 +281,11 @@ namespace MphRead.Mods.Network
             // refuses it on a weapon that cannot. Taken as state rather than
             // rebuilt from the press: see IntentButtons.ZoomedState.
             player.ModSetZoom(intent.Buttons.HasFlag(IntentButtons.ZoomedState));
+            // The owner's own answer about whether it is still in the match.
+            // On the authority this is what makes a spectator stop being a
+            // target; from there the snapshot's FlagSpectating carries it to
+            // everybody else.
+            player.ModSetSpectating(intent.Buttons.HasFlag(IntentButtons.SpectatingState));
         }
 
         /// <summary>

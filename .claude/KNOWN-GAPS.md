@@ -78,6 +78,27 @@ claiming coverage that isn't there.
   on every push via the `windows-server` job, but nobody has run it on a real
   Windows machine behind a real firewall for a long session, unlike the Linux
   server on the Pi.
+- **The Pi's ceiling was found as "nobody else can join", not as a broken
+  match.** Twenty hosted games and 160 players held with 98.8% delivery and
+  no UDP errors; 24 and 32 games admitted no more than 160 either. What is
+  *not* known is whether a real match at that point was still playable --
+  every player in that ramp was synthetic, so it measures the relay and not
+  the game. Nor is the true traffic ceiling known: above four games this box
+  could not offer a full 60 Hz per client (`sendto` costs 3.9 ms through its
+  WSL NAT), so the higher steps held the total traffic constant and only
+  raised the match count.
+- **An old client against the new server is untested.** The Pi has run the
+  2026-09-01 server since that date, and both refusals were then proved on the
+  wire: a full server answers a ninth Hello with `Refused` reason 1 in 11 ms,
+  and a protocol-3 Hello with reason 2. What has not been tried is a client
+  built *before* `RefusedPacket` meeting that server -- by design it drops an
+  unknown packet type and falls back to the eight-second timeout it always
+  had, but nobody has run it.
+- **The rotation crash was found on the public server's own rotation and
+  fixed there; no other pair of maps has been tried.** The mechanism -- a
+  pooled player's NodeRef into the room just unloaded -- does not depend on
+  which rooms they are, but only MP1 SANCTORUS -> MP3 PROVING GROUND has been
+  run, three clients at a time.
 - **Late joiners and bursty features skew the tour's numbers**, not the
   replication. Clients start ~3 s apart; a client that joins a bursty phase
   (bombing, unmorphing) late reports a fraction of what the subject did, and
