@@ -1,4 +1,4 @@
-<img src="src/MphRead/Assets/fruity-prime-logo.png" alt="Fruity Prime" width="100%">
+<img src="src/MphRead/Assets/fruity-prime-intro.png" alt="Fruity Prime" width="100%">
 
 **Metroid Prime Hunters on PC and Android.** Online matches for up to 8 players, widescreen, 60 FPS,
 and a launcher that does the setting up for you.
