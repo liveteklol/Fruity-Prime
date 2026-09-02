@@ -15,7 +15,15 @@ namespace MphRead.Droid
         Shoot,
         Jump,
         Morph,
+        /// <summary>Opens and closes the scan visor: the desktop's SCAN VISOR (E).</summary>
         ScanVisor,
+        /// <summary>
+        /// Scans whatever is targeted, held: the desktop's SCAN (Q). Its own
+        /// button, because it is a second step rather than another way to
+        /// press VISOR -- reading an entry is not leaving the visor, and one
+        /// button trying to be both made a press mean either.
+        /// </summary>
+        Scan,
         WeaponMenu,
         Zoom,
         Pause,
@@ -35,6 +43,11 @@ namespace MphRead.Droid
         public float CentreX { get; set; }
         public float CentreY { get; set; }
         public float Radius { get; set; }
+        /// <summary>
+        /// Whether it is on screen at all. FIRE and SCAN share a place and
+        /// take turns: the visor cannot shoot and the gun cannot scan.
+        /// </summary>
+        public bool Visible { get; set; } = true;
 
         public TouchButton(TouchAction action, string label)
         {
@@ -82,6 +95,9 @@ namespace MphRead.Droid
         public IReadOnlyList<TouchButton> Buttons => _buttons;
         private readonly List<TouchButton> _buttons = new List<TouchButton>
         {
+            // SCAN before FIRE: they sit in the same place, and the one that
+            // is visible is the one a thumb should find there.
+            new TouchButton(TouchAction.Scan, "SCAN") { Visible = false },
             new TouchButton(TouchAction.Shoot, "FIRE"),
             new TouchButton(TouchAction.Jump, "JUMP"),
             new TouchButton(TouchAction.Morph, "MORPH"),
@@ -89,8 +105,8 @@ namespace MphRead.Droid
             // game's own default, the DS having had one attack button -- so
             // it was a second way to press the thing FIRE presses, and having
             // both is what stopped FIRE working at all. FIRE is both attacks
-            // now; see GameView.CollectInput. SCAN now sits where ALT did.
-            new TouchButton(TouchAction.ScanVisor, "SCAN"),
+            // now; see GameView.CollectInput. VISOR now sits where ALT did.
+            new TouchButton(TouchAction.ScanVisor, "VISOR"),
             new TouchButton(TouchAction.WeaponMenu, "WEAPON"),
             new TouchButton(TouchAction.Zoom, "ZOOM"),
             new TouchButton(TouchAction.Pause, "MENU"),
@@ -137,17 +153,90 @@ namespace MphRead.Droid
         // GameView.CollectInput and PlayerInput's boost handling for the
         // other half of this. Tracked on both the free-look aim pointer and
         // the FIRE-drag pointer, since either thumb might do the flick.
-        private const float SwipeBoostDistanceDp = 70f;
+        private const float SwipeBoostDistanceDp = 50f;
         private const long SwipeBoostWindowMs = 120;
         private const long SwipeBoostCooldownMs = 350;
-        private float _aimSwipeX;
-        private float _aimSwipeY;
-        private long _aimSwipeTime;
-        private float _fireAimSwipeX;
-        private float _fireAimSwipeY;
-        private long _fireAimSwipeTime;
-        private long _lastSwipeBoostTime = long.MinValue;
+        private readonly SwipeTracker _aimSwipe = new SwipeTracker();
+        private readonly SwipeTracker _fireAimSwipe = new SwipeTracker();
+        // Zero, not long.MinValue: TickCount64 minus long.MinValue overflows
+        // to a large negative number, and the cooldown below would then never
+        // be satisfied -- which is exactly what stopped this firing at all.
+        private long _lastSwipeBoostTime;
         private bool _swipeBoostPending;
+        private bool _swipeBoostEnabled;
+
+        /// <summary>
+        /// Whether a flick means anything right now -- it is the morph ball's
+        /// boost, so only in the ball. Off, the flick is left alone to be the
+        /// aim it looks like.
+        /// </summary>
+        public bool SwipeBoostEnabled
+        {
+            get
+            {
+                lock (_lock)
+                {
+                    return _swipeBoostEnabled;
+                }
+            }
+            set
+            {
+                lock (_lock)
+                {
+                    _swipeBoostEnabled = value;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Whether the scan visor is open, which is what swaps FIRE for SCAN.
+        /// Set from the game thread, so a change repaints through
+        /// <see cref="Invalidated"/> rather than waiting for the next touch.
+        /// </summary>
+        public bool ScanVisorActive
+        {
+            get
+            {
+                lock (_lock)
+                {
+                    return _scanVisorActive;
+                }
+            }
+            set
+            {
+                bool changed = false;
+                lock (_lock)
+                {
+                    if (_scanVisorActive != value)
+                    {
+                        _scanVisorActive = value;
+                        changed = true;
+                        foreach (TouchButton button in _buttons)
+                        {
+                            if (button.Action == TouchAction.Scan)
+                            {
+                                button.Visible = value;
+                            }
+                            else if (button.Action == TouchAction.Shoot)
+                            {
+                                button.Visible = !value;
+                            }
+                        }
+                    }
+                }
+                if (changed)
+                {
+                    Invalidated?.Invoke();
+                }
+            }
+        }
+        private bool _scanVisorActive;
+
+        /// <summary>
+        /// Asked to repaint, for the changes that do not come from a touch.
+        /// The view sets this; nothing here knows what a view is.
+        /// </summary>
+        public Action? Invalidated { get; set; }
 
         /// <summary>Lay the controls out for a viewport of this size.</summary>
         public void Layout(float width, float height, float density)
@@ -161,6 +250,9 @@ namespace MphRead.Droid
                 StickRadius = 0.15f * h;
                 StickKnobRadius = 0.06f * h;
                 Place(TouchAction.Shoot, width - 0.17f * h, h - 0.19f * h, 0.105f * h);
+                // The same place and the same size: in the visor, that thumb
+                // has nothing to shoot with and everything to scan with.
+                Place(TouchAction.Scan, width - 0.17f * h, h - 0.19f * h, 0.105f * h);
                 Place(TouchAction.Jump, width - 0.40f * h, h - 0.15f * h, 0.085f * h);
                 Place(TouchAction.Morph, width - 0.15f * h, h - 0.47f * h, 0.080f * h);
                 Place(TouchAction.ScanVisor, width - 0.38f * h, h - 0.42f * h, 0.075f * h);
@@ -263,18 +355,20 @@ namespace MphRead.Droid
             {
                 foreach (TouchButton button in _buttons)
                 {
-                    if (button.Contains(x, y))
+                    if (button.Visible && button.Contains(x, y))
                     {
                         _buttonPointers[pointerId] = button.Action;
                         _held.Add(button.Action);
-                        if (button.Action == TouchAction.Shoot)
+                        // Both of the buttons that live under the aiming
+                        // thumb drag the aim as well: keeping a target
+                        // centred matters as much while scanning it as it
+                        // does while shooting at it.
+                        if (button.Action == TouchAction.Shoot || button.Action == TouchAction.Scan)
                         {
                             _fireAimPointer = pointerId;
                             _fireAimLastX = x;
                             _fireAimLastY = y;
-                            _fireAimSwipeX = x;
-                            _fireAimSwipeY = y;
-                            _fireAimSwipeTime = Environment.TickCount64;
+                            _fireAimSwipe.Reset();
                         }
                         return;
                     }
@@ -298,39 +392,100 @@ namespace MphRead.Droid
                     _aimAbsX = x;
                     _aimAbsY = y;
                     _aimDown = true;
-                    _aimSwipeX = x;
-                    _aimSwipeY = y;
-                    _aimSwipeTime = Environment.TickCount64;
+                    _aimSwipe.Reset();
                 }
             }
         }
 
         /// <summary>
-        /// Distance covered from where this flick's window started, not
-        /// sample-to-sample -- Android can deliver several MOVE samples
-        /// during one flick, and comparing only adjacent samples would miss
-        /// it. Called with the lock already held.
+        /// The last few positions of one finger, for telling a flick from a
+        /// drag. Only the newest matter, so it is a small ring.
         /// </summary>
-        private void CheckSwipeBoost(float x, float y, ref float windowX, ref float windowY, ref long windowTime)
+        private sealed class SwipeTracker
+        {
+            private const int Capacity = 12;
+            private readonly float[] _x = new float[Capacity];
+            private readonly float[] _y = new float[Capacity];
+            private readonly long[] _time = new long[Capacity];
+            private int _count;
+            private int _newest = -1;
+
+            public void Reset()
+            {
+                _count = 0;
+                _newest = -1;
+            }
+
+            public void Add(float x, float y, long now)
+            {
+                _newest = (_newest + 1) % Capacity;
+                _x[_newest] = x;
+                _y[_newest] = y;
+                _time[_newest] = now;
+                if (_count < Capacity)
+                {
+                    _count++;
+                }
+            }
+
+            /// <summary>
+            /// The furthest the finger has come from any sample still inside
+            /// the window -- and always from at least the one before this,
+            /// however old it is.
+            ///
+            /// That last part is the whole trick. A finger holding still
+            /// sends no MOVE events at all, so a flick that follows one can
+            /// arrive as a single jump whose predecessor is seconds old, and
+            /// a window that only trusted its own age would throw away
+            /// exactly the sample the flick lives in.
+            /// </summary>
+            public float Displacement(long now, long windowMs)
+            {
+                if (_count < 2)
+                {
+                    return 0;
+                }
+                float newestX = _x[_newest];
+                float newestY = _y[_newest];
+                float best = 0;
+                for (int i = 1; i < _count; i++)
+                {
+                    int index = (_newest - i + Capacity) % Capacity;
+                    if (i > 1 && now - _time[index] > windowMs)
+                    {
+                        break;
+                    }
+                    float dx = newestX - _x[index];
+                    float dy = newestY - _y[index];
+                    float distance = dx * dx + dy * dy;
+                    if (distance > best)
+                    {
+                        best = distance;
+                    }
+                }
+                return MathF.Sqrt(best);
+            }
+        }
+
+        /// <summary>Called with the lock already held.</summary>
+        private void CheckSwipeBoost(SwipeTracker tracker, float x, float y)
         {
             long now = Environment.TickCount64;
-            if (now - windowTime > SwipeBoostWindowMs)
+            tracker.Add(x, y, now);
+            if (!_swipeBoostEnabled || now - _lastSwipeBoostTime < SwipeBoostCooldownMs)
             {
-                windowX = x;
-                windowY = y;
-                windowTime = now;
                 return;
             }
-            float dx = x - windowX;
-            float dy = y - windowY;
             float threshold = SwipeBoostDistanceDp * Density;
-            if (dx * dx + dy * dy > threshold * threshold && now - _lastSwipeBoostTime >= SwipeBoostCooldownMs)
+            if (tracker.Displacement(now, SwipeBoostWindowMs) > threshold)
             {
                 _swipeBoostPending = true;
                 _lastSwipeBoostTime = now;
-                windowX = x;
-                windowY = y;
-                windowTime = now;
+                tracker.Reset();
+                // The flick was the boost, not a look. Letting it through as
+                // aim as well would swing the camera through the whole of it.
+                _aimDeltaX = 0;
+                _aimDeltaY = 0;
             }
         }
 
@@ -387,7 +542,7 @@ namespace MphRead.Droid
                 }
                 if (pointerId == _aimPointer)
                 {
-                    CheckSwipeBoost(x, y, ref _aimSwipeX, ref _aimSwipeY, ref _aimSwipeTime);
+                    CheckSwipeBoost(_aimSwipe, x, y);
                     _aimDeltaX += x - _aimLastX;
                     _aimDeltaY += y - _aimLastY;
                     _aimLastX = x;
@@ -401,7 +556,7 @@ namespace MphRead.Droid
                     // FIRE stays held here regardless of how far the thumb
                     // drags: this pointer skips the "slides off a button
                     // releases it" rule below on purpose.
-                    CheckSwipeBoost(x, y, ref _fireAimSwipeX, ref _fireAimSwipeY, ref _fireAimSwipeTime);
+                    CheckSwipeBoost(_fireAimSwipe, x, y);
                     _aimDeltaX += x - _fireAimLastX;
                     _aimDeltaY += y - _fireAimLastY;
                     _fireAimLastX = x;
@@ -444,11 +599,13 @@ namespace MphRead.Droid
                 {
                     _aimPointer = -1;
                     _aimDown = false;
+                    _aimSwipe.Reset();
                     return;
                 }
                 if (pointerId == _fireAimPointer)
                 {
                     _fireAimPointer = -1;
+                    _fireAimSwipe.Reset();
                 }
                 if (_buttonPointers.Remove(pointerId, out TouchAction action))
                 {
@@ -468,6 +625,8 @@ namespace MphRead.Droid
                 _aimDown = false;
                 _fireAimPointer = -1;
                 _swipeBoostPending = false;
+                _aimSwipe.Reset();
+                _fireAimSwipe.Reset();
                 StickActive = false;
                 _direction = Dir.None;
                 _aimDeltaX = 0;

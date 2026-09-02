@@ -148,12 +148,6 @@ namespace MphRead.Droid
             private readonly Action _onPauseMenu;
             private bool _menuWasHeld;
             private bool _spectateCycleHeld;
-            private bool _scanButtonWasHeld;
-            private long _scanPressStartMs;
-            // Below this, releasing SCAN leaves the visor instead of just
-            // stopping a scan in progress -- there is no separate button for
-            // that on this platform, unlike the desktop's Shoot/Morph exit.
-            private const long ScanExitTapMs = 300;
 
             private EGLDisplay? _display;
             private EGLConfig? _config;
@@ -666,6 +660,11 @@ namespace MphRead.Droid
                     _menuWasHeld = menuHeld;
                     _controls.TakeAimDelta();
                     _controls.TakeSwipeBoost();
+                    // Nothing to scan or boost from here, and FIRE has to be
+                    // the button that cycles players rather than a SCAN left
+                    // over from whatever the visor was doing.
+                    _controls.ScanVisorActive = false;
+                    _controls.SwipeBoostEnabled = false;
                     return;
                 }
                 _spectateCycleHeld = false;
@@ -708,42 +707,29 @@ namespace MphRead.Droid
                 // One button on the DS, and the same key here by default:
                 // jumping on foot is boosting in the ball.
                 _input.Apply(controls.Boost, jump);
-                // A quick flick of the movement stick also boosts, the way a
-                // stylus flick did on the DS -- see PlayerInput's boost
-                // handling for how this one-shot is consumed.
+                // A quick flick on the aim side also boosts, the way a stylus
+                // flick did on the DS -- see PlayerInput's boost handling for
+                // how this one-shot is consumed. Only the ball boosts, and
+                // telling the controls that is what keeps a fast turn on foot
+                // from being read as a flick.
+                _controls.SwipeBoostEnabled = main.IsAltForm;
                 if (_controls.TakeSwipeBoost() && main.IsAltForm)
                 {
                     main.SwipeBoostRequested = true;
                 }
                 _input.Apply(controls.Morph, _controls.IsHeld(TouchAction.Morph));
-                // SCAN does double duty, since there is no room for a
-                // separate button the way the desktop has ScanVisor (E) and
-                // Scan (Q): the first press opens the visor, same as always.
-                // Once it is open, this same button drives Scan instead --
-                // held, it actually scans whatever is targeted, matching the
-                // desktop's hold-to-scan; a tap short enough to not be a
-                // scan attempt closes the visor instead, since nothing else
-                // on this platform does.
-                bool scanHeld = _controls.IsHeld(TouchAction.ScanVisor);
-                bool scanPressedEdge = scanHeld && !_scanButtonWasHeld;
-                bool scanReleasedEdge = !scanHeld && _scanButtonWasHeld;
-                if (scanPressedEdge)
-                {
-                    _scanPressStartMs = Environment.TickCount64;
-                }
-                if (main.ScanVisor)
-                {
-                    _input.Apply(controls.Scan, scanHeld);
-                    if (scanReleasedEdge && Environment.TickCount64 - _scanPressStartMs < ScanExitTapMs)
-                    {
-                        _input.Apply(controls.ScanVisor, true);
-                    }
-                }
-                else if (scanPressedEdge)
-                {
-                    _input.Apply(controls.ScanVisor, true);
-                }
-                _scanButtonWasHeld = scanHeld;
+                // Two binds, two buttons, exactly as the desktop has them:
+                // VISOR opens and closes the scan visor (E) and SCAN reads
+                // what is targeted while it is held (Q). One button trying to
+                // be both could not tell "read this again" from "put the
+                // visor away", and answered a press with both.
+                //
+                // SCAN is only there while the visor is: it takes FIRE's
+                // place, which is idle in the visor anyway. See
+                // TouchControls.ScanVisorActive.
+                _controls.ScanVisorActive = main.ScanVisor;
+                _input.Apply(controls.ScanVisor, _controls.IsHeld(TouchAction.ScanVisor));
+                _input.Apply(controls.Scan, _controls.IsHeld(TouchAction.Scan));
                 _input.Apply(controls.Zoom, _controls.IsHeld(TouchAction.Zoom));
                 // The DS pause button -- map and status on foot, scoreboard
                 // while it is held in a match -- is SCORE now. MENU is the
