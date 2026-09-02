@@ -148,6 +148,12 @@ namespace MphRead.Droid
             private readonly Action _onPauseMenu;
             private bool _menuWasHeld;
             private bool _spectateCycleHeld;
+            private bool _scanButtonWasHeld;
+            private long _scanPressStartMs;
+            // Below this, releasing SCAN leaves the visor instead of just
+            // stopping a scan in progress -- there is no separate button for
+            // that on this platform, unlike the desktop's Shoot/Morph exit.
+            private const long ScanExitTapMs = 300;
 
             private EGLDisplay? _display;
             private EGLConfig? _config;
@@ -710,7 +716,34 @@ namespace MphRead.Droid
                     main.SwipeBoostRequested = true;
                 }
                 _input.Apply(controls.Morph, _controls.IsHeld(TouchAction.Morph));
-                _input.Apply(controls.ScanVisor, _controls.IsHeld(TouchAction.ScanVisor));
+                // SCAN does double duty, since there is no room for a
+                // separate button the way the desktop has ScanVisor (E) and
+                // Scan (Q): the first press opens the visor, same as always.
+                // Once it is open, this same button drives Scan instead --
+                // held, it actually scans whatever is targeted, matching the
+                // desktop's hold-to-scan; a tap short enough to not be a
+                // scan attempt closes the visor instead, since nothing else
+                // on this platform does.
+                bool scanHeld = _controls.IsHeld(TouchAction.ScanVisor);
+                bool scanPressedEdge = scanHeld && !_scanButtonWasHeld;
+                bool scanReleasedEdge = !scanHeld && _scanButtonWasHeld;
+                if (scanPressedEdge)
+                {
+                    _scanPressStartMs = Environment.TickCount64;
+                }
+                if (main.ScanVisor)
+                {
+                    _input.Apply(controls.Scan, scanHeld);
+                    if (scanReleasedEdge && Environment.TickCount64 - _scanPressStartMs < ScanExitTapMs)
+                    {
+                        _input.Apply(controls.ScanVisor, true);
+                    }
+                }
+                else if (scanPressedEdge)
+                {
+                    _input.Apply(controls.ScanVisor, true);
+                }
+                _scanButtonWasHeld = scanHeld;
                 _input.Apply(controls.Zoom, _controls.IsHeld(TouchAction.Zoom));
                 // The DS pause button -- map and status on foot, scoreboard
                 // while it is held in a match -- is SCORE now. MENU is the

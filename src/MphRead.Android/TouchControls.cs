@@ -131,15 +131,21 @@ namespace MphRead.Droid
         private float _fireAimLastX;
         private float _fireAimLastY;
 
-        // A quick flick of the movement stick boosts in morph ball, the way
-        // a stylus flick did on the DS. See GameView.CollectInput and
-        // PlayerInput's boost handling for the other half of this.
-        private const float SwipeBoostDistance = 1.2f;
+        // A quick flick on the right side of the screen -- the aim side,
+        // where nothing else about movement is being controlled -- boosts
+        // in morph ball, the way a stylus flick did on the DS. See
+        // GameView.CollectInput and PlayerInput's boost handling for the
+        // other half of this. Tracked on both the free-look aim pointer and
+        // the FIRE-drag pointer, since either thumb might do the flick.
+        private const float SwipeBoostDistanceDp = 70f;
         private const long SwipeBoostWindowMs = 120;
         private const long SwipeBoostCooldownMs = 350;
-        private float _stickLastRawX;
-        private float _stickLastRawY;
-        private long _stickLastMoveTime;
+        private float _aimSwipeX;
+        private float _aimSwipeY;
+        private long _aimSwipeTime;
+        private float _fireAimSwipeX;
+        private float _fireAimSwipeY;
+        private long _fireAimSwipeTime;
         private long _lastSwipeBoostTime = long.MinValue;
         private bool _swipeBoostPending;
 
@@ -266,6 +272,9 @@ namespace MphRead.Droid
                             _fireAimPointer = pointerId;
                             _fireAimLastX = x;
                             _fireAimLastY = y;
+                            _fireAimSwipeX = x;
+                            _fireAimSwipeY = y;
+                            _fireAimSwipeTime = Environment.TickCount64;
                         }
                         return;
                     }
@@ -279,9 +288,6 @@ namespace MphRead.Droid
                     StickKnobX = x;
                     StickKnobY = y;
                     _direction = Dir.None;
-                    _stickLastRawX = x;
-                    _stickLastRawY = y;
-                    _stickLastMoveTime = Environment.TickCount64;
                     return;
                 }
                 if (_aimPointer == -1)
@@ -292,7 +298,39 @@ namespace MphRead.Droid
                     _aimAbsX = x;
                     _aimAbsY = y;
                     _aimDown = true;
+                    _aimSwipeX = x;
+                    _aimSwipeY = y;
+                    _aimSwipeTime = Environment.TickCount64;
                 }
+            }
+        }
+
+        /// <summary>
+        /// Distance covered from where this flick's window started, not
+        /// sample-to-sample -- Android can deliver several MOVE samples
+        /// during one flick, and comparing only adjacent samples would miss
+        /// it. Called with the lock already held.
+        /// </summary>
+        private void CheckSwipeBoost(float x, float y, ref float windowX, ref float windowY, ref long windowTime)
+        {
+            long now = Environment.TickCount64;
+            if (now - windowTime > SwipeBoostWindowMs)
+            {
+                windowX = x;
+                windowY = y;
+                windowTime = now;
+                return;
+            }
+            float dx = x - windowX;
+            float dy = y - windowY;
+            float threshold = SwipeBoostDistanceDp * Density;
+            if (dx * dx + dy * dy > threshold * threshold && now - _lastSwipeBoostTime >= SwipeBoostCooldownMs)
+            {
+                _swipeBoostPending = true;
+                _lastSwipeBoostTime = now;
+                windowX = x;
+                windowY = y;
+                windowTime = now;
             }
         }
 
@@ -302,32 +340,6 @@ namespace MphRead.Droid
             {
                 if (pointerId == _stickPointer)
                 {
-                    // Swipe boost: distance covered from where this flick's
-                    // window started, not sample-to-sample -- Android can
-                    // deliver several MOVE samples during one flick, and
-                    // comparing only adjacent samples would miss it.
-                    long now = Environment.TickCount64;
-                    if (now - _stickLastMoveTime > SwipeBoostWindowMs)
-                    {
-                        _stickLastRawX = x;
-                        _stickLastRawY = y;
-                        _stickLastMoveTime = now;
-                    }
-                    else
-                    {
-                        float rawDx = x - _stickLastRawX;
-                        float rawDy = y - _stickLastRawY;
-                        if (rawDx * rawDx + rawDy * rawDy > StickRadius * StickRadius * SwipeBoostDistance * SwipeBoostDistance
-                            && now - _lastSwipeBoostTime >= SwipeBoostCooldownMs)
-                        {
-                            _swipeBoostPending = true;
-                            _lastSwipeBoostTime = now;
-                            _stickLastRawX = x;
-                            _stickLastRawY = y;
-                            _stickLastMoveTime = now;
-                        }
-                    }
-
                     float dx = x - StickX;
                     float dy = y - StickY;
                     float length = MathF.Sqrt(dx * dx + dy * dy);
@@ -375,6 +387,7 @@ namespace MphRead.Droid
                 }
                 if (pointerId == _aimPointer)
                 {
+                    CheckSwipeBoost(x, y, ref _aimSwipeX, ref _aimSwipeY, ref _aimSwipeTime);
                     _aimDeltaX += x - _aimLastX;
                     _aimDeltaY += y - _aimLastY;
                     _aimLastX = x;
@@ -388,6 +401,7 @@ namespace MphRead.Droid
                     // FIRE stays held here regardless of how far the thumb
                     // drags: this pointer skips the "slides off a button
                     // releases it" rule below on purpose.
+                    CheckSwipeBoost(x, y, ref _fireAimSwipeX, ref _fireAimSwipeY, ref _fireAimSwipeTime);
                     _aimDeltaX += x - _fireAimLastX;
                     _aimDeltaY += y - _fireAimLastY;
                     _fireAimLastX = x;
