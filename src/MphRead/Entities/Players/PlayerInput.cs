@@ -1544,9 +1544,13 @@ namespace MphRead.Entities
                     }
                     if (_abilities.TestFlag(AbilityFlags.Boost) && AttachedEnemy == null)
                     {
-                        // todo: touch boost
-                        // else...
-                        if (Controls.Boost.IsDown)
+                        // A touch platform's swipe gesture is a flick, not a
+                        // hold-and-release: it forces a full charge straight
+                        // into the release branch below instead of building
+                        // one up over several frames.
+                        bool swipeBoost = SwipeBoostRequested;
+                        SwipeBoostRequested = false;
+                        if (Controls.Boost.IsDown && !swipeBoost)
                         {
                             // the game plays the boost charge SFX here, but that SFX is empty
                             if (_boostCharge < Values.BoostChargeMax * 2) // todo: FPS stuff
@@ -1556,6 +1560,10 @@ namespace MphRead.Entities
                         }
                         else
                         {
+                            if (swipeBoost)
+                            {
+                                _boostCharge = (ushort)(Values.BoostChargeMax * 2);
+                            }
                             if (_boostCharge > Values.BoostChargeMin * 2) // todo: FPS stuff
                             {
                                 if (Features.FullBoostCharge)

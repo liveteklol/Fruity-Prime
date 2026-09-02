@@ -15,6 +15,7 @@ namespace MphRead.Droid
         Shoot,
         Jump,
         Morph,
+        ScanVisor,
         WeaponMenu,
         Zoom,
         Pause,
@@ -88,7 +89,8 @@ namespace MphRead.Droid
             // game's own default, the DS having had one attack button -- so
             // it was a second way to press the thing FIRE presses, and having
             // both is what stopped FIRE working at all. FIRE is both attacks
-            // now; see GameView.CollectInput.
+            // now; see GameView.CollectInput. SCAN now sits where ALT did.
+            new TouchButton(TouchAction.ScanVisor, "SCAN"),
             new TouchButton(TouchAction.WeaponMenu, "WEAPON"),
             new TouchButton(TouchAction.Zoom, "ZOOM"),
             new TouchButton(TouchAction.Pause, "MENU"),
@@ -122,6 +124,25 @@ namespace MphRead.Droid
         private bool _aimDown;
         private Dir _direction;
 
+        // FIRE doubles as an aim drag: a thumb that presses FIRE and then
+        // moves keeps firing and steers the reticle, rather than releasing
+        // FIRE the instant it leaves the button's circle.
+        private int _fireAimPointer = -1;
+        private float _fireAimLastX;
+        private float _fireAimLastY;
+
+        // A quick flick of the movement stick boosts in morph ball, the way
+        // a stylus flick did on the DS. See GameView.CollectInput and
+        // PlayerInput's boost handling for the other half of this.
+        private const float SwipeBoostDistance = 1.2f;
+        private const long SwipeBoostWindowMs = 120;
+        private const long SwipeBoostCooldownMs = 350;
+        private float _stickLastRawX;
+        private float _stickLastRawY;
+        private long _stickLastMoveTime;
+        private long _lastSwipeBoostTime = long.MinValue;
+        private bool _swipeBoostPending;
+
         /// <summary>Lay the controls out for a viewport of this size.</summary>
         public void Layout(float width, float height, float density)
         {
@@ -136,6 +157,7 @@ namespace MphRead.Droid
                 Place(TouchAction.Shoot, width - 0.17f * h, h - 0.19f * h, 0.105f * h);
                 Place(TouchAction.Jump, width - 0.40f * h, h - 0.15f * h, 0.085f * h);
                 Place(TouchAction.Morph, width - 0.15f * h, h - 0.47f * h, 0.080f * h);
+                Place(TouchAction.ScanVisor, width - 0.38f * h, h - 0.42f * h, 0.075f * h);
                 Place(TouchAction.WeaponMenu, width - 0.12f * h, 0.15f * h, 0.075f * h);
                 Place(TouchAction.Zoom, width - 0.33f * h, 0.12f * h, 0.065f * h);
                 Place(TouchAction.Pause, 0.11f * h, 0.12f * h, 0.060f * h);
@@ -183,6 +205,20 @@ namespace MphRead.Droid
         }
 
         /// <summary>
+        /// Whether a swipe boost fired since this was last called, cleared
+        /// by the call so a frame that reads it twice does not boost twice.
+        /// </summary>
+        public bool TakeSwipeBoost()
+        {
+            lock (_lock)
+            {
+                bool pending = _swipeBoostPending;
+                _swipeBoostPending = false;
+                return pending;
+            }
+        }
+
+        /// <summary>
         /// Treat the whole screen as a place to point at, rather than the left
         /// half as a stick.
         ///
@@ -225,6 +261,12 @@ namespace MphRead.Droid
                     {
                         _buttonPointers[pointerId] = button.Action;
                         _held.Add(button.Action);
+                        if (button.Action == TouchAction.Shoot)
+                        {
+                            _fireAimPointer = pointerId;
+                            _fireAimLastX = x;
+                            _fireAimLastY = y;
+                        }
                         return;
                     }
                 }
@@ -237,6 +279,9 @@ namespace MphRead.Droid
                     StickKnobX = x;
                     StickKnobY = y;
                     _direction = Dir.None;
+                    _stickLastRawX = x;
+                    _stickLastRawY = y;
+                    _stickLastMoveTime = Environment.TickCount64;
                     return;
                 }
                 if (_aimPointer == -1)
@@ -257,6 +302,32 @@ namespace MphRead.Droid
             {
                 if (pointerId == _stickPointer)
                 {
+                    // Swipe boost: distance covered from where this flick's
+                    // window started, not sample-to-sample -- Android can
+                    // deliver several MOVE samples during one flick, and
+                    // comparing only adjacent samples would miss it.
+                    long now = Environment.TickCount64;
+                    if (now - _stickLastMoveTime > SwipeBoostWindowMs)
+                    {
+                        _stickLastRawX = x;
+                        _stickLastRawY = y;
+                        _stickLastMoveTime = now;
+                    }
+                    else
+                    {
+                        float rawDx = x - _stickLastRawX;
+                        float rawDy = y - _stickLastRawY;
+                        if (rawDx * rawDx + rawDy * rawDy > StickRadius * StickRadius * SwipeBoostDistance * SwipeBoostDistance
+                            && now - _lastSwipeBoostTime >= SwipeBoostCooldownMs)
+                        {
+                            _swipeBoostPending = true;
+                            _lastSwipeBoostTime = now;
+                            _stickLastRawX = x;
+                            _stickLastRawY = y;
+                            _stickLastMoveTime = now;
+                        }
+                    }
+
                     float dx = x - StickX;
                     float dy = y - StickY;
                     float length = MathF.Sqrt(dx * dx + dy * dy);
@@ -312,6 +383,17 @@ namespace MphRead.Droid
                     _aimAbsY = y;
                     return;
                 }
+                if (pointerId == _fireAimPointer)
+                {
+                    // FIRE stays held here regardless of how far the thumb
+                    // drags: this pointer skips the "slides off a button
+                    // releases it" rule below on purpose.
+                    _aimDeltaX += x - _fireAimLastX;
+                    _aimDeltaY += y - _fireAimLastY;
+                    _fireAimLastX = x;
+                    _fireAimLastY = y;
+                    return;
+                }
                 // a thumb that slides off a button releases it, and one that
                 // slides onto another does not press it: a button press is
                 // where the finger landed
@@ -350,6 +432,10 @@ namespace MphRead.Droid
                     _aimDown = false;
                     return;
                 }
+                if (pointerId == _fireAimPointer)
+                {
+                    _fireAimPointer = -1;
+                }
                 if (_buttonPointers.Remove(pointerId, out TouchAction action))
                 {
                     ReleaseAction(action);
@@ -366,6 +452,8 @@ namespace MphRead.Droid
                 _stickPointer = -1;
                 _aimPointer = -1;
                 _aimDown = false;
+                _fireAimPointer = -1;
+                _swipeBoostPending = false;
                 StickActive = false;
                 _direction = Dir.None;
                 _aimDeltaX = 0;

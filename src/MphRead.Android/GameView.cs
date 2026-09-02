@@ -659,6 +659,7 @@ namespace MphRead.Droid
                     }
                     _menuWasHeld = menuHeld;
                     _controls.TakeAimDelta();
+                    _controls.TakeSwipeBoost();
                     return;
                 }
                 _spectateCycleHeld = false;
@@ -701,7 +702,15 @@ namespace MphRead.Droid
                 // One button on the DS, and the same key here by default:
                 // jumping on foot is boosting in the ball.
                 _input.Apply(controls.Boost, jump);
+                // A quick flick of the movement stick also boosts, the way a
+                // stylus flick did on the DS -- see PlayerInput's boost
+                // handling for how this one-shot is consumed.
+                if (_controls.TakeSwipeBoost() && main.IsAltForm)
+                {
+                    main.SwipeBoostRequested = true;
+                }
                 _input.Apply(controls.Morph, _controls.IsHeld(TouchAction.Morph));
+                _input.Apply(controls.ScanVisor, _controls.IsHeld(TouchAction.ScanVisor));
                 _input.Apply(controls.Zoom, _controls.IsHeld(TouchAction.Zoom));
                 // The DS pause button -- map and status on foot, scoreboard
                 // while it is held in a match -- is SCORE now. MENU is the
