@@ -1550,6 +1550,33 @@ namespace MphRead.Entities
                         // one up over several frames.
                         bool swipeBoost = SwipeBoostRequested;
                         SwipeBoostRequested = false;
+                        // Where the flick pointed, turned into a world
+                        // direction against the basis the ball already rolls
+                        // with: up the screen is forward and left is left,
+                        // exactly as RollUp and RolltLeft are read above. A
+                        // boost that always went wherever the ball was already
+                        // heading made the direction of the flick worth
+                        // nothing -- and aiming a boost is the whole of what
+                        // the gesture is for.
+                        float boostDirX = _field70;
+                        float boostDirZ = _field74;
+                        bool boostAimed = false;
+                        if (swipeBoost && (SwipeBoostX != 0 || SwipeBoostY != 0))
+                        {
+                            float forward = -SwipeBoostY;
+                            float left = -SwipeBoostX;
+                            float dirX = _altRollFbX * forward + _altRollLrX * left;
+                            float dirZ = _altRollFbZ * forward + _altRollLrZ * left;
+                            float dirMag = MathF.Sqrt(dirX * dirX + dirZ * dirZ);
+                            if (dirMag > 1 / 4096f)
+                            {
+                                boostDirX = dirX / dirMag;
+                                boostDirZ = dirZ / dirMag;
+                                boostAimed = true;
+                            }
+                        }
+                        SwipeBoostX = 0;
+                        SwipeBoostY = 0;
                         if (Controls.Boost.IsDown && !swipeBoost)
                         {
                             // the game plays the boost charge SFX here, but that SFX is empty
@@ -1584,7 +1611,7 @@ namespace MphRead.Entities
                                 float factor = Fixed.ToFloat(Values.BoostSpeedMin)
                                     + _boostCharge * (Fixed.ToFloat(Values.BoostSpeedMax) - Fixed.ToFloat(Values.BoostSpeedMin))
                                     / (Values.BoostChargeMax * 2); // todo: FPS stuff
-                                speedDelta = speedDelta.AddX(_field70 * factor).AddZ(_field74 * factor);
+                                speedDelta = speedDelta.AddX(boostDirX * factor).AddZ(boostDirZ * factor);
                                 _altAttackCooldown = (ushort)(Values.AltAttackCooldown * 2); // todo: FPS stuff
                                 Flags1 |= PlayerFlags1.Boosting;
                                 _boostDamage = (ushort)(Values.AltAttackDamage * _boostCharge / (Values.BoostChargeMax * 2)); // todo: FPS stuff
@@ -1597,7 +1624,18 @@ namespace MphRead.Entities
                                     _scene.UnlinkEffectEntry(_boostEffect);
                                     _boostEffect = null;
                                 }
-                                _boostEffect = _scene.SpawnEffectGetEntry(136, _gunVec2, _facingVector, Position); // samusDash
+                                // The dash trail goes with the boost. Aimed
+                                // sideways it would otherwise streak along the
+                                // way the ball was pointing while the ball
+                                // left in another direction entirely. The
+                                // vectors are built the way _gunVec2 is built
+                                // from the facing, so an unaimed boost spawns
+                                // exactly what it always did.
+                                Vector3 boostVec1 = boostAimed
+                                    ? new Vector3(boostDirZ, 0, -boostDirX) : _gunVec2;
+                                Vector3 boostVec2 = boostAimed
+                                    ? new Vector3(boostDirX, 0, boostDirZ) : _facingVector;
+                                _boostEffect = _scene.SpawnEffectGetEntry(136, boostVec1, boostVec2, Position); // samusDash
                                 if (_boostEffect != null)
                                 {
                                     _boostEffect.SetElementExtension(true);

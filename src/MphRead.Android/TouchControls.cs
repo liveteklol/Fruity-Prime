@@ -24,6 +24,14 @@ namespace MphRead.Droid
         /// button trying to be both made a press mean either.
         /// </summary>
         Scan,
+        /// <summary>
+        /// Missile, and back again. The wheel is the six affinity weapons and
+        /// nothing else -- PlayerHud's weapon select has six slots, none of
+        /// them the Power Beam or the Missile -- so on a screen with no number
+        /// keys there was no way to reach a missile at all, in adventure or in
+        /// a match.
+        /// </summary>
+        Missile,
         WeaponMenu,
         Zoom,
         Pause,
@@ -107,6 +115,7 @@ namespace MphRead.Droid
             // both is what stopped FIRE working at all. FIRE is both attacks
             // now; see GameView.CollectInput. VISOR now sits where ALT did.
             new TouchButton(TouchAction.ScanVisor, "VISOR"),
+            new TouchButton(TouchAction.Missile, "MSSL"),
             new TouchButton(TouchAction.WeaponMenu, "WEAPON"),
             new TouchButton(TouchAction.Zoom, "ZOOM"),
             new TouchButton(TouchAction.Pause, "MENU"),
@@ -164,6 +173,25 @@ namespace MphRead.Droid
         private long _lastSwipeBoostTime;
         private bool _swipeBoostPending;
         private bool _swipeBoostEnabled;
+        private float _swipeBoostX;
+        private float _swipeBoostY;
+
+        // Two quick taps on the aiming side jump, the way two taps of the
+        // stylus did. A tap is a finger that went down and came up again
+        // without going anywhere, so this cannot be confused with the flick
+        // above it, which is nothing but going somewhere.
+        private const long TapMaxMs = 250;
+        private const long DoubleTapGapMs = 300;
+        private const float TapSlopDp = 16f;
+        private const float DoubleTapSpreadDp = 70f;
+        private long _tapDownTime;
+        private float _tapDownX;
+        private float _tapDownY;
+        private bool _tapMoved;
+        private long _lastTapTime;
+        private float _lastTapX;
+        private float _lastTapY;
+        private bool _doubleTapJumpPending;
 
         /// <summary>
         /// Whether a flick means anything right now -- it is the morph ball's
@@ -256,6 +284,10 @@ namespace MphRead.Droid
                 Place(TouchAction.Jump, width - 0.40f * h, h - 0.15f * h, 0.085f * h);
                 Place(TouchAction.Morph, width - 0.15f * h, h - 0.47f * h, 0.080f * h);
                 Place(TouchAction.ScanVisor, width - 0.38f * h, h - 0.42f * h, 0.075f * h);
+                // Within the firing thumb's reach, since a missile is fired
+                // rather than administered, and clear of JUMP above it and
+                // VISOR beside it.
+                Place(TouchAction.Missile, width - 0.62f * h, h - 0.28f * h, 0.075f * h);
                 Place(TouchAction.WeaponMenu, width - 0.12f * h, 0.15f * h, 0.075f * h);
                 Place(TouchAction.Zoom, width - 0.33f * h, 0.12f * h, 0.065f * h);
                 Place(TouchAction.Pause, 0.11f * h, 0.12f * h, 0.060f * h);
@@ -303,15 +335,31 @@ namespace MphRead.Droid
         }
 
         /// <summary>
-        /// Whether a swipe boost fired since this was last called, cleared
-        /// by the call so a frame that reads it twice does not boost twice.
+        /// Whether a swipe boost fired since this was last called, and which
+        /// way the flick went -- a unit vector in screen terms, X to the
+        /// right and Y downwards. Cleared by the call, so a frame that reads
+        /// it twice does not boost twice.
         /// </summary>
-        public bool TakeSwipeBoost()
+        public (bool Fired, float X, float Y) TakeSwipeBoost()
         {
             lock (_lock)
             {
                 bool pending = _swipeBoostPending;
                 _swipeBoostPending = false;
+                return (pending, _swipeBoostX, _swipeBoostY);
+            }
+        }
+
+        /// <summary>
+        /// Whether the aiming side was tapped twice quickly, cleared by the
+        /// call. The DS jumped on a double tap and so does this.
+        /// </summary>
+        public bool TakeDoubleTapJump()
+        {
+            lock (_lock)
+            {
+                bool pending = _doubleTapJumpPending;
+                _doubleTapJumpPending = false;
                 return pending;
             }
         }
@@ -393,6 +441,10 @@ namespace MphRead.Droid
                     _aimAbsY = y;
                     _aimDown = true;
                     _aimSwipe.Reset();
+                    _tapDownTime = Environment.TickCount64;
+                    _tapDownX = x;
+                    _tapDownY = y;
+                    _tapMoved = false;
                 }
             }
         }
@@ -439,15 +491,17 @@ namespace MphRead.Droid
             /// a window that only trusted its own age would throw away
             /// exactly the sample the flick lives in.
             /// </summary>
-            public float Displacement(long now, long windowMs)
+            public (float Distance, float X, float Y) Displacement(long now, long windowMs)
             {
                 if (_count < 2)
                 {
-                    return 0;
+                    return (0, 0, 0);
                 }
                 float newestX = _x[_newest];
                 float newestY = _y[_newest];
                 float best = 0;
+                float bestX = 0;
+                float bestY = 0;
                 for (int i = 1; i < _count; i++)
                 {
                     int index = (_newest - i + Capacity) % Capacity;
@@ -461,9 +515,11 @@ namespace MphRead.Droid
                     if (distance > best)
                     {
                         best = distance;
+                        bestX = dx;
+                        bestY = dy;
                     }
                 }
-                return MathF.Sqrt(best);
+                return (MathF.Sqrt(best), bestX, bestY);
             }
         }
 
@@ -477,9 +533,15 @@ namespace MphRead.Droid
                 return;
             }
             float threshold = SwipeBoostDistanceDp * Density;
-            if (tracker.Displacement(now, SwipeBoostWindowMs) > threshold)
+            (float distance, float dx, float dy) = tracker.Displacement(now, SwipeBoostWindowMs);
+            if (distance > threshold)
             {
                 _swipeBoostPending = true;
+                // Kept as a direction rather than a length: how hard the flick
+                // was does not set how hard the boost is (it is always a full
+                // charge), only which way it goes.
+                _swipeBoostX = dx / distance;
+                _swipeBoostY = dy / distance;
                 _lastSwipeBoostTime = now;
                 tracker.Reset();
                 // The flick was the boost, not a look. Letting it through as
@@ -543,6 +605,13 @@ namespace MphRead.Droid
                 if (pointerId == _aimPointer)
                 {
                     CheckSwipeBoost(_aimSwipe, x, y);
+                    if (!_tapMoved)
+                    {
+                        float tapDx = x - _tapDownX;
+                        float tapDy = y - _tapDownY;
+                        float slop = TapSlopDp * Density;
+                        _tapMoved = tapDx * tapDx + tapDy * tapDy > slop * slop;
+                    }
                     _aimDeltaX += x - _aimLastX;
                     _aimDeltaY += y - _aimLastY;
                     _aimLastX = x;
@@ -600,6 +669,27 @@ namespace MphRead.Droid
                     _aimPointer = -1;
                     _aimDown = false;
                     _aimSwipe.Reset();
+                    long up = Environment.TickCount64;
+                    if (!_tapMoved && up - _tapDownTime <= TapMaxMs)
+                    {
+                        float spread = DoubleTapSpreadDp * Density;
+                        float sinceX = _tapDownX - _lastTapX;
+                        float sinceY = _tapDownY - _lastTapY;
+                        if (up - _lastTapTime <= DoubleTapGapMs
+                            && sinceX * sinceX + sinceY * sinceY <= spread * spread)
+                        {
+                            _doubleTapJumpPending = true;
+                            // Spent: a third tap starts a new pair rather than
+                            // jumping again off the second one.
+                            _lastTapTime = 0;
+                        }
+                        else
+                        {
+                            _lastTapTime = up;
+                            _lastTapX = _tapDownX;
+                            _lastTapY = _tapDownY;
+                        }
+                    }
                     return;
                 }
                 if (pointerId == _fireAimPointer)
@@ -625,6 +715,8 @@ namespace MphRead.Droid
                 _aimDown = false;
                 _fireAimPointer = -1;
                 _swipeBoostPending = false;
+                _doubleTapJumpPending = false;
+                _lastTapTime = 0;
                 _aimSwipe.Reset();
                 _fireAimSwipe.Reset();
                 StickActive = false;
