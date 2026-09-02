@@ -12,12 +12,25 @@ namespace MphRead.Mods
     /// Parallel across processes, not threads: GLFW requires its windows to
     /// be created and pumped on the main thread, so several GL windows in
     /// one process is not possible. Each worker is a fresh instance of this
-    /// executable invoked with -thumbnail &lt;room&gt;, which also isolates a
+    /// executable invoked with a share of the rooms, which also isolates a
     /// crash on one room from the rest of the batch.
     /// </summary>
     public static class ThumbnailBatch
     {
-        public const int DefaultParallelism = 10;
+        /// <summary>
+        /// How many workers to run at once.
+        ///
+        /// The cores, rather than the flat ten this used to be. Ten was the
+        /// right shape when a worker was one room and spent a fifth of its
+        /// life asleep between 60 Hz frames -- oversubscribing hid the
+        /// waiting. A worker is now a share of rooms and never waits, so
+        /// anything past the cores only adds context switches, and each of
+        /// them is also a GL context and a room's textures: the machines that
+        /// refuse those allocations (see Run) are exactly the ones with few
+        /// cores. Measured on an 8-core box rendering 28 rooms: 5.2 s at ten,
+        /// 4.1 s at eight.
+        /// </summary>
+        public static int DefaultParallelism => Math.Clamp(Environment.ProcessorCount, 2, 10);
 
         /// <summary>
         /// Whether previews can be rendered at all here. Every worker is a
@@ -75,60 +88,107 @@ namespace MphRead.Mods
                                       int width, int height, string exePath,
                                       Action<string>? report, out List<string> failedRooms)
         {
-
-            var queue = new Queue<string>(rooms);
-            var running = new List<(Process Proc, string Room)>();
             var failed = new List<string>();
             failedRooms = failed;
+            var running = new List<Process>();
+            foreach (IReadOnlyList<string> share in Shares(rooms, parallelism))
+            {
+                Process? proc = StartWorker(exePath, share, width, height);
+                if (proc != null)
+                {
+                    running.Add(proc);
+                }
+            }
+            // Watched through the directory the workers write into, rather
+            // than by which process exited: a worker now holds several rooms,
+            // so its exit says nothing about the ones it finished minutes
+            // ago. Android's batch reports the same way and for the same
+            // reason -- see PreviewWorkers.Watch.
+            var pending = new HashSet<string>(rooms, StringComparer.OrdinalIgnoreCase);
             int done = 0;
             int written = 0;
-
-            while (queue.Count > 0 || running.Count > 0)
+            while (true)
             {
-                while (running.Count < parallelism && queue.Count > 0)
+                bool allExited = true;
+                for (int i = 0; i < running.Count; i++)
                 {
-                    string room = queue.Dequeue();
-                    Process? proc = StartWorker(exePath, room, width, height);
-                    if (proc == null)
+                    if (!running[i].HasExited)
                     {
-                        done++;
-                        continue;
+                        allExited = false;
+                        break;
                     }
-                    running.Add((proc, room));
                 }
-                for (int i = running.Count - 1; i >= 0; i--)
+                foreach (string room in rooms)
                 {
-                    (Process proc, string room) = running[i];
-                    if (!proc.HasExited)
+                    if (!pending.Contains(room) || !ThumbnailGenerator.Exists(room))
                     {
                         continue;
                     }
-                    running.RemoveAt(i);
-                    proc.Dispose();
+                    pending.Remove(room);
+                    written++;
                     done++;
-                    bool ok = ThumbnailGenerator.Exists(room);
-                    if (ok)
-                    {
-                        written++;
-                    }
-                    else
-                    {
-                        failed.Add(room);
-                    }
-                    string line = $"[thumbnails] {done}/{rooms.Count}  "
-                        + $"{(ok ? "ok" : "FAILED")}  {room}";
-                    Console.WriteLine(line);
-                    report?.Invoke(line);
+                    string ok = $"[thumbnails] {done}/{rooms.Count}  ok  {room}";
+                    Console.WriteLine(ok);
+                    report?.Invoke(ok);
                 }
-                if (running.Count > 0)
+                if (allExited)
                 {
-                    Thread.Sleep(50);
+                    break;
                 }
+                Thread.Sleep(50);
+            }
+            // Whatever no worker managed to write, however its process ended.
+            foreach (string room in rooms)
+            {
+                if (!pending.Contains(room))
+                {
+                    continue;
+                }
+                failed.Add(room);
+                done++;
+                string line = $"[thumbnails] {done}/{rooms.Count}  FAILED  {room}";
+                Console.WriteLine(line);
+                report?.Invoke(line);
+            }
+            for (int i = 0; i < running.Count; i++)
+            {
+                running[i].Dispose();
             }
             return written;
         }
 
-        private static Process? StartWorker(string exePath, string room, int width, int height)
+        /// <summary>
+        /// Deal the rooms out to that many workers, round robin.
+        ///
+        /// Round robin rather than contiguous blocks: the rooms arrive sorted
+        /// by name and their sizes are not, so blocks would hand one worker
+        /// every big room. This is the split Android already uses.
+        ///
+        /// A room photographed after another in the same worker is caught with
+        /// its pickups at a different point in their spin -- they are animated,
+        /// and the phase is one of the few things a fresh Scene does not put
+        /// back (ThumbnailCapture.CaptureRoom resets the rest). Nothing appears
+        /// or disappears; the geometry, the camera and the lighting are
+        /// identical to the pixel. The cost of avoiding it is a process per
+        /// room, which is a third of the batch.
+        /// </summary>
+        private static List<List<string>> Shares(IReadOnlyList<string> rooms, int parallelism)
+        {
+            int workers = Math.Min(parallelism, rooms.Count);
+            var shares = new List<List<string>>(workers);
+            for (int i = 0; i < workers; i++)
+            {
+                shares.Add(new List<string>());
+            }
+            for (int i = 0; i < rooms.Count; i++)
+            {
+                shares[i % workers].Add(rooms[i]);
+            }
+            return shares;
+        }
+
+        private static Process? StartWorker(string exePath, IReadOnlyList<string> share,
+                                            int width, int height)
         {
             var info = new ProcessStartInfo
             {
@@ -140,8 +200,11 @@ namespace MphRead.Mods
                 RedirectStandardOutput = true,
                 RedirectStandardError = true
             };
-            info.ArgumentList.Add("-thumbnail");
-            info.ArgumentList.Add(room);
+            for (int i = 0; i < share.Count; i++)
+            {
+                info.ArgumentList.Add("-thumbnail");
+                info.ArgumentList.Add(share[i]);
+            }
             info.ArgumentList.Add("-size");
             info.ArgumentList.Add($"{width}x{height}");
             try
@@ -149,13 +212,14 @@ namespace MphRead.Mods
                 Process? proc = Process.Start(info);
                 if (proc == null)
                 {
-                    Console.WriteLine($"[thumbnails] could not start worker for {room}");
+                    Console.WriteLine($"[thumbnails] could not start a worker for "
+                        + $"{share.Count} room(s)");
                 }
                 return proc;
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[thumbnails] worker failed for {room}: {ex.Message}");
+                Console.WriteLine($"[thumbnails] worker failed to start: {ex.Message}");
                 return null;
             }
         }
