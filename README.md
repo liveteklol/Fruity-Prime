@@ -16,8 +16,8 @@ A fork of [NoneGiven/MphRead](https://github.com/NoneGiven/MphRead).
 - **High resolution**
 - **Windows / Linux / Android port**
 - **60 FPS**
-- **8 players**
 - **Online without lags !** (no WFC support)
+- **Up to 8 players**
 - **Dedicated servers**
 - **Demo recording**
 - **Custom maps**
