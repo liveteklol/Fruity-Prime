@@ -761,6 +761,7 @@ namespace MphRead.Entities
 
         private void ApplyModAim()
         {
+            ApplyGamepadAim();
             if (!NetSession.Active)
             {
                 return;
@@ -784,6 +785,41 @@ namespace MphRead.Entities
                 return;
             }
             ModSetAim(NetSession.RemoteIntents[SlotIndex].Aim);
+        }
+
+        /// <summary>
+        /// The right stick's turn, in the same place and the same units the
+        /// mouse's goes in.
+        ///
+        /// Here rather than anywhere more obvious because this is the one
+        /// point upstream already offers inside the player's own input step:
+        /// aim applied a few lines earlier or later than the mouse's would
+        /// feel different from the mouse for reasons nobody could name, and
+        /// the alternative is a call site in <c>PlayerInput.cs</c>.
+        ///
+        /// Only the hunter this machine is driving. Every player runs this
+        /// method, including bots and the puppets standing in for other
+        /// people, and a pad that turned all of them would be a very strange
+        /// bug to read about.
+        /// </summary>
+        private void ApplyGamepadAim()
+        {
+            if (IsBot || SlotIndex != PlayerEntity.MainPlayerIndex
+                || Mods.SpectatorMode.IsSpectating
+                || Flags1.TestFlag(PlayerFlags1.NoAimInput))
+            {
+                return;
+            }
+            float x = Mods.Input.GamepadInput.AimDeltaX;
+            float y = Mods.Input.GamepadInput.AimDeltaY;
+            if (x == 0 && y == 0)
+            {
+                return;
+            }
+            UpdateHudShiftY(y);
+            UpdateHudShiftX(x);
+            UpdateAimY(y);
+            UpdateAimX(x);
         }
     }
 }

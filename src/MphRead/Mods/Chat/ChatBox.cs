@@ -159,11 +159,26 @@ namespace MphRead.Mods.Chat
             into.Reverse();
         }
 
+        /// <summary>
+        /// Whether there is anybody to talk to.
+        ///
+        /// The story is a match with one player in it: there is no server, no
+        /// roster and nobody to read a line -- and T is a key the adventure's
+        /// own controls may want. Not "is a session running", because an
+        /// offline match against bots is still a match, and the log is where
+        /// the game's own notices go.
+        /// </summary>
+        public static bool Available => !GameState.SinglePlayer;
+
         /// <summary>Anything on screen at all -- the log or the prompt.</summary>
         internal static bool Visible
         {
             get
             {
+                if (!Available)
+                {
+                    return false;
+                }
                 if (Composing)
                 {
                     return true;
@@ -233,9 +248,17 @@ namespace MphRead.Mods.Chat
         /// nothing to say it over -- an offline match still accepts it, since
         /// the log is where the game's own notices go.
         /// </summary>
-        public static void Open()
+        /// <param name="swallowOpeningChar">
+        /// Whether the key that opened this is about to arrive a second time
+        /// as a character. True on the desktop, where GLFW raises the key
+        /// callback before the character callback for one press; false on
+        /// Android, where a key event carries its own character and is
+        /// consumed where it arrives, and false for the touch button, which
+        /// is not a key at all.
+        /// </param>
+        public static void Open(bool swallowOpeningChar = true)
         {
-            if (Composing)
+            if (Composing || !Available)
             {
                 return;
             }
@@ -244,7 +267,7 @@ namespace MphRead.Mods.Chat
                 _compose.Clear();
             }
             Composing = true;
-            _swallowNextChar = true;
+            _swallowNextChar = swallowOpeningChar;
         }
 
         public static void Cancel()
@@ -345,17 +368,32 @@ namespace MphRead.Mods.Chat
         /// </param>
         public static bool HandleKeyDown(KeyboardKeyEventArgs e, bool canOpen)
         {
+            return HandleKeyDown(e.Key, e.Control, e.Alt || e.Command, canOpen);
+        }
+
+        /// <summary>
+        /// The same, without an OpenTK event to build one from. Android has
+        /// key events of its own and no window that raises those, and this is
+        /// the whole of what the two platforms have to agree on.
+        /// </summary>
+        public static bool HandleKeyDown(Keys key, bool control, bool alt, bool canOpen,
+            bool swallowOpeningChar = true)
+        {
             if (!Composing)
             {
-                if (canOpen && e.Key == InputSettings.ChatKey
-                    && !e.Alt && !e.Control && !e.Command)
+                // Unknown on both sides is not a match: a player who has set
+                // chat_key=none has bound it to nothing, and Android reports
+                // every key this build does not map as Unknown -- so without
+                // this, unbinding chat would open it on any key at all.
+                if (canOpen && Available && key != Keys.Unknown
+                    && key == InputSettings.ChatKey && !alt && !control)
                 {
-                    Open();
+                    Open(swallowOpeningChar);
                     return true;
                 }
                 return false;
             }
-            switch (e.Key)
+            switch (key)
             {
                 case Keys.Enter:
                 case Keys.KeyPadEnter:
@@ -372,12 +410,12 @@ namespace MphRead.Mods.Chat
                             // Ctrl+Backspace takes the word, which is what
                             // every other text field on the machine does.
                             int end = _compose.Length;
-                            int cut = e.Control ? WordStart(_compose, end) : end - 1;
+                            int cut = control ? WordStart(_compose, end) : end - 1;
                             _compose.Remove(cut, end - cut);
                         }
                     }
                     return true;
-                case Keys.V when e.Control:
+                case Keys.V when control:
                     // Paste is deliberately not here: the clipboard belongs to
                     // the window, chat does not have one, and a chat line is
                     // eighty characters -- typing it is not the hard part.

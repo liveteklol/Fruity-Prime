@@ -61,6 +61,44 @@ namespace MphRead.Mods
         /// </summary>
         public static Keys ChatKey { get; set; } = Keys.T;
 
+        /// <summary>
+        /// Whether a connected pad drives the game. On, because a pad that
+        /// does nothing when plugged in is the failure people report.
+        /// </summary>
+        public static bool GamepadEnabled { get; set; } = true;
+
+        /// <summary>
+        /// How far a stick must move before it counts, 0 to 0.9.
+        ///
+        /// Applied radially rather than per axis -- see
+        /// <see cref="Input.GamepadInput"/> for why that is not the same
+        /// thing. 0.2 clears the resting drift of a worn stick without
+        /// swallowing a deliberate nudge.
+        /// </summary>
+        public static float GamepadDeadZone
+        {
+            get => _gamepadDeadZone;
+            set => _gamepadDeadZone = Math.Clamp(value, 0, 0.9f);
+        }
+
+        private static float _gamepadDeadZone = 0.2f;
+
+        /// <summary>Multiplier on the right stick's turn rate. 1.0 is 210 degrees a second.</summary>
+        public static float GamepadLookSensitivity
+        {
+            get => _gamepadLook;
+            set => _gamepadLook = Math.Clamp(value, 0.1f, 5f);
+        }
+
+        private static float _gamepadLook = 1f;
+
+        /// <summary>
+        /// Invert the right stick's vertical aim. Its own setting rather than
+        /// sharing the mouse's, because a great many people invert one and not
+        /// the other, and there is no third thing they would rather set.
+        /// </summary>
+        public static bool GamepadInvertY { get; set; }
+
         private static bool _creating;
         private static PlayerControls? _current;
 
@@ -299,6 +337,30 @@ namespace MphRead.Mods
                         ScrollAllWeapons = scrollAll;
                         continue;
                     }
+                    if (key == "gamepad" && Boolean.TryParse(value, out bool pad))
+                    {
+                        GamepadEnabled = pad;
+                        continue;
+                    }
+                    if (key == "gamepad_deadzone"
+                        && Single.TryParse(value, NumberStyles.Float,
+                            CultureInfo.InvariantCulture, out float deadZone))
+                    {
+                        GamepadDeadZone = deadZone;
+                        continue;
+                    }
+                    if (key == "gamepad_look"
+                        && Single.TryParse(value, NumberStyles.Float,
+                            CultureInfo.InvariantCulture, out float look))
+                    {
+                        GamepadLookSensitivity = look;
+                        continue;
+                    }
+                    if (key == "gamepad_invert_y" && Boolean.TryParse(value, out bool padInvert))
+                    {
+                        GamepadInvertY = padInvert;
+                        continue;
+                    }
                     if (key == "chat_key")
                     {
                         // "none" rather than a missing line, so a player who
@@ -365,7 +427,11 @@ namespace MphRead.Mods
                     $"invert_y={InvertMouseY.ToString().ToLowerInvariant()}",
                     $"invert_x={InvertMouseX.ToString().ToLowerInvariant()}",
                     $"scroll_all_weapons={ScrollAllWeapons.ToString().ToLowerInvariant()}",
-                    $"chat_key={(ChatKey == Keys.Unknown ? "none" : ChatKey.ToString())}"
+                    $"chat_key={(ChatKey == Keys.Unknown ? "none" : ChatKey.ToString())}",
+                    $"gamepad={GamepadEnabled.ToString().ToLowerInvariant()}",
+                    "gamepad_deadzone=" + GamepadDeadZone.ToString(CultureInfo.InvariantCulture),
+                    "gamepad_look=" + GamepadLookSensitivity.ToString(CultureInfo.InvariantCulture),
+                    $"gamepad_invert_y={GamepadInvertY.ToString().ToLowerInvariant()}"
                 };
                 foreach (PropertyInfo property in Bindings)
                 {
@@ -401,6 +467,10 @@ namespace MphRead.Mods
             InvertMouseX = false;
             ScrollAllWeapons = true;
             ChatKey = Keys.T;
+            GamepadEnabled = true;
+            GamepadDeadZone = 0.2f;
+            GamepadLookSensitivity = 1f;
+            GamepadInvertY = false;
         }
     }
 }

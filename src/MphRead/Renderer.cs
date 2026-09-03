@@ -1420,9 +1420,21 @@ namespace MphRead
                 {
                     SetFreeCamera(freeCamera.Value);
                 }
-                PlayerEntity.ProcessInput(_keyboardState, _mouseState,
-                    _inputMode == InputMode.CameraOnly || Mods.PauseMenu.Open
-                    || Mods.Chat.ChatBox.Composing);
+                // Read the pad before the keyboard is turned into binds, and
+                // add it after: BeginFrame works out this frame's rising
+                // edges and stick aim, and Apply ors the result onto the same
+                // binds ProcessInput has just filled in. Suppressed by exactly
+                // the things that suppress a keyboard, and by spectating,
+                // where PlayerEntity.Main is somebody else's hunter.
+                Mods.Input.GamepadDesktop.Poll();
+                Mods.Input.GamepadInput.BeginFrame();
+                bool noPlayerInput = _inputMode == InputMode.CameraOnly
+                    || Mods.PauseMenu.Open || Mods.Chat.ChatBox.Composing;
+                PlayerEntity.ProcessInput(_keyboardState, _mouseState, noPlayerInput);
+                if (!noPlayerInput && !Mods.SpectatorMode.IsSpectating)
+                {
+                    Mods.Input.GamepadInput.Apply(PlayerEntity.Main);
+                }
                 Mods.Network.NetHooks.AfterInput(this);
                 _room?.UpdateTransition();
             }
@@ -6027,6 +6039,15 @@ namespace MphRead
                 : CursorState.Normal;
             GameState.ApplyPause();
             Scene.OnUpdateFrame();
+            // Start, on a pad, is Escape. Consumed here rather than in the
+            // scene because opening the menu is a window operation and the
+            // window is this class -- the same reason the keyboard's Escape
+            // is handled in OnKeyDown and not in the entity.
+            if (Mods.Input.GamepadInput.TakeMenuPress()
+                && (Scene.CameraMode == CameraMode.Player || Scene.IsFreeCam))
+            {
+                Mods.PauseMenu.HandleEscape(this);
+            }
             if (!Scene.OnRenderFrame())
             {
                 return;

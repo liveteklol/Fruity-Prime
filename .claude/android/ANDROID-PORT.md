@@ -400,6 +400,32 @@ part of Fast Deployment."* The build succeeds, the APK installs, and it is
 hollow. `-p:EmbedAssembliesIntoApk=true` is what makes a debug APK someone can
 be handed; it is ~110 MB rather than 20.
 
+## Text input
+
+Nothing on this head read a key event until chat needed one. `GameView` is
+focusable now and handles `OnKeyDown`, which covers a keyboard plugged in,
+paired over Bluetooth, or the emulator's -- and, through
+`OnCreateInputConnection`, the soft keyboard the CHAT button asks for.
+
+Three things that are not obvious, all in `GameView`:
+
+- **`InputTypes.Null`** on the `EditorInfo` is what makes an IME send plain
+  key events instead of `commitText`. Without it the view has to keep an
+  editable buffer in step with `ChatBox`'s, which is two copies of one string.
+- **`NoFullscreen | NoExtractUi`**, or the IME covers the match with its own
+  full-screen text box in landscape.
+- **A key event carries its own character** here, where GLFW raises a key
+  callback and then a character callback for one press. So the desktop's
+  "swallow the opening character" step must be turned *off* on this path
+  (`ChatBox.Open(swallowOpeningChar: false)`), or the first real letter is
+  eaten instead.
+
+Focus and touch are separate: the touch overlay sits above `GameView` and takes
+every touch, and never takes focus, so the view keeps the keys.
+
+Full account of what chat is and what the server does with it:
+`.claude/multiplayer/NETWORK-CHAT.md`.
+
 ## Testing it here
 
 An emulator runs this without a device, and without KVM -- which WSL does not
@@ -414,7 +440,25 @@ $ANDROID_HOME/emulator/emulator -avd fruity -no-window -no-audio -no-boot-anim \
 
 `-accel off` is software CPU emulation: it boots in about five minutes and the
 system UI shows "isn't responding" dialogs of its own, which are the emulator
-and not this app. `adb install -r`, `adb shell am start -n
+and not this app.
+
+Four things that cost time here and are not obvious:
+
+- **`adb push` into the app's external directory is refused** on API 30 --
+  scoped storage, `Permission denied`, even for a directory the app itself
+  writes. `adb root` first (the `default` system image allows it; a
+  `google_apis` one does not), and it works.
+- **`adb push --sync`** for the 100 MB of extracted files. A push that dies
+  half way otherwise starts again from nothing.
+- **`pm list packages` finding the package proves nothing** -- an install from
+  a previous session leaves it there, so a wait loop on that returns
+  immediately and the thing under test is last week's APK. Wait on `adb
+  install` actually exiting, and check `dumpsys package ... lastUpdateTime`.
+- **A 112 MB debug APK takes several minutes to install** on a software CPU,
+  and `cmd: Can't find service: package` means the system is still coming up
+  rather than that anything is wrong. `sys.boot_completed` is never set on
+  this image; `init.svc.bootanim` going `stopped` is the signal, and the
+  package service is up a while after that. `adb install -r`, `adb shell am start -n
 fr.livetek.fruityprime/crc64e2a07749a868b9fd.MainActivity`, and `adb shell
 screencap` are enough to see the front screen. With KVM it would be seconds
 rather than minutes.

@@ -6,6 +6,7 @@ using Android.App;
 using Android.Content.PM;
 using Android.OS;
 using Android.Views;
+using Android.Views.InputMethods;
 using Android.Widget;
 using Avalonia;
 using Avalonia.Android;
@@ -568,6 +569,34 @@ namespace MphRead.Droid
             BeginMatch(plan, input);
         }
 
+        /// <summary>
+        /// Put the soft keyboard up, or take it away.
+        ///
+        /// Asked for by the game loop when the chat prompt opens and closes;
+        /// done here because an IME call belongs to the UI thread and to the
+        /// view that says it is a text editor (see
+        /// <c>GameView.OnCheckIsTextEditor</c>). The view has to be focused
+        /// first -- the touch overlay above it takes every touch but never
+        /// focus, so this is normally already true and costs nothing.
+        /// </summary>
+        private void ShowSoftKeyboard(bool show)
+        {
+            if (_gameView == null
+                || GetSystemService(InputMethodService) is not InputMethodManager ime)
+            {
+                return;
+            }
+            if (show)
+            {
+                _gameView.RequestFocus();
+                ime.ShowSoftInput(_gameView, ShowFlags.Implicit);
+            }
+            else
+            {
+                ime.HideSoftInputFromWindow(_gameView.WindowToken, HideSoftInputFlags.None);
+            }
+        }
+
         private void BeginMatch(LaunchPlan plan, AndroidInput input)
         {
             if (_content == null)
@@ -579,7 +608,8 @@ namespace MphRead.Droid
                 () => RunOnUiThread(EndMatch),
                 () => RunOnUiThread(MatchLoaded),
                 error => RunOnUiThread(() => FailMatch(error)),
-                () => RunOnUiThread(TogglePauseMenu));
+                () => RunOnUiThread(TogglePauseMenu),
+                show => RunOnUiThread(() => ShowSoftKeyboard(show)));
             // The launcher is Avalonia, which draws on a surface of its own,
             // and two surfaces in one window have no z-order between them
             // unless one is asked for. Above the other surface and below the

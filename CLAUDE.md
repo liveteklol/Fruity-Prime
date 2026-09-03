@@ -96,6 +96,7 @@ export ALSOFT_DRIVERS=null PULSE_SERVER=   # else ALSA retries stall frames
 | `MphRead -q3convert FILE.pk3 -map LEVEL -name ROOM [-noclip]` | a Quake 3 .pk3 to a custom map in one command: textures baked from the level's own art, scale and extents picked from its geometry, spawns from its entities. Places no weapons or powerups -- where those go decides how the map plays. `.claude/mapgen/MAP-PIPELINE.md` |
 | `MphRead -mapgen ["NAME"]` | generate the room binaries for the custom maps in `maps/` (recursively: a map may sit in a folder of its own with its level and textures beside it, or be a single `.fpmap` bundle), from the player's own textures. `-mapmaterials "ROOM"` prints what textures a room can lend. A map is a JSON file; the `.bin` it produces is never committed. `.claude/mapgen/MAP-PIPELINE.md` |
 | `MphRead -mapbundle ["NAME"] [-mapdir DIR]` | cook a map into the one file it ships and is handed out as: recipe, level and baked textures in a `.fpmap`, with the level trimmed to the lumps the importer reads (376 KB for de_dust2, against 2.8 MB for the folder). What the workflow runs before it publishes -- the bundle is not committed, and the `.pk3` it is cooked from never reaches a package. `-mapdir` is resolved against the directory the command was typed in |
+| `MphRead -gamepad [-seconds N]` | what a connected pad is doing, with no match in the way: its name, its axes, and which game action each button reaches. The only thing that tells "not connected" from "connected but GLFW has no mapping for it" from "the dead zone is eating it" apart. `.claude/GAMEPAD.md` |
 | `MphRead -cel on\|off [-celbands N] [-celedge N]` / `-fog on\|off` / `-prohud on\|off` | render options for every path that never opens a launcher, which is every screenshot command. `.claude/render/CEL-SHADING.md` |
 | `MphRead -uishot DIR` | pictures of the launcher's own screens -- home, settings, the map picker, the pause menu -- rendered without anyone looking at a display. The one part of the program that could not otherwise be checked from a headless box |
 | `MphRead -demoinfo FILE [-replay]` | what a recorded match contains -- records, frames, a packet-type histogram, and how well it compressed. `-replay` then runs the file through the real player with no room or window and reports how the packets landed per frame, which is the measurement "the replay stutters" is about. Needs no game files. `.claude/multiplayer/NETWORK-DEMOS.md` |
@@ -171,6 +172,27 @@ AppCompat descendant, and a Debug APK that carries no managed code unless
 `EmbedAssembliesIntoApk=true` — are written up with the rest in
 `.claude/android/ANDROID-PORT.md`, along with the build recipe, the game-files
 directory, and how to run an emulator here.
+
+## Gamepads
+
+A pad plays the game on the desktop and on Android, over USB or Bluetooth,
+in an Xbox-shaped layout: sticks move and aim, right trigger shoots, A jumps,
+B morphs, the bumpers and d-pad change weapon, Back is the scoreboard and
+Start is the pause menu. There is **no weapon wheel on a pad** -- it reads an
+absolute pointer position, which a stick does not have.
+
+It reaches the game the way the touch controls do, from the other end: after
+`ProcessAllInput` has run, the pad's contribution is **ored** onto the same
+keybinds the keyboard just filled in, so a pad and a keyboard work at once and
+no upstream call site changed. Aim is the exception, since a stick is analogue
+-- it goes in at `ApplyModAim`, in the same units and at the same point in the
+frame as the mouse's.
+
+`FruityPrime -gamepad` prints what a pad is doing with no match in the way,
+and distinguishes "not connected" from "connected but unmapped". Layout, feel
+(radial dead zone, squared look curve, 3.5 degrees a frame at full stick), the
+four settings, and how to test one with a virtual pad on `uinput`:
+`.claude/GAMEPAD.md`.
 
 ## Updating
 
@@ -333,7 +355,9 @@ corner. It draws with a font of its own (`Mods/Chat/ChatFont.cs`, pixel art in
 the file, no asset): the game's has one alphabet, so every line typed came out
 shouted and half as wide again as it needed to be. `PacketType.Chat` is additive and needs no protocol bump, so an older
 server drops it silently and chat simply does nothing there until it is
-redeployed. The server writes the slot and the name onto every line it relays
+redeployed. **Never in the story** -- `ChatBox.Available` is
+`!GameState.SinglePlayer` -- and on Android it is a CHAT button that asks for
+the soft keyboard, or any keyboard that happens to be attached. The server writes the slot and the name onto every line it relays
 rather than trusting the sender's, and rate limits at the relay. Packet
 numbers 24 and 25 are left free for a voice channel.
 `.claude/multiplayer/NETWORK-CHAT.md`.

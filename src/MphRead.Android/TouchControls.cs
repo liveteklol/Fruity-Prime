@@ -41,7 +41,15 @@ namespace MphRead.Droid
         /// being that when it became the way to the app's own menu, and it is
         /// still worth reaching.
         /// </summary>
-        Scoreboard
+        Scoreboard,
+        /// <summary>
+        /// Opens the chat line and asks for the soft keyboard. The desktop's
+        /// T, which a phone has no way to press.
+        ///
+        /// Hidden unless a networked match is running: offline there is nobody
+        /// to read it, and in the story it does not exist at all.
+        /// </summary>
+        Chat
     }
 
     internal sealed class TouchButton
@@ -119,7 +127,8 @@ namespace MphRead.Droid
             new TouchButton(TouchAction.WeaponMenu, "WEAPON"),
             new TouchButton(TouchAction.Zoom, "ZOOM"),
             new TouchButton(TouchAction.Pause, "MENU"),
-            new TouchButton(TouchAction.Scoreboard, "SCORE")
+            new TouchButton(TouchAction.Scoreboard, "SCORE"),
+            new TouchButton(TouchAction.Chat, "CHAT") { Visible = false }
         };
 
         public float Width { get; private set; }
@@ -261,6 +270,46 @@ namespace MphRead.Droid
         private bool _scanVisorActive;
 
         /// <summary>
+        /// Whether the CHAT button is on screen. Set once a frame from the
+        /// game loop, which is the only thing that knows whether a networked
+        /// match is running.
+        /// </summary>
+        public bool ChatEnabled
+        {
+            get
+            {
+                lock (_lock)
+                {
+                    return _chatEnabled;
+                }
+            }
+            set
+            {
+                bool changed = false;
+                lock (_lock)
+                {
+                    if (_chatEnabled != value)
+                    {
+                        _chatEnabled = value;
+                        changed = true;
+                        foreach (TouchButton button in _buttons)
+                        {
+                            if (button.Action == TouchAction.Chat)
+                            {
+                                button.Visible = value;
+                            }
+                        }
+                    }
+                }
+                if (changed)
+                {
+                    Invalidated?.Invoke();
+                }
+            }
+        }
+        private bool _chatEnabled;
+
+        /// <summary>
         /// Asked to repaint, for the changes that do not come from a touch.
         /// The view sets this; nothing here knows what a view is.
         /// </summary>
@@ -292,6 +341,10 @@ namespace MphRead.Droid
                 Place(TouchAction.Zoom, width - 0.33f * h, 0.12f * h, 0.065f * h);
                 Place(TouchAction.Pause, 0.11f * h, 0.12f * h, 0.060f * h);
                 Place(TouchAction.Scoreboard, 0.28f * h, 0.12f * h, 0.060f * h);
+                // Third along the top row, past MENU and SCORE. Low enough to
+                // clear the chat log itself, which grows downward from the top
+                // of the HUD's own space and is inset to miss MENU already.
+                Place(TouchAction.Chat, 0.45f * h, 0.12f * h, 0.060f * h);
             }
         }
 

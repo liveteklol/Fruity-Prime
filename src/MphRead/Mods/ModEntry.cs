@@ -458,6 +458,21 @@ namespace MphRead.Mods
                 return true;
             }
 
+            // What a connected pad is doing, with no match in the way. The
+            // only way to tell "not connected" from "connected but not
+            // mapped" from "the dead zone is eating it" apart.
+            if (HasFlag(args, "gamepad"))
+            {
+                double seconds = 15;
+                string? given = ValueAfter(args, "seconds");
+                if (given != null && Double.TryParse(given, out double parsed) && parsed > 0)
+                {
+                    seconds = parsed;
+                }
+                Environment.ExitCode = Input.GamepadProbe.Run(seconds);
+                return true;
+            }
+
             // The multiplayer room list, one per line, so a shell loop can
             // walk every map without hard-coding the names.
             if (HasFlag(args, "rooms"))

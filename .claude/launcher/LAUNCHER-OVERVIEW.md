@@ -93,4 +93,32 @@ macOS and Android
   where it left the assembly, failing the build after a clean compile. The
   `avares://` assets are embedded by a different target and are unaffected.
 
+## ⚠️ "Random" is a menu entry, not a hunter
+
+`Hunter.Random` is offered by every front screen and has no entry in
+`Metadata.HunterModels`, which has one for each of the seven and for the
+Guardian. Nothing rolled it into a real hunter, so picking Random and starting
+anything threw `KeyNotFoundException` the moment `PlayerEntity.Create` asked
+for a model -- *"The given key 'Random' was not present in the dictionary"* on
+the desktop, and `Arg_KeyNotFoundWithKey` on Android, which is the same
+exception with the message strings trimmed out. Every platform, every match
+kind, since Random was added.
+
+`Hunters.Resolve` (`Mods/Launcher/Portable/LaunchPlan.cs`) rolls it, and
+`LaunchPlan.Hunter` resolves on the way in, so no consumer of a plan can see
+Random. Two things about it are not obvious:
+
+- **The roll is held for one launch.** Joining a server announces the hunter
+  (`NetLaunch.Join`, which resolves too) *before* the plan carrying it is
+  built, so two independent rolls would put a player on the roster as one
+  hunter and draw them as another -- on their own screen and everyone else's.
+- **It is rerolled where a launch begins**, not where the match ends:
+  `GuiLauncher` and `TextLauncher` before they ask, and `HomeView.Reset`,
+  which is Android's equivalent (one HomeView lives for the life of the app).
+  Without that, "Random" picks one hunter and gives it to you for the rest of
+  the session.
+
+The preference keeps the word: `LauncherPrefs.LastHunter` still stores Random,
+so the picker still shows it and the next match rolls again.
+
 See also: .claude/launcher/LAUNCHER-DESIGN.md, .claude/launcher/LAUNCHER-SETTINGS.md, .claude/launcher/LAUNCHER-FIRSTRUN.md

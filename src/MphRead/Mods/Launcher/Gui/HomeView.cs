@@ -337,6 +337,10 @@ namespace MphRead.Mods.Launcher.Gui
         {
             _finished = false;
             Plan = default;
+            // Android keeps one of these for the life of the app, so this is
+            // where a launch begins there -- see GuiLauncher for why the roll
+            // behind "Random" is held for exactly one.
+            Hunters.Reroll();
             LauncherPrefs.Load();
             RefreshPrefRows();
             RefreshRooms();

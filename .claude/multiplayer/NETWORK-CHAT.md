@@ -34,6 +34,8 @@ drawn over the scene in that same corner.
 | `Mods/Network/NetSession.cs` | `SendChat`, and the received line |
 | `Mods/Network/DedicatedServer.cs` | `HandleChat`: attribution, the rate limit, the relay |
 | `Mods/InputSettings.cs` | `ChatKey`, saved to `controls.txt` as `chat_key` |
+| `MphRead.Android/GameView.cs` | Android's key events, and the soft-keyboard editor |
+| `MphRead.Android/TouchControls.cs` | the CHAT button |
 | `~/mph-net-test/probe-chat.py` | the three things `-netcheck` cannot ask |
 
 ## The protocol
@@ -81,6 +83,49 @@ scoreboard reads would be the wrong shape. Nothing in the current wire format
 has to change when it arrives, because the relay forwards what it recognises
 and drops what it does not -- a build that speaks voice and a build that does
 not can share a match.
+
+## Where it is not
+
+**Never in the story.** `ChatBox.Available` is `!GameState.SinglePlayer`, and
+both adventure paths (`MatchStart.LaunchAdventure` and
+`AndroidMatch.BuildAdventure`) set `GameState.Mode = GameMode.SinglePlayer`.
+There is no server, no roster and nobody to read a line; T goes back to
+meaning whatever it meant before, and the log does not draw. The check is
+inside `ChatBox` rather than in each caller, so Android gets it for free.
+
+Not "is a session running", though: an **offline match against bots** still
+has chat. Nothing leaves the machine, and the log is where the game's own
+notices go.
+
+## On Android
+
+Two ways in, because a phone has no T to press:
+
+- **A CHAT button**, third along the top row past MENU and SCORE. It shows
+  only while a networked match is running -- offline there is nobody to read a
+  line -- and pressing it opens the prompt *and* asks for the soft keyboard.
+  The IME call belongs to the UI thread and the button is read on the GL one,
+  so `GameView` asks and `MainActivity.ShowSoftKeyboard` does it, the same
+  arrangement the pause menu has.
+- **A keyboard**, if one is attached -- USB, Bluetooth, or the emulator's.
+  `GameView.OnKeyDown` handles it, and T opens the prompt exactly as on the
+  desktop.
+
+Three things about that are worth knowing:
+
+- **`InputTypes.Null` is what makes the soft keyboard usable at all.** It
+  tells the IME this view cannot be edited through `commitText`, and every
+  keyboard worth the name answers by sending plain key events instead --
+  which is the path `OnKeyDown` already handles. The alternative is an
+  `InputConnection` holding an editable buffer kept in step with `ChatBox`'s,
+  which is two copies of one string and a second set of rules for composing.
+- **`NoFullscreen | NoExtractUi`**, or the IME replaces the whole screen with
+  its own text box in landscape -- which is every phone playing this.
+- **Android delivers the character with the key event**, where GLFW raises two
+  callbacks for one press. So `HandleKey` is both of the desktop's paths in
+  one method, and it opens the prompt with `swallowOpeningChar: false`: there
+  is no second delivery to swallow, and swallowing anyway would eat the first
+  real letter.
 
 ## Traps
 
@@ -146,6 +191,8 @@ mismatches elsewhere.
   (`chat_key=T`, or `none` to give the key back), but the launcher's controls
   page lists `PlayerControls` properties and this is deliberately not one of
   them -- see the comment on `InputSettings.ChatKey`.
-- **Android cannot type.** The log draws, and messages from other players
-  arrive, but the head has no soft keyboard and nothing that opens the prompt.
 - **No team channel and no voice**, per the protocol section above.
+- **The Android CHAT button hides offline.** A local match against bots does
+  have chat on the desktop (see "Where it is not"), and on a phone with no
+  keyboard attached there is no way to reach it. Nobody would read it either
+  way, so the button is tied to `NetSession.Active`.
