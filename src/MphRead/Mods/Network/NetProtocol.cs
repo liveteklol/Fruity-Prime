@@ -40,7 +40,66 @@ namespace MphRead.Mods.Network
         MasterQuery = 18,   // launcher -> master, "who is up?"
         MasterList = 19,    // master -> launcher, one page of the answer
         HostRequest = 20,   // launcher -> master, "run a game for me"
-        HostReply = 21      // master -> launcher, the port it is on, or why not
+        HostReply = 21,     // master -> launcher, the port it is on, or why not
+        Refused = 22        // server -> client, "not you, and here is why"
+    }
+
+    /// <summary>
+    /// Why a server would not admit a client.
+    ///
+    /// Until this existed a refusal was a silence: the server logged its
+    /// reason and sent nothing, so a full server, a server running a
+    /// different build and a server that was switched off were the same eight
+    /// seconds of waiting followed by a guess -- every screen in the program
+    /// said "it may be off, full, or UDP may be blocked", because that is
+    /// genuinely all the client knew.
+    ///
+    /// Additive and ignorable in both directions, so it needs no protocol
+    /// bump: a client built before this drops an unknown packet type on the
+    /// floor exactly as it always did, and a server built before it simply
+    /// never sends one -- which is why the client also keeps the StatusQuery
+    /// fallback (see <c>NetLaunch.DescribeJoinFailure</c>) for the servers
+    /// already deployed.
+    /// </summary>
+    public struct RefusedPacket
+    {
+        public const int Size = 3;
+
+        public const byte ReasonFull = 1;
+        public const byte ReasonProtocol = 2;
+
+        public byte Reason;
+        public byte Players;
+        public byte MaxPlayers;
+
+        public void Write(Span<byte> dest)
+        {
+            dest[0] = Reason;
+            dest[1] = Players;
+            dest[2] = MaxPlayers;
+        }
+
+        public static RefusedPacket Read(ReadOnlySpan<byte> src)
+        {
+            return new RefusedPacket
+            {
+                Reason = src[0],
+                Players = src.Length > 1 ? src[1] : (byte)0,
+                MaxPlayers = src.Length > 2 ? src[2] : (byte)0
+            };
+        }
+
+        public readonly string Describe(string where)
+        {
+            return Reason switch
+            {
+                ReasonFull => $"{where} is full ({Players}/{MaxPlayers} players). "
+                    + "Try again when somebody leaves.",
+                ReasonProtocol => $"{where} is running a different version of the game. "
+                    + "One of you needs updating.",
+                _ => $"{where} would not admit this client."
+            };
+        }
     }
 
     /// <summary>
@@ -522,7 +581,27 @@ namespace MphRead.Mods.Network
         /// session, seven respawns out of seven landed exactly on the spot of
         /// death, to two decimal places, on both machines.
         /// </summary>
-        InPlayState = 1u << 19
+        InPlayState = 1u << 19,
+        /// <summary>
+        /// Not a button either: the sender has stopped playing and is
+        /// watching (<see cref="Mods.SpectatorMode"/>).
+        ///
+        /// Here rather than only in the snapshot because the snapshot travels
+        /// the wrong way for this. A spectator sets the flag on its own
+        /// machine; the flag reaches everyone else through the authority's
+        /// snapshot; and the authority learns nothing about a client except
+        /// through this packet. So a client that spectated was hidden and
+        /// non-solid on its own screen alone -- on every other machine, the
+        /// authority's included, it was still a solid, shootable player
+        /// standing exactly where it had stopped, and could be killed for
+        /// points while its owner was watching from the ceiling. Measured
+        /// against the Pi: 1501 frames spectating on the owner, 0 on the
+        /// observer.
+        ///
+        /// A spare bit, deliberately: an older build ignores it and behaves
+        /// exactly as it did before, so this needs no protocol bump.
+        /// </summary>
+        SpectatingState = 1u << 20
     }
 
     /// <summary>

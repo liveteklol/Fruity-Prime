@@ -1,5 +1,6 @@
 using System;
 using MphRead.Entities;
+using MphRead.Formats.Culling;
 
 namespace MphRead.Mods.Network
 {
@@ -154,6 +155,25 @@ namespace MphRead.Mods.Network
                 created.LoadFlags |= LoadFlags.SlotActive;
                 created.LoadFlags |= LoadFlags.Active;
                 created.LoadFlags |= LoadFlags.Initial;
+                // Where this player was, in the room that no longer exists.
+                //
+                // PlayerEntity.Create hands back the same pooled objects
+                // every time, so a node reference into the old room's portal
+                // graph survives the change -- and RoomEntity.UpdateRoomParts
+                // starts its walk from Main.CameraInfo.NodeRef and indexes
+                // the NEW room's part arrays with it. Its only guard is
+                // PartIndex == -1, which is what a player who has not been
+                // placed yet carries and what these have to be given back;
+                // any other stale index is an ArgumentOutOfRangeException in
+                // RoomEntity.DrawRoomParts on the first frame of the new map.
+                // It killed all four clients in a match the instant the
+                // server rotated from MP1 SANCTORUS to MP3 PROVING GROUND.
+                //
+                // Until the engine places them, the walk finds nothing and
+                // the room draws through DrawAllNodes, which is the correct
+                // picture and merely uncalled.
+                created.NodeRef = NodeRef.None;
+                created.CameraInfo.NodeRef = NodeRef.None;
                 created.IsBot = false;
                 created.BotLevel = 0;
                 bool occupied = slot == localSlot

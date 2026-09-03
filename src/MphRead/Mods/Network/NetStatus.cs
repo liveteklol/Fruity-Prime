@@ -53,6 +53,15 @@ namespace MphRead.Mods.Network
         }
         /// <summary>True when only the join probe answered, so the details are thin.</summary>
         public bool Legacy { get; init; }
+        /// <summary>
+        /// The protocol version the server speaks, or 0 when it did not say.
+        ///
+        /// A server refuses a Hello from a different version in silence, which
+        /// from the client's side is indistinguishable from a server that is
+        /// not there -- except that this packet still comes back, and carries
+        /// the number. See <see cref="NetLaunch.DescribeJoinFailure"/>.
+        /// </summary>
+        public int Protocol { get; init; }
 
         public static ServerStatus Offline(string message) => new()
         {
@@ -261,6 +270,7 @@ namespace MphRead.Mods.Network
                 TimeRemaining = match.TimeRemaining,
                 Latency = latency,
                 Legacy = legacy,
+                Protocol = status.Protocol,
                 Message = message
             };
         }

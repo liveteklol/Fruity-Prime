@@ -129,6 +129,12 @@ namespace MphRead.Mods.Network
         /// upstream hook to one line, which is what makes pulling from
         /// NoneGiven/MphRead a fast forward instead of a conflict.
         /// </summary>
+        /// <summary>
+        /// How long a relayed intent may go unrefreshed and still be trusted
+        /// to say where its owner is: half a second at sixty frames.
+        /// </summary>
+        private const uint StaleIntentFrames = 30;
+
         public static bool TryApplyRemoteInput(PlayerEntity player, int slot)
         {
             if (!NetSession.Active || slot == LocalSlot)
@@ -138,7 +144,17 @@ namespace MphRead.Mods.Network
             if (player.LoadFlags.TestFlag(LoadFlags.Active) && NetSession.RemoteIntentValid[slot])
             {
                 if (player.LoadFlags.TestFlag(LoadFlags.Spawned) && player.Health > 0
-                    && !NetRoomChange.Settling)
+                    && !NetRoomChange.Settling
+                    // And not from an intent that stopped coming. The pin is
+                    // "this player says they are here", which is only true
+                    // while they are still saying it: once their line goes,
+                    // the last position they sent fights the authority's
+                    // snapshots -- which keep moving the puppet, respawning
+                    // it, dropping it off ledges -- and the two yank it back
+                    // and forth every frame for the whole outage. Half a
+                    // second of silence is already several lost packets, and
+                    // the snapshot alone is the right answer from then on.
+                    && NetSession.RemoteIntentAge(slot) <= StaleIntentFrames)
                 {
                     // Position and controls must enter the simulation
                     // together. Applying the position after the scene step
@@ -248,7 +264,31 @@ namespace MphRead.Mods.Network
                 // Between the input step and the intent capture, so a
                 // scripted player's keys reach both the local simulation and
                 // the wire -- the same order a person's keys travel in.
-                NetTestScript.Apply(player);
+                //
+                // Re-asserted every frame, because PlayerEntity.Spawn
+                // clears Flags2 wholesale (`Flags2 = PlayerFlags2.NoShotsFired`)
+                // and a spectator's body still respawns on its timer. The
+                // flag went with it: the spectator stayed on its free camera
+                // while its hunter came back solid, visible and shootable on
+                // every machine including its own, and the authority
+                // published FlagSpectating = 0 for it from then on. Measured
+                // against the Pi: 6001 frames spectating, of which the
+                // observers saw 189 -- one respawn's worth.
+                if (Mods.SpectatorMode.IsSpectating)
+                {
+                    player.ModSetSpectating(true);
+                }
+                // Not while spectating: a real spectator's input never
+                // reaches their hunter (PlayerInput.ProcessInput checks the
+                // same flag), and the tour writes Controls directly, after
+                // that check. A scripted client that kept walking while
+                // "spectating" would be testing nothing. Intents still go out
+                // below -- a silent peer is dropped after TimeoutSeconds, and
+                // a spectator is not a peer who has left.
+                if (!Mods.SpectatorMode.IsSpectating)
+                {
+                    NetTestScript.Apply(player);
+                }
                 // Edges every frame, packets every other one. With N players
                 // the server relays N*(N-1) updates per frame, and at six
                 // players that was losing enough of them to leave visible

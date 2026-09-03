@@ -148,6 +148,7 @@ namespace MphRead.Droid
             private readonly Action _onPauseMenu;
             private bool _menuWasHeld;
             private bool _spectateCycleHeld;
+            private bool _missileWasHeld;
 
             private EGLDisplay? _display;
             private EGLConfig? _config;
@@ -659,6 +660,13 @@ namespace MphRead.Droid
                     }
                     _menuWasHeld = menuHeld;
                     _controls.TakeAimDelta();
+                    _controls.TakeSwipeBoost();
+                    _controls.TakeDoubleTapJump();
+                    // Nothing to scan or boost from here, and FIRE has to be
+                    // the button that cycles players rather than a SCAN left
+                    // over from whatever the visor was doing.
+                    _controls.ScanVisorActive = false;
+                    _controls.SwipeBoostEnabled = false;
                     return;
                 }
                 _spectateCycleHeld = false;
@@ -680,7 +688,18 @@ namespace MphRead.Droid
                 _input.Apply(controls.RolltLeft, left);
                 _input.Apply(controls.RollRight, right);
 
-                bool jump = _controls.IsHeld(TouchAction.Jump);
+                // JUMP, or two quick taps on the aiming side, which is how the
+                // DS jumped with a stylus in hand.
+                //
+                // Taken every frame whether it is wanted or not, so it cannot
+                // go stale and jump later. It is not wanted while a dialog or
+                // the wheel is up: both turn the screen into a thing to press,
+                // and pressing OK twice, or two weapons in a row, is not a
+                // request to jump.
+                bool doubleTap = _controls.TakeDoubleTapJump();
+                bool jump = _controls.IsHeld(TouchAction.Jump)
+                    || (doubleTap && !GameState.DialogPause
+                        && !_controls.IsHeld(TouchAction.WeaponMenu));
                 // FIRE is the only attack button, and it is both attacks.
                 //
                 // There used to be an ALT button beside it, which is what the
@@ -701,8 +720,48 @@ namespace MphRead.Droid
                 // One button on the DS, and the same key here by default:
                 // jumping on foot is boosting in the ball.
                 _input.Apply(controls.Boost, jump);
+                // A quick flick on the aim side also boosts, the way a stylus
+                // flick did on the DS -- see PlayerInput's boost handling for
+                // how this one-shot is consumed. Only the ball boosts, and
+                // telling the controls that is what keeps a fast turn on foot
+                // from being read as a flick.
+                _controls.SwipeBoostEnabled = main.IsAltForm;
+                (bool Fired, float X, float Y) swipe = _controls.TakeSwipeBoost();
+                if (swipe.Fired && main.IsAltForm)
+                {
+                    main.SwipeBoostRequested = true;
+                    // Which way the thumb went, for the boost to follow. The
+                    // engine turns it into a world direction; here it is still
+                    // just the screen's.
+                    main.SwipeBoostX = swipe.X;
+                    main.SwipeBoostY = swipe.Y;
+                }
                 _input.Apply(controls.Morph, _controls.IsHeld(TouchAction.Morph));
+                // Two binds, two buttons, exactly as the desktop has them:
+                // VISOR opens and closes the scan visor (E) and SCAN reads
+                // what is targeted while it is held (Q). One button trying to
+                // be both could not tell "read this again" from "put the
+                // visor away", and answered a press with both.
+                //
+                // SCAN is only there while the visor is: it takes FIRE's
+                // place, which is idle in the visor anyway. See
+                // TouchControls.ScanVisorActive.
+                _controls.ScanVisorActive = main.ScanVisor;
+                _input.Apply(controls.ScanVisor, _controls.IsHeld(TouchAction.ScanVisor));
+                _input.Apply(controls.Scan, _controls.IsHeld(TouchAction.Scan));
                 _input.Apply(controls.Zoom, _controls.IsHeld(TouchAction.Zoom));
+                // MSSL swaps to the Missile and back to the Power Beam, since
+                // neither is on the wheel and a thumb has no number row. The
+                // press decides which of the two binds to hold for the frame;
+                // both are read as presses (PlayerInput.ProcessTouchInput), so
+                // one frame is a switch.
+                bool missile = _controls.IsHeld(TouchAction.Missile);
+                if (missile && !_missileWasHeld)
+                {
+                    _input.Apply(main.CurrentWeapon == BeamType.Missile
+                        ? controls.PowerBeam : controls.Missile, true);
+                }
+                _missileWasHeld = missile;
                 // The DS pause button -- map and status on foot, scoreboard
                 // while it is held in a match -- is SCORE now. MENU is the
                 // app's own menu, which is the thing a player looks for first
@@ -743,7 +802,18 @@ namespace MphRead.Droid
                     _controls.TakeAimDelta();
                     return;
                 }
-                _controls.PointerIsAbsolute = false;
+                // The weapon wheel is the other part that reads a position off
+                // what used to be a touch screen, so while it is open the
+                // screen is one -- the left half stops being a thumbstick.
+                //
+                // Without that, four of the six weapons could not be picked at
+                // all. PlayerHud lays the wheel out from x = 0.30 to x = 0.785
+                // of the width, so most of it is in the half where a finger
+                // becomes the stick instead of the pointer, and a tap there
+                // was a movement input the wheel never saw: the menu opened,
+                // the icons appeared, and choosing one did nothing but play
+                // the "cannot switch" sound.
+                _controls.PointerIsAbsolute = _controls.IsHeld(TouchAction.WeaponMenu);
                 if (_dialogClickDown)
                 {
                     // Released explicitly rather than left to the next tap:

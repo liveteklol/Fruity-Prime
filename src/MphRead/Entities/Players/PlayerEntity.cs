@@ -264,6 +264,19 @@ namespace MphRead.Entities
         private ushort _bombOveruse = 0;
         private ushort _boostCharge = 0;
         private ushort _boostDamage = 0;
+        // Set by a touch platform's swipe gesture, and consumed as a forced
+        // full charge by the boost handling below -- see the "touch boost"
+        // note there.
+        public bool SwipeBoostRequested { get; set; }
+        /// <summary>
+        /// Which way that flick went, as the screen saw it: X to the right,
+        /// Y downwards, unit length. The boost goes where the thumb went
+        /// rather than where the ball happened to be pointing, so it is
+        /// turned into a world direction against the same camera-relative
+        /// basis the ball rolls with. Zero means "wherever it is heading".
+        /// </summary>
+        public float SwipeBoostX { get; set; }
+        public float SwipeBoostY { get; set; }
         private ushort _altAttackCooldown = 0;
         private ushort _altAttackTime = 0;
         private float _altSpinSpeed = 0;

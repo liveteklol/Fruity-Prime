@@ -64,6 +64,16 @@ namespace MphRead.Mods.Network
             public int DamageInAltForm;
             public int Deaths;
             public int ZoomFrames;
+            /// <summary>
+            /// Frames this slot was flagged as watching rather than playing.
+            /// Read off the entity for every slot alike -- the local player
+            /// gets the flag from SpectatorMode, a puppet from the
+            /// FlagSpectating bit in its snapshot -- so the two accounts of
+            /// one player are directly comparable, which is the whole check:
+            /// a spectator who is only hidden on their own machine is still
+            /// solid, shootable and in the way on everybody else's.
+            /// </summary>
+            public int SpectatingFrames;
             public int DoubleDamageFrames;
             public Vector3 LastPosition;
             /// <summary>Last frame's position, for snap detection, which is a
@@ -267,6 +277,20 @@ namespace MphRead.Mods.Network
                 if (player.EquipInfo.Zoomed)
                 {
                     record.ZoomFrames++;
+                }
+                // For this machine's own player, what it *meant* to do --
+                // SpectatorMode, which is where the decision lives -- and for
+                // everybody else the flag as it actually arrived. Deliberately
+                // not the same source on both sides: reading the entity flag
+                // for both made the two accounts agree while spectating was
+                // reaching nobody, because a respawn wiped the flag at the
+                // source and both sides then counted the same zero. The check
+                // is only worth anything if the two sides can disagree.
+                if (slot == _localSlot
+                    ? Mods.SpectatorMode.IsSpectating
+                    : player.Flags2.TestFlag(PlayerFlags2.Spectating))
+                {
+                    record.SpectatingFrames++;
                 }
                 if (player.DoubleDamage)
                 {
@@ -545,17 +569,22 @@ namespace MphRead.Mods.Network
             Console.WriteLine($"    items: {_itemsNow} on the map now, "
                 + $"{(_itemSamples > 0 ? _itemTotal / (double)_itemSamples : 0):0.0} on average, "
                 + $"{_itemsPickedUp} taken or expired");
-            var board = new StringBuilder("    scoreboard as I see it:");
-            for (int slot = 0; slot < PlayerEntity.MaxPlayers; slot++)
+            Console.WriteLine(Scoreboard("    scoreboard as I see it:"));
+            foreach (KeyValuePair<int, string> pair in Boards)
             {
-                if (_records[slot].SpawnedFrames == 0)
-                {
-                    continue;
-                }
-                board.Append($" [{slot}] {GameState.Nicknames[slot]} "
-                    + $"{GameState.Kills[slot]}k/{GameState.Deaths[slot]}d/{GameState.Points[slot]}p");
+                Console.WriteLine(pair.Value);
             }
-            Console.WriteLine(board.ToString());
+            if (Boards.Count > 0)
+            {
+                // Those are the ones that can be compared between clients.
+                // The final board below cannot: clients stop seconds apart,
+                // and a slot's score is cleared the moment its player leaves
+                // (NetSlotManager.Deactivate, deliberately -- somebody who has
+                // gone is not on the board). So by the time the last client
+                // prints, it is the only row left standing, and a run with
+                // departures in it reports the scoreboards as disagreeing by
+                // however many points the leavers had.
+            }
             var phases = new StringBuilder("    phases seen:");
             foreach (KeyValuePair<TestPhase, int> pair in _phaseFrames)
             {
@@ -611,6 +640,8 @@ namespace MphRead.Mods.Network
                 }
             }
             Console.WriteLine(pairs.ToString());
+            Console.WriteLine($"    authority for {NetSession.AuthorityFrames} frame(s) "
+                + $"of {NetSession.NetFrame}");
             Console.WriteLine($"    remote position snaps: {NetPlayerBridge.Snaps} "
                 + $"(worst {NetPlayerBridge.WorstSnap:0.0} units) -- these are the visible teleports");
             if (NetPlayerBridge.RejectedUpdates > 0)
@@ -624,6 +655,40 @@ namespace MphRead.Mods.Network
             }
             failures = fails;
             return fails == 0;
+        }
+
+        /// <summary>
+        /// The scoreboard as it stood at each thirty-second mark of the
+        /// SERVER's clock, while everybody was still connected.
+        ///
+        /// A series rather than one photograph, because clients join seconds
+        /// apart and each one's first mark lands wherever its own arrival
+        /// put it: in an eight-client run the last to join sampled at t=60
+        /// while the rest sampled at t=30, and two photographs of different
+        /// moments are not evidence about each other. With the whole series,
+        /// the comparison can use the latest instant every client has.
+        /// </summary>
+        public readonly SortedDictionary<int, string> Boards = new();
+
+        /// <summary>Take one. Called from the client's frame loop as each mark passes.</summary>
+        public void SampleScoreboard(int serverSecond)
+        {
+            Boards[serverSecond] = Scoreboard($"    scoreboard at t={serverSecond}s:");
+        }
+
+        private string Scoreboard(string prefix)
+        {
+            var board = new StringBuilder(prefix);
+            for (int slot = 0; slot < PlayerEntity.MaxPlayers; slot++)
+            {
+                if (_records[slot].SpawnedFrames == 0)
+                {
+                    continue;
+                }
+                board.Append($" [{slot}] {GameState.Nicknames[slot]} "
+                    + $"{GameState.Kills[slot]}k/{GameState.Deaths[slot]}d/{GameState.Points[slot]}p");
+            }
+            return board.ToString();
         }
 
         private static readonly (string Name, Func<Record, double> Get)[] _features =
@@ -645,6 +710,7 @@ namespace MphRead.Mods.Network
             ("bombs", r => r.BombFrames),
             ("halfturret", r => r.HalfturretFrames),
             ("zoom", r => r.ZoomFrames),
+            ("spectating", r => r.SpectatingFrames),
             ("double-damage", r => r.DoubleDamageFrames),
             ("damage-taken", r => r.DamageEvents),
             ("hit-in-alt-form", r => r.DamageInAltForm),

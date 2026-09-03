@@ -387,6 +387,7 @@ namespace MphRead.Mods.Network
             if (packet.Payload.Length < 1 || packet.Payload[0] != NetConfig.ProtocolVersion)
             {
                 Log($"rejected {packet.Sender}: protocol mismatch");
+                SendRefusal(packet.Sender, RefusedPacket.ReasonProtocol);
                 return;
             }
             Peer? peer = Find(packet.Sender);
@@ -409,6 +410,7 @@ namespace MphRead.Mods.Network
                 if (slot < 0)
                 {
                     Log($"rejected {packet.Sender}: session full");
+                    SendRefusal(packet.Sender, RefusedPacket.ReasonFull);
                     return;
                 }
                 if (_peers.Count == 0)
@@ -481,6 +483,28 @@ namespace MphRead.Mods.Network
                 return;
             }
             EndMatch(now, "a player reached the goal");
+        }
+
+        /// <summary>
+        /// Say no out loud. See <see cref="RefusedPacket"/> for why this is
+        /// worth a packet: the alternative, and what this used to be, is a
+        /// silence the client cannot tell from a server that is switched off.
+        ///
+        /// One datagram per refused Hello, and a refused client retries about
+        /// twice a second for eight seconds, so this is not a reflection risk
+        /// worth rate-limiting: the reply is three bytes to an address that
+        /// just sent a Hello of its own.
+        /// </summary>
+        private void SendRefusal(IPEndPoint to, byte reason)
+        {
+            var refusal = new RefusedPacket
+            {
+                Reason = reason,
+                Players = (byte)_peers.Count,
+                MaxPlayers = (byte)_maxPlayers
+            };
+            refusal.Write(_scratch);
+            _transport?.Send(to, PacketType.Refused, _scratch.AsSpan(0, RefusedPacket.Size));
         }
 
         private void HandleIdentify(ReceivedPacket packet, double now)

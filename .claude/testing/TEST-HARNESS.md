@@ -2,6 +2,12 @@
 
 This document explains the netcheck, maptest and the harness scripts used in `~/mph-net-test`.
 
+The runs where something is deliberately wrong -- a line that goes away, a
+ninth player, everybody spectating, twenty matches at once -- are in
+`TEST-HARD-CASES.md`, along with the two instruments they need (kernel `netem`
+for latency and loss, a Python protocol client for what a real client cannot
+be made to send).
+
 Philosophy
 
 - `-netcheck` runs the real client in a hidden window; using fake packets or stepping the network without the engine can miss failures where clients have disconnected scenes.

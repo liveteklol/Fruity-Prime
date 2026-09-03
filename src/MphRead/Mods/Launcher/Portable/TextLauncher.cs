@@ -305,8 +305,7 @@ namespace MphRead.Mods.Launcher
             Console.WriteLine($"  Connecting to {address}:{port}...");
             if (!NetLaunch.Join(address, port, name, hunter))
             {
-                Console.WriteLine("  Could not join. The server may be off, "
-                    + "full, or UDP may be blocked.");
+                Console.WriteLine($"  {NetLaunch.LastJoinError}");
                 NetSession.Stop();
                 return false;
             }

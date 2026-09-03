@@ -732,9 +732,34 @@ namespace MphRead.Mods
                 {
                     seconds = parsedSeconds;
                 }
+                // Watching instead of playing. -spectate on its own means
+                // "from the moment the map is up"; with a number it is the
+                // second to stop playing at, and -rejoin the second to come
+                // back. Spectating is the one player state the scripted tour
+                // cannot reach on its own -- the tour exists to drive a
+                // hunter, and this is a player who has stopped driving one.
+                double spectateAt = -1;
+                double rejoinAt = -1;
+                if (HasFlag(args, "spectate"))
+                {
+                    spectateAt = 0;
+                    string? spectateValue = ValueAfter(args, "spectate");
+                    if (spectateValue != null && Double.TryParse(spectateValue,
+                        System.Globalization.CultureInfo.InvariantCulture, out double parsedSpectate))
+                    {
+                        spectateAt = parsedSpectate;
+                    }
+                }
+                string? rejoinValue = ValueAfter(args, "rejoin");
+                if (rejoinValue != null && Double.TryParse(rejoinValue,
+                    System.Globalization.CultureInfo.InvariantCulture, out double parsedRejoin))
+                {
+                    rejoinAt = parsedRejoin;
+                }
                 Environment.ExitCode = Network.NetCheckClient.Run(check, ParsePort(args),
                     ParseName(args), ParseHunter(args), seconds, shots, width, height,
-                    recordDemo: HasFlag(args, "recorddemo"));
+                    recordDemo: HasFlag(args, "recorddemo"),
+                    spectateAt: spectateAt, rejoinAt: rejoinAt);
                 return true;
             }
 
@@ -748,16 +773,16 @@ namespace MphRead.Mods
                 return true;
             }
 
-            // Worker invocation: capture exactly one room and exit. This is
-            // what ThumbnailBatch spawns, but it is equally usable by hand
-            // to re-shoot a single map.
-            string? single = ValueAfter(args, "thumbnail");
-            if (single != null)
+            // Worker invocation: capture the rooms this process was given and
+            // exit. This is what ThumbnailBatch spawns -- a share of the
+            // batch rather than one room, so the runtime that starts and the
+            // code that JITs are paid for once across several pictures -- and
+            // a single -thumbnail still works by hand to re-shoot one map.
+            List<string> share = ValuesAfter(args, "thumbnail");
+            if (share.Count > 0)
             {
-                bool ok = ThumbnailCapture.CaptureRoom(single, width, height);
-                Console.WriteLine(ok
-                    ? $"[thumbnails] captured {single}"
-                    : $"[thumbnails] failed {single}");
+                int captured = ThumbnailCapture.CaptureRooms(share, width, height);
+                Console.WriteLine($"[thumbnails] captured {captured}/{share.Count}");
                 return true;
             }
 
@@ -944,6 +969,23 @@ namespace MphRead.Mods
                 }
             }
             return null;
+        }
+
+        /// <summary>
+        /// Every value given for a repeated option, in order. A thumbnail
+        /// worker is handed a whole share of rooms this way rather than one.
+        /// </summary>
+        private static List<string> ValuesAfter(string[] args, string name)
+        {
+            var values = new List<string>();
+            for (int i = 0; i < args.Length - 1; i++)
+            {
+                if (args[i].TrimStart('-').Equals(name, StringComparison.OrdinalIgnoreCase))
+                {
+                    values.Add(args[i + 1]);
+                }
+            }
+            return values;
         }
     }
 }

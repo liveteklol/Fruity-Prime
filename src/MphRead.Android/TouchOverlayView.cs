@@ -37,6 +37,10 @@ namespace MphRead.Droid
         public TouchOverlayView(Context context, TouchControls controls) : base(context)
         {
             _controls = controls;
+            // FIRE becoming SCAN is decided by the game thread, not by a
+            // touch, so it has to ask for the repaint. PostInvalidate is the
+            // one that may be called from off the UI thread.
+            controls.Invalidated = PostInvalidate;
             SetWillNotDraw(false);
             _stroke.SetStyle(Paint.Style.Stroke);
             _fill.SetStyle(Paint.Style.Fill);
@@ -58,6 +62,10 @@ namespace MphRead.Droid
             _stroke.StrokeWidth = Math.Max(2f, unit * 0.22f);
             foreach (TouchButton button in _controls.Buttons)
             {
+                if (!button.Visible)
+                {
+                    continue;
+                }
                 bool held = _controls.IsHeld(button.Action);
                 _fill.Color = held ? _accentFill : _panel;
                 _stroke.Color = held ? _accent : _edge;

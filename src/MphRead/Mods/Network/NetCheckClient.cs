@@ -25,7 +25,8 @@ namespace MphRead.Mods.Network
     /// this client's own frame.
     ///
     /// Usage: -netcheck &lt;host&gt; [-port N] [-name NAME] [-hunter H]
-    ///        [-seconds N] [-shots DIR] [-size WxH]
+    ///        [-seconds N] [-shots DIR] [-size WxH] [-recorddemo]
+    ///        [-spectate [SECONDS]] [-rejoin SECONDS]
     /// </summary>
     public sealed class NetCheckClient : GameWindow
     {
@@ -59,6 +60,31 @@ namespace MphRead.Mods.Network
         private readonly string _name;
         private readonly string? _shotDirectory;
         private readonly double _seconds;
+        /// <summary>
+        /// When this client stops playing and starts watching, in seconds,
+        /// or -1 for never. A spectator is the one player state nothing else
+        /// in this harness can reach: the tour drives a hunter, and a
+        /// spectator is precisely somebody who has stopped driving one.
+        /// </summary>
+        private readonly double _spectateAt;
+        /// <summary>When it comes back into the match, or -1 to stay out.</summary>
+        private readonly double _rejoinAt;
+        /// <summary>
+        /// The server-clock second to photograph the scoreboard at, chosen so
+        /// every client in the match picks the same instant. Taking it at each
+        /// client's own two-thirds mark instead compared photographs seconds
+        /// apart, which reads as the clients keeping different scores.
+        /// </summary>
+        private readonly System.Diagnostics.Stopwatch _wallClock = System.Diagnostics.Stopwatch.StartNew();
+        private float _scoreboardSampleAt = -1;
+
+        /// <summary>Seconds of server clock between scoreboard photographs.</summary>
+        private const float SampleEvery = 30;
+        private int _spectatingFrames;
+        private int _spectateStartedFrame = -1;
+        private int _rejoinedFrame = -1;
+        /// <summary>Frames on which somebody else was flagged spectating in this scene.</summary>
+        private readonly int[] _remoteSpectatingFrames = new int[PlayerEntity.MaxPlayers];
         private readonly RemoteView[] _remotes = new RemoteView[PlayerEntity.MaxPlayers];
         private int _frame;
         private int _shots;
@@ -105,12 +131,16 @@ namespace MphRead.Mods.Network
         public Scene Scene { get; }
 
         private NetCheckClient(string name, string roomKey, GameMode mode, Hunter hunter,
-            double seconds, string? shotDirectory, int width, int height)
+            double seconds, string? shotDirectory, int width, int height,
+            double spectateAt = -1, double rejoinAt = -1)
             : base(GameSettings(), WindowSettings(width, height))
         {
             _name = name;
             _seconds = seconds;
             _shotDirectory = shotDirectory;
+            _spectateAt = spectateAt;
+            _rejoinAt = rejoinAt;
+
             for (int i = 0; i < _remotes.Length; i++)
             {
                 _remotes[i] = new RemoteView();
@@ -141,8 +171,10 @@ namespace MphRead.Mods.Network
                 return;
             }
             _frame++;
+            UpdateSpectating();
             Observe();
             _features.Observe(Scene);
+            SampleScoreboardOnServerClock();
             if (_shotDirectory != null && _frame % 120 == 0)
             {
                 string path = Path.Combine(_shotDirectory, $"{_name}-{_shots:00}.png");
@@ -172,6 +204,91 @@ namespace MphRead.Mods.Network
             if (_frame >= _seconds * 60)
             {
                 Close();
+            }
+        }
+
+        /// <summary>
+        /// Photograph the scoreboard at an instant every client in the match
+        /// agrees on: the next round thirty seconds of the SERVER's match
+        /// clock, at least twenty seconds after this client got here.
+        ///
+        /// The clock is the server's and every client adopts it
+        /// (NetMatchSync), so this is the one instant they can all name
+        /// without talking to each other -- and comparing scoreboards is
+        /// worth nothing unless they were taken at the same moment.
+        /// </summary>
+        private void SampleScoreboardOnServerClock()
+        {
+            if (NetSession.ServerMatch == null)
+            {
+                return;
+            }
+            float elapsed = NetSession.ServerMatch.Value.TimeElapsed;
+            if (_scoreboardSampleAt < 0)
+            {
+                // Twenty seconds after arriving, so the roster and the first
+                // scores have landed, rounded up to the next mark.
+                _scoreboardSampleAt = MathF.Ceiling((elapsed + 20) / SampleEvery) * SampleEvery;
+                return;
+            }
+            if (elapsed >= _scoreboardSampleAt)
+            {
+                _features.SampleScoreboard((int)_scoreboardSampleAt);
+                _scoreboardSampleAt += SampleEvery;
+            }
+        }
+
+        /// <summary>
+        /// Step into and out of spectating on the clock, the way a person
+        /// does it from the pause menu.
+        ///
+        /// Driven from the render loop rather than from the tour because
+        /// spectating is not one of the tour's phases and must not be: the
+        /// phases are keyed to the server's clock so every client is in the
+        /// same one at once, and the question here is what happens when
+        /// somebody steps out of that at a moment of their own choosing.
+        /// </summary>
+        private void UpdateSpectating()
+        {
+            if (_spectateAt >= 0 && _spectateStartedFrame < 0 && _frame >= _spectateAt * 60)
+            {
+                SpectatorMode.Start();
+                if (SpectatorMode.IsSpectating)
+                {
+                    _spectateStartedFrame = _frame;
+                    Console.WriteLine($"[netcheck] {_name} is spectating from frame {_frame}");
+                }
+                else
+                {
+                    // CanSpectate is false outside multiplayer, and saying so
+                    // is the difference between "the mode refused" and "the
+                    // harness never asked".
+                    _spectateStartedFrame = Int32.MaxValue;
+                    Console.WriteLine($"[netcheck] {_name} could not spectate "
+                        + $"(multiplayer={GameState.Multiplayer})");
+                }
+            }
+            if (_rejoinAt >= 0 && _rejoinedFrame < 0 && SpectatorMode.IsSpectating
+                && _frame >= _rejoinAt * 60)
+            {
+                SpectatorMode.Rejoin();
+                _rejoinedFrame = _frame;
+                Console.WriteLine($"[netcheck] {_name} rejoined the match on frame {_frame}");
+            }
+            if (SpectatorMode.IsSpectating)
+            {
+                _spectatingFrames++;
+            }
+            for (int slot = 0; slot < PlayerEntity.MaxPlayers; slot++)
+            {
+                if (slot == Math.Max(NetSession.LocalSlot, 0) || slot >= PlayerEntity.Players.Count)
+                {
+                    continue;
+                }
+                if (PlayerEntity.Players[slot].Flags2.TestFlag(PlayerFlags2.Spectating))
+                {
+                    _remoteSpectatingFrames[slot]++;
+                }
             }
         }
 
@@ -350,8 +467,19 @@ namespace MphRead.Mods.Network
             return false;
         }
 
+        /// <summary>
+        /// Frames a second this client actually managed. Everything the
+        /// session measures in "seconds" is really frames divided by sixty,
+        /// so this is what converts those numbers back into real time.
+        /// </summary>
+        private double FramesPerSecond => _wallClock.Elapsed.TotalSeconds > 0
+            ? _frame / _wallClock.Elapsed.TotalSeconds
+            : 0;
+
         private void Report()
         {
+            Console.WriteLine($"  ran {_frame} frame(s) in "
+                + $"{_wallClock.Elapsed.TotalSeconds:0.0} s -- {FramesPerSecond:0.0} fps");
             int local = Math.Max(NetSession.LocalSlot, 0);
             Console.WriteLine();
             Console.WriteLine($"=== {_name}: what this client saw ===");
@@ -367,6 +495,7 @@ namespace MphRead.Mods.Network
                 // backwards, and a byte counter run backwards reads as a
                 // couple of hundred fresh hits.
                 + $"late={NetSession.SnapshotsOutOfOrder} "
+                + $"restreams={NetSession.SnapshotStreamResets} "
                 + $"intents received={NetSession.IntentsReceived} "
                 // Relayed intents refused as out of order. A handful is UDP
                 // doing what UDP does; a steady stream from one slot is that
@@ -386,6 +515,23 @@ namespace MphRead.Mods.Network
                     pings.Append(pings.Length > 0 ? "  " : "");
                     pings.Append($"slot {slot} {NetSession.SlotPing[slot]} ms");
                 }
+            }
+            if (NetSession.ReAnnouncements > 0 || NetSession.LongestServerSilence > 1.0)
+            {
+                // What a lost connection actually looked like from in here.
+                // Engine seconds, not wall-clock ones: NetSession is driven by
+                // Scene's _globalElapsedTime, which advances one frame's worth
+                // per frame. Five of these clients on one box render at about
+                // 24 fps, so a forty-second outage reads as sixteen "seconds"
+                // here -- and the client's own five-second re-announce
+                // threshold is on the same clock, so it really does re-announce
+                // less often in real time when it is running slowly.
+                Console.WriteLine($"  server silence: {NetSession.ReAnnouncements} "
+                    + $"re-announce(s), longest gap "
+                    + $"{NetSession.LongestServerSilence:0.0} s of engine time "
+                    + $"({NetSession.LongestServerSilence * 60 / Math.Max(FramesPerSecond, 1):0.0} s "
+                    + $"of wall clock at this client's {FramesPerSecond:0} fps), "
+                    + $"{NetSession.AuthorityStandDowns} authority stand-down(s)");
             }
             if (pings.Length > 0)
             {
@@ -435,6 +581,22 @@ namespace MphRead.Mods.Network
                     + $"I saw them hit {view.Hits} time(s), killed {view.Deaths} time(s), "
                     + $"lowest health {(view.MinHealth == Int32.MaxValue ? -1 : view.MinHealth)}");
             }
+            if (_spectateAt >= 0 || _spectatingFrames > 0)
+            {
+                Console.WriteLine($"  spectating: {_spectatingFrames} frame(s), "
+                    + $"started on frame {(_spectateStartedFrame == Int32.MaxValue ? -1 : _spectateStartedFrame)}, "
+                    + $"rejoined on frame {_rejoinedFrame}, now={SpectatorMode.IsSpectating}");
+            }
+            for (int slot = 0; slot < _remoteSpectatingFrames.Length; slot++)
+            {
+                if (_remoteSpectatingFrames[slot] > 0)
+                {
+                    // The replicated half: a spectator is hidden and non-solid
+                    // on *everyone's* machine or the bit never travelled.
+                    Console.WriteLine($"  slot {slot} ({GameState.Nicknames[slot]}) was spectating "
+                        + $"on {_remoteSpectatingFrames[slot]} of my frame(s)");
+                }
+            }
             Console.WriteLine($"  script: {NetTestScript.FramesOnTarget} frame(s) with somebody in its sights, "
                 + $"phase now {NetTestScript.Phase}");
             if (_shots > 0)
@@ -454,7 +616,8 @@ namespace MphRead.Mods.Network
         }
 
         public static int Run(string host, int port, string name, Hunter hunter, double seconds,
-            string? shotDirectory, int width, int height, bool recordDemo = false)
+            string? shotDirectory, int width, int height, bool recordDemo = false,
+            double spectateAt = -1, double rejoinAt = -1)
         {
             if (!NetLaunch.Join(host, port, name, hunter))
             {
@@ -479,7 +642,7 @@ namespace MphRead.Mods.Network
             try
             {
                 window = new NetCheckClient(name, room.RoomKey, room.Mode, hunter,
-                    seconds, shotDirectory, width, height);
+                    seconds, shotDirectory, width, height, spectateAt, rejoinAt);
                 window.Run();
                 window.Report();
                 return window.Passed && window._featureFailures == 0 ? 0 : 1;
@@ -497,6 +660,7 @@ namespace MphRead.Mods.Network
                     DemoRecorder.Stop();
                 }
                 window?.Dispose();
+                SpectatorMode.Reset();
                 NetTestScript.Enabled = false;
                 NetSession.Stop();
                 NetLog.Close();

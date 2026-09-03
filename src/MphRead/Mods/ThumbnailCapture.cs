@@ -45,7 +45,15 @@ namespace MphRead.Mods
 
         private static GameWindowSettings GameSettings() => new()
         {
-            UpdateFrequency = 60 // let the camera sequence advance at its authored rate
+            // Uncapped, because the rate the sequence advances at is not this
+            // one. The engine's timestep is a constant -- Renderer sets
+            // _frameTime to 1/60f every update, whatever the clock says -- so
+            // pacing this loop to 60 Hz did not slow the camera down to its
+            // authored rate, it only made the process sleep between the
+            // frames that reach it. Thirteen settle frames is a fifth of a
+            // second of sleeping per room, and the pictures are identical
+            // either way: the same frames, with the same dt, just sooner.
+            UpdateFrequency = 0
         };
 
         private static NativeWindowSettings WindowSettings(int width, int height) => new()
@@ -227,12 +235,65 @@ namespace MphRead.Mods
             base.OnClosing(e);
         }
 
+        /// <summary>
+        /// Render a share of rooms, one after another, in this process.
+        /// Returns how many pictures were written.
+        ///
+        /// A worker used to be one room, so a batch of twenty-eight paid for
+        /// twenty-eight runtimes to start, twenty-eight passes of the same
+        /// code through the JIT and twenty-eight reads of the same metadata,
+        /// to take twenty-eight pictures. Android never did that -- its
+        /// workers are handed a list (see PreviewRun.Render) -- and there was
+        /// no reason the desktop had to. Measured: the first room in a worker
+        /// costs 0.92 s and the ones after it 0.38-0.45 s.
+        ///
+        /// Still a window per room, though. Scene.AddRoom must be called
+        /// before OnLoad and refuses a second room, so a room per window
+        /// lifetime is the shape the engine supports; what is saved here is
+        /// everything *outside* the window, which is most of what a short
+        /// capture spends its time on.
+        /// </summary>
+        public static int CaptureRooms(IReadOnlyList<string> rooms, int width, int height)
+        {
+            int captured = 0;
+            for (int i = 0; i < rooms.Count; i++)
+            {
+                var clock = Stopwatch.StartNew();
+                bool ok = CaptureRoom(rooms[i], width, height);
+                if (ok)
+                {
+                    captured++;
+                }
+                Console.WriteLine($"[thumbnails] {(ok ? "ok" : "FAILED")}  {rooms[i]}"
+                    + $"  {clock.Elapsed.TotalSeconds:0.00}s");
+            }
+            return captured;
+        }
+
         /// <summary>Render and save one room's preview. Returns false if it could not be captured.</summary>
         public static bool CaptureRoom(string roomKey, int width, int height)
         {
             try
             {
                 ThumbnailMode.Enter();
+                // The world a room is photographed in has to be the same world
+                // every time, and it is static: the player roster, the match
+                // state and the RNG all outlive a Scene. That cost nothing
+                // while a worker was one room in one process, and matters now
+                // that a worker is a share of them -- the roster kept its
+                // player, so the *second* room's own player was created as a
+                // bot with Main still pointing at the first room's, which is
+                // the fault PlayerEntity.Reset's own comment describes
+                // arriving from the network path.
+                //
+                // What this does not reach is the pickups' animation phase:
+                // they spin and pulse, and in a shared process they are caught
+                // at a different point in that cycle. Nothing appears or
+                // disappears and the geometry, camera and lighting are
+                // identical -- see the note on ThumbnailBatch.Shares.
+                GameState.Reset();
+                Rng.SetRng1(Rng.Rng1StartValue);
+                Rng.SetRng2(Rng.Rng2StartValue);
                 using var window = new ThumbnailCapture(roomKey, width, height);
                 window.Run();
                 return window.Succeeded;
