@@ -28,6 +28,7 @@ A fork of [NoneGiven/MphRead](https://github.com/NoneGiven/MphRead).
 - **Modern HUD**
 - **Story mode**
 - **Auto Update check**
+- **All roms are compatible**
 
 ## Support
 
