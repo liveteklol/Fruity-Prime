@@ -47,6 +47,20 @@ namespace MphRead.Mods
         /// </summary>
         public static bool ScrollAllWeapons { get; set; } = true;
 
+        /// <summary>
+        /// The key that opens the chat prompt. T, which is where every
+        /// shooter since Quake has put it.
+        ///
+        /// Not a <see cref="Keybind"/> on <see cref="PlayerControls"/> like
+        /// everything else here, and deliberately so: that class is upstream's
+        /// and its every member is read by <c>ProcessAllInput</c> as something
+        /// the *player* does in the world. Chat is the opposite -- it takes
+        /// the keyboard away from the player -- so it is handled by the window
+        /// before the game sees the key at all, and a binding the game never
+        /// reads has no business in the game's binding set.
+        /// </summary>
+        public static Keys ChatKey { get; set; } = Keys.T;
+
         private static bool _creating;
         private static PlayerControls? _current;
 
@@ -285,6 +299,21 @@ namespace MphRead.Mods
                         ScrollAllWeapons = scrollAll;
                         continue;
                     }
+                    if (key == "chat_key")
+                    {
+                        // "none" rather than a missing line, so a player who
+                        // wants the key back for something else can say so and
+                        // still have the file rewritten with everything in it.
+                        if (value.Equals("none", StringComparison.OrdinalIgnoreCase))
+                        {
+                            ChatKey = Keys.Unknown;
+                        }
+                        else if (Enum.TryParse(value, out Keys chatKey))
+                        {
+                            ChatKey = chatKey;
+                        }
+                        continue;
+                    }
                     PropertyInfo? property = Bindings.FirstOrDefault(p => p.Name == key);
                     if (property != null)
                     {
@@ -335,7 +364,8 @@ namespace MphRead.Mods
                     $"sensitivity={MouseSensitivity.ToString("0.###", CultureInfo.InvariantCulture)}",
                     $"invert_y={InvertMouseY.ToString().ToLowerInvariant()}",
                     $"invert_x={InvertMouseX.ToString().ToLowerInvariant()}",
-                    $"scroll_all_weapons={ScrollAllWeapons.ToString().ToLowerInvariant()}"
+                    $"scroll_all_weapons={ScrollAllWeapons.ToString().ToLowerInvariant()}",
+                    $"chat_key={(ChatKey == Keys.Unknown ? "none" : ChatKey.ToString())}"
                 };
                 foreach (PropertyInfo property in Bindings)
                 {
@@ -370,6 +400,7 @@ namespace MphRead.Mods
             InvertMouseY = false;
             InvertMouseX = false;
             ScrollAllWeapons = true;
+            ChatKey = Keys.T;
         }
     }
 }

@@ -38,6 +38,19 @@ namespace MphRead.Mods.Network
             public double PingSentAt;
             public byte PingId;
             public bool PingPending;
+            /// <summary>
+            /// Chat allowance left, in messages. See <see cref="HandleChat"/>.
+            /// Starts full so a player can say hello the moment they arrive.
+            /// </summary>
+            public double ChatCredit = ChatBurst;
+            public double ChatCreditAt;
+            /// <summary>
+            /// Lines dropped since the last one that got through. Only there
+            /// so the log says "this peer is flooding" once rather than once
+            /// per dropped packet, which would make the flood the log's
+            /// problem as well as the relay's.
+            /// </summary>
+            public int ChatDropped;
         }
 
         private readonly List<Peer> _peers = new();
@@ -357,7 +370,85 @@ namespace MphRead.Mods.Network
                 case PacketType.MatchEnd:
                     HandleMatchEnd(packet, now);
                     break;
+                case PacketType.Chat:
+                    HandleChat(packet, now);
+                    break;
             }
+        }
+
+        /// <summary>
+        /// Sustained chat rate, in messages a second, and how many may be
+        /// sent back to back before that rate starts to bite.
+        ///
+        /// A relay with no limit here is a relay that will multiply one
+        /// client's flood by the number of people in the match and send it to
+        /// all of them -- the one packet type in this protocol whose contents
+        /// a player chooses freely and whose cost is paid by everybody else.
+        /// Three in a row then one every two seconds is faster than anybody
+        /// types and slower than anything worth calling a flood.
+        /// </summary>
+        private const double ChatRatePerSecond = 0.5;
+        private const double ChatBurst = 3;
+
+        /// <summary>
+        /// Pass one player's line on to everybody else.
+        ///
+        /// The slot and the name are overwritten with what this server knows
+        /// about the sender rather than taken from the packet. A client can
+        /// put any name it likes in those fields, and a line that appears to
+        /// come from somebody else is the entire attack: the endpoint a
+        /// datagram arrived from is the only thing here that cannot be typed
+        /// into a text box.
+        ///
+        /// Not sent back to the sender, which echoes its own line locally --
+        /// see <c>ChatBox.Submit</c> for why that is the better half of the
+        /// round trip to skip.
+        /// </summary>
+        private void HandleChat(ReceivedPacket packet, double now)
+        {
+            Peer? peer = Find(packet.Sender);
+            if (peer == null || peer.SlotIndex < 0 || packet.Payload.Length < ChatPacket.Size)
+            {
+                return;
+            }
+            peer.LastSeen = now;
+            ChatPacket chat = ChatPacket.Read(packet.Payload);
+            if (chat.Text.Length == 0)
+            {
+                return;
+            }
+            // A leaky bucket rather than a minimum interval: an interval
+            // punishes two quick lines of the same thought exactly as hard as
+            // a hundred, and the thing worth stopping is the hundred.
+            peer.ChatCredit = Math.Min(ChatBurst,
+                peer.ChatCredit + (now - peer.ChatCreditAt) * ChatRatePerSecond);
+            peer.ChatCreditAt = now;
+            if (peer.ChatCredit < 1)
+            {
+                if (peer.ChatDropped++ == 0)
+                {
+                    Log($"chat from slot {peer.SlotIndex} ({peer.EndPoint}) dropped: too fast");
+                }
+                return;
+            }
+            peer.ChatCredit -= 1;
+            peer.ChatDropped = 0;
+            chat.Slot = (byte)peer.SlotIndex;
+            chat.Name = peer.Name.Length > 0 ? peer.Name : $"Player{peer.SlotIndex}";
+            // Team chat has no teams behind it yet: relaying it as a team line
+            // would deliver it to everybody while telling the reader it went
+            // to one side, which is worse than not having the channel.
+            chat.Kind = ChatPacket.KindSay;
+            chat.Write(_scratch);
+            for (int i = 0; i < _peers.Count; i++)
+            {
+                if (_peers[i] != peer)
+                {
+                    _transport?.Send(_peers[i].EndPoint, PacketType.Chat,
+                        _scratch.AsSpan(0, ChatPacket.Size));
+                }
+            }
+            Log($"chat {chat.Name}: {chat.Text}");
         }
 
         /// <summary>

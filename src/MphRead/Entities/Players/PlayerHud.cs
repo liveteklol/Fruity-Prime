@@ -1239,6 +1239,12 @@ namespace MphRead.Entities
             {
                 DrawFps();
             }
+            // Before the pause and spectator checks, like the counter above
+            // it and for the same reason: somebody watching a match is in the
+            // one position where reading what the players are saying is most
+            // of the point, and a message that arrives while the scoreboard
+            // is up has still arrived.
+            ModDrawChat();
             if (Mods.SpectatorMode.FreeCamera)
             {
                 // Looking at the map, not out of anybody's eyes: there is no
@@ -3127,12 +3133,19 @@ namespace MphRead.Entities
         /// are trying to read should not.
         /// </summary>
         /// <summary>
-        /// Hard into the top-left corner on the desktop, and clear of it on
-        /// Android, which draws its MENU button there -- over the scene and
-        /// outside it, so a counter in the corner itself would sit under a
-        /// translucent circle on a phone and nowhere else.
+        /// The right-hand corner, on every platform.
+        ///
+        /// It used to be the left one, which is where a frame counter belongs
+        /// when nothing else is there. The chat log is there now -- three
+        /// lines of it, growing downward from the same y -- and two things
+        /// sharing that corner meant the counter sat under the first message
+        /// anybody sent. Nothing on the right competes for it: the ammo
+        /// readout is at the foot of the screen and the scoreboard is drawn
+        /// down the middle. The Android MENU button, which is why this had a
+        /// per-platform inset at all, is on the left and stays the chat log's
+        /// problem instead.
         /// </summary>
-        private static readonly float NumberX = OperatingSystem.IsAndroid() ? 30 : 3;
+        private const float NumberMargin = 3;
         private const float NumberY = 3;
         private const float NumberScale = 0.5f;
         private const float UnitScale = 0.34f;
@@ -3151,14 +3164,19 @@ namespace MphRead.Entities
             // whatever we do. Smaller is what makes it read as a unit instead
             // of as three more digits.
             // Corrected across, like every other horizontal HUD measurement:
-            // NumberX is a margin in units of the screen's height, so the
+            // NumberMargin is a margin in units of the screen's height, so the
             // counter sits the same distance from the edge on any window.
-            Vector2 end = DrawText2D(NumberX * HudAspectFix, NumberY, Align.Left, palette: 0,
-                buffer[..written], color, fontSpacing: 8, scale: NumberScale);
+            //
+            // Right-aligned, so the unit is placed first and the digits are
+            // hung off its left edge: laid out from the left instead, a run
+            // that gains a digit at 100 fps would push "fps" off the screen.
             // A glyph is placed from its top, so the smaller run has to come
             // down by the difference in height to sit on the same baseline.
-            DrawText2D(end.X + HudAspectFix, NumberY + (NumberScale - UnitScale) * 8, Align.Left,
+            Vector2 unit = DrawText2D(256 - NumberMargin * HudAspectFix,
+                NumberY + (NumberScale - UnitScale) * 8, Align.Right,
                 palette: 0, "fps", color, fontSpacing: 8, scale: UnitScale);
+            DrawText2D(unit.X - HudAspectFix, NumberY, Align.Right, palette: 0,
+                buffer[..written], color, fontSpacing: 8, scale: NumberScale);
         }
 
         private float _textSpacingY = 0;

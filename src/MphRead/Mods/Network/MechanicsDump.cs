@@ -406,6 +406,10 @@ namespace MphRead.Mods.Network
                 + "sized from it |");
             text.AppendLine("| Map rotation | the server owns it; clients poll the match state and "
                 + "load the new room, rebuilding every player slot and resetting the scores |");
+            text.AppendLine("| Chat | T opens a line, the server stamps it with the sender's real "
+                + "slot and name and relays it to everybody else, and the sender echoes its own. "
+                + "Rate limited at the relay: three back to back, then one every two seconds. "
+                + "Additive on the wire, so an older server simply drops it |");
             text.AppendLine();
         }
 

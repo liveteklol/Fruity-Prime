@@ -83,6 +83,7 @@ export ALSOFT_DRIVERS=null PULSE_SERVER=   # else ALSA retries stall frames
 | `MphRead -servers [-master HOST] [-masterport N]` | print the server list the launcher's browser would show, with each server's map, players and round trip |
 | `MphRead -connect HOST -port N -name X -hunter H` | join from the command line, no launcher |
 | `MphRead -netcheck HOST -port N -name X -hunter H -seconds N [-shots DIR] [-size WxH]` | a real client driven by a script, which reports what it saw. Exit code 0 = pass. `-spectate [SEC]` makes it stop playing and watch, `-rejoin SEC` puts it back in -- the one player state the tour cannot reach on its own |
+| `~/mph-net-test/probe-chat.py [HOST] [PORT]` | what the server does with chat, asked the way no real client can: a spoofed sender, and a flood. `.claude/multiplayer/NETWORK-CHAT.md` |
 | `~/mph-net-test/run-remote.sh HOST PORT SECONDS hunter...` | the same check against a server that is not on this machine -- which is the one that matters, since eight clients on one box measure the box |
 | `~/mph-net-test/run-demo.sh SEC [authority\|client]` | record a demo from a scripted client and print what landed in the file. The authority is the case that matters: it is whichever client joined first, so it is normally whoever set the match up, and the server sends it no snapshots at all |
 | `~/mph-net-test/run-rejoin.sh SEC LEAVE REJOIN [host] [port]` | the rejoin scenario, with a control: A hosts and leaves, the authority moves, then one client takes the vacated slot and another takes a fresh one. Prints what each took. `.claude/multiplayer/NETWORK-DIAGNOSTICS.md` |
@@ -325,6 +326,17 @@ Shapes worth keeping without opening anything else:
 - **A randomised run against a loopback server is a regression check, not a
   real-world one, and must not be reported as one** — it has none of the
   reordering, jitter or CPU load the bugs above were found under.
+
+**Chat is T**, three lines top left in green on nothing, gone ten seconds
+after they arrive -- which is why the frame counter now sits in the right-hand
+corner. It draws with a font of its own (`Mods/Chat/ChatFont.cs`, pixel art in
+the file, no asset): the game's has one alphabet, so every line typed came out
+shouted and half as wide again as it needed to be. `PacketType.Chat` is additive and needs no protocol bump, so an older
+server drops it silently and chat simply does nothing there until it is
+redeployed. The server writes the slot and the name onto every line it relays
+rather than trusting the sender's, and rate limits at the relay. Packet
+numbers 24 and 25 are left free for a voice channel.
+`.claude/multiplayer/NETWORK-CHAT.md`.
 
 Recording and watching a match back -- the file format, the two things a demo
 has to synthesize because they were never received, and why the player counts

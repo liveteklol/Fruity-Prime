@@ -1386,9 +1386,18 @@ namespace MphRead
                 {
                     _elapsedTime += _frameTime;
                 }
-                if (_inputMode == InputMode.CameraOnly)
+                if (_inputMode == InputMode.CameraOnly || Mods.Chat.ChatBox.Composing)
                 {
+                    // Every frame the prompt is up, not once when it opens: a
+                    // key held at the moment somebody pressed T stays held in
+                    // the binding until something clears it, and a player who
+                    // opened chat mid-stride would otherwise walk into the
+                    // nearest wall for as long as they were typing.
                     PlayerEntity.Main.Controls.ClearAll();
+                }
+                else if (Mods.Chat.ChatBox.ConsumeJustClosed())
+                {
+                    PlayerEntity.Main.ModForgetInputDeltas();
                 }
                 Mods.Network.DemoPlayback.PumpFrame();
                 Mods.Network.NetSession.Update(_globalElapsedTime);
@@ -1412,7 +1421,8 @@ namespace MphRead
                     SetFreeCamera(freeCamera.Value);
                 }
                 PlayerEntity.ProcessInput(_keyboardState, _mouseState,
-                    _inputMode == InputMode.CameraOnly || Mods.PauseMenu.Open);
+                    _inputMode == InputMode.CameraOnly || Mods.PauseMenu.Open
+                    || Mods.Chat.ChatBox.Composing);
                 Mods.Network.NetHooks.AfterInput(this);
                 _room?.UpdateTransition();
             }
@@ -6080,8 +6090,35 @@ namespace MphRead
             base.OnMouseWheel(e);
         }
 
+        /// <summary>
+        /// One code point, from whatever layout the player actually types on.
+        /// The key events above cannot answer this: GLFW reports physical
+        /// keys, so reading a message out of them would spell it in US QWERTY
+        /// whoever wrote it.
+        /// </summary>
+        protected override void OnTextInput(TextInputEventArgs e)
+        {
+            Mods.Chat.ChatBox.HandleText(e.Unicode);
+            base.OnTextInput(e);
+        }
+
         protected override void OnKeyDown(KeyboardKeyEventArgs e)
         {
+            // First, before anything else claims a key. While the chat prompt
+            // is up every key belongs to it: Escape closes the prompt rather
+            // than the match, Space types a space rather than jumping, and
+            // Enter sends. When it is down, this is only looking for the one
+            // key that opens it.
+            //
+            // Not while a demo is playing: there is nobody to send to, and
+            // whatever was said in that match is already in the file.
+            if (Mods.Chat.ChatBox.HandleKeyDown(e,
+                canOpen: !Mods.Network.DemoPlayback.IsActive
+                    && (Scene.CameraMode == CameraMode.Player || Scene.IsFreeCam)))
+            {
+                base.OnKeyDown(e);
+                return;
+            }
             // F11 and Alt+Enter switch window modes.
             if (Mods.WindowMode.HandleKey(this, e))
             {

@@ -202,4 +202,5 @@ This is not the DS Wi-Fi protocol and cannot talk to real hardware or an emulato
 | Remote smoothing | none, deliberately, on the machine that resolves damage: a remote player is placed at the position its owner reported, because the aim in the same packet was computed against exactly that position, and easing towards it leaves the hitbox behind the shot. Beyond 15 units it is a respawn or a teleporter and is counted as a snap. See `.claude/multiplayer/NETWORK-DIAGNOSTICS.md` for why smoothing was removed |
 | Slots | `PlayerEntity.SlotCapacity` (8). Every slot-indexed array is sized from it |
 | Map rotation | the server owns it; clients poll the match state and load the new room, rebuilding every player slot and resetting the scores |
+| Chat | T opens a line, the server stamps it with the sender's real slot and name and relays it to everybody else, and the sender echoes its own. Rate limited at the relay: three back to back, then one every two seconds. Additive on the wire, so an older server simply drops it |
 

@@ -244,6 +244,7 @@ namespace MphRead.Mods.Network
             NetRoomChange.Reset();
             NetMatchEnd.Reset();
             NetPlayerBridge.Reset();
+            Chat.ChatBox.Clear();
             IsAuthority = false;
             _authorityNeedsStateApply = false;
             if (_transport != null)
@@ -546,9 +547,100 @@ namespace MphRead.Mods.Network
                 case PacketType.MapChange when Role == NetRole.Client:
                     HandleMatchState(packet, packet.Type == PacketType.MapChange);
                     break;
+                case PacketType.Chat:
+                    HandleChat(packet, time);
+                    break;
                 case PacketType.Bye:
                     HandleBye(packet);
                     break;
+            }
+        }
+
+        /// <summary>
+        /// One line somebody typed, as the server passed it on.
+        ///
+        /// Not guarded by role, unlike almost everything above it: a listen
+        /// host receives these from its own peers and has to hand them round,
+        /// and a client receives them from the server and only has to read
+        /// them. The server is the one that decides whose name goes on a line
+        /// (see <see cref="ChatPacket"/>), so nothing here re-checks it --
+        /// but a *host* is the server for its peers, so it does.
+        /// </summary>
+        private static void HandleChat(ReceivedPacket packet, double time)
+        {
+            if (packet.Payload.Length < ChatPacket.Size)
+            {
+                return;
+            }
+            ChatPacket chat = ChatPacket.Read(packet.Payload);
+            if (chat.Text.Length == 0)
+            {
+                return;
+            }
+            if (Role == NetRole.Host)
+            {
+                RemotePeer? peer = FindPeer(packet.Sender);
+                if (peer == null || peer.SlotIndex < 0)
+                {
+                    return;
+                }
+                peer.LastSeenTime = time;
+                // The sender's own claim about who it is, replaced with what
+                // this host knows. Same rule the dedicated server applies.
+                chat.Slot = (byte)peer.SlotIndex;
+                if (peer.SlotIndex < GameState.Nicknames.Length
+                    && !String.IsNullOrEmpty(GameState.Nicknames[peer.SlotIndex]))
+                {
+                    chat.Name = GameState.Nicknames[peer.SlotIndex];
+                }
+                chat.Kind = ChatPacket.KindSay;
+                chat.Write(_scratch);
+                for (int i = 0; i < _peers.Count; i++)
+                {
+                    if (_peers[i] != peer)
+                    {
+                        _transport?.Send(_peers[i].EndPoint, PacketType.Chat,
+                            _scratch.AsSpan(0, ChatPacket.Size));
+                    }
+                }
+            }
+            Chat.ChatBox.Receive(chat);
+        }
+
+        /// <summary>
+        /// Put a line on the wire. The server stamps it with this client's
+        /// real slot and name before anyone else sees it, so what goes in
+        /// these two fields only matters to a demo recorded here.
+        /// </summary>
+        public static void SendChat(string text)
+        {
+            if (_transport == null || String.IsNullOrWhiteSpace(text))
+            {
+                return;
+            }
+            var chat = new ChatPacket
+            {
+                Slot = (byte)Math.Max(LocalSlot, 0),
+                Kind = ChatPacket.KindSay,
+                Name = PlayerName,
+                Text = text
+            };
+            chat.Write(_scratch);
+            if (Role == NetRole.Host)
+            {
+                // Nobody upstream to send to: a host is the server. Straight
+                // out to the peers, exactly as the relay above would.
+                for (int i = 0; i < _peers.Count; i++)
+                {
+                    _transport.Send(_peers[i].EndPoint, PacketType.Chat,
+                        _scratch.AsSpan(0, ChatPacket.Size));
+                }
+                return;
+            }
+            if (_hostEndPoint != null)
+            {
+                _transport.Send(_hostEndPoint, PacketType.Chat,
+                    _scratch.AsSpan(0, ChatPacket.Size));
             }
         }
 
