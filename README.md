@@ -70,7 +70,6 @@ map list next time you open the launcher, picture and all. **de_dust2** comes wi
 
 - **Adventure co-op.** The launcher's toggle is a placeholder; the story is one player.
 - **Gamepads**, on any platform.
-- **Android**: no command line, no window settings, and cel shading is unverified on real hardware.
 
 ## Building
 
