@@ -62,12 +62,6 @@ namespace MphRead.Mods
         public static Keys ChatKey { get; set; } = Keys.T;
 
         /// <summary>
-        /// Whether a connected pad drives the game. On, because a pad that
-        /// does nothing when plugged in is the failure people report.
-        /// </summary>
-        public static bool GamepadEnabled { get; set; } = true;
-
-        /// <summary>
         /// How far a stick must move before it counts, 0 to 0.9.
         ///
         /// Applied radially rather than per axis -- see
@@ -337,9 +331,15 @@ namespace MphRead.Mods
                         ScrollAllWeapons = scrollAll;
                         continue;
                     }
-                    if (key == "gamepad" && Boolean.TryParse(value, out bool pad))
+                    if (key == "gamepad")
                     {
-                        GamepadEnabled = pad;
+                        // Written by every build up to the one that removed
+                        // the toggle. Skipped rather than refused so an old
+                        // controls.txt still loads the rest of itself.
+                        continue;
+                    }
+                    if (Input.PadBindings.TryLoad(key, value))
+                    {
                         continue;
                     }
                     if (key == "gamepad_deadzone"
@@ -428,11 +428,15 @@ namespace MphRead.Mods
                     $"invert_x={InvertMouseX.ToString().ToLowerInvariant()}",
                     $"scroll_all_weapons={ScrollAllWeapons.ToString().ToLowerInvariant()}",
                     $"chat_key={(ChatKey == Keys.Unknown ? "none" : ChatKey.ToString())}",
-                    $"gamepad={GamepadEnabled.ToString().ToLowerInvariant()}",
                     "gamepad_deadzone=" + GamepadDeadZone.ToString(CultureInfo.InvariantCulture),
                     "gamepad_look=" + GamepadLookSensitivity.ToString(CultureInfo.InvariantCulture),
                     $"gamepad_invert_y={GamepadInvertY.ToString().ToLowerInvariant()}"
                 };
+                foreach (Input.PadAction action in Input.PadBindings.Actions)
+                {
+                    lines.Add($"{Input.PadBindings.SettingKey(action)}="
+                        + Input.PadBindings.Get(action));
+                }
                 foreach (PropertyInfo property in Bindings)
                 {
                     Keybind bind = Bind(property);
@@ -467,7 +471,7 @@ namespace MphRead.Mods
             InvertMouseX = false;
             ScrollAllWeapons = true;
             ChatKey = Keys.T;
-            GamepadEnabled = true;
+            Input.PadBindings.Reset();
             GamepadDeadZone = 0.2f;
             GamepadLookSensitivity = 1f;
             GamepadInvertY = false;

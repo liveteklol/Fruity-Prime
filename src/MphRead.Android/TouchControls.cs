@@ -145,6 +145,12 @@ namespace MphRead.Droid
         public float StickRadius { get; private set; }
         public float StickKnobRadius { get; private set; }
 
+        // The controls step aside for a pad and come back at the first
+        // touch. See NotePadActivity.
+        private bool _padDriving;
+        private bool _forceVisible;
+        private readonly HashSet<int> _swallowed = new HashSet<int>();
+
         private readonly HashSet<TouchAction> _held = new HashSet<TouchAction>();
         private readonly Dictionary<int, TouchAction> _buttonPointers = new Dictionary<int, TouchAction>();
         private int _stickPointer = -1;
@@ -315,6 +321,109 @@ namespace MphRead.Droid
         /// </summary>
         public Action? Invalidated { get; set; }
 
+        /// <summary>
+        /// Whether the controls are off the screen because a pad is being
+        /// held. Read by the view, which draws nothing while it is true.
+        /// </summary>
+        public bool PadDriving
+        {
+            get
+            {
+                lock (_lock)
+                {
+                    return HiddenLocked;
+                }
+            }
+        }
+
+        /// <summary>Called with the lock held.</summary>
+        private bool HiddenLocked => _padDriving && !_forceVisible;
+
+        /// <summary>
+        /// Keep the controls on screen whatever the pad is doing.
+        ///
+        /// Set once a frame by the game loop, for the one thing a pad cannot
+        /// do: a dialog box is dismissed by pressing its OK button, which is
+        /// read as a *position* on what used to be a touch screen (see
+        /// PlayerDialog.CheckButtonPressed), and GamepadInput deliberately
+        /// drives no pointer. Hiding the controls through one of those would
+        /// be a story that cannot be continued.
+        ///
+        /// A flag the loop keeps setting rather than a one-shot "show
+        /// yourself", because a thumb still on the stick would otherwise put
+        /// them away again on the very next motion event and the box would
+        /// flicker for as long as the pad was held.
+        /// </summary>
+        public bool ForceVisible
+        {
+            get
+            {
+                lock (_lock)
+                {
+                    return _forceVisible;
+                }
+            }
+            set
+            {
+                bool before;
+                bool after;
+                lock (_lock)
+                {
+                    before = HiddenLocked;
+                    _forceVisible = value;
+                    after = HiddenLocked;
+                }
+                Settle(before, after);
+            }
+        }
+
+        /// <summary>
+        /// A pad button or stick moved: put the controls away.
+        ///
+        /// There is no setting behind this and there was one -- "use a
+        /// connected gamepad". Being *connected* was never the question a
+        /// player was asking: a pad paired with the phone for something else
+        /// is still paired while they play with their thumbs, so hiding on
+        /// connection would take the controls away from someone who never
+        /// picked the pad up. What is being watched here is the pad actually
+        /// being used, and the answer is reversed by the next finger on the
+        /// glass.
+        /// </summary>
+        public void NotePadActivity()
+        {
+            bool before;
+            bool after;
+            lock (_lock)
+            {
+                before = HiddenLocked;
+                _padDriving = true;
+                after = HiddenLocked;
+            }
+            Settle(before, after);
+        }
+
+        /// <summary>
+        /// Repaint when the controls appeared or went away, and let go of
+        /// everything on the way out.
+        ///
+        /// The releasing is not tidiness: a thumb resting on FIRE as the
+        /// player picks the pad up would be held down for ever otherwise,
+        /// since the finger's release lands on a control that is no longer
+        /// listening.
+        /// </summary>
+        private void Settle(bool wasHidden, bool isHidden)
+        {
+            if (wasHidden == isHidden)
+            {
+                return;
+            }
+            if (isHidden)
+            {
+                ReleaseEverything();
+            }
+            Invalidated?.Invoke();
+        }
+
         /// <summary>Lay the controls out for a viewport of this size.</summary>
         public void Layout(float width, float height, float density)
         {
@@ -452,53 +561,81 @@ namespace MphRead.Droid
 
         public void PointerDown(int pointerId, float x, float y)
         {
+            bool revealed = false;
             lock (_lock)
             {
-                foreach (TouchButton button in _buttons)
+                bool hidden = HiddenLocked;
+                // A finger on the glass is the player choosing the
+                // touchscreen again, whether or not the controls had gone.
+                _padDriving = false;
+                if (hidden)
                 {
-                    if (button.Visible && button.Contains(x, y))
-                    {
-                        _buttonPointers[pointerId] = button.Action;
-                        _held.Add(button.Action);
-                        // Both of the buttons that live under the aiming
-                        // thumb drag the aim as well: keeping a target
-                        // centred matters as much while scanning it as it
-                        // does while shooting at it.
-                        if (button.Action == TouchAction.Shoot || button.Action == TouchAction.Scan)
-                        {
-                            _fireAimPointer = pointerId;
-                            _fireAimLastX = x;
-                            _fireAimLastY = y;
-                            _fireAimSwipe.Reset();
-                        }
-                        return;
-                    }
+                    // The touch that brings them back does nothing else. They
+                    // were not on screen when the finger went down, so
+                    // wherever it landed was not a choice -- and the first
+                    // thing a thumb reaches for after putting a pad down is
+                    // the middle of the screen, which is FIRE's half.
+                    _swallowed.Add(pointerId);
+                    revealed = true;
                 }
-                if (!PointerIsAbsolute && x < Width / 2 && _stickPointer == -1)
+                else
                 {
-                    _stickPointer = pointerId;
-                    StickActive = true;
-                    StickX = x;
-                    StickY = y;
-                    StickKnobX = x;
-                    StickKnobY = y;
-                    _direction = Dir.None;
+                    PointerDownLocked(pointerId, x, y);
+                }
+            }
+            if (revealed)
+            {
+                Invalidated?.Invoke();
+            }
+        }
+
+        /// <summary>Called with the lock already held.</summary>
+        private void PointerDownLocked(int pointerId, float x, float y)
+        {
+            foreach (TouchButton button in _buttons)
+            {
+                if (button.Visible && button.Contains(x, y))
+                {
+                    _buttonPointers[pointerId] = button.Action;
+                    _held.Add(button.Action);
+                    // Both of the buttons that live under the aiming
+                    // thumb drag the aim as well: keeping a target
+                    // centred matters as much while scanning it as it
+                    // does while shooting at it.
+                    if (button.Action == TouchAction.Shoot || button.Action == TouchAction.Scan)
+                    {
+                        _fireAimPointer = pointerId;
+                        _fireAimLastX = x;
+                        _fireAimLastY = y;
+                        _fireAimSwipe.Reset();
+                    }
                     return;
                 }
-                if (_aimPointer == -1)
-                {
-                    _aimPointer = pointerId;
-                    _aimLastX = x;
-                    _aimLastY = y;
-                    _aimAbsX = x;
-                    _aimAbsY = y;
-                    _aimDown = true;
-                    _aimSwipe.Reset();
-                    _tapDownTime = Environment.TickCount64;
-                    _tapDownX = x;
-                    _tapDownY = y;
-                    _tapMoved = false;
-                }
+            }
+            if (!PointerIsAbsolute && x < Width / 2 && _stickPointer == -1)
+            {
+                _stickPointer = pointerId;
+                StickActive = true;
+                StickX = x;
+                StickY = y;
+                StickKnobX = x;
+                StickKnobY = y;
+                _direction = Dir.None;
+                return;
+            }
+            if (_aimPointer == -1)
+            {
+                _aimPointer = pointerId;
+                _aimLastX = x;
+                _aimLastY = y;
+                _aimAbsX = x;
+                _aimAbsY = y;
+                _aimDown = true;
+                _aimSwipe.Reset();
+                _tapDownTime = Environment.TickCount64;
+                _tapDownX = x;
+                _tapDownY = y;
+                _tapMoved = false;
             }
         }
 
@@ -608,6 +745,10 @@ namespace MphRead.Droid
         {
             lock (_lock)
             {
+                if (_swallowed.Contains(pointerId))
+                {
+                    return;
+                }
                 if (pointerId == _stickPointer)
                 {
                     float dx = x - StickX;
@@ -710,6 +851,10 @@ namespace MphRead.Droid
         {
             lock (_lock)
             {
+                if (_swallowed.Remove(pointerId))
+                {
+                    return;
+                }
                 if (pointerId == _stickPointer)
                 {
                     _stickPointer = -1;
@@ -762,6 +907,7 @@ namespace MphRead.Droid
             lock (_lock)
             {
                 _buttonPointers.Clear();
+                _swallowed.Clear();
                 _held.Clear();
                 _stickPointer = -1;
                 _aimPointer = -1;

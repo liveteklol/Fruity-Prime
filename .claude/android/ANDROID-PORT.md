@@ -204,6 +204,46 @@ movement, so a swipe turns the same amount on any phone; `GameView.AimScale` is
 the one number to change if it feels wrong, and the player's own mouse
 sensitivity scales it after that.
 
+### The controls step aside for a pad, and come back at a touch
+
+There is no setting for it, and there was one — "Use a connected gamepad",
+now gone. Being *connected* was never the question a player was asking: a pad
+paired with the phone for something else is still paired while they play with
+their thumbs. What `TouchControls.NotePadActivity` watches is the pad actually
+being **used** — a button down, or a stick past the dead zone, which is what
+`GamepadInput.InUse` answers — and the answer is reversed by the next finger
+on the glass.
+
+Three things that are easy to get wrong here and are not:
+
+- **The view stays; only the drawing stops.** `TouchOverlayView` is still the
+  only thing receiving touches, so the touch that brings the controls back is
+  an ordinary one. Making the view `Gone` would hand every touch to whatever
+  is underneath and there would be nothing left to bring them back with.
+- **The reviving touch does nothing else.** It is added to `_swallowed` and
+  its move and up are dropped. The controls were not on screen when the finger
+  went down, so where it landed was not a choice — and the middle of the
+  screen, which is where a thumb goes first, is FIRE's half.
+- **Everything held is released on the way out.** A thumb resting on FIRE as
+  the player picks the pad up would otherwise be held for ever: the finger's
+  release lands on a control that is no longer listening.
+
+**The one exception is a dialog box.** `PlayerDialog.CheckButtonPressed` reads
+`Input.ClickX/Y` — the OK button is a *position*, because on the DS it was a
+touch screen — and `GamepadInput` deliberately drives no pointer. So
+`GameView.ApplyInput` sets `TouchControls.ForceVisible` from
+`GameState.DialogPause` every frame, pad or no pad. Without it the story stops
+at the first scan, with nothing on screen to press. A flag the loop keeps
+setting rather than a one-shot "show yourself": a thumb still resting on the
+stick would otherwise put the controls away again on the very next motion
+event, and the box would flicker for as long as the pad was held.
+
+Pad events reach the state through `MainActivity.DispatchKeyEvent` and
+`DispatchGenericMotionEvent` rather than through `GameView` — a pad has to
+reach the settings screen too, where no `GameView` exists, so that a button
+can be rebound. `GameView`'s own handlers are kept as a fallback and never see
+a pad event in this app.
+
 ## Playing online
 
 `AndroidMatch.Build` is the head's half of `MatchStart.Launch`, and it was

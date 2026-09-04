@@ -34,8 +34,48 @@ namespace MphRead.Mods.Input
         /// <summary>Buttons that went down this frame, for the one-shot actions.</summary>
         private static GamepadButtons _pressed;
 
-        /// <summary>True while a pad is connected and turned on in the settings.</summary>
-        public static bool Active => State.Connected && InputSettings.GamepadEnabled;
+        /// <summary>
+        /// True while a pad is connected.
+        ///
+        /// There used to be a setting beside this -- "Use a connected gamepad"
+        /// -- and it is gone. It could only ever matter to somebody who had a
+        /// pad attached and did not want it, which the automatic handover
+        /// answers on its own: nothing on screen changes until a pad button is
+        /// actually pressed, and a finger takes the game straight back. What
+        /// it cost was a row in the settings that read like it might be the
+        /// reason the pad was not working, in the one screen somebody with a
+        /// pad that is not working will go looking.
+        /// </summary>
+        public static bool Active => State.Connected;
+
+        /// <summary>
+        /// Whether the pad is being *held*, as opposed to merely connected.
+        ///
+        /// The dead zone rather than zero, and the trigger threshold rather
+        /// than zero, because every pad's sticks and triggers drift at rest
+        /// and a pad lying on a table would otherwise look like a pad in
+        /// somebody's hands. That is the whole question the Android head asks
+        /// before it puts the touch controls away.
+        /// </summary>
+        public static bool InUse
+        {
+            get
+            {
+                if (!Active)
+                {
+                    return false;
+                }
+                if (State.Buttons != GamepadButtons.None)
+                {
+                    return true;
+                }
+                (float leftX, float leftY) = ApplyDeadZone(State.LeftX, State.LeftY);
+                (float rightX, float rightY) = ApplyDeadZone(State.RightX, State.RightY);
+                return leftX != 0 || leftY != 0 || rightX != 0 || rightY != 0
+                    || State.LeftTrigger > TriggerThreshold
+                    || State.RightTrigger > TriggerThreshold;
+            }
+        }
 
         /// <summary>
         /// What the right stick asked for this frame, in degrees of turn --
@@ -133,13 +173,14 @@ namespace MphRead.Mods.Input
         /// </summary>
         public static bool TakeMenuPress()
         {
-            if ((_pressed & GamepadButtons.Start) == 0)
+            GamepadButtons menu = PadBindings.Get(PadAction.Menu);
+            if (menu == GamepadButtons.None || (_pressed & menu) == 0)
             {
                 return false;
             }
             // Cleared so a frame that is drawn twice, or a caller that asks
             // twice, cannot open the menu and close it again in one press.
-            _pressed &= ~GamepadButtons.Start;
+            _pressed &= ~menu;
             return true;
         }
 
@@ -174,17 +215,24 @@ namespace MphRead.Mods.Input
             Hold(controls.MoveRight, moveX > WalkThreshold);
             Hold(controls.RollRight, moveX > WalkThreshold);
 
-            // FIRE is both attacks, for the reason the touch button is: the DS
+            // Which button each of these is on is the player's business now:
+            // see PadBindings, which starts as the table that used to be
+            // written out here. Two of them drive two binds apiece, which is
+            // why PadAction has twelve entries and PlayerControls has more --
+            // FIRE is both attacks, for the reason the touch button is (the DS
             // had one attack button, and the game's own defaults still bind
-            // the gun and the alt form's attack to the same one.
-            Hold(controls.Shoot, GamepadButtons.RightTrigger);
-            Hold(controls.AltAttack, GamepadButtons.RightTrigger);
-            Hold(controls.Zoom, GamepadButtons.LeftTrigger);
-            Hold(controls.Jump, GamepadButtons.A);
-            Hold(controls.Boost, GamepadButtons.A);
-            Hold(controls.Morph, GamepadButtons.B);
-            Hold(controls.Scan, GamepadButtons.X);
-            Hold(controls.ScanVisor, GamepadButtons.Y);
+            // the gun and the alt form's attack to the same one), and JUMP is
+            // also the ball's boost.
+            GamepadButtons shoot = PadBindings.Get(PadAction.Shoot);
+            Hold(controls.Shoot, shoot);
+            Hold(controls.AltAttack, shoot);
+            Hold(controls.Zoom, PadBindings.Get(PadAction.Zoom));
+            GamepadButtons jump = PadBindings.Get(PadAction.Jump);
+            Hold(controls.Jump, jump);
+            Hold(controls.Boost, jump);
+            Hold(controls.Morph, PadBindings.Get(PadAction.Morph));
+            Hold(controls.Scan, PadBindings.Get(PadAction.Scan));
+            Hold(controls.ScanVisor, PadBindings.Get(PadAction.ScanVisor));
             // No weapon wheel on a pad, deliberately: PlayerHud's weapon
             // select reads the *absolute* pointer position, because on the DS
             // it was a touch screen and the slot under the stylus is the one
@@ -196,16 +244,18 @@ namespace MphRead.Mods.Input
             //
             // The scoreboard is the DS's own pause button, which is what Back
             // is shaped like on every pad.
-            Hold(controls.Pause, GamepadButtons.Back);
+            Hold(controls.Pause, PadBindings.Get(PadAction.Scoreboard));
 
-            Hold(controls.NextWeapon, GamepadButtons.RightBumper | GamepadButtons.DpadRight);
-            Hold(controls.PrevWeapon, GamepadButtons.LeftBumper | GamepadButtons.DpadLeft);
-            Hold(controls.Missile, GamepadButtons.DpadUp);
-            Hold(controls.PowerBeam, GamepadButtons.DpadDown);
+            Hold(controls.NextWeapon, PadBindings.Get(PadAction.NextWeapon));
+            Hold(controls.PrevWeapon, PadBindings.Get(PadAction.PrevWeapon));
+            Hold(controls.Missile, PadBindings.Get(PadAction.Missile));
+            Hold(controls.PowerBeam, PadBindings.Get(PadAction.PowerBeam));
         }
 
         private static void Hold(Keybind bind, GamepadButtons buttons)
         {
+            // An unbound action is None, and None & anything is None, so this
+            // needs no case of its own: it simply never holds anything down.
             Hold(bind, (State.Buttons & buttons) != 0, (_pressed & buttons) != 0);
         }
 

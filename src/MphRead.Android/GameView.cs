@@ -126,7 +126,11 @@ namespace MphRead.Droid
         {
             // The pad first: its buttons are their own key codes and overlap
             // nothing a keyboard sends, so this only ever claims events a
-            // keyboard could not have produced.
+            // keyboard could not have produced. A fallback in practice --
+            // MainActivity.DispatchKeyEvent takes a pad's events before any
+            // view sees them, so that rebinding one works on the settings
+            // screen too -- and kept because it costs a comparison and this
+            // class should still work if it is ever hosted somewhere else.
             if (GamepadBridge.HandleKey(keyCode, e, down: true))
             {
                 return true;
@@ -803,6 +807,14 @@ namespace MphRead.Droid
                 // there is to do, and a player whose entity is not active yet
                 // has still asked for the keyboard if they pressed CHAT.
                 HandleChat();
+                // The one thing a pad cannot do. A dialog's OK button is
+                // pressed by *position* -- PlayerDialog.CheckButtonPressed
+                // reads Input.ClickX/Y, because on the DS it was a touch
+                // screen -- and GamepadInput deliberately drives no pointer.
+                // So the touch controls stay on screen through one whether or
+                // not a pad is in the player's hands, or the story stops at
+                // the first scan with nothing to press.
+                _controls.ForceVisible = GameState.DialogPause;
                 PlayerEntity main = PlayerEntity.Main;
                 if (main == null || !main.LoadFlags.TestFlag(LoadFlags.Active))
                 {

@@ -291,6 +291,55 @@ namespace MphRead.Droid
         }
 
         /// <summary>
+        /// Every key event the window gets, offered to the pad first.
+        ///
+        /// Here rather than in <see cref="GameView"/> -- which is where it
+        /// used to be, and still is as a fallback -- because a pad has to
+        /// reach the *settings screen* too: rebinding a button means pressing
+        /// it while a launcher view has the focus and no GameView exists at
+        /// all. An activity's dispatch is the one place both are underneath.
+        ///
+        /// Only a pad's events are taken. <see cref="GamepadBridge.HandleKey"/>
+        /// answers false for anything a keyboard could have produced, so chat
+        /// and the Back button are untouched.
+        /// </summary>
+        public override bool DispatchKeyEvent(KeyEvent? e)
+        {
+            bool down = e?.Action == KeyEventActions.Down;
+            if (e != null && (down || e.Action == KeyEventActions.Up)
+                && GamepadBridge.HandleKey(e.KeyCode, e, down))
+            {
+                if (down)
+                {
+                    _controls.NotePadActivity();
+                }
+                return true;
+            }
+            return base.DispatchKeyEvent(e);
+        }
+
+        /// <summary>
+        /// The sticks, the triggers and the hat, for the same reason.
+        ///
+        /// The controls only step aside for a pad that is actually being
+        /// held: a stick resting off centre is every pad, and taking the touch
+        /// controls away for it would be taking them away from a phone with a
+        /// pad in a drawer. See <c>GamepadInput.InUse</c>.
+        /// </summary>
+        public override bool DispatchGenericMotionEvent(MotionEvent? e)
+        {
+            if (GamepadBridge.HandleMotion(e))
+            {
+                if (MphRead.Mods.Input.GamepadInput.InUse)
+                {
+                    _controls.NotePadActivity();
+                }
+                return true;
+            }
+            return base.DispatchGenericMotionEvent(e);
+        }
+
+        /// <summary>
         /// Ask for immersive again whenever the window becomes ours.
         ///
         /// OnResume is too early: the toolkit sets the window up after it and

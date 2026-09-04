@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.Linq;
 using System.Text;
 using System.Threading;
 using OpenTK.Windowing.GraphicsLibraryFramework;
@@ -41,8 +42,10 @@ namespace MphRead.Mods.Input
             Console.WriteLine($"[gamepad] watching for {seconds:0} s. "
                 + $"dead zone {InputSettings.GamepadDeadZone:0.00}, "
                 + $"look {InputSettings.GamepadLookSensitivity:0.00}, "
-                + $"invert y {(InputSettings.GamepadInvertY ? "on" : "off")}, "
-                + $"enabled {(InputSettings.GamepadEnabled ? "yes" : "no")}");
+                + $"invert y {(InputSettings.GamepadInvertY ? "on" : "off")}");
+            Console.WriteLine("[gamepad] buttons: " + String.Join(", ",
+                PadBindings.Actions.Select(a =>
+                    $"{PadBindings.Name(a)} {PadBindings.Describe(PadBindings.Get(a))}")));
             ReportPresence();
             var clock = Stopwatch.StartNew();
             string last = "";

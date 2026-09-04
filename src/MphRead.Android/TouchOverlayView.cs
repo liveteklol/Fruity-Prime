@@ -58,6 +58,14 @@ namespace MphRead.Droid
         protected override void OnDraw(Canvas canvas)
         {
             base.OnDraw(canvas);
+            if (_controls.PadDriving)
+            {
+                // A pad is being held: nothing is drawn, and the view stays
+                // where it is rather than going away. It is still the only
+                // thing receiving touches, and the first one brings the
+                // controls back -- see TouchControls.PointerDown.
+                return;
+            }
             float unit = Math.Max(1f, Height / 100f);
             _stroke.StrokeWidth = Math.Max(2f, unit * 0.22f);
             foreach (TouchButton button in _controls.Buttons)

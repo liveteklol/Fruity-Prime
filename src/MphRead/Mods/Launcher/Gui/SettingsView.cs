@@ -85,7 +85,6 @@ namespace MphRead.Mods.Launcher.Gui
         private ToggleRow _invertY = null!;
         private ToggleRow _invertX = null!;
         private ToggleRow _scrollAllWeapons = null!;
-        private ToggleRow _gamepadOn = null!;
         private SliderRow _gamepadLook = null!;
         private SliderRow _gamepadDeadZone = null!;
         private ToggleRow _gamepadInvertY = null!;
@@ -479,8 +478,11 @@ namespace MphRead.Mods.Launcher.Gui
             // its own sensitivity, and somebody who inverts one of the two
             // very often does not invert the other.
             Heading(page, "Gamepad");
-            _gamepadOn = Add(page, new ToggleRow("Use a connected gamepad",
-                InputSettings.GamepadEnabled));
+            // No "use a connected gamepad" toggle. A pad that is not being
+            // held changes nothing on its own -- see GamepadInput.Active --
+            // and on a phone the touch controls now step aside for a pad by
+            // themselves and come back at the first touch, so the one thing
+            // the toggle was ever asked to do is done without asking.
             _gamepadLook = Add(page, new SliderRow("Look sensitivity",
                 LookToSlider(InputSettings.GamepadLookSensitivity),
                 v => $"{SliderToLook(v).ToString("0.00", CultureInfo.InvariantCulture)}x"));
@@ -489,6 +491,13 @@ namespace MphRead.Mods.Launcher.Gui
                 v => $"{SliderToDeadZone(v).ToString("0.00", CultureInfo.InvariantCulture)}"));
             _gamepadInvertY = Add(page, new ToggleRow("Invert vertical aim (stick)",
                 InputSettings.GamepadInvertY));
+
+            Heading(page, "Gamepad buttons");
+            var padRows = new List<PadRow>();
+            foreach (Mods.Input.PadAction action in Mods.Input.PadBindings.Actions)
+            {
+                padRows.Add(Add(page, new PadRow(action)));
+            }
 
             Heading(page, "Keys");
             var rows = new List<KeyRow>();
@@ -509,10 +518,15 @@ namespace MphRead.Mods.Launcher.Gui
                 _invertY.On = InputSettings.InvertMouseY;
                 _invertX.On = InputSettings.InvertMouseX;
                 _scrollAllWeapons.On = InputSettings.ScrollAllWeapons;
-                _gamepadOn.On = InputSettings.GamepadEnabled;
                 _gamepadLook.Value = LookToSlider(InputSettings.GamepadLookSensitivity);
                 _gamepadDeadZone.Value = DeadZoneToSlider(InputSettings.GamepadDeadZone);
                 _gamepadInvertY.On = InputSettings.GamepadInvertY;
+                // InputSettings.Reset puts the pad's buttons back too, so
+                // these only have to be redrawn.
+                foreach (PadRow row in padRows)
+                {
+                    row.InvalidateVisual();
+                }
                 foreach (KeyRow row in rows)
                 {
                     row.InvalidateVisual();
@@ -723,7 +737,6 @@ namespace MphRead.Mods.Launcher.Gui
             InputSettings.InvertMouseY = _invertY.On;
             InputSettings.InvertMouseX = _invertX.On;
             InputSettings.ScrollAllWeapons = _scrollAllWeapons.On;
-            InputSettings.GamepadEnabled = _gamepadOn.On;
             InputSettings.GamepadLookSensitivity = SliderToLook(_gamepadLook.Value);
             InputSettings.GamepadDeadZone = SliderToDeadZone(_gamepadDeadZone.Value);
             InputSettings.GamepadInvertY = _gamepadInvertY.On;

@@ -8,11 +8,13 @@ produced them, and a paired pad is an input device like any other.
 | Path | What |
 |---|---|
 | `Mods/Input/GamepadState.cs` | the neutral snapshot both platforms fill in |
+| `Mods/Input/PadBindings.cs` | which button each action is on, and the player's changes to it |
 | `Mods/Input/GamepadInput.cs` | dead zones, the response curve, and what every button means |
 | `Mods/Input/GamepadDesktop.cs` | the desktop reader, polling GLFW |
 | `Mods/Input/GamepadProbe.cs` | `-gamepad`, the diagnostic |
 | `MphRead.Android/GamepadBridge.cs` | the Android reader, accumulating key and motion events |
-| `Mods/InputSettings.cs` | the four settings, saved to `controls.txt` |
+| `Mods/Launcher/Gui/PadRow.cs` | one rebindable button in the settings screen |
+| `Mods/InputSettings.cs` | the three settings and the bindings, saved to `controls.txt` |
 
 ## The layout
 
@@ -20,6 +22,10 @@ Xbox-shaped, because that is what both platforms hand over: GLFW remaps every
 pad it recognises through SDL's controller database, and Android's own
 `KEYCODE_BUTTON_*` constants are the same fifteen in the same places. A
 DualShock's cross arrives as A from both.
+
+This is the **default** layout. Every row of it below the two sticks is a
+`PadAction` the player can move to another button on the Controls page; the
+table is `PadBindings`, which starts as exactly this.
 
 | Pad | Action |
 |---|---|
@@ -37,6 +43,12 @@ DualShock's cross arrives as A from both.
 | D-pad ↓ | power beam |
 | Back | scoreboard |
 | Start | pause menu |
+
+Two actions drive two binds each, and have one row apiece rather than two:
+FIRE is both the gun and the alt form's attack (the DS had one attack button
+and the game's own defaults still bind both to it), and JUMP is also the
+ball's boost. Offering four rows for two buttons would let somebody build a
+pad on which the ball cannot boost, with nothing on screen saying why.
 
 **No weapon wheel.** `PlayerHud`'s weapon select reads the *absolute* pointer
 position, because on the DS it was a touch screen and the slot under the
@@ -63,10 +75,11 @@ Two things cannot go through a keybind:
   of turn per frame) and at the same point in the frame. Aim applied a few
   lines earlier or later than the mouse's would feel different from the mouse
   for reasons nobody could name.
-- **Start**, because the pause menu is not a thing the *player* does: it is a
-  window the host platform opens. `TakeMenuPress` is consumed by whatever owns
-  a window — `RenderWindow.OnRenderFrame` on the desktop, the render loop on
-  Android.
+- **The menu button**, because the pause menu is not a thing the *player*
+  does: it is a window the host platform opens. `TakeMenuPress` is consumed by
+  whatever owns a window — `RenderWindow.OnRenderFrame` on the desktop, the
+  render loop on Android. It is rebindable like the rest; Start is only where
+  it starts.
 
 ## Feel
 
@@ -89,17 +102,58 @@ Two things cannot go through a keybind:
 
 ## Settings
 
-`controls.txt`, and the launcher's Controls page has a Gamepad section:
+`controls.txt`, and the launcher's Controls page has a Gamepad section and a
+Gamepad buttons section:
 
 ```
-gamepad=true
 gamepad_deadzone=0.2
 gamepad_look=1
 gamepad_invert_y=false
+pad_Shoot=RightTrigger
+pad_NextWeapon=RightBumper, DpadRight
+...
 ```
 
 Vertical invert is its own setting rather than sharing the mouse's, because a
 great many people invert one and not the other.
+
+**There is no `gamepad=true` any more.** The toggle it saved — "Use a
+connected gamepad" — could only ever matter to somebody with a pad attached
+who did not want it, and what it cost was a row that reads like it might be
+the reason the pad is not working, in the one screen somebody whose pad is not
+working will go looking. A pad that is merely connected now changes nothing on
+its own, and on Android the touch controls step aside for one by themselves.
+The key is still *read* and skipped, so an older `controls.txt` still loads
+the rest of itself.
+
+### Rebinding, and why it is not a `Keybind`
+
+`ButtonType` and `Keybind` are upstream's, in `Entities/Players/PlayerInput.cs`.
+Adding a fifth `ButtonType` for a pad button would put this project's change in
+an upstream file, which is the one thing the `Mods/` rule exists to avoid. It
+also buys nothing: `GamepadInput.Apply` already *adds* the pad's contribution
+to the binds after `ProcessAllInput` has filled them in, so the two mappings
+never have to agree about anything. `PadBindings` is therefore its own table,
+`PadAction` → `GamepadButtons`, saved under its own `pad_` keys.
+
+A binding is a **flag set**, not one button, because two of the defaults have
+two buttons in them. The settings row replaces the whole set with the single
+button that was pressed; the reset puts the pairs back.
+
+`PadRow` does not listen for a toolkit event the way `KeyRow` does — a pad is
+already reduced to `GamepadState` by the time anything could see it, so the
+row watches that state instead and cannot disagree with the game about what
+was pressed. Two things had to be arranged for it to see anything at all
+outside a match:
+
+- **Android**: `MainActivity.DispatchKeyEvent` and `DispatchGenericMotionEvent`
+  now feed `GamepadBridge`, so a pad press lands in the state whatever view
+  has the focus. It used to be `GameView`'s alone, which does not exist while
+  the launcher is up.
+- **Desktop**: `GamepadDesktop.PollForMenu` initialises GLFW if nothing has
+  yet (OpenTK does it when it creates the game's window, which has not
+  happened on a first run) and pumps an event poll, since GLFW only refreshes
+  joystick state inside one. Called only while a row is listening.
 
 ## Checking it
 
@@ -144,12 +198,21 @@ stick alone. Unplugging mid-run was handled by the rescan without a stall.
 ## Known gaps
 
 - **Android is unmeasured.** The bridge compiles and the shared half of it is
-  the half that was tested above, but no pad has been held against the APK:
+  the half that was tested above — including the automatic touch handover in
+  `TouchControls.NotePadActivity`, which no pad and no thumb have exercised
+  together — but no pad has been held against the APK:
   the emulator here would not keep its package service up long enough to
   install one, and there is no phone on this machine.
 - **The launcher itself is not navigable with a pad** — only a match is. The
   front screen is Avalonia and would need its own focus handling.
-- **No rumble, and no per-button rebinding.** The layout above is fixed; the
-  four settings are the whole of what can be tuned.
+- **No rumble.**
+- **The sticks are not rebindable**, only the buttons. Nobody has asked to
+  swap move and aim, and the two are not interchangeable anyway — one is a
+  threshold and the other a curve.
+- **`PadRow`'s capture is unmeasured on the desktop launcher.** The GLFW
+  lazy-init path has not been run against a real pad from a cold start with no
+  game window; it is guarded and falls back to showing the binding it already
+  has, but "press a button on the pad" doing nothing there is the first thing
+  to check.
 - **One pad.** The first that answers wins, since nothing here has a second
   player to give a second pad to.

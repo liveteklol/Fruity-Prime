@@ -60,6 +60,52 @@ namespace MphRead.Mods.Input
         private const int AxisLeftTrigger = 4;
         private const int AxisRightTrigger = 5;
 
+        /// <summary>
+        /// Whether GLFW has been stood up from here. Only ever set true; the
+        /// game's own window may own the library by then and terminating it
+        /// would take the window with it.
+        /// </summary>
+        private static bool _initialised;
+
+        /// <summary>
+        /// Poll for a settings screen rather than for a frame.
+        ///
+        /// Two things the game loop does for free and a menu does not. GLFW
+        /// only refreshes joystick state inside an event poll, and a launcher
+        /// shown before any match has no window pumping one; and the library
+        /// may not have been initialised at all yet, since OpenTK does that
+        /// when it creates the game's window. Both are cheap to ask for again
+        /// and neither is an error when it has already happened.
+        ///
+        /// Called only while a <c>PadRow</c> is listening for a button, so
+        /// nothing here runs for a settings screen nobody is rebinding on.
+        /// </summary>
+        public static void PollForMenu()
+        {
+            if (OperatingSystem.IsAndroid())
+            {
+                // Evented there: the activity puts pad presses into the state
+                // whether or not a match is running. See GamepadBridge.
+                return;
+            }
+            try
+            {
+                if (!_initialised)
+                {
+                    GLFW.Init();
+                    _initialised = true;
+                }
+                GLFW.PollEvents();
+            }
+            catch (Exception ex) when (ex is DllNotFoundException
+                || ex is EntryPointNotFoundException || ex is BadImageFormatException)
+            {
+                _slot = -2;
+                return;
+            }
+            Poll();
+        }
+
         public static void Poll()
         {
             if (OperatingSystem.IsAndroid())
