@@ -250,6 +250,42 @@ It is **not** rare and it is not only that map: zero on MP2 HARVESTER over
 with five -- about 2.5% of frames, every one of which was a puppet the
 renderer would have been free to hide. Measured 2026-09-04 against the Pi.
 
+## The gun that lowered itself, and the shots that were never spawned
+
+The largest of this round, and it was found by pulling on the pad bug. The
+engine lowers an idle player's gun after `GunIdleTime` (`UpdateGunAnimation`),
+and raises it again only on a frame where `_timeSinceInput` is exactly zero.
+That counter is reset from **one** place: `Input.HasInput`, written by the pass
+in `ProcessAllInput` that turns a keyboard into binds. Three kinds of player
+never go through that pass:
+
+| Driven by | Goes idle? | What it cost |
+|---|---|---|
+| keyboard and mouse | no | -- |
+| touch controls | no -- they press keys into a `KeyboardState` of their own | -- |
+| a **gamepad** | yes | the gun sank off the bottom of the screen and never came back: `CanShoot` and `TryEquipWeapon` both refuse while `GunAnimation.UpDown` is playing |
+| a **remote player** (`ApplyIntent`) | yes | every puppet on every machine, including the authority's |
+| a **scripted client** (the tour) | yes | the harness measured a fraction of the shots the tour asks for |
+
+The middle row is the one that reached players. A puppet's beams are spawned
+by its own simulation on each machine, and the machine that matters is the
+authority, because `NetDamage.Suppress` throws away damage resolved anywhere
+else. So a player who held still and fired -- which is what a sniper does --
+had their shots fail to spawn on the one machine whose shots count. Their
+Imperialist went through somebody and did nothing, and then a later shot, on a
+frame where a weapon switch or a respawn happened to have reset the counter,
+killed them. That is "the shot seems to miss and the death arrives a second
+later", and it is not latency.
+
+`PlayerEntity.ModNoteInput` is the fix, called from `GamepadInput.Apply`, from
+`NetPlayerBridge.ApplyIntent` (masked to the *pressed* bits, so a puppet goes
+idle exactly when its owner does) and from `NetTestScript.Finish`.
+
+The measurement, on TEST ARENA with three clients, before and after: shots
+spawned per slot went from 28-63 to **118-142**, hits taken from 2-20 to
+**49-72**, and the affliction probe went from `freeze FAIL burn nohit disrupt
+FAIL` to `freeze ok burn ok`. None of those numbers were a network problem.
+
 ## Why a hit can land a second after the shot
 
 Not a bug, and worth being able to say so quickly. On a dedicated server the

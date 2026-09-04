@@ -920,7 +920,7 @@ namespace MphRead.Entities
             {
                 return;
             }
-            ModNotePadInput();
+            ModNoteInput();
             UpdateHudShiftY(y);
             UpdateHudShiftX(x);
             UpdateAimY(y);
@@ -929,7 +929,7 @@ namespace MphRead.Entities
 
         /// <summary>
         /// Say that this player is being played, when the thing playing it is
-        /// not the keyboard or the mouse.
+        /// not this machine's keyboard or mouse.
         ///
         /// <c>Input.HasInput</c> is written in one place -- the pass in
         /// <c>ProcessAllInput</c> that turns a <see cref="OpenTK.Windowing.GraphicsLibraryFramework.KeyboardState"/>
@@ -953,8 +953,27 @@ namespace MphRead.Entities
         /// The touch controls do not need this: they press the keys the player
         /// has bound into a keyboard of their own, so they arrive *inside* the
         /// pass that sets the flag.
+        ///
+        /// **Three writers, not one.** The pad is the visible case; the other
+        /// two are worse and were found by following it:
+        ///
+        /// - a **remote player** is driven from relayed intents
+        ///   (`NetPlayerBridge.ApplyIntent`), and `ProcessAllInput` skips the
+        ///   flag entirely for them. So every puppet on every machine looked
+        ///   idle from the moment it stopped respawning or changing weapon --
+        ///   which lowers its gun, and `CanShoot` refuses to spawn a beam
+        ///   while that animation is playing. The authority is a machine full
+        ///   of puppets: a player holding still and firing, which is what a
+        ///   sniper does, had their shots fail to spawn on the one machine
+        ///   whose shots count. That is "my Imperialist shot went through
+        ///   them and did nothing".
+        /// - a **scripted client** writes into the same binds and is not a
+        ///   bot, so the harness had the fault too, which is why its shot
+        ///   counts were a fraction of what the tour asks for and why the
+        ///   affliction probe could never fire the charged shot it waits to
+        ///   fire.
         /// </summary>
-        internal void ModNotePadInput()
+        internal void ModNoteInput()
         {
             Input.HasInput = true;
         }

@@ -94,6 +94,7 @@ export ALSOFT_DRIVERS=null PULSE_SERVER=   # else ALSA retries stall frames
 | `MphRead -maptest "ROOM" -players 8 -seconds 22` | load one room with a full house, drive every player, and report what the map holds and whether it survived |
 | `MphRead -maptest "ROOM" -players 8 -bots` | the same, but AI bots instead of the scripted tour -- a different code path, the only one that finds what only `PlayerAi` touches |
 | `MphRead -maptest "ROOM" -renderprobe` | stand on every spawn point in the room in turn, read the frame, walk forward five seconds, read the worst. Catches a room that draws nothing -- the failure no other check can see, because everything else about it passes. `-shots DIR` writes the PNGs, `-allnodes` draws without room-part culling (which separates "the geometry is missing" from "the cull lost it"), `-hudshots` uses a real visible window and reads *its* buffer, which is the only capture that includes the HUD, and `-size WxH` sets that window's shape -- the HUD is laid out in a 4:3 space and stretched, so how it looks is partly a question about the window. Under WSL a HUD capture needs the X11 backend: `WAYLAND_DISPLAY=` `DISPLAY=:0`, or every window read comes back black |
+| `MphRead -maptest "TEST ARENA" -players 8` | the harness's own room (`maps/arena/`): forty units square, eight spawns on a ring looking inward, nothing far from anything. Where damage, hit registration and the affliction states are actually measurable -- a real map's corridors mean most of the tour's shots land on a wall |
 | `MphRead -rooms` | list every multiplayer room, one per line, for a shell loop. **27** is the whole cartridge and the right answer with no custom map source present; anything more is a custom map |
 | `MphRead -q3convert FILE.pk3 -map LEVEL -name ROOM [-noclip]` | a Quake 3 .pk3 to a custom map in one command: textures baked from the level's own art, scale and extents picked from its geometry, spawns from its entities. Places no weapons or powerups -- where those go decides how the map plays. `.claude/mapgen/MAP-PIPELINE.md` |
 | `MphRead -mapgen ["NAME"]` | generate the room binaries for the custom maps in `maps/` (recursively: a map may sit in a folder of its own with its level and textures beside it, or be a single `.fpmap` bundle), from the player's own textures. `-mapmaterials "ROOM"` prints what textures a room can lend. A map is a JSON file; the `.bin` it produces is never committed. `.claude/mapgen/MAP-PIPELINE.md` |
@@ -357,12 +358,16 @@ Shapes worth keeping without opening anything else:
   either side first, and if it still cannot be placed, say so and draw it
   anyway.
 - **Nothing that answers "has this person touched anything lately" knew about
-  the pad.** `Input.HasInput` is written in the pass that turns a keyboard
-  into binds, and the pad is ored on *after* it -- so on a controller the gun
-  lowered itself after `GunIdleTime` and never came back up (both `CanShoot`
-  and `TryEquipWeapon` refuse while that animation plays), and the idle sway
-  drifted the aim of a player who was deliberately holding still. One line in
-  `GamepadInput.Apply`.
+  the pad -- or about a remote player.** `Input.HasInput` is written in the
+  pass that turns a keyboard into binds, and three kinds of player never go
+  through it: a pad (ored on afterwards), a puppet (driven from relayed
+  intents), and a scripted client. All three therefore looked idle, and the
+  engine lowers an idle player's gun -- which `CanShoot` and `TryEquipWeapon`
+  both refuse to work through. On a pad that meant a gun that fell off the
+  screen and a player who could not fire again; on a **puppet** it meant a
+  player who held still and fired had their shots fail to spawn *on the
+  authority*, which is the only machine whose shots count. Shots spawned per
+  slot went from 28-63 to 118-142 once it was fixed. `ModNoteInput`.
 
 - **A stale input is not harmless just because it's only a position.** The
   intent stream has no notion of "this predates what just happened," so

@@ -794,13 +794,17 @@ namespace MphRead.Mods.Network
             Line("halfturret", mine.HalfturretFrames, other.HalfturretFrames, 5, "frames",
                 applicable: other.Hunter == Hunter.Weavel);
             Line("zoom", mine.ZoomFrames, other.ZoomFrames, 10, "frames");
-            // Generous, and deliberately so: the freeze starts on the
-            // authority and reaches everybody else a round trip later, so at
-            // 300 ms the two counts differ by twenty frames before anything
-            // is wrong. What this is watching for is one side counting
-            // hundreds and the other zero, which is what it did before the
-            // flag existed.
-            Line("frozen", mine.FrozenFrames, other.FrozenFrames, 45, "frames");
+            // No `frozen` row here on purpose, though the count is recorded
+            // and does cross-check. This report compares *this* player against
+            // *that* one, which works for the things the tour has both of them
+            // do at once and not for a state one of them is put into: the tour
+            // aims in a ring, so the only player a Noxus freezes is the next
+            // slot up, and comparing a frozen player against an unfrozen one
+            // reads as a replication failure when it is the pair being wrong.
+            // The comparison that means something is the same slot seen by
+            // everybody, which is `compare-reports.py`'s table -- measured on
+            // TEST ARENA as 107 frames on the victim's own machine against 149
+            // and 145 on the two watching.
             Line("double damage", mine.DoubleDamageFrames, other.DoubleDamageFrames, 10, "frames");
             Line("taking damage", mine.DamageEvents, other.DamageEvents, 1, "hits");
             Line("hit in alt form", mine.DamageInAltForm, other.DamageInAltForm, 2, "hits",

@@ -255,10 +255,10 @@ namespace MphRead.Mods.Input
             // after the pass that answers that question for the keyboard, so
             // without this a player holding nothing but a pad reads as idle --
             // which lowers their gun off the screen and leaves them unable to
-            // fire. See PlayerEntity.ModNotePadInput.
+            // fire. See PlayerEntity.ModNoteInput.
             if (InUse)
             {
-                player.ModNotePadInput();
+                player.ModNoteInput();
             }
         }
 

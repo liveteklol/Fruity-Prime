@@ -139,7 +139,7 @@ namespace MphRead.Mods.Network
             PlayerControls c = player.Controls;
             Clear(c);
             Hold(c.Shoot, down);
-            Finish(c);
+            Finish(player, c);
         }
 
         /// <summary>
@@ -166,7 +166,7 @@ namespace MphRead.Mods.Network
             {
                 Hold(c.Morph, true);
             }
-            Finish(c);
+            Finish(player, c);
         }
 
         /// <summary>
@@ -189,7 +189,7 @@ namespace MphRead.Mods.Network
             {
                 Hold(c.MoveUp, true);
             }
-            Finish(c);
+            Finish(player, c);
         }
 
         public static void Apply(PlayerEntity player)
@@ -320,7 +320,7 @@ namespace MphRead.Mods.Network
                     Duel(player, c, target, onTarget);
                     break;
             }
-            Finish(c);
+            Finish(player, c);
         }
 
         /// <summary>Not in the middle of changing form.</summary>
@@ -408,13 +408,26 @@ namespace MphRead.Mods.Network
         }
 
         /// <summary>Work out this frame's press and release edges.</summary>
-        private static void Finish(PlayerControls c)
+        private static void Finish(PlayerEntity player, PlayerControls c)
         {
+            bool any = false;
             for (int i = 0; i < c.All.Length && i < _wasDown.Length; i++)
             {
                 Keybind bind = c.All[i];
                 bind.IsPressed = bind.IsDown && !_wasDown[i];
                 bind.IsReleased = !bind.IsDown && _wasDown[i];
+                any |= bind.IsDown || bind.IsReleased;
+            }
+            if (any)
+            {
+                // A scripted client is not a bot and its binds are written
+                // after the pass that answers "is anybody playing this", so
+                // without this the tour's own players went idle, had their
+                // guns lowered, and could not fire -- which is most of why
+                // the shot counts in every report were a fraction of what the
+                // tour actually asks for, and the whole of why the affliction
+                // probe never got its charged shot away.
+                player.ModNoteInput();
             }
         }
 

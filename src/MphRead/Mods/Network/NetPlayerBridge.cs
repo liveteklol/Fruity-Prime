@@ -250,6 +250,21 @@ namespace MphRead.Mods.Network
         /// previous frame, so gameplay code that tests those edges behaves
         /// the same for a remote player as for a local one.
         /// </summary>
+        /// <summary>
+        /// The bits of an intent that mean somebody pressed something, as
+        /// opposed to the four that describe what state the sender is in.
+        ///
+        /// The difference matters for <see cref="PlayerEntity.ModNoteInput"/>:
+        /// `InPlayState` is set on every packet a living player sends, so
+        /// counting the whole mask would make a puppet look busy while its
+        /// owner stood perfectly still -- and the engine lowers an idle
+        /// player's gun, which their own screen would then be doing and
+        /// nobody else's. Replicating the idle means replicating the idle.
+        /// </summary>
+        private const IntentButtons PressedButtons = ~(IntentButtons.ZoomedState
+            | IntentButtons.AltFormState | IntentButtons.InPlayState
+            | IntentButtons.SpectatingState);
+
         /// <summary>Newest press frame already applied, per slot.</summary>
         private static readonly uint[] _lastPressFrame = new uint[PlayerEntity.SlotCapacity];
         private static readonly bool[] _pressSeen = new bool[PlayerEntity.SlotCapacity];
@@ -290,6 +305,20 @@ namespace MphRead.Mods.Network
                 player.ModSetWeapon((BeamType)intent.WeaponSelect);
             }
             player.ModSetAmmo(intent.AmmoUa, intent.AmmoMissiles);
+            // Somebody is playing this hunter, even though it is not this
+            // machine's keyboard doing it.
+            //
+            // Without this a puppet looked idle from the moment its owner
+            // stopped respawning or changing weapon, and the engine lowers an
+            // idle player's gun -- which `CanShoot` refuses to fire through.
+            // So a player holding still and firing, which is what a sniper
+            // does, had their shots fail to spawn on every other machine
+            // including the authority, whose shots are the only ones that
+            // count. See PlayerEntity.ModNoteInput.
+            if ((intent.Buttons & PressedButtons) != IntentButtons.None)
+            {
+                player.ModNoteInput();
+            }
             // After the weapon, because zoom belongs to one and the engine
             // refuses it on a weapon that cannot. Taken as state rather than
             // rebuilt from the press: see IntentButtons.ZoomedState.
