@@ -250,6 +250,16 @@ namespace MphRead.Mods.Input
             Hold(controls.PrevWeapon, PadBindings.Get(PadAction.PrevWeapon));
             Hold(controls.Missile, PadBindings.Get(PadAction.Missile));
             Hold(controls.PowerBeam, PadBindings.Get(PadAction.PowerBeam));
+
+            // And say that somebody is playing. The binds above are ored on
+            // after the pass that answers that question for the keyboard, so
+            // without this a player holding nothing but a pad reads as idle --
+            // which lowers their gun off the screen and leaves them unable to
+            // fire. See PlayerEntity.ModNotePadInput.
+            if (InUse)
+            {
+                player.ModNotePadInput();
+            }
         }
 
         private static void Hold(Keybind bind, GamepadButtons buttons)

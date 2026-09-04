@@ -144,6 +144,7 @@ namespace MphRead.Mods.Launcher.Gui
             // it: the badge in one bottom corner, the version in the other.
             _layout.Children.Add(_updateBadge);
             _layout.Children.Add(BuildVersionLine());
+            _layout.Children.Add(BuildDebugSwitch());
             _layout.Children.Add(_panel);
             ApplyLayout(narrow: false);
 
@@ -248,6 +249,8 @@ namespace MphRead.Mods.Launcher.Gui
                 Grid.SetRow(_updateBadge, 0);
                 Grid.SetColumn(_versionBox, 0);
                 Grid.SetRow(_versionBox, 0);
+                Grid.SetColumn(_debugBox, 0);
+                Grid.SetRow(_debugBox, 0);
                 Grid.SetColumn(_panel, 0);
                 Grid.SetRow(_panel, 1);
                 return;
@@ -262,6 +265,8 @@ namespace MphRead.Mods.Launcher.Gui
             Grid.SetRow(_updateBadge, 0);
             Grid.SetColumn(_versionBox, 0);
             Grid.SetRow(_versionBox, 0);
+            Grid.SetColumn(_debugBox, 0);
+            Grid.SetRow(_debugBox, 0);
             Grid.SetColumn(_panel, 1);
             Grid.SetRow(_panel, 0);
         }
@@ -483,6 +488,10 @@ namespace MphRead.Mods.Launcher.Gui
             {
                 bool home = ReferenceEquals(card, _homeCard);
                 _versionBox.IsVisible = home;
+                if (_debugBox != null)
+                {
+                    _debugBox.IsVisible = home;
+                }
                 if (home && _updateBadge.IsVisible)
                 {
                     _updateBadge.IsVisible = false;
@@ -616,6 +625,98 @@ namespace MphRead.Mods.Launcher.Gui
                 }
             };
             return _versionBox;
+        }
+
+        private TextBlock _debugLine = null!;
+        private Border _debugBox = null!;
+
+        /// <summary>
+        /// The switch that turns the log file on, in the corner under the
+        /// version.
+        ///
+        /// Deliberately the smallest thing on the screen. It is not a feature
+        /// anybody came here for: it is what somebody is asked to turn on when
+        /// they report a crash nobody else can reproduce, and it costs a
+        /// growing directory and a lock on every line the program prints, so
+        /// it should be findable when described over a chat window and
+        /// invisible the rest of the time. The corner it is in is the one that
+        /// already carries the things about the program rather than about the
+        /// match -- the build, and the update -- and it is on the front card
+        /// only, for the same reason those are.
+        ///
+        /// It says where the file went once it is on, because "turn on logging
+        /// and send me the file" has a second half.
+        /// </summary>
+        private Border BuildDebugSwitch()
+        {
+            _debugLine = new TextBlock
+            {
+                FontSize = 10,
+                Foreground = GuiTheme.TextDimBrush
+            };
+            _debugBox = new Border
+            {
+                Background = GuiTheme.ScrimBrush,
+                BorderBrush = GuiTheme.EdgeBrush,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(8, 3, 8, 3),
+                // Directly above the version corner, sharing its right edge.
+                Margin = new Thickness(0, 0, 24, 48),
+                HorizontalAlignment = HorizontalAlignment.Right,
+                VerticalAlignment = VerticalAlignment.Bottom,
+                IsVisible = false,
+                Cursor = new Cursor(StandardCursorType.Hand),
+                Child = _debugLine
+            };
+            _debugBox.PointerPressed += (_, e) =>
+            {
+                e.Handled = true;
+                ToggleDebugLogs();
+            };
+            RefreshDebugSwitch();
+            return _debugBox;
+        }
+
+        private void ToggleDebugLogs()
+        {
+            LauncherPrefs.DebugLogs = !LauncherPrefs.DebugLogs;
+            LauncherPrefs.Save();
+            if (LauncherPrefs.DebugLogs)
+            {
+                // Straight away, so the run that is about to crash is the run
+                // in the file -- being asked to restart first is where a
+                // report like this is usually lost.
+                Mods.DebugLog.Attach();
+                Mods.DebugLog.Line("launcher", "debug logging turned on from the front screen");
+            }
+            else
+            {
+                Mods.DebugLog.Line("launcher", "debug logging turned off from the front screen");
+                Mods.DebugLog.Detach();
+            }
+            RefreshDebugSwitch();
+        }
+
+        private void RefreshDebugSwitch()
+        {
+            if (_debugLine == null)
+            {
+                return;
+            }
+            if (!LauncherPrefs.DebugLogs)
+            {
+                _debugLine.Text = "\u25A2 Enable debugging logs";
+                _debugLine.Foreground = GuiTheme.TextDimBrush;
+                ToolTip.SetTip(_debugBox, "Write everything this build can say "
+                    + "about itself to a file, for a bug report.");
+                return;
+            }
+            _debugLine.Text = "\u25A3 Debugging logs on";
+            _debugLine.Foreground = new SolidColorBrush(GuiTheme.Warm);
+            ToolTip.SetTip(_debugBox, Mods.DebugLog.Path is string path
+                ? $"Writing to {path}"
+                : "Logging starts with the next run.");
         }
 
         /// <summary>

@@ -304,8 +304,17 @@ namespace MphRead.Mods.Network
                     // own weapon, so the phase begins by handing it over. Then
                     // it is an ordinary duel: the point is to land those shots
                     // on somebody, not to prove the gun exists.
+                    //
+                    // Charged, which it was not. Every affliction in the game
+                    // is on the *charged* affinity shot, and the duel's fire
+                    // pattern holds the trigger for 24 frames of every 30 --
+                    // less than any weapon's full charge, so the phase armed
+                    // the right gun and then fired it in the one way that
+                    // cannot afflict anybody. Nothing said so: the affliction
+                    // has no cross-check of its own in this harness, and
+                    // `frozen` read `untested` on every client of every run.
                     player.ModArmAffinityWeapon();
-                    Duel(player, c, target, onTarget);
+                    Duel(player, c, target, onTarget, charged: true);
                     break;
                 case TestPhase.Duel:
                     Duel(player, c, target, onTarget);
@@ -443,7 +452,15 @@ namespace MphRead.Mods.Network
             Hold(c.MoveLeft, phase == 3);
         }
 
-        private static void Duel(PlayerEntity player, PlayerControls c, PlayerEntity? target, bool onTarget)
+        /// <summary>
+        /// Frames left to keep the trigger *up* for, so that a charge which
+        /// has finished actually leaves the gun. A charged weapon fires on
+        /// release; holding fire forever charges forever.
+        /// </summary>
+        private static int _releaseFrames;
+
+        private static void Duel(PlayerEntity player, PlayerControls c, PlayerEntity? target,
+            bool onTarget, bool charged = false)
         {
             if (target == null)
             {
@@ -471,7 +488,26 @@ namespace MphRead.Mods.Network
             Hold(c.MoveRight, stuck ? !_stuckDirection
                 : distance <= PreferredRange && _frame / 90 % 2 == 1);
             Hold(c.Jump, stuck ? _stuckFrames % 30 < 3 : _frame % 150 < 3);
-            Hold(c.Shoot, onTarget && _frame % 30 < 24);
+            if (!charged)
+            {
+                Hold(c.Shoot, onTarget && _frame % 30 < 24);
+                return;
+            }
+            // Hold until the charge is full whether or not the aim has come
+            // round yet -- a charge is built while waiting for a shot, which
+            // is how the weapon is used -- and let go once it is full and the
+            // target is in front of the gun.
+            if (_releaseFrames > 0)
+            {
+                _releaseFrames--;
+                return;
+            }
+            if (onTarget && player.ModChargeReady)
+            {
+                _releaseFrames = 4;
+                return;
+            }
+            Hold(c.Shoot, true);
         }
 
         private static PlayerEntity? FindTarget(PlayerEntity self)

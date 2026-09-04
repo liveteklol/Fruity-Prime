@@ -36,6 +36,19 @@ namespace MphRead.Mods
             // Keys and mouse feel, before anything creates a player. Called
             // here because this runs for every invocation, launcher or not.
             InputSettings.Load();
+            // And the file of everything the program can say about itself, if
+            // the player has asked for one. Read the preferences here rather
+            // than waiting for the launcher to: a crash while a map loads
+            // happens on paths that never open one, and the point of the log
+            // is to be already running when that happens. -debuglog turns it
+            // on for a single run without the setting, for the case where the
+            // launcher itself is what will not start.
+            Launcher.LauncherPrefs.Load();
+            if (HasFlag(args, "debuglog"))
+            {
+                DebugLog.Force();
+            }
+            DebugLog.Attach();
             Update.Updater.Disabled = HasFlag(args, "noupdate");
             ApplyRenderOverrides(args);
 
@@ -61,6 +74,29 @@ namespace MphRead.Mods
             // And the desktop's own installer, unless a platform head has
             // already put its own in place.
             Update.UpdateInstall.UseDesktopIfPossible();
+
+            // A bad line, asked for. Before anything opens a socket, and for
+            // every path that has one -- the game, the harness client and the
+            // dedicated server alike -- so a fault that only shows up at 200
+            // ms can be reproduced against the real server rather than only
+            // behind a proxy in front of a local one. See Mods/Network/NetLag.
+            string? netLag = ValueAfter(args, "netlag");
+            if (netLag != null && !Network.NetLag.Configure(netLag))
+            {
+                Console.WriteLine($"[net] -netlag {netLag} is not a number of "
+                    + "milliseconds (try -netlag 200 or -netlag 200:40)");
+                return true;
+            }
+            string? netLoss = ValueAfter(args, "netloss");
+            if (netLoss != null && !Network.NetLag.ConfigureLoss(netLoss))
+            {
+                Console.WriteLine($"[net] -netloss {netLoss} is not a percentage");
+                return true;
+            }
+            if (Network.NetLag.Active)
+            {
+                Console.WriteLine($"[net] simulating a bad line: {Network.NetLag.Describe()}");
+            }
 
             if (HasFlag(args, "credits"))
             {

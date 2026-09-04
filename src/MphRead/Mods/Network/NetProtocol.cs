@@ -997,6 +997,24 @@ namespace MphRead.Mods.Network
         /// one whose local input is frozen. See <see cref="Mods.SpectatorMode"/>.
         /// </summary>
         public const byte FlagSpectating = 1 << 4;
+        /// <summary>
+        /// Frozen solid by an affinity Judicator.
+        ///
+        /// The freeze is produced inside <c>TakeDamage</c>, from the beam
+        /// entity that landed the hit -- and a beam entity only ever exists on
+        /// the machine that resolved it. <c>NetDamage.Replay</c> has no beam
+        /// to give, so every machine but the authority replayed the damage
+        /// without the affliction: the victim went on walking about on their
+        /// own screen while the authority held them still, and the authority,
+        /// which pins a puppet to the position its owner last reported, drew a
+        /// player encased in ice sliding around the room. Reported from play
+        /// as "frozen players who keep moving", from the person hosting.
+        ///
+        /// So the state travels rather than the cause. Additive: the byte and
+        /// the packet are the size they were, an older build ignores the bit,
+        /// and an older authority simply never sets it.
+        /// </summary>
+        public const byte FlagFrozen = 1 << 5;
 
         public void Write(Span<byte> dest)
         {

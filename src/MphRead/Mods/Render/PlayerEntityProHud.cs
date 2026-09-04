@@ -66,7 +66,10 @@ namespace MphRead.Entities
             ProNumber(6 * aspect, 172, Align.Left, _health.ToString(), ProInk(health), 1.5f);
             ProBar(4 * aspect, 186, 40, 3, ProHealthFraction(), health);
             DrawProAmmo();
-            ProScore(4 * aspect, 12, Align.Left, 1.1f);
+            // Below the chat log: the pro score sits in the same corner the
+            // log is drawn into, and at 12 units down it was underneath the
+            // second line of it. See ModChatClearance.
+            ProScore(4 * aspect, ModChatClearance(12), Align.Left, 1.1f);
         }
 
         /// <summary>

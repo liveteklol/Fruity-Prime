@@ -165,7 +165,6 @@ namespace MphRead.Droid
         // touch. See NotePadActivity.
         private bool _padDriving;
         private bool _forceVisible;
-        private readonly HashSet<int> _swallowed = new HashSet<int>();
 
         private readonly HashSet<TouchAction> _held = new HashSet<TouchAction>();
         private readonly Dictionary<int, TouchAction> _buttonPointers = new Dictionary<int, TouchAction>();
@@ -514,23 +513,23 @@ namespace MphRead.Droid
         }
 
         /// <summary>
-        /// Repaint when the controls appeared or went away, and let go of
-        /// everything on the way out.
+        /// Repaint when the controls appeared or went away.
         ///
-        /// The releasing is not tidiness: a thumb resting on FIRE as the
-        /// player picks the pad up would be held down for ever otherwise,
-        /// since the finger's release lands on a control that is no longer
-        /// listening.
+        /// It used to let go of everything held on the way out, and that was
+        /// the right answer to the wrong question: a thumb resting on FIRE as
+        /// the player picked the pad up would have been held down for ever,
+        /// *because the finger's release landed on a control that had stopped
+        /// listening*. It does not stop listening any more -- hiding the
+        /// layout hides the layout -- so the release arrives and does its job,
+        /// and cancelling here would instead cut off a player who is
+        /// deliberately holding a button with one hand and a stick with the
+        /// other.
         /// </summary>
         private void Settle(bool wasHidden, bool isHidden)
         {
             if (wasHidden == isHidden)
             {
                 return;
-            }
-            if (isHidden)
-            {
-                ReleaseEverything();
             }
             Invalidated?.Invoke();
         }
@@ -675,24 +674,22 @@ namespace MphRead.Droid
             bool revealed = false;
             lock (_lock)
             {
-                bool hidden = HiddenLocked;
+                revealed = HiddenLocked;
                 // A finger on the glass is the player choosing the
                 // touchscreen again, whether or not the controls had gone.
                 _padDriving = false;
-                if (hidden)
-                {
-                    // The touch that brings them back does nothing else. They
-                    // were not on screen when the finger went down, so
-                    // wherever it landed was not a choice -- and the first
-                    // thing a thumb reaches for after putting a pad down is
-                    // the middle of the screen, which is FIRE's half.
-                    _swallowed.Add(pointerId);
-                    revealed = true;
-                }
-                else
-                {
-                    PointerDownLocked(pointerId, x, y);
-                }
+                // And it does what it landed on, drawn or not. The controls
+                // used to swallow this one -- the reasoning being that a
+                // thumb reaching for a screen it had stopped looking at
+                // lands in FIRE's half -- but that is a rule about a player
+                // who has *put the pad down*, and the pad and the glass are
+                // routinely both in use at once: a stick in the left hand and
+                // a thumb on FIRE, or a pad for movement and the screen for
+                // the weapon wheel, which is the one thing a pad cannot reach
+                // at all. Swallowing the touch made those cost a press every
+                // time the pad had been moved since. Hiding the layout is
+                // still right; disabling the surface under it was not.
+                PointerDownLocked(pointerId, x, y);
             }
             if (revealed)
             {
@@ -856,10 +853,6 @@ namespace MphRead.Droid
         {
             lock (_lock)
             {
-                if (_swallowed.Contains(pointerId))
-                {
-                    return;
-                }
                 if (pointerId == _stickPointer)
                 {
                     float dx = x - StickX;
@@ -962,10 +955,6 @@ namespace MphRead.Droid
         {
             lock (_lock)
             {
-                if (_swallowed.Remove(pointerId))
-                {
-                    return;
-                }
                 if (pointerId == _stickPointer)
                 {
                     _stickPointer = -1;
@@ -1018,7 +1007,6 @@ namespace MphRead.Droid
             lock (_lock)
             {
                 _buttonPointers.Clear();
-                _swallowed.Clear();
                 _held.Clear();
                 _stickPointer = -1;
                 _aimPointer = -1;

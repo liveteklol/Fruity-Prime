@@ -48,7 +48,7 @@ namespace MphRead.Entities
             // example issue - Kanden visible for one frame before Data Shrine 03 cam seq starts
             // should be culled because the cam seq frustum info has already been loaded, and is facing away from him,
             // even though the player's view is still what's on the screen (at least that seems to be what's happening)
-            if (IsMainPlayer || IsVisible(NodeRef))
+            if (IsMainPlayer || IsVisible(NodeRef) || ModNodeUnresolved)
             {
                 drawBiped = !IsMainPlayer || CameraType != CameraType.First || CameraSequence.Current != null
                     || _camSwitchTimer < Values.CamSwitchTime * 2; // todo: FPS stuff

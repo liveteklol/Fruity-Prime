@@ -1130,7 +1130,8 @@ namespace MphRead.Mods.Network
                         | (player.IsAltForm ? PlayerState.FlagAltForm : 0)
                         | (player.ModIsInPlay ? PlayerState.FlagSpawned : 0)
                         | (player.EquipInfo.Zoomed ? PlayerState.FlagZoomed : 0)
-                        | (player.Flags2.TestFlag(PlayerFlags2.Spectating) ? PlayerState.FlagSpectating : 0)),
+                        | (player.Flags2.TestFlag(PlayerFlags2.Spectating) ? PlayerState.FlagSpectating : 0)
+                        | (player.ModFrozen ? PlayerState.FlagFrozen : 0)),
                     Position = player.Position,
                     Speed = player.Speed,
                     Facing = player.FacingVector,

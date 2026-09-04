@@ -66,6 +66,19 @@ namespace MphRead.Mods.Network
         public static float WorstSnap { get; private set; }
 
         /// <summary>
+        /// Frames on which a player's room node could not be worked out from
+        /// its position at all, even after the body and half a unit either
+        /// side of it were tried.
+        ///
+        /// The measurement behind "players go invisible up there": the node is
+        /// what the renderer culls against, so a lookup that fails leaves a
+        /// puppet holding a stale one. Non-zero says the map has places the
+        /// portal volumes do not cover, and which map and how often is the
+        /// difference between a room to look at and a fluke.
+        /// </summary>
+        public static long NodeLookupsUnresolved;
+
+        /// <summary>
         /// How far this machine's own player may be from the authority's copy
         /// of it before it is pulled back.
         ///
@@ -523,6 +536,11 @@ namespace MphRead.Mods.Network
                     _divergedFrames[slot] = 0;
                 }
                 player.Health = state.Health;
+                // Including for this machine's own player: being frozen is
+                // part of the match, like health and the score, and a victim
+                // who kept walking about while the authority held them still
+                // was the whole of the "frozen players who keep moving" bug.
+                player.ModSetFrozen((state.Flags & PlayerState.FlagFrozen) != 0);
                 return;
             }
             // Converted for the same reason the reported position is: the
@@ -541,6 +559,7 @@ namespace MphRead.Mods.Network
             // whose input is frozen -- Quake 3's spectator, not a player who
             // merely stopped moving.
             player.ModSetSpectating((state.Flags & PlayerState.FlagSpectating) != 0);
+            player.ModSetFrozen((state.Flags & PlayerState.FlagFrozen) != 0);
         }
 
         /// <summary>
@@ -667,6 +686,7 @@ namespace MphRead.Mods.Network
             Array.Clear(_formMismatch);
             Snaps = 0;
             WorstSnap = 0;
+            NodeLookupsUnresolved = 0;
             Array.Clear(_formAttempts);
             Array.Clear(_lastPressFrame);
             Array.Clear(_pressSeen);

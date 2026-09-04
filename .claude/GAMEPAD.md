@@ -81,6 +81,52 @@ Two things cannot go through a keybind:
   render loop on Android. It is rebindable like the rest; Start is only where
   it starts.
 
+And one thing the or could not carry, which cost two bugs before anybody
+worked out they were the same one. **`Input.HasInput`** — the engine's answer
+to "has this person touched anything lately" — is written in the pass that
+turns the keyboard into binds, and the pad arrives *after* that pass has run.
+So on a controller the player looked idle every frame of a match they were
+playing:
+
+- `UpdateGunAnimation` lowers the gun after `GunIdleTime` and raises it again
+  only on a frame where `_timeSinceInput` is exactly zero. That frame never
+  came. The gun sank off the bottom of the screen and stayed there — and both
+  `CanShoot` and `TryEquipWeapon` refuse while `GunAnimation.UpDown` is
+  playing, so the player could neither fire nor change weapon for the rest of
+  the life. Reported from Android as "with Trace, sniping, the weapon falls
+  away and I cannot shoot".
+- the idle sway starts drifting `_facingVector` on its own after
+  `SwayStartTime`, which is worst for exactly the player who is deliberately
+  holding still.
+
+`GamepadInput.Apply` now calls `PlayerEntity.ModNotePadInput` whenever the pad
+is `InUse`, and `ApplyGamepadAim` does the same for the stick. The touch
+controls never needed it: they press the keys the player has bound into a
+`KeyboardState` of their own, so they arrive *inside* the pass that sets the
+flag.
+
+**Alt form** was the other half. `ApplyModAim` was called from `ProcessBiped`
+and nowhere else, so a pad could walk, boost and attack in alt form but not
+look — Trace, Sylux and Weavel aim in alt form, and only the mouse could do
+it, from `ProcessAlt`'s own branch. It is now called from both, in the same
+place as the mouse's, which also means a remote player's relayed aim reaches
+their puppet while they are morphed instead of waiting for the next snapshot.
+The ball hunters (Samus, Kanden, Spire, Noxus) are unchanged: nothing aims a
+morph ball, and the mouse does not turn one either.
+
+## Both at once, on a phone
+
+Using the pad hides the touch layout (`TouchControls.NotePadActivity`) and
+**does nothing else**: the overlay view still receives every touch, so a
+finger on the glass does what it landed on and brings the layout back in the
+same gesture. Nothing held is cancelled when the layout goes away either.
+
+That is a change from how it was first built, and the reason is in the table
+above: there is no weapon wheel on a pad, because the wheel reads an absolute
+pointer position. Somebody playing with a pad who wants a different weapon has
+to touch the screen -- and used to pay a wasted press for it every time,
+because the reviving touch was swallowed. See ANDROID-PORT.md.
+
 ## Feel
 
 - **The dead zone is radial, not per axis.** Per-axis is the common mistake

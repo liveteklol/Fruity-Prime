@@ -452,6 +452,35 @@ namespace MphRead.Mods.Network
         }
 
         /// <summary>
+        /// The server itself saying something to everybody.
+        ///
+        /// No slot and no name -- <see cref="ChatPacket.KindSystem"/> is drawn
+        /// in its own colour with nobody's name in front of it, because a
+        /// notice attributed to a player reads as that player having typed it.
+        /// Not rate limited: nothing a client sends can cause one.
+        /// </summary>
+        private void Announce(string text)
+        {
+            if (_peers.Count == 0)
+            {
+                return;
+            }
+            var chat = new ChatPacket
+            {
+                Slot = 0xFF,
+                Kind = ChatPacket.KindSystem,
+                Name = String.Empty,
+                Text = text
+            };
+            chat.Write(_scratch);
+            for (int i = 0; i < _peers.Count; i++)
+            {
+                _transport?.Send(_peers[i].EndPoint, PacketType.Chat,
+                    _scratch.AsSpan(0, ChatPacket.Size));
+            }
+        }
+
+        /// <summary>
         /// Answer "what is running here?" without touching the roster.
         ///
         /// The asker is a launcher deciding whether to show this server as
@@ -627,9 +656,19 @@ namespace MphRead.Mods.Network
             {
                 return;
             }
+            bool firstName = peer.Name.Length == 0;
             peer.Name = name;
             peer.Hunter = hunter;
             Log($"slot {peer.SlotIndex} is \"{name}\" playing {(Hunter)hunter}");
+            if (firstName)
+            {
+                // The first line anybody sees in a match, and the only one
+                // that is worth sending. It is also the answer to "is chat
+                // working at all here": a player who joins and sees nothing
+                // when the next person arrives is on a server that predates
+                // chat, which otherwise looks exactly like nobody talking.
+                Announce($"{name} joined");
+            }
             // Membership changed in a way clients care about, so tell
             // everyone rather than waiting for the periodic broadcast.
             BroadcastRoster();
@@ -836,6 +875,10 @@ namespace MphRead.Mods.Network
             _peers.Remove(peer);
             BroadcastRoster();
             Log($"{peer.EndPoint} {reason} (slot {peer.SlotIndex})");
+            if (peer.Name.Length > 0)
+            {
+                Announce($"{peer.Name} {reason}");
+            }
             if (_authority != peer)
             {
                 return;

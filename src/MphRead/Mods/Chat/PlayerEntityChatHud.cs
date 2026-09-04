@@ -40,6 +40,33 @@ namespace MphRead.Entities
         private const float ChatTop = 3;
 
         /// <summary>
+        /// The lowest the log can reach: three lines and the prompt under
+        /// them. Reserved whether or not anybody is talking, because a score
+        /// that moved when a message arrived would be worse than one sitting
+        /// slightly lower than the DS put it.
+        /// </summary>
+        private const float ChatBottom = ChatTop + (ChatBox.VisibleLines + 1) * ChatLineHeight;
+
+        /// <summary>
+        /// Where a readout drawn in the top-left corner has to start so the
+        /// chat log does not land on top of it.
+        ///
+        /// The mode score is the one that does: most hunters' HUD layouts put
+        /// it between 4 and 18 units down, which is inside the log, and the
+        /// two were drawn over each other -- green text on white, both
+        /// unreadable. It moves rather than the log, because the log is three
+        /// lines and the score is one number: pushing the log below the score
+        /// would put it across the middle of the screen.
+        ///
+        /// Only in a match, where there is chat at all. The adventure's own
+        /// readouts stay exactly where the game put them.
+        /// </summary>
+        internal float ModChatClearance(float posY)
+        {
+            return ChatBox.Available ? Math.Max(posY, ChatBottom) : posY;
+        }
+
+        /// <summary>
         /// Clear of the top-left corner on Android, which draws its MENU
         /// button over the scene there -- the same reason and the same number
         /// the frame counter used before it moved to the other side.

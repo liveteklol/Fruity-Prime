@@ -56,7 +56,8 @@ one-sided run as a whole one.
 | `run-blackout.sh` | one player's line disappears for 1, 3, 8 and 40 s while the others keep playing |
 | `run-churn.sh` | players leaving and rejoining mid-match, both by quitting and by vanishing |
 | `run-authority.sh` | the authority leaving mid-match, and coming back into a match it no longer runs |
-| `run-latency.sh` | 100 / 200 / 300 / 500 ms of round trip, added by `netem` in the kernel |
+| `run-latency.sh` | 100 / 200 / 300 / 500 ms of round trip, added by `netem` in the kernel — the same line for every client |
+| `run-netlag.sh` | one match, a **different** line per client (`-netlag`, inside each process): the report that says "a couple of players had 100-200 ms and stuttered" is a mixture, not a uniform delay, and which of them the server made the authority is most of the answer |
 | `run-loss.sh` | 5 / 15 / 30 % packet loss, shaped on both legs, no added latency |
 | `run-spectate.sh` | one spectator among players, then every player spectating at once |
 | `run-demos.sh` | every client recording the same match, then replaying every file |

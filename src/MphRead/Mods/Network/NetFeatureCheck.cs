@@ -65,6 +65,20 @@ namespace MphRead.Mods.Network
             public int Deaths;
             public int ZoomFrames;
             /// <summary>
+            /// Frames this slot was frozen solid, counted the same way on
+            /// every machine -- the entity's own timer, which is set locally
+            /// by the hit on the authority and by
+            /// <c>PlayerState.FlagFrozen</c> everywhere else.
+            ///
+            /// This check did not exist while the bug it is for did: freeze
+            /// is applied inside TakeDamage from the beam entity, the replay
+            /// has no beam, and so a player frozen on the authority was
+            /// frozen on no other machine at all -- walking about normally on
+            /// their own screen while the authority drew them encased in ice
+            /// and slid them around on their own reported positions.
+            /// </summary>
+            public int FrozenFrames;
+            /// <summary>
             /// Frames this slot was flagged as watching rather than playing.
             /// Read off the entity for every slot alike -- the local player
             /// gets the flag from SpectatorMode, a puppet from the
@@ -277,6 +291,10 @@ namespace MphRead.Mods.Network
                 if (player.EquipInfo.Zoomed)
                 {
                     record.ZoomFrames++;
+                }
+                if (player.ModFrozen)
+                {
+                    record.FrozenFrames++;
                 }
                 // For this machine's own player, what it *meant* to do --
                 // SpectatorMode, which is where the decision lives -- and for
@@ -644,6 +662,10 @@ namespace MphRead.Mods.Network
                 + $"of {NetSession.NetFrame}");
             Console.WriteLine($"    remote position snaps: {NetPlayerBridge.Snaps} "
                 + $"(worst {NetPlayerBridge.WorstSnap:0.0} units) -- these are the visible teleports");
+            // Where a puppet would have been culled into invisibility before
+            // ModRefreshNodeRef started saying so. Zero on most maps.
+            Console.WriteLine($"    node lookups unresolved: "
+                + $"{NetPlayerBridge.NodeLookupsUnresolved} -- these players are drawn uncalled");
             if (NetPlayerBridge.RejectedUpdates > 0)
             {
                 // Never silently: a rejected update means somebody produced a
@@ -710,6 +732,7 @@ namespace MphRead.Mods.Network
             ("bombs", r => r.BombFrames),
             ("halfturret", r => r.HalfturretFrames),
             ("zoom", r => r.ZoomFrames),
+            ("frozen", r => r.FrozenFrames),
             ("spectating", r => r.SpectatingFrames),
             ("double-damage", r => r.DoubleDamageFrames),
             ("damage-taken", r => r.DamageEvents),
@@ -771,6 +794,13 @@ namespace MphRead.Mods.Network
             Line("halfturret", mine.HalfturretFrames, other.HalfturretFrames, 5, "frames",
                 applicable: other.Hunter == Hunter.Weavel);
             Line("zoom", mine.ZoomFrames, other.ZoomFrames, 10, "frames");
+            // Generous, and deliberately so: the freeze starts on the
+            // authority and reaches everybody else a round trip later, so at
+            // 300 ms the two counts differ by twenty frames before anything
+            // is wrong. What this is watching for is one side counting
+            // hundreds and the other zero, which is what it did before the
+            // flag existed.
+            Line("frozen", mine.FrozenFrames, other.FrozenFrames, 45, "frames");
             Line("double damage", mine.DoubleDamageFrames, other.DoubleDamageFrames, 10, "frames");
             Line("taking damage", mine.DamageEvents, other.DamageEvents, 1, "hits");
             Line("hit in alt form", mine.DamageInAltForm, other.DamageInAltForm, 2, "hits",

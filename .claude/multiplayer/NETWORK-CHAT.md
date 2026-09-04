@@ -51,6 +51,16 @@ What that costs is the one failure mode worth knowing about: **against a
 server that predates this build, chat looks exactly like nobody answering.**
 Redeploy the server (`deploy-server.sh`) and it works.
 
+That is not hypothetical: it is what happened. Chat landed on 2026-09-03 and
+the Pi was still running the binary deployed on 2026-09-01, so every player
+who typed a line saw their own copy and nobody else saw anything -- reported
+on 2026-09-04 as "in-game chat does not work". Nothing in the client is wrong
+and nothing in the log says so, on either side: the server drops an unknown
+packet type on the floor, which is exactly what makes the type additive in the
+first place. **Check the server's build date before reading any chat report.**
+The join notices above are there so this is visible the next time: on a
+current server, walking into a match with somebody else in it prints a line.
+
 `ChatPacket` is fixed at 114 bytes: slot, kind, a 16-byte name and 96 bytes of
 text, all ASCII with anything unprintable replaced by `?` on the way in *and*
 on the way out -- so a hostile client cannot put a control character on
@@ -70,6 +80,18 @@ seconds -- faster than anybody types, slower than anything worth calling a
 flood. An interval instead of a bucket would punish two quick lines of one
 thought exactly as hard as a hundred. Dropped lines are logged once per burst,
 not once per packet, so the flood does not become the log's problem too.
+
+**The server talks too.** `DedicatedServer.Announce` sends a `KindSystem`
+line to everybody when a player is first named (`HandleIdentify`) and when one
+is removed (`HandleBye`, or a timeout) -- "NAME joined", "NAME left", "NAME
+timed out". No slot and no name on the packet, because a notice attributed to
+a player reads as that player having typed it, and no rate limit, because
+nothing a client sends can produce one.
+
+Two reasons, and the second is the one that mattered. It is the only thing in
+a match that says who came and went; and it is the answer to *"is chat working
+at all on this server?"*, which otherwise looks exactly like nobody talking --
+see the deployment trap under The protocol.
 
 Kinds are `Say`, `Team` and `System`. **Team is reserved and relayed as Say**:
 nothing yet asks the server which side a slot is on, and delivering a line to
@@ -159,8 +181,13 @@ Three things about that are worth knowing:
 ## Checking it
 
 `-netcheck` clients each say two lines, at frames 300 and 1500, and report
-`chat: sent=N received=M`. With N clients everyone should hear `2*(N-1)`: a
-client's own lines are echoed locally and never come back.
+`chat: sent=N received=M`. With N clients everyone hears `2*(N-1)` player
+lines **plus the server's own join and leave notices**, which are not
+predictable from the client count alone -- clients start three seconds apart
+and leave staggered, so each one sees a different number of arrivals. Three
+clients over 90 s reported 9, 5 and 7. What matters is that M is well above
+zero on every client and that `grep chat server.log` attributes each line to
+the right name.
 
 ```
 cd ~/mph-net-test && ./run-check.sh 60 Samus Weavel Sylux

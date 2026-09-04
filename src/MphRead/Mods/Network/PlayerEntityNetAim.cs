@@ -150,15 +150,60 @@ namespace MphRead.Entities
             // outside the geometry, which happens -- and the node it had is a
             // better answer than nothing.
             Formats.Culling.NodeRef found = _scene.GetNodeRefByPosition(Position);
+            if (found.PartIndex == -1)
+            {
+                // The body rather than the point it is anchored at, and then a
+                // little either side of it. A lookup tests a position against
+                // every portal plane of a part, so a player standing on top of
+                // the level -- or a hair outside it, which is where a jump
+                // lands -- can be outside all of them while the middle of the
+                // same player is comfortably inside one. Cheap, and it is only
+                // reached when the direct answer already failed.
+                found = _scene.GetNodeRefByPosition(_volume.SpherePosition);
+            }
+            if (found.PartIndex == -1)
+            {
+                found = _scene.GetNodeRefByPosition(Position + Vector3.UnitY * 0.5f);
+            }
+            if (found.PartIndex == -1)
+            {
+                found = _scene.GetNodeRefByPosition(Position - Vector3.UnitY * 0.5f);
+            }
             if (found.PartIndex != -1)
             {
                 NodeRef = found;
+                ModNodeUnresolved = false;
+                return;
             }
-            else
+            // Nothing placed this player at all. The node it had is still the
+            // best guess for everything that reads one -- but it is a guess,
+            // and a wrong one hides the player outright, so say so and let
+            // PlayerDraw draw them anyway. Reported from AD2 ALINOS PERCH by
+            // several players at once: hunters up at the top of the map who
+            // could be shot and could not be seen, with their shadows still
+            // moving about underneath them. Same shape as the MP4 HIGHGROUND
+            // EXPANDED report that this method was written for, except that
+            // there the position resolved and here it does not resolve at all.
+            ModNodeUnresolved = true;
+            NetPlayerBridge.NodeLookupsUnresolved++;
+            if (NodeRef != Formats.Culling.NodeRef.None)
             {
                 NodeRef = _scene.UpdateNodeRef(NodeRef, previousPosition, Position);
             }
         }
+
+        /// <summary>
+        /// Whether this player's last node lookup failed outright, so the node
+        /// it is holding is stale rather than merely old.
+        ///
+        /// Read by <c>PlayerDraw</c>, which culls on the node: a puppet whose
+        /// node cannot be worked out is drawn rather than hidden. Drawing one
+        /// that should have been culled costs a model the depth buffer mostly
+        /// swallows; hiding one that should have been drawn costs a player who
+        /// can shoot you from somewhere you cannot see them, which is the
+        /// report this exists for.
+        /// </summary>
+        internal bool ModNodeUnresolved { get; private set; }
 
         /// <summary>
         /// Record the positions a collision query is about to be built from.
@@ -609,6 +654,65 @@ namespace MphRead.Entities
         /// <summary>Frozen by an affinity Judicator, for the audit.</summary>
         internal bool ModFrozen => _frozenTimer > 0;
 
+        /// <summary>
+        /// Freeze or thaw this player because the authority says so.
+        ///
+        /// The affliction cannot travel with the hit that caused it: the
+        /// freeze is applied inside <c>TakeDamage</c> from the beam entity,
+        /// and <c>NetDamage.Replay</c> has no beam to hand it -- so before
+        /// this, a player frozen on the authority was frozen *nowhere else*.
+        /// They walked around normally on their own screen, and the machine
+        /// running the simulation, which pins a puppet wherever its owner last
+        /// said it was, drew a block of ice gliding across the room. Both
+        /// halves of "either they are frozen and cannot move, or they are
+        /// not".
+        ///
+        /// The countdown still runs locally rather than being carried frame by
+        /// frame: it starts a fraction of a second late, which nobody can see,
+        /// and it is topped up for as long as the flag is still set so it
+        /// cannot expire early. Ending is handed back to the engine -- one
+        /// frame left, and the ordinary tick plays the sound and the ice
+        /// breaking, exactly as it does for the machine that resolved the hit.
+        /// </summary>
+        internal void ModSetFrozen(bool frozen)
+        {
+            if (_health <= 0)
+            {
+                return;
+            }
+            if (frozen)
+            {
+                if (_frozenTimer == 0)
+                {
+                    // The engine's own numbers and the engine's own re-freeze
+                    // rule: a second freeze within two seconds of the last is
+                    // a short one. A relayed freeze always has an attacker, so
+                    // the multiplayer duration is the one that applies.
+                    _soundSource.PlaySfx(SfxId.SHOTGUN_FREEZE);
+                    if (IsMainPlayer)
+                    {
+                        ResetCombatVisor();
+                        _drawIceLayer = true;
+                    }
+                    _frozenTimer = _timeSinceFrozen > 60 * 2 // todo: FPS stuff
+                        ? (ushort)(75 * 2)
+                        : (ushort)(15 * 2);
+                    _frozenGfxTimer = (ushort)(_frozenTimer + 5 * 2); // todo: FPS stuff
+                    EndAltAttack();
+                }
+                else if (_frozenTimer < 2)
+                {
+                    // Still frozen where it matters; do not let this copy thaw
+                    // a round trip early and start moving again.
+                    _frozenTimer = 2;
+                }
+            }
+            else if (_frozenTimer > 1)
+            {
+                _frozenTimer = 1;
+            }
+        }
+
         /// <summary>Burning from an affinity Magmaul.</summary>
         internal bool ModBurning => _burnTimer > 0;
 
@@ -816,10 +920,43 @@ namespace MphRead.Entities
             {
                 return;
             }
+            ModNotePadInput();
             UpdateHudShiftY(y);
             UpdateHudShiftX(x);
             UpdateAimY(y);
             UpdateAimX(x);
+        }
+
+        /// <summary>
+        /// Say that this player is being played, when the thing playing it is
+        /// not the keyboard or the mouse.
+        ///
+        /// <c>Input.HasInput</c> is written in one place -- the pass in
+        /// <c>ProcessAllInput</c> that turns a <see cref="OpenTK.Windowing.GraphicsLibraryFramework.KeyboardState"/>
+        /// into binds -- and the pad's contribution is *ored* onto those binds
+        /// after that pass has run (see <c>GamepadInput.Apply</c>). So a player
+        /// holding nothing but a controller looked idle to everything that
+        /// asks "has this person touched anything lately", and two of those
+        /// answers are visible from the first minute of a match:
+        ///
+        /// - <c>UpdateGunAnimation</c> lowers the gun after <c>GunIdleTime</c>
+        ///   and only raises it again on a frame where <c>_timeSinceInput</c>
+        ///   is exactly zero. On a pad that frame never came: the gun sank off
+        ///   the bottom of the screen and stayed there, and
+        ///   <c>CanShoot</c>/<c>TryEquipWeapon</c> both refuse while
+        ///   <c>GunAnimation.UpDown</c> is playing -- so the player could
+        ///   neither fire nor change weapon for the rest of the life. Reported
+        ///   from Android as "the weapon falls away and I cannot shoot".
+        /// - the idle sway starts drifting the aim on its own, which is worst
+        ///   with the one weapon whose player is deliberately holding still.
+        ///
+        /// The touch controls do not need this: they press the keys the player
+        /// has bound into a keyboard of their own, so they arrive *inside* the
+        /// pass that sets the flag.
+        /// </summary>
+        internal void ModNotePadInput()
+        {
+            Input.HasInput = true;
         }
     }
 }

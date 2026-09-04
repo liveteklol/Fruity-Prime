@@ -508,6 +508,14 @@ namespace MphRead.Mods.Network
             int local = Math.Max(NetSession.LocalSlot, 0);
             Console.WriteLine();
             Console.WriteLine($"=== {_name}: what this client saw ===");
+            string? lag = NetLag.Describe();
+            if (lag != null)
+            {
+                // Said before any number below it, because every one of them
+                // is a measurement of a line this client made up.
+                Console.WriteLine($"  SIMULATED LINE: {lag} -- these numbers "
+                    + "describe a reproduction, not a real connection");
+            }
             Console.WriteLine($"  slot {local}, authority={NetSession.IsAuthority}, frames={_frame}");
             Console.WriteLine($"  room: {Metadata.GetRoomById(Scene.RoomId, noThrow: true)?.Name ?? "?"} "
                 + $"(server says {NetSession.ServerMatch?.RoomKey ?? "?"}), "

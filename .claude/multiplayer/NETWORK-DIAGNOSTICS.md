@@ -159,12 +159,115 @@ rotation over SSH per run and restores it on the way out.
 
 ## Reproducing latency
 
+Three instruments, in order of how much they are worth:
+
 ```bash
-cd ~/mph-net-test
-./run-lag.sh 60 90 Samus Kanden Trace     # 60 ms each way
+# Inside the client. Per-process, no sudo, no extra hop, works against the Pi.
+FruityPrime -netcheck net.livetek.fr -port 27888 ... -netlag 200:20 -netloss 2
+./hard/run-netlag.sh 150 0 0 150 150 300   # one match, five different lines
+
+# In the kernel, on this box's interface. Everything this machine sends.
+./hard/run-latency.sh 150 5 0 100 200 300
+
+# A relay in front of a loopback server. The weakest of the three.
+./run-lag.sh 60 90 Samus Kanden Trace
 ```
 
-`udp-lag.py` is the relay; `run-lag.sh` puts a loopback server behind it.
+`-netlag MS[:JITTER]` (`Mods/Network/NetLag.cs`) holds half the round trip on
+the way out and half on the way in, inside `NetTransport`, with the queue
+drained from the head only while the head is due -- so jitter delays a
+datagram and never overtakes the one in front of it. `-netloss PCT` throws
+datagrams away each way. Every report that prints a measurement says
+**SIMULATED LINE** at the top when either is set: a run with these on is a
+reproduction and must never be quoted as a measurement of the real thing.
+
+What each is for: **netem** answers "what does 200 ms do to a match", and does
+it in the kernel where it costs nothing. **-netlag** answers the question netem
+cannot, which is the one the reports are actually about -- a match where the
+*players* have different connections, and one of them is the authority. And it
+is the only one of the three that works on Android, on Windows, or in
+somebody's hand.
+
+`udp-lag.py` is the old relay; `run-lag.sh` puts a loopback server behind it.
+It is kept for the loopback case and should not be used for anything else: at
+five clients that Python forwarder *was* the experiment -- asked for 100 ms it
+produced round trips of 1767-1859 ms and lost 40% of the intents.
+
+## A freeze that existed on one machine only
+
+Reported 2026-09-04, from the person hosting: *"I see players being frozen who
+keep moving -- either they are frozen and cannot move, or they are not."*
+
+The freeze is applied inside `PlayerEntity.TakeDamage`, in the branch that
+reads `beam.Afflictions` -- from the **beam entity** that landed the hit. A
+beam entity only ever exists on the machine that resolved the shot, and
+`NetDamage.Replay` calls `TakeDamage` with no beam at all (it cannot: the
+projectile was never spawned here). So the affliction was applied on the
+authority and *nowhere else*:
+
+- the victim, on their own machine, was never frozen. They walked around
+  normally and kept reporting positions;
+- the authority, which pins a puppet wherever its owner's last intent said it
+  was (`ApplyReportedPosition`), therefore drew a player encased in ice
+  sliding across the room -- because `_frozenGfxTimer` was set there and the
+  position was not its own to decide;
+- every other client saw neither: no ice, and a player who stopped moving only
+  because the authority's snapshots had stopped moving them.
+
+`PlayerState.FlagFrozen` (bit 5, additive, no protocol bump) carries the
+*state* rather than the cause. `NetPlayerBridge.ApplyState` applies it to
+puppets and to this machine's own player alike -- being frozen is part of the
+match, like health and the score. `PlayerEntity.ModSetFrozen` starts the
+engine's own timer with the engine's own numbers and its re-freeze rule, tops
+it up while the flag is still set so it cannot expire a round trip early, and
+hands the *ending* back to the ordinary tick by leaving one frame on it -- so
+the break sound and the ice-shatter effect are the game's, not an imitation.
+
+The shape to remember: **an affliction is not state until it is sent.** Burn
+(`_burnTimer`) and disrupt (`_disruptedTimer`) have exactly the same
+structure; neither has been reported, and neither is replicated. Two spare
+bits are left in the flags byte.
+
+## Players invisible at the top of AD2 ALINOS PERCH
+
+The other half of the node-ref story in `ModRefreshNodeRef`. That method was
+written for MP4 HIGHGROUND EXPANDED, where the lookup *succeeded* and the walk
+had gone stale; this is the case where `GetNodeRefByPosition` returns nothing
+at all, because the position is inside no room part's portal volumes -- which
+is what the top of that map is. The fallback then kept whatever node the
+puppet already had, `PlayerDraw` culls on `IsMainPlayer || IsVisible(NodeRef)`,
+and the result was a player who could be shot and could not be seen, with
+their shadow still moving about underneath them. Confirmed by several players
+at once.
+
+Now: probe the body and half a unit either side before giving up, and if it
+still cannot be placed, set `ModNodeUnresolved` and draw the player anyway.
+Drawing one that should have been culled costs a model the depth buffer mostly
+swallows; hiding one that should have been drawn costs a match.
+`node lookups unresolved: N` in every check's report is how often it happens.
+It is **not** rare and it is not only that map: zero on MP2 HARVESTER over
+90 s with three clients, but 12-231 per client on MP1 SANCTORUS over 150 s
+with five -- about 2.5% of frames, every one of which was a puppet the
+renderer would have been free to hide. Measured 2026-09-04 against the Pi.
+
+## Why a hit can land a second after the shot
+
+Not a bug, and worth being able to say so quickly. On a dedicated server the
+authority is **one of the clients**, so a shot fired by anybody else takes
+four hops to become a death anybody can see: shooter to server, server to
+authority, authority's snapshot back to the server, server to everyone. At the
+100-200 ms this was reported at, that is 0.4-0.8 s before the victim's body
+reacts, and the shooter meanwhile sees their own beam pass through a puppet
+that keeps walking -- because `NetDamage.Suppress` throws away damage resolved
+on any machine that is not the authority, which is what stops one kill being
+counted twice.
+
+Three things are *not* the cause and have been checked: snapshots go out every
+frame (`AfterSimulation` -> `BroadcastSnapshot`, no cadence), intents go every
+frame (`IntentSendInterval` is 1), and the relay adds no queueing of its own.
+The fix, if it is ever worth one, is lag compensation on the authority --
+rewinding the victim by the shooter's latency before testing the overlap --
+and that changes what a hit *is*, so it is not something to do quietly.
 
 ## Traps
 

@@ -101,6 +101,18 @@ namespace MphRead.Mods.Launcher
         /// </summary>
         public static WindowStartMode WindowMode { get; set; } = WindowStartMode.Windowed;
 
+        /// <summary>
+        /// Whether the program writes a file of everything it can say about
+        /// itself. See <see cref="Mods.DebugLog"/>.
+        ///
+        /// Off, and asked for rather than offered: it is here for the reports
+        /// that cannot be answered any other way -- a crash while a map loads,
+        /// on a machine nobody here can plug in -- and it costs a directory
+        /// that grows and a lock on every line the program prints. One switch,
+        /// in the corner of the front screen, kept where it was left.
+        /// </summary>
+        public static bool DebugLogs { get; set; }
+
 
         public static void Load()
         {
@@ -207,6 +219,12 @@ namespace MphRead.Mods.Launcher
                                 AutoUpdate = autoUpdate;
                             }
                             break;
+                        case "debug_logs":
+                            if (Boolean.TryParse(value, out bool debugLogs))
+                            {
+                                DebugLogs = debugLogs;
+                            }
+                            break;
                         case "last_kind":
                             if (Int32.TryParse(value, NumberStyles.Integer,
                                 CultureInfo.InvariantCulture, out int kind))
@@ -245,6 +263,7 @@ namespace MphRead.Mods.Launcher
                     $"host_on_master={HostOnMaster.ToString().ToLowerInvariant()}",
                     $"last_kind={LastKind.ToString(CultureInfo.InvariantCulture)}",
                     $"auto_update={AutoUpdate.ToString().ToLowerInvariant()}",
+                    $"debug_logs={DebugLogs.ToString().ToLowerInvariant()}",
                     $"window_mode={(WindowMode == WindowStartMode.BorderlessFullscreen ? "borderless" : "windowed")}"
                 });
             }

@@ -2594,7 +2594,8 @@ namespace MphRead.Entities
                 return;
             }
             float posX = _hudObjects.ScorePosX + _objShiftX;
-            float posY = _hudObjects.ScorePosY + _objShiftY;
+            // Below the chat log rather than under it: see ModChatClearance.
+            float posY = ModChatClearance(_hudObjects.ScorePosY) + _objShiftY;
             _textSpacingY = 8;
             string message = Strings.GetHudMessage(messageId);
             // the game wraps text here, but the text used will never wrap (and doesn't have newlines)

@@ -61,6 +61,7 @@ namespace MphRead.Mods.Launcher.Gui
             {
                 Console.WriteLine($"[launcher] the window could not be opened: {ex.Message}");
                 Console.WriteLine("[launcher] falling back to the text launcher");
+                Mods.DebugLog.Exception("launcher", ex);
                 return false;
             }
         }
@@ -186,6 +187,14 @@ namespace MphRead.Mods.Launcher.Gui
                     Console.WriteLine();
                     Console.WriteLine($"The game could not start: {ex.Message}");
                     Console.WriteLine(ex.StackTrace);
+                    // The Windows build is a GUI binary with no console behind
+                    // it, so the two lines above reach nobody: from the
+                    // player's side the game simply disappears while a map is
+                    // loading. This is the one place that can still be read
+                    // afterwards -- and the whole reason the switch in the
+                    // corner of the front screen exists.
+                    Mods.DebugLog.Line("crash", "the match could not start");
+                    Mods.DebugLog.Exception("crash", ex);
                     return;
                 }
                 finally
