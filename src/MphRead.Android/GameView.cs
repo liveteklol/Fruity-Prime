@@ -325,6 +325,7 @@ namespace MphRead.Droid
             private readonly Action<bool> _onSoftKeyboard;
             private bool _menuWasHeld;
             private bool _spectateCycleHeld;
+            private bool _spectateViewHeld;
             private bool _missileWasHeld;
             private bool _chatWasHeld;
             private bool _keyboardShown;
@@ -832,6 +833,93 @@ namespace MphRead.Droid
             }
 
             /// <summary>
+            /// One frame of a spectator's screen.
+            ///
+            /// Nothing here goes near the player: <c>PlayerEntity.ProcessInput</c>
+            /// skips the local player's input entirely while spectating, and
+            /// the hunter the camera is on is somebody else's. What is left is
+            /// four things -- who to watch, which camera, the scoreboard, and,
+            /// on the free camera, driving it.
+            ///
+            /// The free camera is the room viewer's Roam camera (see
+            /// <c>Scene.SetFreeCamera</c>), and it is not driven through binds
+            /// at all: <c>Scene.OnKeyHeld</c> reads W/A/S/D, Space and V off
+            /// the keyboard and <c>Scene.OnMouseMove</c> turns it. This head
+            /// already owns a keyboard nobody is holding, so the stick presses
+            /// those keys and the aim drag is handed to the same method the
+            /// desktop's mouse move calls. The letters are a copy of that
+            /// method's own table and the one place they could go out of step
+            /// with it.
+            /// </summary>
+            private void Spectate()
+            {
+                bool freeCamera = Mods.SpectatorMode.FreeCamera;
+                _controls.SetSpectator(spectating: true, freeCamera);
+                // NEXT: the desktop's left click.
+                bool cycle = _controls.IsHeld(TouchAction.Shoot);
+                if (cycle && !_spectateCycleHeld)
+                {
+                    Mods.SpectatorMode.CycleNext();
+                }
+                _spectateCycleHeld = cycle;
+                // VIEW: the desktop's Space -- the map, or the player being
+                // watched. Without it the free camera was a one-way trip on
+                // this head: NEXT leaves it and nothing brought it back.
+                bool view = _controls.IsHeld(TouchAction.ScanVisor);
+                if (view && !_spectateViewHeld)
+                {
+                    Mods.SpectatorMode.ToggleView();
+                }
+                _spectateViewHeld = view;
+                bool menuHeld = _controls.IsHeld(TouchAction.Pause);
+                if (menuHeld && !_menuWasHeld)
+                {
+                    _onPauseMenu();
+                }
+                _menuWasHeld = menuHeld;
+                // The one control a spectator keeps. Read off the keyboard
+                // against the binding itself rather than through a player --
+                // see PlayerInput.ProcessInput and SpectatorMode.NoteScoreboard
+                // -- so the bind is what has to be pressed here, and the
+                // watched player's own controls would be the wrong set.
+                _input.Apply(Mods.InputSettings.Current.Pause,
+                    _controls.IsHeld(TouchAction.Scoreboard));
+                if (freeCamera)
+                {
+                    TouchControls.Dir dir = _controls.Direction;
+                    _input.ApplyKey(Keys.W, (dir & TouchControls.Dir.Up) != 0);
+                    _input.ApplyKey(Keys.S, (dir & TouchControls.Dir.Down) != 0);
+                    _input.ApplyKey(Keys.A, (dir & TouchControls.Dir.Left) != 0);
+                    _input.ApplyKey(Keys.D, (dir & TouchControls.Dir.Right) != 0);
+                    _input.ApplyKey(Keys.Space, _controls.IsHeld(TouchAction.Jump));
+                    _input.ApplyKey(Keys.V, _controls.IsHeld(TouchAction.Morph));
+                    (float X, float Y) look = _controls.TakeAimDelta();
+                    if (look.X != 0 || look.Y != 0)
+                    {
+                        // The same call the desktop's mouse move makes, in the
+                        // same units: OnMouseMove applies the player's own
+                        // sensitivity and inversion, so the free camera turns
+                        // the way their game does.
+                        Scene?.OnMouseMove(look.X * AimScale, look.Y * AimScale);
+                    }
+                }
+                else
+                {
+                    // Riding along behind somebody's eyes: their view, not
+                    // ours. Taken rather than left, so it cannot arrive as a
+                    // lurch on the frame the free camera comes back.
+                    _controls.TakeAimDelta();
+                }
+                _controls.TakeSwipeBoost();
+                _controls.TakeDoubleTapJump();
+                // Nothing to scan or boost from here, and FIRE has to be the
+                // button that cycles players rather than a SCAN left over from
+                // whatever the visor was doing.
+                _controls.ScanVisorActive = false;
+                _controls.SwipeBoostEnabled = false;
+            }
+
+            /// <summary>
             /// The CHAT button, and the soft keyboard that has to follow it.
             ///
             /// A phone has no T to press, so the button is the whole of how
@@ -872,35 +960,12 @@ namespace MphRead.Droid
             {
                 if (Mods.SpectatorMode.IsSpectating)
                 {
-                    // FIRE moves on to the next player, which is what a left
-                    // click does on the desktop (Renderer.OnMouseDown). The
-                    // menu button still opens the menu, and everything else is
-                    // ignored: PlayerEntity.ProcessInput skips the local
-                    // player's input entirely while this is on, so there is
-                    // nothing else for a thumb to do.
-                    bool cycle = _controls.IsHeld(TouchAction.Shoot);
-                    if (cycle && !_spectateCycleHeld)
-                    {
-                        Mods.SpectatorMode.CycleNext();
-                    }
-                    _spectateCycleHeld = cycle;
-                    bool menuHeld = _controls.IsHeld(TouchAction.Pause);
-                    if (menuHeld && !_menuWasHeld)
-                    {
-                        _onPauseMenu();
-                    }
-                    _menuWasHeld = menuHeld;
-                    _controls.TakeAimDelta();
-                    _controls.TakeSwipeBoost();
-                    _controls.TakeDoubleTapJump();
-                    // Nothing to scan or boost from here, and FIRE has to be
-                    // the button that cycles players rather than a SCAN left
-                    // over from whatever the visor was doing.
-                    _controls.ScanVisorActive = false;
-                    _controls.SwipeBoostEnabled = false;
+                    Spectate();
                     return;
                 }
+                _controls.SetSpectator(spectating: false, freeCamera: false);
                 _spectateCycleHeld = false;
+                _spectateViewHeld = false;
                 PlayerControls controls = main.Controls;
                 TouchControls.Dir dir = _controls.Direction;
                 bool up = (dir & TouchControls.Dir.Up) != 0;

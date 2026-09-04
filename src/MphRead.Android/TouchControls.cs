@@ -55,7 +55,22 @@ namespace MphRead.Droid
     internal sealed class TouchButton
     {
         public TouchAction Action { get; }
-        public string Label { get; }
+
+        /// <summary>
+        /// What is written on it *now*. Not fixed: a spectator's screen is
+        /// the same dozen circles doing different jobs, and a button that
+        /// still says FIRE while it cycles players is a button nobody
+        /// presses. See <c>TouchControls.ApplyLayoutLocked</c>.
+        /// </summary>
+        public string Label { get; private set; }
+
+        private readonly string _defaultLabel;
+
+        /// <summary>Rename it, or pass null to put its own name back.</summary>
+        public void Relabel(string? label)
+        {
+            Label = label ?? _defaultLabel;
+        }
         public float CentreX { get; set; }
         public float CentreY { get; set; }
         public float Radius { get; set; }
@@ -69,6 +84,7 @@ namespace MphRead.Droid
         {
             Action = action;
             Label = label;
+            _defaultLabel = label;
         }
 
         public bool Contains(float x, float y)
@@ -247,30 +263,15 @@ namespace MphRead.Droid
             }
             set
             {
-                bool changed = false;
-                lock (_lock)
+                Change(() =>
                 {
-                    if (_scanVisorActive != value)
+                    if (_scanVisorActive == value)
                     {
-                        _scanVisorActive = value;
-                        changed = true;
-                        foreach (TouchButton button in _buttons)
-                        {
-                            if (button.Action == TouchAction.Scan)
-                            {
-                                button.Visible = value;
-                            }
-                            else if (button.Action == TouchAction.Shoot)
-                            {
-                                button.Visible = !value;
-                            }
-                        }
+                        return false;
                     }
-                }
-                if (changed)
-                {
-                    Invalidated?.Invoke();
-                }
+                    _scanVisorActive = value;
+                    return true;
+                });
             }
         }
         private bool _scanVisorActive;
@@ -291,29 +292,139 @@ namespace MphRead.Droid
             }
             set
             {
-                bool changed = false;
-                lock (_lock)
+                Change(() =>
                 {
-                    if (_chatEnabled != value)
+                    if (_chatEnabled == value)
                     {
-                        _chatEnabled = value;
-                        changed = true;
-                        foreach (TouchButton button in _buttons)
-                        {
-                            if (button.Action == TouchAction.Chat)
-                            {
-                                button.Visible = value;
-                            }
-                        }
+                        return false;
                     }
-                }
-                if (changed)
-                {
-                    Invalidated?.Invoke();
-                }
+                    _chatEnabled = value;
+                    return true;
+                });
             }
         }
         private bool _chatEnabled;
+
+        /// <summary>
+        /// The screen a spectator gets: the same dozen circles, most of them
+        /// gone and the rest doing something else.
+        ///
+        /// Set once a frame from the game loop, which is the only thing that
+        /// knows either of these. Both at once rather than two properties,
+        /// because the layout depends on the pair and a screen laid out twice
+        /// from two half-answers flickers between them.
+        /// </summary>
+        public void SetSpectator(bool spectating, bool freeCamera)
+        {
+            Change(() =>
+            {
+                if (_spectating == spectating && _spectatorFreeCam == freeCamera)
+                {
+                    return false;
+                }
+                _spectating = spectating;
+                _spectatorFreeCam = freeCamera;
+                return true;
+            });
+        }
+
+        private bool _spectating;
+        private bool _spectatorFreeCam;
+
+        /// <summary>
+        /// Apply a change to what the screen shows, and repaint if it moved.
+        ///
+        /// The three callers used to each reach into <see cref="_buttons"/>
+        /// and set the visibility of the ones they knew about, which only
+        /// works while no two of them care about the same button. Spectating
+        /// cares about nine of them, so the layout is worked out in one place
+        /// now (<see cref="ApplyLayoutLocked"/>) from all of the state at
+        /// once, and these only say what changed.
+        ///
+        /// The mutation reports whether it moved anything, and does so from
+        /// inside the lock: these are set once a frame from the game thread
+        /// and read on the UI thread, so a comparison made outside it is a
+        /// comparison against a value that may already be stale.
+        /// </summary>
+        private void Change(Func<bool> mutate)
+        {
+            lock (_lock)
+            {
+                if (!mutate())
+                {
+                    return;
+                }
+                ApplyLayoutLocked();
+            }
+            Invalidated?.Invoke();
+        }
+
+        /// <summary>
+        /// Which buttons are on the screen and what they say, from every
+        /// piece of state that decides it. Called with the lock held.
+        /// </summary>
+        private void ApplyLayoutLocked()
+        {
+            foreach (TouchButton button in _buttons)
+            {
+                bool visible;
+                string? label = null;
+                if (_spectating)
+                {
+                    // Nothing a spectator presses does anything in the world:
+                    // PlayerEntity.ProcessInput skips the local player while
+                    // this is on. So the buttons that would shoot, scan, pick
+                    // a weapon or zoom go away, and the ones that are left are
+                    // renamed to what they now do.
+                    switch (button.Action)
+                    {
+                    case TouchAction.Shoot:
+                        // The desktop's left click.
+                        visible = true;
+                        label = "NEXT";
+                        break;
+                    case TouchAction.ScanVisor:
+                        // The desktop's Space: the map, or the player you were
+                        // watching.
+                        visible = true;
+                        label = "VIEW";
+                        break;
+                    case TouchAction.Jump:
+                    case TouchAction.Morph:
+                        // Up and down on the free camera, and nothing at all
+                        // riding along behind somebody's eyes -- so they are
+                        // only there on the camera that can use them.
+                        visible = _spectatorFreeCam;
+                        label = button.Action == TouchAction.Jump ? "UP" : "DOWN";
+                        break;
+                    case TouchAction.Scoreboard:
+                    case TouchAction.Pause:
+                        visible = true;
+                        break;
+                    case TouchAction.Chat:
+                        visible = _chatEnabled;
+                        break;
+                    default:
+                        visible = false;
+                        break;
+                    }
+                }
+                else
+                {
+                    visible = button.Action switch
+                    {
+                        // FIRE and SCAN share a place and take turns: the
+                        // visor cannot shoot and the gun cannot scan.
+                        TouchAction.Scan => _scanVisorActive,
+                        TouchAction.Shoot => !_scanVisorActive,
+                        TouchAction.Chat => _chatEnabled,
+                        _ => true
+                    };
+                }
+                button.Visible = visible;
+                button.Relabel(label);
+            }
+        }
 
         /// <summary>
         /// Asked to repaint, for the changes that do not come from a touch.

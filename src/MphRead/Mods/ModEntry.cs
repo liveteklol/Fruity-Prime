@@ -39,6 +39,29 @@ namespace MphRead.Mods
             Update.Updater.Disabled = HasFlag(args, "noupdate");
             ApplyRenderOverrides(args);
 
+            // The copying half of a desktop update, which is this build
+            // started by the *previous* one. First, and before anything reads
+            // a file or draws a window: it is not the game, it waits for the
+            // old process to exit and copies itself over the installation.
+            // See Mods/Update/DesktopUpdate.cs.
+            int applyAt = IndexOfFlag(args, Update.DesktopUpdate.ApplyFlag);
+            if (applyAt >= 0 && applyAt + 2 < args.Length)
+            {
+                // Two values, read by position rather than by name: the first
+                // is a directory, and a directory is exactly the kind of
+                // argument that can begin with a dash.
+                Environment.ExitCode = Update.DesktopUpdate.Apply(args[applyAt + 1],
+                    Int32.TryParse(args[applyAt + 2], out int parsed) ? parsed : -1);
+                return true;
+            }
+            // Whatever the last update left behind. Here rather than in the
+            // copying process, which cannot delete the directory it is running
+            // from, and cheap when there is nothing there.
+            Update.DesktopUpdate.Clean();
+            // And the desktop's own installer, unless a platform head has
+            // already put its own in place.
+            Update.UpdateInstall.UseDesktopIfPossible();
+
             if (HasFlag(args, "credits"))
             {
                 Credits.Print();
@@ -972,6 +995,19 @@ namespace MphRead.Mods
             Console.WriteLine("[uishot] this build has no Avalonia launcher");
             return 1;
 #endif
+        }
+
+        /// <summary>Where an option appears, or -1. For the ones read by position.</summary>
+        private static int IndexOfFlag(string[] args, string name)
+        {
+            for (int i = 0; i < args.Length; i++)
+            {
+                if (args[i].TrimStart('-').Equals(name, StringComparison.OrdinalIgnoreCase))
+                {
+                    return i;
+                }
+            }
+            return -1;
         }
 
         private static string? ValueAfter(string[] args, string name)

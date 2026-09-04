@@ -5,6 +5,14 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
   <uses-permission android:name="android.permission.INTERNET" />
   <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+  <!-- The front screen fetches the release APK from GitHub and hands it to
+       Android's own installer, so a player never has to find a browser, a
+       download and a file manager to take an update (ApkInstaller.cs). This
+       permission does not let the app install anything: it lets it *ask*, and
+       only after the player has turned this app on as an install source in
+       Settings, which is a screen and not a dialog. Every install still goes
+       through the system's own confirmation. -->
+  <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
   <!-- The renderer is ES 3.0: vertex array objects, unsigned int indices and
        the 300 es shaders in Mods/Render/EsShaders.cs. A device without it
        cannot run the match half at all, so it should not see the app. -->

@@ -172,8 +172,9 @@ namespace MphRead.Mods.Launcher.Gui
                 // In the background, and never blocking the window: a launcher
                 // that will not draw until GitHub answers looks broken on a bad
                 // connection.
-                Update.Updater.CheckInBackground(update =>
-                    Dispatcher.UIThread.Post(() => ShowUpdate(update)));
+                Update.Updater.CheckInBackground(
+                    update => Dispatcher.UIThread.Post(() => ShowUpdate(update)),
+                    () => Dispatcher.UIThread.Post(RefreshVersionLine));
             }
             _ = CatchUpPreviews();
         }
@@ -531,12 +532,82 @@ namespace MphRead.Mods.Launcher.Gui
             var quit = new MenuEntry("Quit");
             quit.Click += (_, _) => Finish(default);
 
+            // Under the menu rather than in it: which build this is is not a
+            // thing anybody came here to do. Green when it is the published
+            // one and amber when it is not, so the state is readable without
+            // reading -- and an entry appears above it only when there is
+            // actually something to press.
+            _updateEntry = new MenuEntry("Update available", "", titleSize: 13)
+            {
+                Accent = GuiTheme.Warm,
+                IsVisible = false,
+                Margin = new Thickness(0, 8, 0, 0)
+            };
+            _updateEntry.Click += (_, _) => UpdateNow();
+            _versionLine = new TextBlock
+            {
+                Text = BuildVersion.Display,
+                FontSize = 11,
+                Foreground = GuiTheme.TextDimBrush,
+                Margin = new Thickness(4, 10, 4, 0)
+            };
+
             card.Children.Add(_hostEntry);
             card.Children.Add(_onlineEntry);
             card.Children.Add(_demoEntry);
             card.Children.Add(settings);
             card.Children.Add(quit);
+            card.Children.Add(_updateEntry);
+            card.Children.Add(_versionLine);
+            RefreshVersionLine();
             return card;
+        }
+
+        private MenuEntry _updateEntry = null!;
+        private TextBlock _versionLine = null!;
+
+        /// <summary>
+        /// What the version line says and what colour it is.
+        ///
+        /// Three states, not two. Green is "this is the published build";
+        /// amber is "there is a newer one", which is the only state that also
+        /// puts a button above it; and dim is everything else -- a local
+        /// build, or a check that has not answered yet or could not. Painting
+        /// "no answer" green would be the one wrong thing this can do: a
+        /// server refuses a client on a different build at Hello, so being
+        /// told you are current when nobody has checked is worse than being
+        /// told nothing.
+        /// </summary>
+        private void RefreshVersionLine()
+        {
+            if (_versionLine == null)
+            {
+                return;
+            }
+            UpdateInfo? update = Update.Updater.Available;
+            if (update != null)
+            {
+                _versionLine.Text = $"{BuildVersion.Display} — {update.Value.Tag} available";
+                _versionLine.Foreground = GuiTheme.WarmBrush;
+                _updateEntry.Subtitle = update.Value.Tag;
+                _updateEntry.IsVisible = true;
+                return;
+            }
+            _updateEntry.IsVisible = false;
+            if (!BuildVersion.IsRelease)
+            {
+                _versionLine.Text = BuildVersion.Display;
+                _versionLine.Foreground = GuiTheme.TextDimBrush;
+                return;
+            }
+            if (!Update.Updater.Checked)
+            {
+                _versionLine.Text = BuildVersion.Display;
+                _versionLine.Foreground = GuiTheme.TextDimBrush;
+                return;
+            }
+            _versionLine.Text = BuildVersion.Display + " — up to date";
+            _versionLine.Foreground = GuiTheme.GoodBrush;
         }
 
         private void ShowUpdate(UpdateInfo update)
@@ -546,26 +617,133 @@ namespace MphRead.Mods.Launcher.Gui
                 : $"{update.Tag} is out");
             // The picture's own caption moves up out of the way.
             _splash.BottomInset = _updateBadge.DesiredSize.Height + 22;
+            RefreshVersionLine();
         }
 
         /// <summary>
-        /// Open the release page. The program does not install anything: this
-        /// hands the person the page and they replace the files themselves.
+        /// Take the update.
+        ///
+        /// On the desktop that still means opening the release page: a release
+        /// is an archive somebody unpacks over their own copy, and a program
+        /// that rewrote its own files while running would have to solve
+        /// restarting itself on three operating systems to save one unzip.
+        ///
+        /// Where the platform can install for itself -- a phone, today -- it
+        /// fetches the file and hands it to the system installer instead. See
+        /// <see cref="Update.UpdateInstall"/> for why the seam is there and
+        /// not simply an "if Android".
         /// </summary>
         private void UpdateNow()
         {
-            UpdateInfo? update = Update.Updater.Available;
-            if (update == null)
+            UpdateInfo? found = Update.Updater.Available;
+            if (found == null)
             {
                 return;
             }
-            if (!Update.Updater.OpenPage(update.Value))
+            UpdateInfo update = found.Value;
+            if (Update.UpdateInstall.CanInstall(update))
+            {
+                _ = FetchAndInstall(update, Update.UpdateInstall.Current!);
+                return;
+            }
+            if (!Update.Updater.OpenPage(update))
             {
                 // No browser to open, or it refused. Putting the address on the
                 // badge beats a button that appears to do nothing.
-                _updateBadge.Say(update.Value.PageUrl);
+                _updateBadge.Say(update.PageUrl);
             }
         }
+
+        /// <summary>
+        /// Fetch the release's package and take the step that cannot be taken
+        /// back.
+        ///
+        /// Every stage reports on the button, because every stage can take
+        /// seconds and a button that greys out and says nothing is a button
+        /// that looks broken. The permission stage in particular *has* to
+        /// leave the entry pressable: on a phone, allowing this app as an
+        /// install source is a Settings screen, nothing here can wait for it,
+        /// and the player comes back and presses again.
+        /// </summary>
+        private async Task FetchAndInstall(UpdateInfo update, Update.IUpdateInstaller installer)
+        {
+            if (_updating)
+            {
+                return;
+            }
+            if (!installer.Allowed)
+            {
+                _updateEntry.Subtitle = "Allow installs from this app, then press again";
+                _updateEntry.SubtitleColor = GuiTheme.Warm;
+                installer.RequestPermission();
+                return;
+            }
+            _updating = true;
+            _updateEntry.IsEnabled = false;
+            installer.Finished = (ok, message) => Dispatcher.UIThread.Post(() =>
+            {
+                // Only ever seen when something went wrong: an install the
+                // player accepts replaces this program, and it does not
+                // survive that on either platform.
+                _updating = false;
+                _updateEntry.IsEnabled = true;
+                _updateEntry.Subtitle = ok ? update.Tag : message;
+                _updateEntry.SubtitleColor = ok ? GuiTheme.TextDim : GuiTheme.Warm;
+            });
+            string label = update.AssetName.Length > 0 ? update.AssetName : update.Tag;
+            _updateEntry.Subtitle = $"Downloading {label}...";
+            _updateEntry.SubtitleColor = GuiTheme.TextDim;
+            var reported = new object();
+            int shown = -1;
+            void Progress(float fraction)
+            {
+                // Whole percents only, and only when one changes: this is
+                // called for every 64 KB and each post crosses to the UI
+                // thread.
+                int percent = fraction < 0 ? -1 : (int)(fraction * 100);
+                lock (reported)
+                {
+                    if (percent == shown)
+                    {
+                        return;
+                    }
+                    shown = percent;
+                }
+                Dispatcher.UIThread.Post(() => _updateEntry.Subtitle = percent < 0
+                    ? $"Downloading {label}..."
+                    : $"Downloading {label}... {percent}%");
+            }
+            string error = "";
+            bool ready = await Task.Run(() => installer.Prepare(update, Progress, out error));
+            if (!ready)
+            {
+                _updating = false;
+                _updateEntry.IsEnabled = true;
+                _updateEntry.Subtitle = error.Length > 0 ? error : "the download failed";
+                _updateEntry.SubtitleColor = GuiTheme.Warm;
+                return;
+            }
+            _updateEntry.Subtitle = installer.ExitAfterInstall
+                ? "Restarting to finish..."
+                : "Waiting for the system installer...";
+            if (!installer.Install(out error))
+            {
+                _updating = false;
+                _updateEntry.IsEnabled = true;
+                _updateEntry.Subtitle = error.Length > 0 ? error : "the install could not be started";
+                _updateEntry.SubtitleColor = GuiTheme.Warm;
+                return;
+            }
+            if (installer.ExitAfterInstall)
+            {
+                // The copying process is already running and waiting for this
+                // one to be gone before it touches a single file. Staying open
+                // would leave it waiting until its own deadline.
+                Finish(default);
+            }
+        }
+
+        private bool _updating;
 
         /// <summary>
         /// Everything but "game files" is unusable until there is something to
@@ -767,8 +945,43 @@ namespace MphRead.Mods.Launcher.Gui
             }
         }
 
-        /// <summary>Pick a recorded demo file and hand it to <see cref="MatchStart"/> as a launch plan.</summary>
+        /// <summary>
+        /// Pick a recorded demo and hand it to <see cref="MatchStart"/> as a
+        /// launch plan.
+        ///
+        /// This machine's own recordings first, listed from the folder they
+        /// are written to, and the system file picker behind an "Open a
+        /// file..." entry rather than in front of everything.
+        ///
+        /// The order used to be the other way round -- the picker was the
+        /// whole of it -- and on Android that could not reach the recordings
+        /// at all. <see cref="DemoRecorder"/> writes into the app's own
+        /// directory, and since Android 11 <c>Android/data</c> is excluded
+        /// from the Storage Access Framework: the picker cannot be pointed at
+        /// it and it cannot be navigated to, however absolute the path handed
+        /// over is. Nothing about that stops *this* app reading the folder --
+        /// it owns it, and needs no permission for it.
+        /// </summary>
         private async Task ChooseDemo()
+        {
+            var view = new DemoPickerView(DemoLibrary.List(), DemoLibrary.Directory);
+            await ShowOverlay(view, handler => view.Closed += handler);
+            if (view.Path != null)
+            {
+                await PlayDemo(view.Path);
+                return;
+            }
+            if (view.ImportRequested)
+            {
+                await ImportDemo();
+            }
+        }
+
+        /// <summary>
+        /// The system file picker, for a demo that came from somewhere else on
+        /// the device.
+        /// </summary>
+        private async Task ImportDemo()
         {
             TopLevel? top = TopLevel.GetTopLevel(this);
             if (top == null)
@@ -795,7 +1008,14 @@ namespace MphRead.Mods.Launcher.Gui
             }
             try
             {
-                string demoDir = Paths.Combine(Paths.Export, "_demos");
+                // Absolute, because Paths.Export is normally empty and the
+                // recorder's own combine is therefore relative to the working
+                // directory -- and a relative path is one no storage provider
+                // can resolve. Worth setting on the desktop, where the picker
+                // will honour it; on Android it is ignored, since the folder
+                // is one the Storage Access Framework does not show. That is
+                // what DemoPickerView is for.
+                string demoDir = DemoLibrary.Directory;
                 if (Directory.Exists(demoDir))
                 {
                     options.SuggestedStartLocation =
@@ -838,6 +1058,12 @@ namespace MphRead.Mods.Launcher.Gui
                     return;
                 }
             }
+            await PlayDemo(path);
+        }
+
+        /// <summary>Load a demo file and, if it reads, start playing it.</summary>
+        private async Task PlayDemo(string path)
+        {
             // Joined here, not inside MatchStart: a failure has to land back
             // on a screen that is still open to show it on. Console.WriteLine
             // is where DemoPlayback.Join otherwise says why -- invisible on

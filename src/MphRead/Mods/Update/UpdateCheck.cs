@@ -15,10 +15,21 @@ namespace MphRead.Mods.Update
         public Version Version { get; init; }
         /// <summary>
         /// The asset built for this exact package, or "" when the release has
-        /// none. A hint for the person doing the download -- which of the four
-        /// files on the page is theirs -- and not something this fetches.
+        /// none. A hint for the person doing the download -- which of the
+        /// files on the page is theirs -- and, where the platform can install
+        /// it itself, the thing that gets fetched.
         /// </summary>
         public string AssetName { get; init; }
+
+        /// <summary>
+        /// Where that asset actually is, or "". Only ever GitHub's own
+        /// download host, because it is copied out of the release GitHub just
+        /// answered with and never built from a name.
+        /// </summary>
+        public string AssetUrl { get; init; }
+
+        /// <summary>Its size in bytes, for a progress figure. 0 when unknown.</summary>
+        public long AssetSize { get; init; }
         /// <summary>The release's page on GitHub. Where "Update now" goes.</summary>
         public string PageUrl { get; init; }
         public string Notes { get; init; }
@@ -136,7 +147,7 @@ namespace MphRead.Mods.Update
             string tag;
             string notes;
             string page;
-            var assets = new List<string>();
+            var assets = new List<(string Name, string Url, long Size)>();
             try
             {
                 using JsonDocument document = JsonDocument.Parse(json);
@@ -153,9 +164,13 @@ namespace MphRead.Mods.Update
                     {
                         string name = asset.TryGetProperty("name", out JsonElement n)
                             ? n.GetString() ?? "" : "";
+                        string url = asset.TryGetProperty("browser_download_url",
+                            out JsonElement u) ? u.GetString() ?? "" : "";
+                        long size = asset.TryGetProperty("size", out JsonElement z)
+                            && z.TryGetInt64(out long parsedSize) ? parsedSize : 0;
                         if (name.Length > 0)
                         {
-                            assets.Add(name);
+                            assets.Add((name, url, size));
                         }
                     }
                 }
@@ -183,11 +198,18 @@ namespace MphRead.Mods.Update
             // Nothing is fetched from here any more, so there is no reason to
             // hide a release because its file names were not what was expected
             // -- the person going to the page can see what is actually on it.
+            (string Name, string Url, long Size)? package = PickAsset(assets);
             return new UpdateInfo
             {
                 Tag = tag,
                 Version = published,
-                AssetName = PickAsset(assets) ?? "",
+                AssetName = package?.Name ?? "",
+                // Only ever the address GitHub itself just gave for that
+                // asset. Nothing here composes one out of the tag and a
+                // pattern, so a release whose files were named differently
+                // ends up with no download rather than with a guess.
+                AssetUrl = package?.Url ?? "",
+                AssetSize = package?.Size ?? 0,
                 PageUrl = page.Length > 0 ? page : ReleasesPage,
                 Notes = notes
             };
@@ -199,12 +221,13 @@ namespace MphRead.Mods.Update
         /// is a server build; null when nothing matches, which is not a reason
         /// to withhold the release.
         /// </summary>
-        private static string? PickAsset(List<string> assets)
+        private static (string Name, string Url, long Size)? PickAsset(
+            List<(string Name, string Url, long Size)> assets)
         {
             string rid = Rid();
-            foreach (string asset in assets)
+            foreach ((string Name, string Url, long Size) asset in assets)
             {
-                string name = asset.ToLowerInvariant();
+                string name = asset.Name.ToLowerInvariant();
                 if (!name.Contains(rid))
                 {
                     continue;
@@ -239,6 +262,14 @@ namespace MphRead.Mods.Update
         /// </summary>
         public static string Rid()
         {
+            // Android first, and not as an "os-arch" pair: the APK is one file
+            // for every ABI (release.yml publishes FruityPrime-<tag>-android.apk
+            // and nothing per-architecture), so matching on the architecture
+            // here would find nothing on every phone.
+            if (OperatingSystem.IsAndroid())
+            {
+                return "android";
+            }
             string os = OperatingSystem.IsWindows() ? "win"
                 : OperatingSystem.IsMacOS() ? "osx" : "linux";
             string arch = RuntimeInformation.ProcessArchitecture switch
