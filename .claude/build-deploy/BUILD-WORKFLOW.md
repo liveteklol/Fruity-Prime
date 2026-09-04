@@ -120,17 +120,45 @@ Notes
 
 The front screen has always checked GitHub for a newer release
 (`Mods/Update/UpdateCheck.cs`) and shown a badge. Two things are new: the
-version is on the home card, and on **Android** the update is fetched and
-installed rather than pointed at.
+build is named in the corner of the picture, and on **Android** the update is
+fetched and installed rather than pointed at.
 
-- **Three states on the version line**, not two. Green is "this is the
-  published build", amber is "there is a newer one" and also puts an entry
-  above it, and dim is a local build *or* a check that has not answered.
-  Painting "no answer" green is the one thing that line must never do: a
-  server refuses a client on a different build at Hello, so being told you are
-  current when nobody has asked is worse than being told nothing.
-  `Updater.CheckInBackground` gained a `done` callback for it -- before, "there
-  is an update" and "you are up to date" were the same silence.
+- **The version corner is the button**, bottom right of the splash, front
+  card only. `1.2.3` in green when it is the published build; `1.2.3 : Update
+  available ! Click here to update` in amber when it is not, and pressing it
+  is what takes the update. One control rather than a label and a button
+  beside it, because the state and the action are the same fact here -- green
+  is "nothing to do" and amber is "press this", so either arrangement leaves
+  one of the two redundant in either state. The download's progress and any
+  failure are written into the same line.
+- **Dim is a third state, and it is not green.** A local build, and a check
+  that has not answered. Painting "no answer" green is the one thing that line
+  must never do: a server refuses a client on a different build at Hello, so
+  being told you are current when nobody has asked is worse than being told
+  nothing. `Updater.CheckInBackground` gained a `done` callback for it --
+  before, "there is an update" and "you are up to date" were the same silence.
+- **`UpdateBadge` stays, for every card but the front one.** It is over the
+  splash so that a fresh install -- which sits on the game-files card, exactly
+  where an out-of-date copy is most likely to be -- still sees it, and that
+  card has no version corner. On the front card the two would be the same
+  offer in opposite corners of one picture, so the badge hides there.
+- **`BuildVersion` reads *this* assembly when there is no entry assembly**,
+  which is every Android launch: the system starts an activity, so the process
+  has no managed entry point and `Assembly.GetEntryAssembly()` answers null.
+  Every APK therefore called itself "a local build", release or not, and the
+  version line could never be anything but grey. The fallback is right on that
+  platform because the Android head *compiles* MphRead's sources into its own
+  assembly (`<Compile Include="..\MphRead\**\*.cs" />`) rather than
+  referencing the project, so the file this class lives in is part of the APK's
+  assembly -- and that assembly is the one `release.yml` stamps. Checked in
+  `obj/.../MphRead.Android.AssemblyInfo.cs` against a build with
+  `-p:InformationalVersion=1.2.3`.
+- **Only a *tagged release* APK is stamped.** `build.yml`'s android job passes
+  no version, so the `FruityPrime-android` artifact from a push says "a local
+  build" and that is correct, not a bug: an unstamped build has no way to tell
+  whether it is ahead of the published release or behind it, and overwriting a
+  developer's own binary with a download is the one failure the updater must
+  never have.
 - **`UpdateCheck.Rid()` answers `android`**, and not as an os-arch pair: the
   APK is one file for every ABI, so matching on the architecture found nothing
   on every phone. `UpdateInfo` now carries the asset's **URL and size** as

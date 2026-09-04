@@ -140,8 +140,10 @@ namespace MphRead.Mods.Launcher.Gui
             _updateBadge.VerticalAlignment = VerticalAlignment.Bottom;
             _updateBadge.Margin = new Thickness(24, 0, 24, 22);
             _layout.Children.Add(_splash);
-            // After the splash and in the same cell, so it draws on top of it.
+            // After the splash and in the same cell, so they draw on top of
+            // it: the badge in one bottom corner, the version in the other.
             _layout.Children.Add(_updateBadge);
+            _layout.Children.Add(BuildVersionLine());
             _layout.Children.Add(_panel);
             ApplyLayout(narrow: false);
 
@@ -244,6 +246,8 @@ namespace MphRead.Mods.Launcher.Gui
                 Grid.SetRow(_splash, 0);
                 Grid.SetColumn(_updateBadge, 0);
                 Grid.SetRow(_updateBadge, 0);
+                Grid.SetColumn(_versionBox, 0);
+                Grid.SetRow(_versionBox, 0);
                 Grid.SetColumn(_panel, 0);
                 Grid.SetRow(_panel, 1);
                 return;
@@ -256,6 +260,8 @@ namespace MphRead.Mods.Launcher.Gui
             Grid.SetRow(_splash, 0);
             Grid.SetColumn(_updateBadge, 0);
             Grid.SetRow(_updateBadge, 0);
+            Grid.SetColumn(_versionBox, 0);
+            Grid.SetRow(_versionBox, 0);
             Grid.SetColumn(_panel, 1);
             Grid.SetRow(_panel, 0);
         }
@@ -470,6 +476,22 @@ namespace MphRead.Mods.Launcher.Gui
             _cards.Children.Clear();
             _cards.Children.Add(card);
             _current = card;
+            // The front card only. Which build this is is not a question
+            // anybody has while choosing a server or a hunter, and the corner
+            // it sits in is where those cards put their own things.
+            if (_versionBox != null)
+            {
+                bool home = ReferenceEquals(card, _homeCard);
+                _versionBox.IsVisible = home;
+                if (home && _updateBadge.IsVisible)
+                {
+                    _updateBadge.IsVisible = false;
+                }
+                else if (!home && Update.Updater.Available != null)
+                {
+                    _updateBadge.IsVisible = true;
+                }
+            }
             if (!_narrow)
             {
                 _panel.Width = PanelWidth();
@@ -532,39 +554,99 @@ namespace MphRead.Mods.Launcher.Gui
             var quit = new MenuEntry("Quit");
             quit.Click += (_, _) => Finish(default);
 
-            // Under the menu rather than in it: which build this is is not a
-            // thing anybody came here to do. Green when it is the published
-            // one and amber when it is not, so the state is readable without
-            // reading -- and an entry appears above it only when there is
-            // actually something to press.
-            _updateEntry = new MenuEntry("Update available", "", titleSize: 13)
-            {
-                Accent = GuiTheme.Warm,
-                IsVisible = false,
-                Margin = new Thickness(0, 8, 0, 0)
-            };
-            _updateEntry.Click += (_, _) => UpdateNow();
-            _versionLine = new TextBlock
-            {
-                Text = BuildVersion.Display,
-                FontSize = 11,
-                Foreground = GuiTheme.TextDimBrush,
-                Margin = new Thickness(4, 10, 4, 0)
-            };
-
             card.Children.Add(_hostEntry);
             card.Children.Add(_onlineEntry);
             card.Children.Add(_demoEntry);
             card.Children.Add(settings);
             card.Children.Add(quit);
-            card.Children.Add(_updateEntry);
-            card.Children.Add(_versionLine);
             RefreshVersionLine();
             return card;
         }
 
-        private MenuEntry _updateEntry = null!;
         private TextBlock _versionLine = null!;
+        private Border _versionBox = null!;
+
+        /// <summary>
+        /// The build, in the bottom corner of the picture -- and, when there
+        /// is one to take, the update.
+        ///
+        /// Over the splash rather than in the menu, for the update badge's own
+        /// reason: knowing which build you are on is not one of the things
+        /// somebody came to the launcher to do, so it does not belong in a
+        /// list of them. Only on the front card, though, unlike the badge --
+        /// reading a version number while picking a server or a hunter is
+        /// nobody's question.
+        ///
+        /// It is the whole button rather than a label with one beside it. The
+        /// state and the action are the same fact here: green is "nothing to
+        /// do" and amber is "press this", and two controls saying that would
+        /// be one of them redundant in either state.
+        ///
+        /// A panel behind it because a splash is a map preview and a map
+        /// preview is whatever colour that room is. Eleven points of dim grey
+        /// on an unknown picture is a line that is legible half the time.
+        /// </summary>
+        private Border BuildVersionLine()
+        {
+            _versionLine = new TextBlock
+            {
+                Text = VersionNumber(),
+                FontSize = 11,
+                Foreground = GuiTheme.TextDimBrush
+            };
+            _versionBox = new Border
+            {
+                Background = GuiTheme.ScrimBrush,
+                BorderBrush = GuiTheme.EdgeBrush,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(9, 4, 9, 4),
+                Margin = new Thickness(0, 0, 24, 22),
+                HorizontalAlignment = HorizontalAlignment.Right,
+                VerticalAlignment = VerticalAlignment.Bottom,
+                IsVisible = false,
+                Child = _versionLine
+            };
+            _versionBox.PointerPressed += (_, e) =>
+            {
+                if (_updatable)
+                {
+                    e.Handled = true;
+                    UpdateNow();
+                }
+            };
+            return _versionBox;
+        }
+
+        /// <summary>
+        /// "1.2.3", or what to say instead when this build is not a release.
+        ///
+        /// Not <c>BuildVersion.Display</c>, which puts a v in front: this is a
+        /// corner of a picture rather than a sentence, and the v is a letter
+        /// that carries nothing.
+        /// </summary>
+        private static string VersionNumber()
+        {
+            Version? current = BuildVersion.Current;
+            return current == null ? "a local build" : current.ToString(3);
+        }
+
+        /// <summary>Whether pressing the corner would do anything.</summary>
+        private bool _updatable;
+
+        /// <summary>What the corner says, and in what colour.</summary>
+        private void SayVersion(string text, Color colour, bool pressable = false)
+        {
+            if (_versionLine == null)
+            {
+                return;
+            }
+            _versionLine.Text = text;
+            _versionLine.Foreground = new SolidColorBrush(colour);
+            _updatable = pressable;
+            _versionBox.Cursor = new Cursor(
+                pressable ? StandardCursorType.Hand : StandardCursorType.Arrow);
+        }
 
         /// <summary>
         /// What the version line says and what colour it is.
@@ -584,37 +666,40 @@ namespace MphRead.Mods.Launcher.Gui
             {
                 return;
             }
-            UpdateInfo? update = Update.Updater.Available;
-            if (update != null)
+            if (_updating)
             {
-                _versionLine.Text = $"{BuildVersion.Display} — {update.Value.Tag} available";
-                _versionLine.Foreground = GuiTheme.WarmBrush;
-                _updateEntry.Subtitle = update.Value.Tag;
-                _updateEntry.IsVisible = true;
+                // Mid-download; FetchAndInstall owns the line until it is done.
                 return;
             }
-            _updateEntry.IsVisible = false;
-            if (!BuildVersion.IsRelease)
+            string number = VersionNumber();
+            if (Update.Updater.Available != null)
             {
-                _versionLine.Text = BuildVersion.Display;
-                _versionLine.Foreground = GuiTheme.TextDimBrush;
+                SayVersion($"{number} : Update available ! Click here to update",
+                    GuiTheme.Warm, pressable: true);
                 return;
             }
-            if (!Update.Updater.Checked)
-            {
-                _versionLine.Text = BuildVersion.Display;
-                _versionLine.Foreground = GuiTheme.TextDimBrush;
-                return;
-            }
-            _versionLine.Text = BuildVersion.Display + " — up to date";
-            _versionLine.Foreground = GuiTheme.GoodBrush;
+            // Dim, not green, for a local build and for a check that has not
+            // answered -- and those are two different things from "up to
+            // date". A server refuses a client on a different build at Hello,
+            // so being told you are current when nobody has asked is worse
+            // than being told nothing.
+            SayVersion(number, BuildVersion.IsRelease && Update.Updater.Checked
+                ? GuiTheme.Good
+                : GuiTheme.TextDim);
         }
 
         private void ShowUpdate(UpdateInfo update)
         {
+            // The badge stays for every card *but* the front one, which is
+            // where the version corner does the same job in the other corner
+            // of the same picture. Keeping it elsewhere is what it was put
+            // over the splash for: a fresh install sits on the game-files
+            // card, which is exactly where an out-of-date copy is most likely
+            // to be, and that card has no version corner.
             _updateBadge.Show(update.AssetName.Length > 0
                 ? $"{update.Tag} is out -- get {update.AssetName}"
                 : $"{update.Tag} is out");
+            _updateBadge.IsVisible = !ReferenceEquals(_current, _homeCard);
             // The picture's own caption moves up out of the way.
             _splash.BottomInset = _updateBadge.DesiredSize.Height + 22;
             RefreshVersionLine();
@@ -671,28 +756,26 @@ namespace MphRead.Mods.Launcher.Gui
             {
                 return;
             }
+            string number = VersionNumber();
             if (!installer.Allowed)
             {
-                _updateEntry.Subtitle = "Allow installs from this app, then press again";
-                _updateEntry.SubtitleColor = GuiTheme.Warm;
+                SayVersion($"{number} : allow installs from this app, then press again",
+                    GuiTheme.Warm, pressable: true);
                 installer.RequestPermission();
                 return;
             }
             _updating = true;
-            _updateEntry.IsEnabled = false;
             installer.Finished = (ok, message) => Dispatcher.UIThread.Post(() =>
             {
                 // Only ever seen when something went wrong: an install the
                 // player accepts replaces this program, and it does not
                 // survive that on either platform.
                 _updating = false;
-                _updateEntry.IsEnabled = true;
-                _updateEntry.Subtitle = ok ? update.Tag : message;
-                _updateEntry.SubtitleColor = ok ? GuiTheme.TextDim : GuiTheme.Warm;
+                SayVersion(ok ? number : $"{number} : {message}",
+                    ok ? GuiTheme.TextDim : GuiTheme.Warm, pressable: !ok);
             });
             string label = update.AssetName.Length > 0 ? update.AssetName : update.Tag;
-            _updateEntry.Subtitle = $"Downloading {label}...";
-            _updateEntry.SubtitleColor = GuiTheme.TextDim;
+            SayVersion($"{number} : downloading {label}...", GuiTheme.Warm);
             var reported = new object();
             int shown = -1;
             void Progress(float fraction)
@@ -709,29 +792,27 @@ namespace MphRead.Mods.Launcher.Gui
                     }
                     shown = percent;
                 }
-                Dispatcher.UIThread.Post(() => _updateEntry.Subtitle = percent < 0
-                    ? $"Downloading {label}..."
-                    : $"Downloading {label}... {percent}%");
+                Dispatcher.UIThread.Post(() => SayVersion(percent < 0
+                    ? $"{number} : downloading {label}..."
+                    : $"{number} : downloading {label}... {percent}%", GuiTheme.Warm));
             }
             string error = "";
             bool ready = await Task.Run(() => installer.Prepare(update, Progress, out error));
             if (!ready)
             {
                 _updating = false;
-                _updateEntry.IsEnabled = true;
-                _updateEntry.Subtitle = error.Length > 0 ? error : "the download failed";
-                _updateEntry.SubtitleColor = GuiTheme.Warm;
+                SayVersion($"{number} : {(error.Length > 0 ? error : "the download failed")}",
+                    GuiTheme.Warm, pressable: true);
                 return;
             }
-            _updateEntry.Subtitle = installer.ExitAfterInstall
-                ? "Restarting to finish..."
-                : "Waiting for the system installer...";
+            SayVersion(installer.ExitAfterInstall
+                ? $"{number} : restarting to finish..."
+                : $"{number} : waiting for the system installer...", GuiTheme.Warm);
             if (!installer.Install(out error))
             {
                 _updating = false;
-                _updateEntry.IsEnabled = true;
-                _updateEntry.Subtitle = error.Length > 0 ? error : "the install could not be started";
-                _updateEntry.SubtitleColor = GuiTheme.Warm;
+                SayVersion($"{number} : {(error.Length > 0 ? error : "the install could not be started")}",
+                    GuiTheme.Warm, pressable: true);
                 return;
             }
             if (installer.ExitAfterInstall)
