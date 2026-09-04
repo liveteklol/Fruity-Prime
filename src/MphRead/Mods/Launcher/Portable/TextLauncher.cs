@@ -70,6 +70,9 @@ namespace MphRead.Mods.Launcher
                     // reach the entry that fixes that.
                     rooms = ThumbnailGenerator.MultiplayerRooms();
                 }
+                // See GuiLauncher: the roll behind "Random" is held for one
+                // launch, and this is where a launch begins.
+                Hunters.Reroll();
                 if (!Home(settings, rooms, out LaunchPlan plan))
                 {
                     return;

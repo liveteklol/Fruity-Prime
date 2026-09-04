@@ -327,6 +327,7 @@ namespace MphRead.Mods.Network
                 }
                 _lastRoomId = Scene.RoomId;
             }
+            SayHello();
             int local = Math.Max(NetSession.LocalSlot, 0);
             PlayerEntity? me = local < PlayerEntity.Players.Count ? PlayerEntity.Players[local] : null;
             if (me != null && me.LoadFlags.TestFlag(LoadFlags.Spawned))
@@ -446,6 +447,30 @@ namespace MphRead.Mods.Network
         }
 
         /// <summary>
+        /// Two lines of chat, from every client, at frames every client
+        /// reaches.
+        ///
+        /// The claim being checked is the one the tour cannot make on its
+        /// own: that a real server accepts a chat packet, decides whose it
+        /// is, and hands it to everybody else. Received counts are compared
+        /// across the reports afterwards -- with N clients each saying two
+        /// things, everyone should hear 2*(N-1) of them.
+        ///
+        /// Two rather than one, and far apart, because a relay that works
+        /// once and stops is the interesting failure: the second is late
+        /// enough to be past a map rotation on a short-round server, and the
+        /// rate limiter's bucket has long since refilled between them.
+        /// </summary>
+        private void SayHello()
+        {
+            if (NetSession.LocalSlot < 0 || (_frame != 300 && _frame != 1500))
+            {
+                return;
+            }
+            Mods.Chat.ChatBox.Send($"hello from {_name} at frame {_frame}");
+        }
+
+        /// <summary>
         /// Passing means somebody else was on the map, moving, for long
         /// enough to be more than a spawn glitch. Deliberately not "a packet
         /// arrived": every version of this feature that shipped broken had
@@ -507,6 +532,11 @@ namespace MphRead.Mods.Network
                 // was sent, which reads on the other clients' reports as
                 // "they never saw me turn".
                 + $"dropped={NetTransport.TotalPacketsDropped}");
+            // What the relay did with the one packet type a player composes.
+            // Received counts what arrived from everybody else: this client's
+            // own two lines are echoed locally and never come back.
+            Console.WriteLine($"  chat: sent={Mods.Chat.ChatBox.Sent} "
+                + $"received={Mods.Chat.ChatBox.Received}");
             var pings = new System.Text.StringBuilder();
             for (int slot = 0; slot < PlayerEntity.MaxPlayers; slot++)
             {

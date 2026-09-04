@@ -33,7 +33,11 @@ namespace MphRead.Mods.Network
             int timeoutMs = 8000)
         {
             NetSession.PlayerName = playerName;
-            NetSession.LocalHunter = hunter;
+            // Rolled here as well as in the launch plan, because joining
+            // happens *before* the plan is built: the hunter announced in
+            // Identify is what every other client draws this player as, and
+            // Hunter.Random has no model for anybody to draw.
+            NetSession.LocalHunter = Launcher.Hunters.Resolve(hunter);
             // A networked match is not limited to the four the DS could hold:
             // the server decides how many it admits, and every client has to
             // be able to hold that many slots for it to matter.

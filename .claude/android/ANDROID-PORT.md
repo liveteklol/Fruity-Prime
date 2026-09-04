@@ -204,6 +204,82 @@ movement, so a swipe turns the same amount on any phone; `GameView.AimScale` is
 the one number to change if it feels wrong, and the player's own mouse
 sensitivity scales it after that.
 
+### The controls step aside for a pad, and come back at a touch
+
+There is no setting for it, and there was one — "Use a connected gamepad",
+now gone. Being *connected* was never the question a player was asking: a pad
+paired with the phone for something else is still paired while they play with
+their thumbs. What `TouchControls.NotePadActivity` watches is the pad actually
+being **used** — a button down, or a stick past the dead zone, which is what
+`GamepadInput.InUse` answers — and the answer is reversed by the next finger
+on the glass.
+
+Three things that are easy to get wrong here and are not:
+
+- **The view stays; only the drawing stops.** `TouchOverlayView` is still the
+  only thing receiving touches, so the touch that brings the controls back is
+  an ordinary one. Making the view `Gone` would hand every touch to whatever
+  is underneath and there would be nothing left to bring them back with.
+- **The reviving touch does nothing else.** It is added to `_swallowed` and
+  its move and up are dropped. The controls were not on screen when the finger
+  went down, so where it landed was not a choice — and the middle of the
+  screen, which is where a thumb goes first, is FIRE's half.
+- **Everything held is released on the way out.** A thumb resting on FIRE as
+  the player picks the pad up would otherwise be held for ever: the finger's
+  release lands on a control that is no longer listening.
+
+**The one exception is a dialog box.** `PlayerDialog.CheckButtonPressed` reads
+`Input.ClickX/Y` — the OK button is a *position*, because on the DS it was a
+touch screen — and `GamepadInput` deliberately drives no pointer. So
+`GameView.ApplyInput` sets `TouchControls.ForceVisible` from
+`GameState.DialogPause` every frame, pad or no pad. Without it the story stops
+at the first scan, with nothing on screen to press. A flag the loop keeps
+setting rather than a one-shot "show yourself": a thumb still resting on the
+stick would otherwise put the controls away again on the very next motion
+event, and the box would flicker for as long as the pad was held.
+
+Pad events reach the state through `MainActivity.DispatchKeyEvent` and
+`DispatchGenericMotionEvent` rather than through `GameView` — a pad has to
+reach the settings screen too, where no `GameView` exists, so that a button
+can be rebound. `GameView`'s own handlers are kept as a fallback and never see
+a pad event in this app.
+
+### Spectating
+
+The spectator's screen is the same dozen circles doing different jobs, and
+`TouchControls.ApplyLayoutLocked` is the one place that decides which are on
+and what they say — visibility used to be set by each of the three callers
+reaching into the button list for the ones it knew about, which only works
+while no two of them care about the same button, and spectating cares about
+nine.
+
+| Button | While spectating |
+|---|---|
+| FIRE → **NEXT** | next player. The desktop's left click |
+| VISOR → **VIEW** | the map camera, or the player being watched. The desktop's Space |
+| JUMP → **UP**, MORPH → **DOWN** | the free camera only, and only shown on it |
+| Left stick | drives the free camera |
+| Aim drag | turns the free camera |
+| SCORE | the scoreboard, the one control a spectator keeps |
+| everything else | gone |
+
+**The free camera is not driven through binds**, and that is the part worth
+knowing. It is the room viewer's Roam camera (`Scene.SetFreeCamera`), which
+`Scene.OnKeyHeld` moves by reading W/A/S/D, Space and V **off the keyboard
+directly** and `Scene.OnMouseMove` turns. So `GameView.Spectate` presses those
+letters through `AndroidInput.ApplyKey` and hands the aim drag to
+`OnMouseMove` — the same call the desktop's mouse makes, so the player's own
+sensitivity and inversion apply. The letters are a copy of that method's table
+and the one place this can go out of step with it.
+
+Before this, the spectator branch pressed nothing and threw the aim delta
+away: the free camera opened and could not be moved, turned or left.
+
+`SpectatorMode.Rejoin` never puts a score *up*. A score below zero is a
+penalty — a suicide costs a point — and clearing it by spectating for a second
+would make the pause menu the cheapest way out of one, so only a positive
+score goes back to zero. That is shared, not Android's.
+
 ## Playing online
 
 `AndroidMatch.Build` is the head's half of `MatchStart.Launch`, and it was
@@ -322,9 +398,20 @@ textures; `AndroidMaps.EnsureBuilt` is what runs the builder before a match.
 
 ## Demos
 
-Watching a recorded match works here too, and needed two things the desktop
+Watching a recorded match works here too, and needed three things the desktop
 never had to think about:
 
+- **The system file picker cannot reach this app's own recordings at all.**
+  Since Android 11 `Android/data` and `Android/obb` are excluded from the
+  Storage Access Framework: the picker cannot be pointed at the folder
+  `DemoRecorder` writes to, and a player cannot navigate to it either. None of
+  that stops *this* app reading the folder -- it owns it and needs no
+  permission for it, which is the whole of the confusion. So the Demos entry
+  lists the folder itself (`DemoLibrary` and `DemoPickerView`) and the system
+  picker is one entry inside that list, for a demo that came from somewhere
+  else. `SuggestedStartLocation` is still set for the desktop, where it is
+  honoured; on Android it is ignored, and it used to be handed a *relative*
+  path, which no storage provider anywhere could resolve.
 - **The file picker cannot filter by pattern.** Android filters by MIME type
   and a `.fpdemo` has none, so `FileTypeFilter` is skipped here exactly as it
   is for the `.nds` picker -- setting one produces a picker in which every file
@@ -334,6 +421,38 @@ never had to think about:
   copies the document into `GameFiles.Root` and plays it from there. Kept
   rather than deleted afterwards, unlike the cartridge copy: the reader holds
   the file for the whole session, and the next demo overwrites it.
+
+### Where a recording lands
+
+`DemoRecorder.Start` writes to `Paths.Combine(Paths.Export, "_demos", name)`,
+and `Export` is **empty** in every `paths.txt` a desktop extraction produces.
+An empty first element makes that a *relative* path, resolved against the
+working directory -- which `CustomizeAppBuilder` set to whatever `ChooseRoot`
+picked. So on a phone a recording is:
+
+```
+<root>/_demos/<room>_<yyyy-MM-dd_HH-mm-ss>.fpdemo
+```
+
+with `<root>` normally the external files directory, reachable over USB at
+`Android/data/fr.livetek.fruityprime/files/_demos/`. The
+`[android] N bundled map files -> <path>` line names the root that was
+actually chosen; on a device that fell back to internal storage the folder is
+under `/data/user/0/...` and only `adb` can reach it.
+
+That path is worth having: no file manager on a modern Android can open the
+folder, so copying a recording off the device means USB/MTP or `adb`. It is
+written on screen in exactly one place -- the Demos list, when there is
+nothing in it yet. The "saved to..." line at the end of a recording is still a
+`Console.WriteLine`, which is logcat here and invisible to a player.
+
+`DemoLibrary.List` reads the room and the moment back out of the file *name*
+rather than opening anything: the name already carries both, and reading a
+header out of every file to learn what the name says would turn a directory
+listing into a disk full of seeks. The timestamp is a fixed nineteen
+characters at the end, which is what makes it safe to split -- a room name can
+contain underscores of its own, since `SanitizeFileName` puts one in for every
+character a file name cannot hold.
 
 `AndroidMatch.BuildDemo` is the rest -- the half of `MatchStart.LaunchDemo`
 that is not a window: join, read the room out of the recording's own
@@ -400,6 +519,32 @@ part of Fast Deployment."* The build succeeds, the APK installs, and it is
 hollow. `-p:EmbedAssembliesIntoApk=true` is what makes a debug APK someone can
 be handed; it is ~110 MB rather than 20.
 
+## Text input
+
+Nothing on this head read a key event until chat needed one. `GameView` is
+focusable now and handles `OnKeyDown`, which covers a keyboard plugged in,
+paired over Bluetooth, or the emulator's -- and, through
+`OnCreateInputConnection`, the soft keyboard the CHAT button asks for.
+
+Three things that are not obvious, all in `GameView`:
+
+- **`InputTypes.Null`** on the `EditorInfo` is what makes an IME send plain
+  key events instead of `commitText`. Without it the view has to keep an
+  editable buffer in step with `ChatBox`'s, which is two copies of one string.
+- **`NoFullscreen | NoExtractUi`**, or the IME covers the match with its own
+  full-screen text box in landscape.
+- **A key event carries its own character** here, where GLFW raises a key
+  callback and then a character callback for one press. So the desktop's
+  "swallow the opening character" step must be turned *off* on this path
+  (`ChatBox.Open(swallowOpeningChar: false)`), or the first real letter is
+  eaten instead.
+
+Focus and touch are separate: the touch overlay sits above `GameView` and takes
+every touch, and never takes focus, so the view keeps the keys.
+
+Full account of what chat is and what the server does with it:
+`.claude/multiplayer/NETWORK-CHAT.md`.
+
 ## Testing it here
 
 An emulator runs this without a device, and without KVM -- which WSL does not
@@ -414,7 +559,25 @@ $ANDROID_HOME/emulator/emulator -avd fruity -no-window -no-audio -no-boot-anim \
 
 `-accel off` is software CPU emulation: it boots in about five minutes and the
 system UI shows "isn't responding" dialogs of its own, which are the emulator
-and not this app. `adb install -r`, `adb shell am start -n
+and not this app.
+
+Four things that cost time here and are not obvious:
+
+- **`adb push` into the app's external directory is refused** on API 30 --
+  scoped storage, `Permission denied`, even for a directory the app itself
+  writes. `adb root` first (the `default` system image allows it; a
+  `google_apis` one does not), and it works.
+- **`adb push --sync`** for the 100 MB of extracted files. A push that dies
+  half way otherwise starts again from nothing.
+- **`pm list packages` finding the package proves nothing** -- an install from
+  a previous session leaves it there, so a wait loop on that returns
+  immediately and the thing under test is last week's APK. Wait on `adb
+  install` actually exiting, and check `dumpsys package ... lastUpdateTime`.
+- **A 112 MB debug APK takes several minutes to install** on a software CPU,
+  and `cmd: Can't find service: package` means the system is still coming up
+  rather than that anything is wrong. `sys.boot_completed` is never set on
+  this image; `init.svc.bootanim` going `stopped` is the signal, and the
+  package service is up a while after that. `adb install -r`, `adb shell am start -n
 fr.livetek.fruityprime/crc64e2a07749a868b9fd.MainActivity`, and `adb shell
 screencap` are enough to see the front screen. With KVM it would be seconds
 rather than minutes.

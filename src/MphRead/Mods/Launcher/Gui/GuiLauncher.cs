@@ -168,6 +168,10 @@ namespace MphRead.Mods.Launcher.Gui
                     rooms = ThumbnailGenerator.MultiplayerRooms();
                 }
 
+                // Before the screen that offers "Random" as a hunter: the
+                // roll is held for one launch so the joined server and the
+                // loaded player agree, and this is where a launch begins.
+                Hunters.Reroll();
                 LaunchPlan plan = Ask(settings, rooms);
                 if (plan.Kind == LaunchKind.None)
                 {

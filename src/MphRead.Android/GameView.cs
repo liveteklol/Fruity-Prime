@@ -4,10 +4,13 @@ using System.Threading;
 using Android.Content;
 using Android.Graphics;
 using Android.Opengl;
+using Android.Text;
 using Android.Views;
+using Android.Views.InputMethods;
 using MphRead.Entities;
 using MphRead.Mods.Render;
 using OpenTK.Mathematics;
+using Keys = OpenTK.Windowing.GraphicsLibraryFramework.Keys;
 
 namespace MphRead.Droid
 {
@@ -54,11 +57,178 @@ namespace MphRead.Droid
 
         public GameView(Context context, TouchControls controls, AndroidInput input,
             Func<AndroidInput, Vector2i, Scene> build, Action onEnd, Action onLoaded,
-            Action<string> onError, Action onPauseMenu)
+            Action<string> onError, Action onPauseMenu, Action<bool> onSoftKeyboard)
             : base(context)
         {
-            _loop = new RenderLoop(controls, input, build, onEnd, onLoaded, onError, onPauseMenu);
+            _loop = new RenderLoop(controls, input, build, onEnd, onLoaded, onError,
+                onPauseMenu, onSoftKeyboard);
             Holder?.AddCallback(this);
+            // So this view can receive key events at all: from a keyboard
+            // plugged into the phone, from one paired over Bluetooth, from the
+            // emulator's, and from the soft keyboard the CHAT button asks for.
+            // Nothing else here wants them -- the touch overlay sits on top and
+            // takes every touch, and focus and touch are separate things.
+            Focusable = true;
+            FocusableInTouchMode = true;
+            RequestFocus();
+        }
+
+        /// <summary>
+        /// Yes, when chat is open -- which is what makes the system offer a
+        /// soft keyboard for this view rather than refusing to show one.
+        /// </summary>
+        public override bool OnCheckIsTextEditor()
+        {
+            return MphRead.Mods.Chat.ChatBox.Composing;
+        }
+
+        /// <summary>
+        /// An editor with no text in it.
+        ///
+        /// <see cref="InputTypes.Null"/> is doing the work: it tells the IME
+        /// that this view cannot be edited through the usual commitText path,
+        /// and every keyboard worth the name answers that by sending plain key
+        /// events instead -- which is exactly what
+        /// <see cref="OnKeyDown"/> below already handles for a real keyboard.
+        /// The alternative is an <c>InputConnection</c> that maintains an
+        /// editable buffer and keeps it in step with <c>ChatBox</c>'s, which is
+        /// two copies of one string and a second set of rules for composing
+        /// text.
+        /// </summary>
+        public override IInputConnection? OnCreateInputConnection(EditorInfo? outAttrs)
+        {
+            if (outAttrs != null)
+            {
+                outAttrs.InputType = InputTypes.Null;
+                // NoFullscreen and NoExtractUi together are what stop the IME
+                // replacing the whole screen with its own text box in
+                // landscape -- which is every phone playing this, and which
+                // would put an editor over the match rather than a keyboard
+                // under it.
+                outAttrs.ImeOptions = (ImeFlags)((int)ImeAction.Done
+                    | (int)ImeFlags.NoFullscreen | (int)ImeFlags.NoExtractUi);
+            }
+            return new BaseInputConnection(this, fullEditor: false);
+        }
+
+        /// <summary>
+        /// The key whose press chat took, so its release can be taken too.
+        ///
+        /// Not a check on "is chat open": Back closes the prompt on the way
+        /// down, so by the time its release arrives the prompt is shut and the
+        /// release would fall through to the activity -- which is where
+        /// <c>onBackPressed</c> lives, and which would leave the match. One
+        /// key at a time is enough; nothing here is chorded.
+        /// </summary>
+        private Keycode _keyTaken = Keycode.Unknown;
+
+        public override bool OnKeyDown(Keycode keyCode, KeyEvent? e)
+        {
+            // The pad first: its buttons are their own key codes and overlap
+            // nothing a keyboard sends, so this only ever claims events a
+            // keyboard could not have produced. A fallback in practice --
+            // MainActivity.DispatchKeyEvent takes a pad's events before any
+            // view sees them, so that rebinding one works on the settings
+            // screen too -- and kept because it costs a comparison and this
+            // class should still work if it is ever hosted somewhere else.
+            if (GamepadBridge.HandleKey(keyCode, e, down: true))
+            {
+                return true;
+            }
+            if (HandleKey(keyCode, e))
+            {
+                _keyTaken = keyCode;
+                return true;
+            }
+            return base.OnKeyDown(keyCode, e);
+        }
+
+        public override bool OnKeyUp(Keycode keyCode, KeyEvent? e)
+        {
+            if (GamepadBridge.HandleKey(keyCode, e, down: false))
+            {
+                return true;
+            }
+            if (_keyTaken == keyCode)
+            {
+                _keyTaken = Keycode.Unknown;
+                return true;
+            }
+            return base.OnKeyUp(keyCode, e);
+        }
+
+        /// <summary>
+        /// The sticks and triggers. Android has no way to poll a pad, so this
+        /// is the only place their positions are ever reported -- see
+        /// <see cref="GamepadBridge"/>.
+        /// </summary>
+        public override bool OnGenericMotionEvent(MotionEvent? e)
+        {
+            return GamepadBridge.HandleMotion(e) || base.OnGenericMotionEvent(e);
+        }
+
+        /// <summary>
+        /// One key, from whatever is attached. Returns true when chat took it.
+        ///
+        /// Android delivers the character *with* the key event, where GLFW
+        /// raises two callbacks for one press -- so this is both of the
+        /// desktop's paths in one method, and the opening key does not have to
+        /// be swallowed on its way back round.
+        /// </summary>
+        private bool HandleKey(Keycode keyCode, KeyEvent? e)
+        {
+            bool composing = MphRead.Mods.Chat.ChatBox.Composing;
+            bool control = e?.IsCtrlPressed ?? false;
+            bool alt = e?.IsAltPressed ?? false;
+            if (!composing)
+            {
+                // The one key that opens it, and only where there is a match
+                // to talk in. Everything else belongs to whoever asked next.
+                return MphRead.Mods.Chat.ChatBox.HandleKeyDown(Map(keyCode), control, alt,
+                    canOpen: Scene != null, swallowOpeningChar: false);
+            }
+            Keys key = Map(keyCode);
+            if (key == Keys.Enter || key == Keys.Escape || key == Keys.Backspace)
+            {
+                MphRead.Mods.Chat.ChatBox.HandleKeyDown(key, control, alt, canOpen: false);
+                return true;
+            }
+            int unicode = e?.GetUnicodeChar(e.MetaState) ?? 0;
+            if (unicode != 0)
+            {
+                MphRead.Mods.Chat.ChatBox.HandleText(unicode);
+            }
+            // Everything while the prompt is up, character or not: a key that
+            // fell through here would reach the activity, and Back would leave
+            // the match in the middle of a sentence.
+            return true;
+        }
+
+        /// <summary>
+        /// Android key codes to the ones <c>InputSettings.ChatKey</c> is
+        /// expressed in. Only what chat needs: the letters and digits any
+        /// sensible chat key could be bound to, and the four keys that drive
+        /// the prompt.
+        /// </summary>
+        private static Keys Map(Keycode code)
+        {
+            if (code >= Keycode.A && code <= Keycode.Z)
+            {
+                return Keys.A + (code - Keycode.A);
+            }
+            if (code >= Keycode.Num0 && code <= Keycode.Num9)
+            {
+                return Keys.D0 + (code - Keycode.Num0);
+            }
+            return code switch
+            {
+                Keycode.Enter or Keycode.NumpadEnter => Keys.Enter,
+                Keycode.Escape or Keycode.Back => Keys.Escape,
+                Keycode.Del => Keys.Backspace,
+                Keycode.Space => Keys.Space,
+                Keycode.Tab => Keys.Tab,
+                _ => Keys.Unknown
+            };
         }
 
         public Scene? Scene => _loop.Scene;
@@ -146,9 +316,19 @@ namespace MphRead.Droid
             private bool _ended;
             private bool _dialogClickDown;
             private readonly Action _onPauseMenu;
+            /// <summary>
+            /// Show or hide the soft keyboard. An IME call belongs to the UI
+            /// thread and this is the GL one, so it is asked for rather than
+            /// done here -- the same arrangement <see cref="_onPauseMenu"/>
+            /// has, and for the same reason.
+            /// </summary>
+            private readonly Action<bool> _onSoftKeyboard;
             private bool _menuWasHeld;
             private bool _spectateCycleHeld;
+            private bool _spectateViewHeld;
             private bool _missileWasHeld;
+            private bool _chatWasHeld;
+            private bool _keyboardShown;
 
             private EGLDisplay? _display;
             private EGLConfig? _config;
@@ -162,9 +342,10 @@ namespace MphRead.Droid
 
             public RenderLoop(TouchControls controls, AndroidInput input,
                 Func<AndroidInput, Vector2i, Scene> build, Action onEnd, Action onLoaded,
-                Action<string> onError, Action onPauseMenu)
+                Action<string> onError, Action onPauseMenu, Action<bool> onSoftKeyboard)
             {
                 _onPauseMenu = onPauseMenu;
+                _onSoftKeyboard = onSoftKeyboard;
                 _controls = controls;
                 _input = input;
                 _build = build;
@@ -621,6 +802,20 @@ namespace MphRead.Droid
             /// </summary>
             private void ApplyInput()
             {
+                // Before the check below, and before the spectator's early
+                // return in CollectInput: somebody watching a match is in the
+                // position where talking to the people playing is most of what
+                // there is to do, and a player whose entity is not active yet
+                // has still asked for the keyboard if they pressed CHAT.
+                HandleChat();
+                // The one thing a pad cannot do. A dialog's OK button is
+                // pressed by *position* -- PlayerDialog.CheckButtonPressed
+                // reads Input.ClickX/Y, because on the DS it was a touch
+                // screen -- and GamepadInput deliberately drives no pointer.
+                // So the touch controls stay on screen through one whether or
+                // not a pad is in the player's hands, or the story stops at
+                // the first scan with nothing to press.
+                _controls.ForceVisible = GameState.DialogPause;
                 PlayerEntity main = PlayerEntity.Main;
                 if (main == null || !main.LoadFlags.TestFlag(LoadFlags.Active))
                 {
@@ -637,39 +832,140 @@ namespace MphRead.Droid
                 }
             }
 
+            /// <summary>
+            /// One frame of a spectator's screen.
+            ///
+            /// Nothing here goes near the player: <c>PlayerEntity.ProcessInput</c>
+            /// skips the local player's input entirely while spectating, and
+            /// the hunter the camera is on is somebody else's. What is left is
+            /// four things -- who to watch, which camera, the scoreboard, and,
+            /// on the free camera, driving it.
+            ///
+            /// The free camera is the room viewer's Roam camera (see
+            /// <c>Scene.SetFreeCamera</c>), and it is not driven through binds
+            /// at all: <c>Scene.OnKeyHeld</c> reads W/A/S/D, Space and V off
+            /// the keyboard and <c>Scene.OnMouseMove</c> turns it. This head
+            /// already owns a keyboard nobody is holding, so the stick presses
+            /// those keys and the aim drag is handed to the same method the
+            /// desktop's mouse move calls. The letters are a copy of that
+            /// method's own table and the one place they could go out of step
+            /// with it.
+            /// </summary>
+            private void Spectate()
+            {
+                bool freeCamera = Mods.SpectatorMode.FreeCamera;
+                _controls.SetSpectator(spectating: true, freeCamera);
+                // NEXT: the desktop's left click.
+                bool cycle = _controls.IsHeld(TouchAction.Shoot);
+                if (cycle && !_spectateCycleHeld)
+                {
+                    Mods.SpectatorMode.CycleNext();
+                }
+                _spectateCycleHeld = cycle;
+                // VIEW: the desktop's Space -- the map, or the player being
+                // watched. Without it the free camera was a one-way trip on
+                // this head: NEXT leaves it and nothing brought it back.
+                bool view = _controls.IsHeld(TouchAction.ScanVisor);
+                if (view && !_spectateViewHeld)
+                {
+                    Mods.SpectatorMode.ToggleView();
+                }
+                _spectateViewHeld = view;
+                bool menuHeld = _controls.IsHeld(TouchAction.Pause);
+                if (menuHeld && !_menuWasHeld)
+                {
+                    _onPauseMenu();
+                }
+                _menuWasHeld = menuHeld;
+                // The one control a spectator keeps. Read off the keyboard
+                // against the binding itself rather than through a player --
+                // see PlayerInput.ProcessInput and SpectatorMode.NoteScoreboard
+                // -- so the bind is what has to be pressed here, and the
+                // watched player's own controls would be the wrong set.
+                _input.Apply(Mods.InputSettings.Current.Pause,
+                    _controls.IsHeld(TouchAction.Scoreboard));
+                if (freeCamera)
+                {
+                    TouchControls.Dir dir = _controls.Direction;
+                    _input.ApplyKey(Keys.W, (dir & TouchControls.Dir.Up) != 0);
+                    _input.ApplyKey(Keys.S, (dir & TouchControls.Dir.Down) != 0);
+                    _input.ApplyKey(Keys.A, (dir & TouchControls.Dir.Left) != 0);
+                    _input.ApplyKey(Keys.D, (dir & TouchControls.Dir.Right) != 0);
+                    _input.ApplyKey(Keys.Space, _controls.IsHeld(TouchAction.Jump));
+                    _input.ApplyKey(Keys.V, _controls.IsHeld(TouchAction.Morph));
+                    (float X, float Y) look = _controls.TakeAimDelta();
+                    if (look.X != 0 || look.Y != 0)
+                    {
+                        // The same call the desktop's mouse move makes, in the
+                        // same units: OnMouseMove applies the player's own
+                        // sensitivity and inversion, so the free camera turns
+                        // the way their game does.
+                        Scene?.OnMouseMove(look.X * AimScale, look.Y * AimScale);
+                    }
+                }
+                else
+                {
+                    // Riding along behind somebody's eyes: their view, not
+                    // ours. Taken rather than left, so it cannot arrive as a
+                    // lurch on the frame the free camera comes back.
+                    _controls.TakeAimDelta();
+                }
+                _controls.TakeSwipeBoost();
+                _controls.TakeDoubleTapJump();
+                // Nothing to scan or boost from here, and FIRE has to be the
+                // button that cycles players rather than a SCAN left over from
+                // whatever the visor was doing.
+                _controls.ScanVisorActive = false;
+                _controls.SwipeBoostEnabled = false;
+            }
+
+            /// <summary>
+            /// The CHAT button, and the soft keyboard that has to follow it.
+            ///
+            /// A phone has no T to press, so the button is the whole of how
+            /// chat is opened without a keyboard attached -- and asking for
+            /// the keyboard is the other half, since an open prompt with
+            /// nothing to type on is worse than no prompt.
+            /// </summary>
+            private void HandleChat()
+            {
+                // Offline there is nobody to read a line, and in the story
+                // chat does not exist at all; the button goes away rather than
+                // sitting there doing nothing.
+                _controls.ChatEnabled = MphRead.Mods.Chat.ChatBox.Available
+                    && MphRead.Mods.Network.NetSession.Active;
+                // Start, on a pad, is the MENU button. Same call, same
+                // reason it is a request rather than a call: the menu is a
+                // view swap on the UI thread and this is the GL one.
+                if (MphRead.Mods.Input.GamepadInput.TakeMenuPress())
+                {
+                    _onPauseMenu();
+                }
+                bool chat = _controls.IsHeld(TouchAction.Chat);
+                if (chat && !_chatWasHeld)
+                {
+                    // Not a key, so nothing is about to arrive as a character.
+                    MphRead.Mods.Chat.ChatBox.Open(swallowOpeningChar: false);
+                }
+                _chatWasHeld = chat;
+                bool wanted = MphRead.Mods.Chat.ChatBox.Composing;
+                if (wanted != _keyboardShown)
+                {
+                    _keyboardShown = wanted;
+                    _onSoftKeyboard(wanted);
+                }
+            }
+
             private void CollectInput(PlayerEntity main)
             {
                 if (Mods.SpectatorMode.IsSpectating)
                 {
-                    // FIRE moves on to the next player, which is what a left
-                    // click does on the desktop (Renderer.OnMouseDown). The
-                    // menu button still opens the menu, and everything else is
-                    // ignored: PlayerEntity.ProcessInput skips the local
-                    // player's input entirely while this is on, so there is
-                    // nothing else for a thumb to do.
-                    bool cycle = _controls.IsHeld(TouchAction.Shoot);
-                    if (cycle && !_spectateCycleHeld)
-                    {
-                        Mods.SpectatorMode.CycleNext();
-                    }
-                    _spectateCycleHeld = cycle;
-                    bool menuHeld = _controls.IsHeld(TouchAction.Pause);
-                    if (menuHeld && !_menuWasHeld)
-                    {
-                        _onPauseMenu();
-                    }
-                    _menuWasHeld = menuHeld;
-                    _controls.TakeAimDelta();
-                    _controls.TakeSwipeBoost();
-                    _controls.TakeDoubleTapJump();
-                    // Nothing to scan or boost from here, and FIRE has to be
-                    // the button that cycles players rather than a SCAN left
-                    // over from whatever the visor was doing.
-                    _controls.ScanVisorActive = false;
-                    _controls.SwipeBoostEnabled = false;
+                    Spectate();
                     return;
                 }
+                _controls.SetSpectator(spectating: false, freeCamera: false);
                 _spectateCycleHeld = false;
+                _spectateViewHeld = false;
                 PlayerControls controls = main.Controls;
                 TouchControls.Dir dir = _controls.Direction;
                 bool up = (dir & TouchControls.Dir.Up) != 0;

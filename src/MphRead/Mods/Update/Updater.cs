@@ -56,7 +56,15 @@ namespace MphRead.Mods.Update
         /// and a launcher that will not draw until GitHub answers is a launcher
         /// that looks broken on a bad connection.
         /// </summary>
-        public static void CheckInBackground(Action<UpdateInfo> found)
+        /// <param name="done">
+        /// Called when the check has finished whatever it found, including
+        /// when it found nothing. A screen that only hears about a *new*
+        /// release can say "there is an update" and can never say "you are on
+        /// the latest", because the two answers are the same silence -- and
+        /// showing somebody a green "up to date" that only means "nobody has
+        /// asked yet" is the one wrong thing a version line can do.
+        /// </param>
+        public static void CheckInBackground(Action<UpdateInfo> found, Action? done = null)
         {
             if (Disabled)
             {
@@ -76,6 +84,10 @@ namespace MphRead.Mods.Update
                 {
                     // A background check is never worth an exception reaching
                     // anybody; LastReason already holds whatever went wrong.
+                }
+                finally
+                {
+                    done?.Invoke();
                 }
             });
         }

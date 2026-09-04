@@ -41,7 +41,15 @@ namespace MphRead.Mods.Network
         MasterList = 19,    // master -> launcher, one page of the answer
         HostRequest = 20,   // launcher -> master, "run a game for me"
         HostReply = 21,     // master -> launcher, the port it is on, or why not
-        Refused = 22        // server -> client, "not you, and here is why"
+        Refused = 22,       // server -> client, "not you, and here is why"
+        Chat = 23           // client -> server -> everyone else, one line of text
+        // 24 and 25 are left free for a voice channel. Speech is a stream of
+        // frames rather than a line of text -- it wants its own type, its own
+        // cadence and its own "who is talking" packet, and squeezing it into
+        // Chat's Kind byte would put an audio codec inside the packet the
+        // scoreboard reads. Nothing here needs to change when it arrives: the
+        // server relays what it recognises and drops what it does not, so a
+        // build that speaks voice and a build that does not can share a match.
     }
 
     /// <summary>
@@ -700,6 +708,122 @@ namespace MphRead.Mods.Network
                 length++;
             }
             return length == 0 ? string.Empty : Encoding.ASCII.GetString(src[..length]);
+        }
+    }
+
+    /// <summary>
+    /// One line somebody typed.
+    ///
+    /// Additive and ignorable in both directions, exactly like
+    /// <see cref="RefusedPacket"/>, so it needs no protocol bump: a server
+    /// built before this drops the type on the floor as it always did -- the
+    /// sender still sees its own line, nobody else does -- and a client built
+    /// before it is never sent one. What that buys is that chat can be
+    /// deployed without taking every match offline; what it costs is that
+    /// "nobody answered me" on an old server looks exactly like "nobody
+    /// answered me", which is why <c>ChatBox</c> says so once per session
+    /// when the server never echoes anything back.
+    ///
+    /// The slot and the name are written by the *server*, not trusted from
+    /// the sender: a client can put anything in these fields, and a line
+    /// attributed to somebody else is the whole of what a chat exploit is.
+    /// The client fills them in anyway, so a demo recorded against a server
+    /// that predates chat still replays with a name attached.
+    ///
+    /// Fixed size, like every other packet here. 114 bytes for something sent
+    /// a handful of times a match is not worth a length prefix, and a fixed
+    /// layout is the one that cannot be read short.
+    /// </summary>
+    public struct ChatPacket
+    {
+        public const int MaxNameBytes = 16;
+        /// <summary>
+        /// Room for a sentence and no more. The HUD draws these in the DS's
+        /// 256-unit space at half size, which is about 90 characters across
+        /// once a name and a colon are in front of them, so a longer message
+        /// could not be read even if it were carried.
+        /// </summary>
+        public const int MaxTextBytes = 96;
+        public const int Size = 1 + 1 + MaxNameBytes + MaxTextBytes;
+
+        /// <summary>Everyone in the match.</summary>
+        public const byte KindSay = 0;
+        /// <summary>
+        /// One team. Reserved rather than implemented: the modes that have
+        /// teams are here, but nothing yet asks the server which side a slot
+        /// is on, so the server relays this as <see cref="KindSay"/> instead
+        /// of quietly delivering a team line to the other team.
+        /// </summary>
+        public const byte KindTeam = 1;
+        /// <summary>The server itself talking -- joins, leaves, refusals.</summary>
+        public const byte KindSystem = 2;
+
+        public byte Slot;
+        public byte Kind;
+        public string Name;
+        public string Text;
+
+        public void Write(Span<byte> dest)
+        {
+            dest[..Size].Clear();
+            dest[0] = Slot;
+            dest[1] = Kind;
+            WriteAscii(dest.Slice(2, MaxNameBytes), Name);
+            WriteAscii(dest.Slice(2 + MaxNameBytes, MaxTextBytes), Text);
+        }
+
+        public static ChatPacket Read(ReadOnlySpan<byte> src)
+        {
+            return new ChatPacket
+            {
+                Slot = src[0],
+                Kind = src[1],
+                Name = ReadAscii(src.Slice(2, MaxNameBytes)),
+                Text = ReadAscii(src.Slice(2 + MaxNameBytes, MaxTextBytes))
+            };
+        }
+
+        /// <summary>
+        /// The same substitution <see cref="RosterPacket"/> makes, and for the
+        /// same reason: the in-game font is ASCII, so a byte it cannot draw
+        /// has to be replaced here rather than discovered by the HUD. It also
+        /// means a hostile client cannot put a control character on anybody
+        /// else's screen -- everything below 32 becomes a question mark on the
+        /// way in as well as on the way out.
+        /// </summary>
+        internal static void WriteAscii(Span<byte> dest, string? value)
+        {
+            dest.Clear();
+            if (String.IsNullOrEmpty(value))
+            {
+                return;
+            }
+            int count = Math.Min(value.Length, dest.Length);
+            for (int i = 0; i < count; i++)
+            {
+                char c = value[i];
+                dest[i] = (byte)(c < 32 || c > 126 ? '?' : c);
+            }
+        }
+
+        internal static string ReadAscii(ReadOnlySpan<byte> src)
+        {
+            int length = 0;
+            while (length < src.Length && src[length] != 0)
+            {
+                length++;
+            }
+            if (length == 0)
+            {
+                return String.Empty;
+            }
+            Span<char> chars = stackalloc char[length];
+            for (int i = 0; i < length; i++)
+            {
+                byte b = src[i];
+                chars[i] = b < 32 || b > 126 ? '?' : (char)b;
+            }
+            return new string(chars);
         }
     }
 

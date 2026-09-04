@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using MphRead.Entities;
 
@@ -210,6 +211,13 @@ namespace MphRead.Mods
         /// spectating was time not playing -- picking the match back up with
         /// whatever score was left standing would credit or fault a period
         /// nothing was actually being played.
+        ///
+        /// **It never resets the score upwards.** A score below zero is a
+        /// penalty -- this game subtracts a point for killing yourself -- and
+        /// clearing it by spectating for a second and rejoining would make
+        /// the pause menu the cheapest way out of one. So a negative score is
+        /// left exactly where it was, and only a positive one goes back to
+        /// zero.
         /// </summary>
         public static void Rejoin()
         {
@@ -227,7 +235,7 @@ namespace MphRead.Mods
             if (localSlot >= 0 && localSlot < GameState.Points.Length)
             {
                 PlayerEntity.Players[localSlot].ModSetSpectating(false);
-                GameState.Points[localSlot] = 0;
+                GameState.Points[localSlot] = Math.Min(0, GameState.Points[localSlot]);
                 GameState.Kills[localSlot] = 0;
                 GameState.Deaths[localSlot] = 0;
             }

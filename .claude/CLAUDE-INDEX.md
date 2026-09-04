@@ -11,7 +11,9 @@ loading everything.
 - launcher/LAUNCHER-DESIGN.md — UI components, logo/assets, pitfalls
 - launcher/LAUNCHER-SETTINGS.md — settings window layout and toggles
 - launcher/LAUNCHER-FIRSTRUN.md — extraction flow and progress bar
+- GAMEPAD.md — controllers on the desktop and Android: the layout, the feel, and how to test one without owning one
 - multiplayer/NETWORK-BROWSER.md — server discovery, directory, hosting
+- multiplayer/NETWORK-CHAT.md — the in-game chat line: the packet, the relay's rules, the input traps
 - multiplayer/NETWORK-DEMOS.md — recording and replaying a match: format, clocking, the gaps
 - multiplayer/NETWORK-MATCHEND.md — match end, rotation, the double-counted-kill bug
 - multiplayer/NETWORK-DIAGNOSTICS.md — the full damage-bug postmortem, traps, diagnostics

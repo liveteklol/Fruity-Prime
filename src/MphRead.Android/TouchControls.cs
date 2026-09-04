@@ -41,13 +41,36 @@ namespace MphRead.Droid
         /// being that when it became the way to the app's own menu, and it is
         /// still worth reaching.
         /// </summary>
-        Scoreboard
+        Scoreboard,
+        /// <summary>
+        /// Opens the chat line and asks for the soft keyboard. The desktop's
+        /// T, which a phone has no way to press.
+        ///
+        /// Hidden unless a networked match is running: offline there is nobody
+        /// to read it, and in the story it does not exist at all.
+        /// </summary>
+        Chat
     }
 
     internal sealed class TouchButton
     {
         public TouchAction Action { get; }
-        public string Label { get; }
+
+        /// <summary>
+        /// What is written on it *now*. Not fixed: a spectator's screen is
+        /// the same dozen circles doing different jobs, and a button that
+        /// still says FIRE while it cycles players is a button nobody
+        /// presses. See <c>TouchControls.ApplyLayoutLocked</c>.
+        /// </summary>
+        public string Label { get; private set; }
+
+        private readonly string _defaultLabel;
+
+        /// <summary>Rename it, or pass null to put its own name back.</summary>
+        public void Relabel(string? label)
+        {
+            Label = label ?? _defaultLabel;
+        }
         public float CentreX { get; set; }
         public float CentreY { get; set; }
         public float Radius { get; set; }
@@ -61,6 +84,7 @@ namespace MphRead.Droid
         {
             Action = action;
             Label = label;
+            _defaultLabel = label;
         }
 
         public bool Contains(float x, float y)
@@ -119,7 +143,8 @@ namespace MphRead.Droid
             new TouchButton(TouchAction.WeaponMenu, "WEAPON"),
             new TouchButton(TouchAction.Zoom, "ZOOM"),
             new TouchButton(TouchAction.Pause, "MENU"),
-            new TouchButton(TouchAction.Scoreboard, "SCORE")
+            new TouchButton(TouchAction.Scoreboard, "SCORE"),
+            new TouchButton(TouchAction.Chat, "CHAT") { Visible = false }
         };
 
         public float Width { get; private set; }
@@ -135,6 +160,12 @@ namespace MphRead.Droid
         public float StickKnobY { get; private set; }
         public float StickRadius { get; private set; }
         public float StickKnobRadius { get; private set; }
+
+        // The controls step aside for a pad and come back at the first
+        // touch. See NotePadActivity.
+        private bool _padDriving;
+        private bool _forceVisible;
+        private readonly HashSet<int> _swallowed = new HashSet<int>();
 
         private readonly HashSet<TouchAction> _held = new HashSet<TouchAction>();
         private readonly Dictionary<int, TouchAction> _buttonPointers = new Dictionary<int, TouchAction>();
@@ -232,39 +263,277 @@ namespace MphRead.Droid
             }
             set
             {
-                bool changed = false;
-                lock (_lock)
+                Change(() =>
                 {
-                    if (_scanVisorActive != value)
+                    if (_scanVisorActive == value)
                     {
-                        _scanVisorActive = value;
-                        changed = true;
-                        foreach (TouchButton button in _buttons)
-                        {
-                            if (button.Action == TouchAction.Scan)
-                            {
-                                button.Visible = value;
-                            }
-                            else if (button.Action == TouchAction.Shoot)
-                            {
-                                button.Visible = !value;
-                            }
-                        }
+                        return false;
                     }
-                }
-                if (changed)
-                {
-                    Invalidated?.Invoke();
-                }
+                    _scanVisorActive = value;
+                    return true;
+                });
             }
         }
         private bool _scanVisorActive;
+
+        /// <summary>
+        /// Whether the CHAT button is on screen. Set once a frame from the
+        /// game loop, which is the only thing that knows whether a networked
+        /// match is running.
+        /// </summary>
+        public bool ChatEnabled
+        {
+            get
+            {
+                lock (_lock)
+                {
+                    return _chatEnabled;
+                }
+            }
+            set
+            {
+                Change(() =>
+                {
+                    if (_chatEnabled == value)
+                    {
+                        return false;
+                    }
+                    _chatEnabled = value;
+                    return true;
+                });
+            }
+        }
+        private bool _chatEnabled;
+
+        /// <summary>
+        /// The screen a spectator gets: the same dozen circles, most of them
+        /// gone and the rest doing something else.
+        ///
+        /// Set once a frame from the game loop, which is the only thing that
+        /// knows either of these. Both at once rather than two properties,
+        /// because the layout depends on the pair and a screen laid out twice
+        /// from two half-answers flickers between them.
+        /// </summary>
+        public void SetSpectator(bool spectating, bool freeCamera)
+        {
+            Change(() =>
+            {
+                if (_spectating == spectating && _spectatorFreeCam == freeCamera)
+                {
+                    return false;
+                }
+                _spectating = spectating;
+                _spectatorFreeCam = freeCamera;
+                return true;
+            });
+        }
+
+        private bool _spectating;
+        private bool _spectatorFreeCam;
+
+        /// <summary>
+        /// Apply a change to what the screen shows, and repaint if it moved.
+        ///
+        /// The three callers used to each reach into <see cref="_buttons"/>
+        /// and set the visibility of the ones they knew about, which only
+        /// works while no two of them care about the same button. Spectating
+        /// cares about nine of them, so the layout is worked out in one place
+        /// now (<see cref="ApplyLayoutLocked"/>) from all of the state at
+        /// once, and these only say what changed.
+        ///
+        /// The mutation reports whether it moved anything, and does so from
+        /// inside the lock: these are set once a frame from the game thread
+        /// and read on the UI thread, so a comparison made outside it is a
+        /// comparison against a value that may already be stale.
+        /// </summary>
+        private void Change(Func<bool> mutate)
+        {
+            lock (_lock)
+            {
+                if (!mutate())
+                {
+                    return;
+                }
+                ApplyLayoutLocked();
+            }
+            Invalidated?.Invoke();
+        }
+
+        /// <summary>
+        /// Which buttons are on the screen and what they say, from every
+        /// piece of state that decides it. Called with the lock held.
+        /// </summary>
+        private void ApplyLayoutLocked()
+        {
+            foreach (TouchButton button in _buttons)
+            {
+                bool visible;
+                string? label = null;
+                if (_spectating)
+                {
+                    // Nothing a spectator presses does anything in the world:
+                    // PlayerEntity.ProcessInput skips the local player while
+                    // this is on. So the buttons that would shoot, scan, pick
+                    // a weapon or zoom go away, and the ones that are left are
+                    // renamed to what they now do.
+                    switch (button.Action)
+                    {
+                    case TouchAction.Shoot:
+                        // The desktop's left click.
+                        visible = true;
+                        label = "NEXT";
+                        break;
+                    case TouchAction.ScanVisor:
+                        // The desktop's Space: the map, or the player you were
+                        // watching.
+                        visible = true;
+                        label = "VIEW";
+                        break;
+                    case TouchAction.Jump:
+                    case TouchAction.Morph:
+                        // Up and down on the free camera, and nothing at all
+                        // riding along behind somebody's eyes -- so they are
+                        // only there on the camera that can use them.
+                        visible = _spectatorFreeCam;
+                        label = button.Action == TouchAction.Jump ? "UP" : "DOWN";
+                        break;
+                    case TouchAction.Scoreboard:
+                    case TouchAction.Pause:
+                        visible = true;
+                        break;
+                    case TouchAction.Chat:
+                        visible = _chatEnabled;
+                        break;
+                    default:
+                        visible = false;
+                        break;
+                    }
+                }
+                else
+                {
+                    visible = button.Action switch
+                    {
+                        // FIRE and SCAN share a place and take turns: the
+                        // visor cannot shoot and the gun cannot scan.
+                        TouchAction.Scan => _scanVisorActive,
+                        TouchAction.Shoot => !_scanVisorActive,
+                        TouchAction.Chat => _chatEnabled,
+                        _ => true
+                    };
+                }
+                button.Visible = visible;
+                button.Relabel(label);
+            }
+        }
 
         /// <summary>
         /// Asked to repaint, for the changes that do not come from a touch.
         /// The view sets this; nothing here knows what a view is.
         /// </summary>
         public Action? Invalidated { get; set; }
+
+        /// <summary>
+        /// Whether the controls are off the screen because a pad is being
+        /// held. Read by the view, which draws nothing while it is true.
+        /// </summary>
+        public bool PadDriving
+        {
+            get
+            {
+                lock (_lock)
+                {
+                    return HiddenLocked;
+                }
+            }
+        }
+
+        /// <summary>Called with the lock held.</summary>
+        private bool HiddenLocked => _padDriving && !_forceVisible;
+
+        /// <summary>
+        /// Keep the controls on screen whatever the pad is doing.
+        ///
+        /// Set once a frame by the game loop, for the one thing a pad cannot
+        /// do: a dialog box is dismissed by pressing its OK button, which is
+        /// read as a *position* on what used to be a touch screen (see
+        /// PlayerDialog.CheckButtonPressed), and GamepadInput deliberately
+        /// drives no pointer. Hiding the controls through one of those would
+        /// be a story that cannot be continued.
+        ///
+        /// A flag the loop keeps setting rather than a one-shot "show
+        /// yourself", because a thumb still on the stick would otherwise put
+        /// them away again on the very next motion event and the box would
+        /// flicker for as long as the pad was held.
+        /// </summary>
+        public bool ForceVisible
+        {
+            get
+            {
+                lock (_lock)
+                {
+                    return _forceVisible;
+                }
+            }
+            set
+            {
+                bool before;
+                bool after;
+                lock (_lock)
+                {
+                    before = HiddenLocked;
+                    _forceVisible = value;
+                    after = HiddenLocked;
+                }
+                Settle(before, after);
+            }
+        }
+
+        /// <summary>
+        /// A pad button or stick moved: put the controls away.
+        ///
+        /// There is no setting behind this and there was one -- "use a
+        /// connected gamepad". Being *connected* was never the question a
+        /// player was asking: a pad paired with the phone for something else
+        /// is still paired while they play with their thumbs, so hiding on
+        /// connection would take the controls away from someone who never
+        /// picked the pad up. What is being watched here is the pad actually
+        /// being used, and the answer is reversed by the next finger on the
+        /// glass.
+        /// </summary>
+        public void NotePadActivity()
+        {
+            bool before;
+            bool after;
+            lock (_lock)
+            {
+                before = HiddenLocked;
+                _padDriving = true;
+                after = HiddenLocked;
+            }
+            Settle(before, after);
+        }
+
+        /// <summary>
+        /// Repaint when the controls appeared or went away, and let go of
+        /// everything on the way out.
+        ///
+        /// The releasing is not tidiness: a thumb resting on FIRE as the
+        /// player picks the pad up would be held down for ever otherwise,
+        /// since the finger's release lands on a control that is no longer
+        /// listening.
+        /// </summary>
+        private void Settle(bool wasHidden, bool isHidden)
+        {
+            if (wasHidden == isHidden)
+            {
+                return;
+            }
+            if (isHidden)
+            {
+                ReleaseEverything();
+            }
+            Invalidated?.Invoke();
+        }
 
         /// <summary>Lay the controls out for a viewport of this size.</summary>
         public void Layout(float width, float height, float density)
@@ -292,6 +561,10 @@ namespace MphRead.Droid
                 Place(TouchAction.Zoom, width - 0.33f * h, 0.12f * h, 0.065f * h);
                 Place(TouchAction.Pause, 0.11f * h, 0.12f * h, 0.060f * h);
                 Place(TouchAction.Scoreboard, 0.28f * h, 0.12f * h, 0.060f * h);
+                // Third along the top row, past MENU and SCORE. Low enough to
+                // clear the chat log itself, which grows downward from the top
+                // of the HUD's own space and is inset to miss MENU already.
+                Place(TouchAction.Chat, 0.45f * h, 0.12f * h, 0.060f * h);
             }
         }
 
@@ -399,53 +672,81 @@ namespace MphRead.Droid
 
         public void PointerDown(int pointerId, float x, float y)
         {
+            bool revealed = false;
             lock (_lock)
             {
-                foreach (TouchButton button in _buttons)
+                bool hidden = HiddenLocked;
+                // A finger on the glass is the player choosing the
+                // touchscreen again, whether or not the controls had gone.
+                _padDriving = false;
+                if (hidden)
                 {
-                    if (button.Visible && button.Contains(x, y))
-                    {
-                        _buttonPointers[pointerId] = button.Action;
-                        _held.Add(button.Action);
-                        // Both of the buttons that live under the aiming
-                        // thumb drag the aim as well: keeping a target
-                        // centred matters as much while scanning it as it
-                        // does while shooting at it.
-                        if (button.Action == TouchAction.Shoot || button.Action == TouchAction.Scan)
-                        {
-                            _fireAimPointer = pointerId;
-                            _fireAimLastX = x;
-                            _fireAimLastY = y;
-                            _fireAimSwipe.Reset();
-                        }
-                        return;
-                    }
+                    // The touch that brings them back does nothing else. They
+                    // were not on screen when the finger went down, so
+                    // wherever it landed was not a choice -- and the first
+                    // thing a thumb reaches for after putting a pad down is
+                    // the middle of the screen, which is FIRE's half.
+                    _swallowed.Add(pointerId);
+                    revealed = true;
                 }
-                if (!PointerIsAbsolute && x < Width / 2 && _stickPointer == -1)
+                else
                 {
-                    _stickPointer = pointerId;
-                    StickActive = true;
-                    StickX = x;
-                    StickY = y;
-                    StickKnobX = x;
-                    StickKnobY = y;
-                    _direction = Dir.None;
+                    PointerDownLocked(pointerId, x, y);
+                }
+            }
+            if (revealed)
+            {
+                Invalidated?.Invoke();
+            }
+        }
+
+        /// <summary>Called with the lock already held.</summary>
+        private void PointerDownLocked(int pointerId, float x, float y)
+        {
+            foreach (TouchButton button in _buttons)
+            {
+                if (button.Visible && button.Contains(x, y))
+                {
+                    _buttonPointers[pointerId] = button.Action;
+                    _held.Add(button.Action);
+                    // Both of the buttons that live under the aiming
+                    // thumb drag the aim as well: keeping a target
+                    // centred matters as much while scanning it as it
+                    // does while shooting at it.
+                    if (button.Action == TouchAction.Shoot || button.Action == TouchAction.Scan)
+                    {
+                        _fireAimPointer = pointerId;
+                        _fireAimLastX = x;
+                        _fireAimLastY = y;
+                        _fireAimSwipe.Reset();
+                    }
                     return;
                 }
-                if (_aimPointer == -1)
-                {
-                    _aimPointer = pointerId;
-                    _aimLastX = x;
-                    _aimLastY = y;
-                    _aimAbsX = x;
-                    _aimAbsY = y;
-                    _aimDown = true;
-                    _aimSwipe.Reset();
-                    _tapDownTime = Environment.TickCount64;
-                    _tapDownX = x;
-                    _tapDownY = y;
-                    _tapMoved = false;
-                }
+            }
+            if (!PointerIsAbsolute && x < Width / 2 && _stickPointer == -1)
+            {
+                _stickPointer = pointerId;
+                StickActive = true;
+                StickX = x;
+                StickY = y;
+                StickKnobX = x;
+                StickKnobY = y;
+                _direction = Dir.None;
+                return;
+            }
+            if (_aimPointer == -1)
+            {
+                _aimPointer = pointerId;
+                _aimLastX = x;
+                _aimLastY = y;
+                _aimAbsX = x;
+                _aimAbsY = y;
+                _aimDown = true;
+                _aimSwipe.Reset();
+                _tapDownTime = Environment.TickCount64;
+                _tapDownX = x;
+                _tapDownY = y;
+                _tapMoved = false;
             }
         }
 
@@ -555,6 +856,10 @@ namespace MphRead.Droid
         {
             lock (_lock)
             {
+                if (_swallowed.Contains(pointerId))
+                {
+                    return;
+                }
                 if (pointerId == _stickPointer)
                 {
                     float dx = x - StickX;
@@ -657,6 +962,10 @@ namespace MphRead.Droid
         {
             lock (_lock)
             {
+                if (_swallowed.Remove(pointerId))
+                {
+                    return;
+                }
                 if (pointerId == _stickPointer)
                 {
                     _stickPointer = -1;
@@ -709,6 +1018,7 @@ namespace MphRead.Droid
             lock (_lock)
             {
                 _buttonPointers.Clear();
+                _swallowed.Clear();
                 _held.Clear();
                 _stickPointer = -1;
                 _aimPointer = -1;

@@ -85,6 +85,9 @@ namespace MphRead.Mods.Launcher.Gui
         private ToggleRow _invertY = null!;
         private ToggleRow _invertX = null!;
         private ToggleRow _scrollAllWeapons = null!;
+        private SliderRow _gamepadLook = null!;
+        private SliderRow _gamepadDeadZone = null!;
+        private ToggleRow _gamepadInvertY = null!;
         private FieldRow _pointGoal = null!;
         private FieldRow _timeLimit = null!;
         private ChoiceRow _damageRow = null!;
@@ -471,6 +474,31 @@ namespace MphRead.Mods.Launcher.Gui
             _scrollAllWeapons = Add(page, new ToggleRow("Wheel cycles every weapon",
                 InputSettings.ScrollAllWeapons));
 
+            // Its own section rather than more rows under "Mouse": a pad has
+            // its own sensitivity, and somebody who inverts one of the two
+            // very often does not invert the other.
+            Heading(page, "Gamepad");
+            // No "use a connected gamepad" toggle. A pad that is not being
+            // held changes nothing on its own -- see GamepadInput.Active --
+            // and on a phone the touch controls now step aside for a pad by
+            // themselves and come back at the first touch, so the one thing
+            // the toggle was ever asked to do is done without asking.
+            _gamepadLook = Add(page, new SliderRow("Look sensitivity",
+                LookToSlider(InputSettings.GamepadLookSensitivity),
+                v => $"{SliderToLook(v).ToString("0.00", CultureInfo.InvariantCulture)}x"));
+            _gamepadDeadZone = Add(page, new SliderRow("Stick dead zone",
+                DeadZoneToSlider(InputSettings.GamepadDeadZone),
+                v => $"{SliderToDeadZone(v).ToString("0.00", CultureInfo.InvariantCulture)}"));
+            _gamepadInvertY = Add(page, new ToggleRow("Invert vertical aim (stick)",
+                InputSettings.GamepadInvertY));
+
+            Heading(page, "Gamepad buttons");
+            var padRows = new List<PadRow>();
+            foreach (Mods.Input.PadAction action in Mods.Input.PadBindings.Actions)
+            {
+                padRows.Add(Add(page, new PadRow(action)));
+            }
+
             Heading(page, "Keys");
             var rows = new List<KeyRow>();
             foreach (PropertyInfo property in InputSettings.Bindings)
@@ -490,6 +518,15 @@ namespace MphRead.Mods.Launcher.Gui
                 _invertY.On = InputSettings.InvertMouseY;
                 _invertX.On = InputSettings.InvertMouseX;
                 _scrollAllWeapons.On = InputSettings.ScrollAllWeapons;
+                _gamepadLook.Value = LookToSlider(InputSettings.GamepadLookSensitivity);
+                _gamepadDeadZone.Value = DeadZoneToSlider(InputSettings.GamepadDeadZone);
+                _gamepadInvertY.On = InputSettings.GamepadInvertY;
+                // InputSettings.Reset puts the pad's buttons back too, so
+                // these only have to be redrawn.
+                foreach (PadRow row in padRows)
+                {
+                    row.InvalidateVisual();
+                }
                 foreach (KeyRow row in rows)
                 {
                     row.InvalidateVisual();
@@ -506,6 +543,31 @@ namespace MphRead.Mods.Launcher.Gui
         private static float SliderToSensitivity(int value)
         {
             return 0.1f + value / 100f * 2.9f;
+        }
+
+        // The pad's look runs 0.25x to 3x, which is 50 to 630 degrees a second
+        // -- slower than anybody plays at one end and faster at the other.
+        private static int LookToSlider(float look)
+        {
+            return Math.Clamp((int)Math.Round((look - 0.25f) / 2.75f * 100), 0, 100);
+        }
+
+        private static float SliderToLook(int value)
+        {
+            return 0.25f + value / 100f * 2.75f;
+        }
+
+        // Up to half the stick's travel. Past that a pad is broken rather than
+        // worn, and a dead zone that large makes the game feel worse than the
+        // drift it was hiding.
+        private static int DeadZoneToSlider(float dead)
+        {
+            return Math.Clamp((int)Math.Round(dead / 0.5f * 100), 0, 100);
+        }
+
+        private static float SliderToDeadZone(int value)
+        {
+            return value / 100f * 0.5f;
         }
 
         // ---------------------------------------------------------- match rules
@@ -675,6 +737,9 @@ namespace MphRead.Mods.Launcher.Gui
             InputSettings.InvertMouseY = _invertY.On;
             InputSettings.InvertMouseX = _invertX.On;
             InputSettings.ScrollAllWeapons = _scrollAllWeapons.On;
+            InputSettings.GamepadLookSensitivity = SliderToLook(_gamepadLook.Value);
+            InputSettings.GamepadDeadZone = SliderToDeadZone(_gamepadDeadZone.Value);
+            InputSettings.GamepadInvertY = _gamepadInvertY.On;
             InputSettings.Save();
             // The players in the match already have their own copies of these.
             InputSettings.ApplyToPlayers();

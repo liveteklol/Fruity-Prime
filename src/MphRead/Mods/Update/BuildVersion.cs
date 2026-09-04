@@ -34,8 +34,23 @@ namespace MphRead.Mods.Update
 
         private static Version? Read()
         {
-            string? text = Assembly.GetEntryAssembly()
-                ?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+            // The entry assembly first, and this one when there is no entry
+            // assembly at all -- which is every Android launch.
+            //
+            // `Assembly.GetEntryAssembly` answers null there and it is not a
+            // fault: Android starts an *activity*, so the process has no
+            // managed entry point for the runtime to name. Every APK
+            // therefore called itself "a local build", release or not, and the
+            // version line could never be anything but grey. This assembly is
+            // the right answer on that platform for a reason worth writing
+            // down: the Android head compiles MphRead's own sources into
+            // itself (`<Compile Include="..\MphRead\**\*.cs" />`) rather than
+            // referencing the project, so the file this class lives in *is*
+            // part of the APK's assembly, and that assembly is what
+            // release.yml stamps.
+            Assembly? assembly = Assembly.GetEntryAssembly() ?? typeof(BuildVersion).Assembly;
+            string? text = assembly
+                .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
                 ?.InformationalVersion;
             if (text == null)
             {

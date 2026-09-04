@@ -140,8 +140,10 @@ namespace MphRead.Mods.Launcher.Gui
             _updateBadge.VerticalAlignment = VerticalAlignment.Bottom;
             _updateBadge.Margin = new Thickness(24, 0, 24, 22);
             _layout.Children.Add(_splash);
-            // After the splash and in the same cell, so it draws on top of it.
+            // After the splash and in the same cell, so they draw on top of
+            // it: the badge in one bottom corner, the version in the other.
             _layout.Children.Add(_updateBadge);
+            _layout.Children.Add(BuildVersionLine());
             _layout.Children.Add(_panel);
             ApplyLayout(narrow: false);
 
@@ -172,8 +174,9 @@ namespace MphRead.Mods.Launcher.Gui
                 // In the background, and never blocking the window: a launcher
                 // that will not draw until GitHub answers looks broken on a bad
                 // connection.
-                Update.Updater.CheckInBackground(update =>
-                    Dispatcher.UIThread.Post(() => ShowUpdate(update)));
+                Update.Updater.CheckInBackground(
+                    update => Dispatcher.UIThread.Post(() => ShowUpdate(update)),
+                    () => Dispatcher.UIThread.Post(RefreshVersionLine));
             }
             _ = CatchUpPreviews();
         }
@@ -243,6 +246,8 @@ namespace MphRead.Mods.Launcher.Gui
                 Grid.SetRow(_splash, 0);
                 Grid.SetColumn(_updateBadge, 0);
                 Grid.SetRow(_updateBadge, 0);
+                Grid.SetColumn(_versionBox, 0);
+                Grid.SetRow(_versionBox, 0);
                 Grid.SetColumn(_panel, 0);
                 Grid.SetRow(_panel, 1);
                 return;
@@ -255,6 +260,8 @@ namespace MphRead.Mods.Launcher.Gui
             Grid.SetRow(_splash, 0);
             Grid.SetColumn(_updateBadge, 0);
             Grid.SetRow(_updateBadge, 0);
+            Grid.SetColumn(_versionBox, 0);
+            Grid.SetRow(_versionBox, 0);
             Grid.SetColumn(_panel, 1);
             Grid.SetRow(_panel, 0);
         }
@@ -337,6 +344,10 @@ namespace MphRead.Mods.Launcher.Gui
         {
             _finished = false;
             Plan = default;
+            // Android keeps one of these for the life of the app, so this is
+            // where a launch begins there -- see GuiLauncher for why the roll
+            // behind "Random" is held for exactly one.
+            Hunters.Reroll();
             LauncherPrefs.Load();
             RefreshPrefRows();
             RefreshRooms();
@@ -465,6 +476,22 @@ namespace MphRead.Mods.Launcher.Gui
             _cards.Children.Clear();
             _cards.Children.Add(card);
             _current = card;
+            // The front card only. Which build this is is not a question
+            // anybody has while choosing a server or a hunter, and the corner
+            // it sits in is where those cards put their own things.
+            if (_versionBox != null)
+            {
+                bool home = ReferenceEquals(card, _homeCard);
+                _versionBox.IsVisible = home;
+                if (home && _updateBadge.IsVisible)
+                {
+                    _updateBadge.IsVisible = false;
+                }
+                else if (!home && Update.Updater.Available != null)
+                {
+                    _updateBadge.IsVisible = true;
+                }
+            }
             if (!_narrow)
             {
                 _panel.Width = PanelWidth();
@@ -532,36 +559,272 @@ namespace MphRead.Mods.Launcher.Gui
             card.Children.Add(_demoEntry);
             card.Children.Add(settings);
             card.Children.Add(quit);
+            RefreshVersionLine();
             return card;
+        }
+
+        private TextBlock _versionLine = null!;
+        private Border _versionBox = null!;
+
+        /// <summary>
+        /// The build, in the bottom corner of the picture -- and, when there
+        /// is one to take, the update.
+        ///
+        /// Over the splash rather than in the menu, for the update badge's own
+        /// reason: knowing which build you are on is not one of the things
+        /// somebody came to the launcher to do, so it does not belong in a
+        /// list of them. Only on the front card, though, unlike the badge --
+        /// reading a version number while picking a server or a hunter is
+        /// nobody's question.
+        ///
+        /// It is the whole button rather than a label with one beside it. The
+        /// state and the action are the same fact here: green is "nothing to
+        /// do" and amber is "press this", and two controls saying that would
+        /// be one of them redundant in either state.
+        ///
+        /// A panel behind it because a splash is a map preview and a map
+        /// preview is whatever colour that room is. Eleven points of dim grey
+        /// on an unknown picture is a line that is legible half the time.
+        /// </summary>
+        private Border BuildVersionLine()
+        {
+            _versionLine = new TextBlock
+            {
+                Text = VersionNumber(),
+                FontSize = 11,
+                Foreground = GuiTheme.TextDimBrush
+            };
+            _versionBox = new Border
+            {
+                Background = GuiTheme.ScrimBrush,
+                BorderBrush = GuiTheme.EdgeBrush,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(9, 4, 9, 4),
+                Margin = new Thickness(0, 0, 24, 22),
+                HorizontalAlignment = HorizontalAlignment.Right,
+                VerticalAlignment = VerticalAlignment.Bottom,
+                IsVisible = false,
+                Child = _versionLine
+            };
+            _versionBox.PointerPressed += (_, e) =>
+            {
+                if (_updatable)
+                {
+                    e.Handled = true;
+                    UpdateNow();
+                }
+            };
+            return _versionBox;
+        }
+
+        /// <summary>
+        /// "1.2.3", or what to say instead when this build is not a release.
+        ///
+        /// Not <c>BuildVersion.Display</c>, which puts a v in front: this is a
+        /// corner of a picture rather than a sentence, and the v is a letter
+        /// that carries nothing.
+        /// </summary>
+        private static string VersionNumber()
+        {
+            Version? current = BuildVersion.Current;
+            return current == null ? "a local build" : current.ToString(3);
+        }
+
+        /// <summary>Whether pressing the corner would do anything.</summary>
+        private bool _updatable;
+
+        /// <summary>What the corner says, and in what colour.</summary>
+        private void SayVersion(string text, Color colour, bool pressable = false)
+        {
+            if (_versionLine == null)
+            {
+                return;
+            }
+            _versionLine.Text = text;
+            _versionLine.Foreground = new SolidColorBrush(colour);
+            _updatable = pressable;
+            _versionBox.Cursor = new Cursor(
+                pressable ? StandardCursorType.Hand : StandardCursorType.Arrow);
+        }
+
+        /// <summary>
+        /// What the version line says and what colour it is.
+        ///
+        /// Three states, not two. Green is "this is the published build";
+        /// amber is "there is a newer one", which is the only state that also
+        /// puts a button above it; and dim is everything else -- a local
+        /// build, or a check that has not answered yet or could not. Painting
+        /// "no answer" green would be the one wrong thing this can do: a
+        /// server refuses a client on a different build at Hello, so being
+        /// told you are current when nobody has checked is worse than being
+        /// told nothing.
+        /// </summary>
+        private void RefreshVersionLine()
+        {
+            if (_versionLine == null)
+            {
+                return;
+            }
+            if (_updating)
+            {
+                // Mid-download; FetchAndInstall owns the line until it is done.
+                return;
+            }
+            string number = VersionNumber();
+            if (Update.Updater.Available != null)
+            {
+                SayVersion($"{number} : Update available ! Click here to update",
+                    GuiTheme.Warm, pressable: true);
+                return;
+            }
+            // Dim, not green, for a local build and for a check that has not
+            // answered -- and those are two different things from "up to
+            // date". A server refuses a client on a different build at Hello,
+            // so being told you are current when nobody has asked is worse
+            // than being told nothing.
+            SayVersion(number, BuildVersion.IsRelease && Update.Updater.Checked
+                ? GuiTheme.Good
+                : GuiTheme.TextDim);
         }
 
         private void ShowUpdate(UpdateInfo update)
         {
+            // The badge stays for every card *but* the front one, which is
+            // where the version corner does the same job in the other corner
+            // of the same picture. Keeping it elsewhere is what it was put
+            // over the splash for: a fresh install sits on the game-files
+            // card, which is exactly where an out-of-date copy is most likely
+            // to be, and that card has no version corner.
             _updateBadge.Show(update.AssetName.Length > 0
                 ? $"{update.Tag} is out -- get {update.AssetName}"
                 : $"{update.Tag} is out");
+            _updateBadge.IsVisible = !ReferenceEquals(_current, _homeCard);
             // The picture's own caption moves up out of the way.
             _splash.BottomInset = _updateBadge.DesiredSize.Height + 22;
+            RefreshVersionLine();
         }
 
         /// <summary>
-        /// Open the release page. The program does not install anything: this
-        /// hands the person the page and they replace the files themselves.
+        /// Take the update.
+        ///
+        /// On the desktop that still means opening the release page: a release
+        /// is an archive somebody unpacks over their own copy, and a program
+        /// that rewrote its own files while running would have to solve
+        /// restarting itself on three operating systems to save one unzip.
+        ///
+        /// Where the platform can install for itself -- a phone, today -- it
+        /// fetches the file and hands it to the system installer instead. See
+        /// <see cref="Update.UpdateInstall"/> for why the seam is there and
+        /// not simply an "if Android".
         /// </summary>
         private void UpdateNow()
         {
-            UpdateInfo? update = Update.Updater.Available;
-            if (update == null)
+            UpdateInfo? found = Update.Updater.Available;
+            if (found == null)
             {
                 return;
             }
-            if (!Update.Updater.OpenPage(update.Value))
+            UpdateInfo update = found.Value;
+            if (Update.UpdateInstall.CanInstall(update))
+            {
+                _ = FetchAndInstall(update, Update.UpdateInstall.Current!);
+                return;
+            }
+            if (!Update.Updater.OpenPage(update))
             {
                 // No browser to open, or it refused. Putting the address on the
                 // badge beats a button that appears to do nothing.
-                _updateBadge.Say(update.Value.PageUrl);
+                _updateBadge.Say(update.PageUrl);
             }
         }
+
+        /// <summary>
+        /// Fetch the release's package and take the step that cannot be taken
+        /// back.
+        ///
+        /// Every stage reports on the button, because every stage can take
+        /// seconds and a button that greys out and says nothing is a button
+        /// that looks broken. The permission stage in particular *has* to
+        /// leave the entry pressable: on a phone, allowing this app as an
+        /// install source is a Settings screen, nothing here can wait for it,
+        /// and the player comes back and presses again.
+        /// </summary>
+        private async Task FetchAndInstall(UpdateInfo update, Update.IUpdateInstaller installer)
+        {
+            if (_updating)
+            {
+                return;
+            }
+            string number = VersionNumber();
+            if (!installer.Allowed)
+            {
+                SayVersion($"{number} : allow installs from this app, then press again",
+                    GuiTheme.Warm, pressable: true);
+                installer.RequestPermission();
+                return;
+            }
+            _updating = true;
+            installer.Finished = (ok, message) => Dispatcher.UIThread.Post(() =>
+            {
+                // Only ever seen when something went wrong: an install the
+                // player accepts replaces this program, and it does not
+                // survive that on either platform.
+                _updating = false;
+                SayVersion(ok ? number : $"{number} : {message}",
+                    ok ? GuiTheme.TextDim : GuiTheme.Warm, pressable: !ok);
+            });
+            string label = update.AssetName.Length > 0 ? update.AssetName : update.Tag;
+            SayVersion($"{number} : downloading {label}...", GuiTheme.Warm);
+            var reported = new object();
+            int shown = -1;
+            void Progress(float fraction)
+            {
+                // Whole percents only, and only when one changes: this is
+                // called for every 64 KB and each post crosses to the UI
+                // thread.
+                int percent = fraction < 0 ? -1 : (int)(fraction * 100);
+                lock (reported)
+                {
+                    if (percent == shown)
+                    {
+                        return;
+                    }
+                    shown = percent;
+                }
+                Dispatcher.UIThread.Post(() => SayVersion(percent < 0
+                    ? $"{number} : downloading {label}..."
+                    : $"{number} : downloading {label}... {percent}%", GuiTheme.Warm));
+            }
+            string error = "";
+            bool ready = await Task.Run(() => installer.Prepare(update, Progress, out error));
+            if (!ready)
+            {
+                _updating = false;
+                SayVersion($"{number} : {(error.Length > 0 ? error : "the download failed")}",
+                    GuiTheme.Warm, pressable: true);
+                return;
+            }
+            SayVersion(installer.ExitAfterInstall
+                ? $"{number} : restarting to finish..."
+                : $"{number} : waiting for the system installer...", GuiTheme.Warm);
+            if (!installer.Install(out error))
+            {
+                _updating = false;
+                SayVersion($"{number} : {(error.Length > 0 ? error : "the install could not be started")}",
+                    GuiTheme.Warm, pressable: true);
+                return;
+            }
+            if (installer.ExitAfterInstall)
+            {
+                // The copying process is already running and waiting for this
+                // one to be gone before it touches a single file. Staying open
+                // would leave it waiting until its own deadline.
+                Finish(default);
+            }
+        }
+
+        private bool _updating;
 
         /// <summary>
         /// Everything but "game files" is unusable until there is something to
@@ -763,8 +1026,43 @@ namespace MphRead.Mods.Launcher.Gui
             }
         }
 
-        /// <summary>Pick a recorded demo file and hand it to <see cref="MatchStart"/> as a launch plan.</summary>
+        /// <summary>
+        /// Pick a recorded demo and hand it to <see cref="MatchStart"/> as a
+        /// launch plan.
+        ///
+        /// This machine's own recordings first, listed from the folder they
+        /// are written to, and the system file picker behind an "Open a
+        /// file..." entry rather than in front of everything.
+        ///
+        /// The order used to be the other way round -- the picker was the
+        /// whole of it -- and on Android that could not reach the recordings
+        /// at all. <see cref="DemoRecorder"/> writes into the app's own
+        /// directory, and since Android 11 <c>Android/data</c> is excluded
+        /// from the Storage Access Framework: the picker cannot be pointed at
+        /// it and it cannot be navigated to, however absolute the path handed
+        /// over is. Nothing about that stops *this* app reading the folder --
+        /// it owns it, and needs no permission for it.
+        /// </summary>
         private async Task ChooseDemo()
+        {
+            var view = new DemoPickerView(DemoLibrary.List(), DemoLibrary.Directory);
+            await ShowOverlay(view, handler => view.Closed += handler);
+            if (view.Path != null)
+            {
+                await PlayDemo(view.Path);
+                return;
+            }
+            if (view.ImportRequested)
+            {
+                await ImportDemo();
+            }
+        }
+
+        /// <summary>
+        /// The system file picker, for a demo that came from somewhere else on
+        /// the device.
+        /// </summary>
+        private async Task ImportDemo()
         {
             TopLevel? top = TopLevel.GetTopLevel(this);
             if (top == null)
@@ -791,7 +1089,14 @@ namespace MphRead.Mods.Launcher.Gui
             }
             try
             {
-                string demoDir = Paths.Combine(Paths.Export, "_demos");
+                // Absolute, because Paths.Export is normally empty and the
+                // recorder's own combine is therefore relative to the working
+                // directory -- and a relative path is one no storage provider
+                // can resolve. Worth setting on the desktop, where the picker
+                // will honour it; on Android it is ignored, since the folder
+                // is one the Storage Access Framework does not show. That is
+                // what DemoPickerView is for.
+                string demoDir = DemoLibrary.Directory;
                 if (Directory.Exists(demoDir))
                 {
                     options.SuggestedStartLocation =
@@ -834,6 +1139,12 @@ namespace MphRead.Mods.Launcher.Gui
                     return;
                 }
             }
+            await PlayDemo(path);
+        }
+
+        /// <summary>Load a demo file and, if it reads, start playing it.</summary>
+        private async Task PlayDemo(string path)
+        {
             // Joined here, not inside MatchStart: a failure has to land back
             // on a screen that is still open to show it on. Console.WriteLine
             // is where DemoPlayback.Join otherwise says why -- invisible on

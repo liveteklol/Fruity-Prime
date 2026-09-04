@@ -26,7 +26,7 @@ Sections
 |---|---|
 | Display | window mode; performance; cel shading; **Pro mode HUD**, which is the whole of the HUD question now |
 | Audio | sound-effect and music volume; the game's text language |
-| Controls | mouse sensitivity, invert either axis, and every key binding, plus reset to defaults |
+| Controls | mouse sensitivity, invert either axis, and every key binding, plus reset to defaults; and a **Gamepad** section -- on/off, look sensitivity, stick dead zone, invert the stick's vertical aim. Its own section rather than more rows under Mouse, because a pad has its own sensitivity and a great many people invert one of the two and not the other. `.claude/GAMEPAD.md` |
 | Match rules | point goal, time limit, damage level, team play, friendly fire, hunter radar, affinity weapons |
 | Launcher | your name and hunter, the default server, the server directory, and whether to check for updates. These live in `launcher.txt`, not `settings.json` |
 | Features / Cheats / Bugfixes | every `public static bool` on those three classes, by reflection, so the list cannot drift |

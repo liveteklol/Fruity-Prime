@@ -6,6 +6,7 @@ using Android.App;
 using Android.Content.PM;
 using Android.OS;
 using Android.Views;
+using Android.Views.InputMethods;
 using Android.Widget;
 using Avalonia;
 using Avalonia.Android;
@@ -38,7 +39,8 @@ namespace MphRead.Droid
         LaunchMode = LaunchMode.SingleTop,
         ConfigurationChanges = ConfigChanges.Orientation | ConfigChanges.ScreenSize
             | ConfigChanges.UiMode | ConfigChanges.Density | ConfigChanges.KeyboardHidden)]
-    public class MainActivity : AvaloniaMainActivity<AndroidApp>
+    public class MainActivity : AvaloniaMainActivity<AndroidApp>,
+        Android.Hardware.Display.DisplayManager.IDisplayListener
     {
         internal static MainActivity? Instance { get; private set; }
 
@@ -90,6 +92,13 @@ namespace MphRead.Droid
             // being constructed, and on the desktop the same seam is left empty
             // so the batch of worker processes answers instead.
             ThumbnailHost.Current = new AndroidThumbnailHost(this);
+            // Also before the front screen: it decides whether its update
+            // entry fetches and installs or opens a page while it is being
+            // laid out. A phone is the one platform where the browser round
+            // trip is worth removing -- no file manager can reach the app's
+            // own download directory, and the system has an installer that
+            // does the whole job. See Mods/Update/UpdateInstall.cs.
+            MphRead.Mods.Update.UpdateInstall.Current = new AndroidUpdateInstaller(this);
             ScreenCapture.PngWriter = AndroidPng.Write;
             return base.CustomizeAppBuilder(builder).WithInterFont();
         }
@@ -269,8 +278,136 @@ namespace MphRead.Droid
             }
         }
 
+        // --------------------------------------------------------- rotation
+
+        /// <summary>
+        /// The display rotation the window was last laid out for.
+        ///
+        /// Turning a phone end for end while playing is a **180 degree**
+        /// rotation, and it is the only one a match can see: the orientation
+        /// is `SensorLandscape`, so landscape is the only shape on offer. That
+        /// turn is invisible to everything an app would normally hear about
+        /// it. `Configuration.orientation` does not change -- landscape to
+        /// landscape -- so there is no configuration change and no
+        /// `OnConfigurationChanged`; the window keeps the same size, so no
+        /// view gets an `OnSizeChanged`; and the GL thread owns its own EGL
+        /// surface, so the match carries on drawing regardless. The one thing
+        /// that *does* change is the display's rotation, and
+        /// `DisplayManager` is the only thing that reports it.
+        ///
+        /// That silence is the bug it is here for: the touch controls
+        /// stopped answering after a 180 while the game kept running
+        /// perfectly. Two things can do that and this answers both.
+        ///
+        /// - **The window's input transform is stale.** A rotation that does
+        ///   not resize the window is finalised when the window next draws,
+        ///   and this window is a `SurfaceView` under a control overlay that
+        ///   repaints only when a finger moves -- so it may never draw again
+        ///   on its own, and touches keep arriving in the old orientation's
+        ///   coordinates. Asking for a layout pass is what settles it.
+        /// - **Pointers are stranded.** Rotating a phone means holding it,
+        ///   which means thumbs on the glass; if the gesture is interrupted
+        ///   without an UP or a CANCEL, `_stickPointer` and `_aimPointer`
+        ///   keep ids that will never be released and every later touch falls
+        ///   through <c>PointerDown</c> doing nothing.
+        /// </summary>
+        private int _lastRotation = -1;
+
+        private Android.Hardware.Display.DisplayManager? _displays;
+
+        private int CurrentRotation()
+        {
+            try
+            {
+                if (OperatingSystem.IsAndroidVersionAtLeast(30))
+                {
+                    return (int?)Display?.Rotation ?? -1;
+                }
+#pragma warning disable CA1422 // the pre-30 way, for the devices that need it
+                return (int?)WindowManager?.DefaultDisplay?.Rotation ?? -1;
+#pragma warning restore CA1422
+            }
+            catch (Exception)
+            {
+                return -1;
+            }
+        }
+
+        public void OnDisplayAdded(int displayId)
+        {
+        }
+
+        public void OnDisplayRemoved(int displayId)
+        {
+        }
+
+        /// <summary>
+        /// Fires for a rotation, and for a great many things that are not one
+        /// -- a refresh rate change, an HDR mode, a resize. So the rotation is
+        /// compared rather than assumed, and nothing is done when it has not
+        /// moved.
+        /// </summary>
+        public void OnDisplayChanged(int displayId)
+        {
+            int rotation = CurrentRotation();
+            if (rotation < 0 || rotation == _lastRotation)
+            {
+                return;
+            }
+            int before = _lastRotation;
+            _lastRotation = rotation;
+            if (before < 0)
+            {
+                // The first reading is not a turn.
+                return;
+            }
+            Console.WriteLine($"[android] display rotation {before} -> {rotation} at "
+                + $"{ContentSize.Width}x{ContentSize.Height}");
+            AfterRotation();
+            // Again once the window has had a chance to settle. The insets
+            // move on a rotation even when the size does not -- a cutout
+            // changes sides -- and the second pass is what catches a layout
+            // that arrives after this callback rather than before it.
+            _content?.PostDelayed(AfterRotation, SettleMs);
+        }
+
+        private void AfterRotation()
+        {
+            // Nothing held survives the turn. See _lastRotation: a thumb that
+            // was on the glass through the rotation may never send its
+            // release, and a stranded pointer id is a control that answers
+            // nothing for the rest of the match.
+            _controls.ReleaseEverything();
+            // A layout pass on the window, which is what finalises the
+            // rotation for input. The overlay is asked separately because its
+            // size has not changed, so it would not otherwise re-read it.
+            _overlay?.Refresh();
+            _content?.RequestLayout();
+            _content?.Invalidate();
+            Window?.DecorView?.RequestLayout();
+            // The system puts the bars back on a rotation.
+            GoImmersive(true);
+        }
+
+        /// <summary>
+        /// Delivered when the *configuration* changes, which a 180 does not
+        /// cause -- but a 90 does, and so does a fold, a screen resize and a
+        /// theme change. The rotation check inside makes this harmless when
+        /// nothing turned.
+        /// </summary>
+        public override void OnConfigurationChanged(Android.Content.Res.Configuration newConfig)
+        {
+            base.OnConfigurationChanged(newConfig);
+            OnDisplayChanged(0);
+        }
+
         protected override void OnPause()
         {
+            if (_displays != null)
+            {
+                _displays.UnregisterDisplayListener(this);
+                _displays = null;
+            }
             _gameView?.OnPause();
             base.OnPause();
         }
@@ -286,7 +423,66 @@ namespace MphRead.Droid
             // rotation or a swipe from the edge, so this is asked for again on
             // every resume rather than once at startup.
             GoImmersive(true);
+            _lastRotation = CurrentRotation();
+            if (_displays == null
+                && GetSystemService(DisplayService) is Android.Hardware.Display.DisplayManager manager)
+            {
+                _displays = manager;
+                // No handler: the callback is wanted on the main looper, which
+                // is where a null one puts it, and everything it does is view
+                // work that belongs on the UI thread anyway.
+                manager.RegisterDisplayListener(this, null);
+            }
             _gameView?.OnResume();
+        }
+
+        /// <summary>
+        /// Every key event the window gets, offered to the pad first.
+        ///
+        /// Here rather than in <see cref="GameView"/> -- which is where it
+        /// used to be, and still is as a fallback -- because a pad has to
+        /// reach the *settings screen* too: rebinding a button means pressing
+        /// it while a launcher view has the focus and no GameView exists at
+        /// all. An activity's dispatch is the one place both are underneath.
+        ///
+        /// Only a pad's events are taken. <see cref="GamepadBridge.HandleKey"/>
+        /// answers false for anything a keyboard could have produced, so chat
+        /// and the Back button are untouched.
+        /// </summary>
+        public override bool DispatchKeyEvent(KeyEvent? e)
+        {
+            bool down = e?.Action == KeyEventActions.Down;
+            if (e != null && (down || e.Action == KeyEventActions.Up)
+                && GamepadBridge.HandleKey(e.KeyCode, e, down))
+            {
+                if (down)
+                {
+                    _controls.NotePadActivity();
+                }
+                return true;
+            }
+            return base.DispatchKeyEvent(e);
+        }
+
+        /// <summary>
+        /// The sticks, the triggers and the hat, for the same reason.
+        ///
+        /// The controls only step aside for a pad that is actually being
+        /// held: a stick resting off centre is every pad, and taking the touch
+        /// controls away for it would be taking them away from a phone with a
+        /// pad in a drawer. See <c>GamepadInput.InUse</c>.
+        /// </summary>
+        public override bool DispatchGenericMotionEvent(MotionEvent? e)
+        {
+            if (GamepadBridge.HandleMotion(e))
+            {
+                if (MphRead.Mods.Input.GamepadInput.InUse)
+                {
+                    _controls.NotePadActivity();
+                }
+                return true;
+            }
+            return base.DispatchGenericMotionEvent(e);
         }
 
         /// <summary>
@@ -391,6 +587,10 @@ namespace MphRead.Droid
             }
             var input = new AndroidInput();
             _controls.ReleaseEverything();
+            // The controls object outlives a match -- it is a field here, not
+            // the view's -- so a match left while spectating would hand the
+            // next one a screen of NEXT and VIEW buttons.
+            _controls.SetSpectator(spectating: false, freeCamera: false);
             _orientationBefore = RequestedOrientation;
             // A first-person game on a phone is landscape. The activity handles
             // its own configuration changes, so this rotates the surface rather
@@ -568,6 +768,34 @@ namespace MphRead.Droid
             BeginMatch(plan, input);
         }
 
+        /// <summary>
+        /// Put the soft keyboard up, or take it away.
+        ///
+        /// Asked for by the game loop when the chat prompt opens and closes;
+        /// done here because an IME call belongs to the UI thread and to the
+        /// view that says it is a text editor (see
+        /// <c>GameView.OnCheckIsTextEditor</c>). The view has to be focused
+        /// first -- the touch overlay above it takes every touch but never
+        /// focus, so this is normally already true and costs nothing.
+        /// </summary>
+        private void ShowSoftKeyboard(bool show)
+        {
+            if (_gameView == null
+                || GetSystemService(InputMethodService) is not InputMethodManager ime)
+            {
+                return;
+            }
+            if (show)
+            {
+                _gameView.RequestFocus();
+                ime.ShowSoftInput(_gameView, ShowFlags.Implicit);
+            }
+            else
+            {
+                ime.HideSoftInputFromWindow(_gameView.WindowToken, HideSoftInputFlags.None);
+            }
+        }
+
         private void BeginMatch(LaunchPlan plan, AndroidInput input)
         {
             if (_content == null)
@@ -579,7 +807,8 @@ namespace MphRead.Droid
                 () => RunOnUiThread(EndMatch),
                 () => RunOnUiThread(MatchLoaded),
                 error => RunOnUiThread(() => FailMatch(error)),
-                () => RunOnUiThread(TogglePauseMenu));
+                () => RunOnUiThread(TogglePauseMenu),
+                show => RunOnUiThread(() => ShowSoftKeyboard(show)));
             // The launcher is Avalonia, which draws on a surface of its own,
             // and two surfaces in one window have no z-order between them
             // unless one is asked for. Above the other surface and below the
@@ -768,6 +997,7 @@ namespace MphRead.Droid
                 _gameView = null;
             }
             _controls.ReleaseEverything();
+            _controls.SetSpectator(spectating: false, freeCamera: false);
             if (_launcherView != null)
             {
                 _launcherView.Visibility = ViewStates.Visible;

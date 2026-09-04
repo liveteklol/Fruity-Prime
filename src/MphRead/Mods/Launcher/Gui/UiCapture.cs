@@ -102,6 +102,15 @@ namespace MphRead.Mods.Launcher.Gui
             {
                 yield return ("mappicker", new MapPickerView(rooms, rooms[0]), _windowSize);
             }
+            // Both halves of it: the list a machine that has recorded
+            // something gets, and the line a machine that has not gets --
+            // which is the one carrying the folder's path and the only place
+            // that path is ever written down.
+            yield return ("demopicker", new DemoPickerView(SampleDemos(),
+                Network.DemoLibrary.Directory), _windowSize);
+            yield return ("demopicker-empty", new DemoPickerView(
+                Array.Empty<Network.DemoRecording>(), Network.DemoLibrary.Directory),
+                _windowSize);
             yield return ("pausemenu", new PauseMenuView(offerWindowMode: true), _windowSize);
             // Deliberately shorter than the menu's own content, and shorter
             // than the game window is now allowed to be. The pause menu is
@@ -112,6 +121,23 @@ namespace MphRead.Mods.Launcher.Gui
             yield return ("pausemenu-small", new PauseMenuView(offerWindowMode: true),
                 new Size(560, 320));
             yield return ("serverbrowser", ServerList(), _windowSize);
+        }
+
+        /// <summary>
+        /// Recordings that are not there, so the list can be seen on a machine
+        /// that has never recorded one.
+        /// </summary>
+        private static IReadOnlyList<Network.DemoRecording> SampleDemos()
+        {
+            var now = new DateTime(2026, 9, 4, 18, 22, 7);
+            return new[]
+            {
+                new Network.DemoRecording("MP3 PROVING GROUND_2026-09-04_18-22-07.fpdemo",
+                    "MP3 PROVING GROUND", now, 1_512_320),
+                new Network.DemoRecording("COMBAT HALL_2026-09-02_21-04-55.fpdemo",
+                    "COMBAT HALL", now.AddDays(-2), 402_112),
+                new Network.DemoRecording("sent-to-me.fpdemo", "", now.AddDays(-9), 88_400)
+            };
         }
 
         /// <summary>

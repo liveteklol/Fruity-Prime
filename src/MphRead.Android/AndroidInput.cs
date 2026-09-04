@@ -133,6 +133,25 @@ namespace MphRead.Droid
         }
 
         /// <summary>
+        /// A key that is not one of the player's binds.
+        ///
+        /// For the spectator's free camera, which is the room viewer's Roam
+        /// camera: <c>Scene.OnKeyHeld</c> drives it by reading W/A/S/D, Space
+        /// and V off the keyboard directly rather than through a
+        /// <see cref="Keybind"/>, so there is no bind to apply and the key
+        /// itself has to be pressed. Through the same accumulator as
+        /// everything else, so <see cref="CommitFrame"/> releases it when the
+        /// thumb comes off.
+        /// </summary>
+        public void ApplyKey(Keys key, bool down)
+        {
+            if (key != Keys.Unknown && down)
+            {
+                _keysDown.Add(key);
+            }
+        }
+
+        /// <summary>
         /// A press that is not one of the player's binds -- the dialog box's
         /// OK button, which the DS read off its touch screen. Goes through the
         /// same accumulator so <see cref="CommitFrame"/> does not release it.

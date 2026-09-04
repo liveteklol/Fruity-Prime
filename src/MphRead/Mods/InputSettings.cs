@@ -47,6 +47,52 @@ namespace MphRead.Mods
         /// </summary>
         public static bool ScrollAllWeapons { get; set; } = true;
 
+        /// <summary>
+        /// The key that opens the chat prompt. T, which is where every
+        /// shooter since Quake has put it.
+        ///
+        /// Not a <see cref="Keybind"/> on <see cref="PlayerControls"/> like
+        /// everything else here, and deliberately so: that class is upstream's
+        /// and its every member is read by <c>ProcessAllInput</c> as something
+        /// the *player* does in the world. Chat is the opposite -- it takes
+        /// the keyboard away from the player -- so it is handled by the window
+        /// before the game sees the key at all, and a binding the game never
+        /// reads has no business in the game's binding set.
+        /// </summary>
+        public static Keys ChatKey { get; set; } = Keys.T;
+
+        /// <summary>
+        /// How far a stick must move before it counts, 0 to 0.9.
+        ///
+        /// Applied radially rather than per axis -- see
+        /// <see cref="Input.GamepadInput"/> for why that is not the same
+        /// thing. 0.2 clears the resting drift of a worn stick without
+        /// swallowing a deliberate nudge.
+        /// </summary>
+        public static float GamepadDeadZone
+        {
+            get => _gamepadDeadZone;
+            set => _gamepadDeadZone = Math.Clamp(value, 0, 0.9f);
+        }
+
+        private static float _gamepadDeadZone = 0.2f;
+
+        /// <summary>Multiplier on the right stick's turn rate. 1.0 is 210 degrees a second.</summary>
+        public static float GamepadLookSensitivity
+        {
+            get => _gamepadLook;
+            set => _gamepadLook = Math.Clamp(value, 0.1f, 5f);
+        }
+
+        private static float _gamepadLook = 1f;
+
+        /// <summary>
+        /// Invert the right stick's vertical aim. Its own setting rather than
+        /// sharing the mouse's, because a great many people invert one and not
+        /// the other, and there is no third thing they would rather set.
+        /// </summary>
+        public static bool GamepadInvertY { get; set; }
+
         private static bool _creating;
         private static PlayerControls? _current;
 
@@ -285,6 +331,51 @@ namespace MphRead.Mods
                         ScrollAllWeapons = scrollAll;
                         continue;
                     }
+                    if (key == "gamepad")
+                    {
+                        // Written by every build up to the one that removed
+                        // the toggle. Skipped rather than refused so an old
+                        // controls.txt still loads the rest of itself.
+                        continue;
+                    }
+                    if (Input.PadBindings.TryLoad(key, value))
+                    {
+                        continue;
+                    }
+                    if (key == "gamepad_deadzone"
+                        && Single.TryParse(value, NumberStyles.Float,
+                            CultureInfo.InvariantCulture, out float deadZone))
+                    {
+                        GamepadDeadZone = deadZone;
+                        continue;
+                    }
+                    if (key == "gamepad_look"
+                        && Single.TryParse(value, NumberStyles.Float,
+                            CultureInfo.InvariantCulture, out float look))
+                    {
+                        GamepadLookSensitivity = look;
+                        continue;
+                    }
+                    if (key == "gamepad_invert_y" && Boolean.TryParse(value, out bool padInvert))
+                    {
+                        GamepadInvertY = padInvert;
+                        continue;
+                    }
+                    if (key == "chat_key")
+                    {
+                        // "none" rather than a missing line, so a player who
+                        // wants the key back for something else can say so and
+                        // still have the file rewritten with everything in it.
+                        if (value.Equals("none", StringComparison.OrdinalIgnoreCase))
+                        {
+                            ChatKey = Keys.Unknown;
+                        }
+                        else if (Enum.TryParse(value, out Keys chatKey))
+                        {
+                            ChatKey = chatKey;
+                        }
+                        continue;
+                    }
                     PropertyInfo? property = Bindings.FirstOrDefault(p => p.Name == key);
                     if (property != null)
                     {
@@ -335,8 +426,17 @@ namespace MphRead.Mods
                     $"sensitivity={MouseSensitivity.ToString("0.###", CultureInfo.InvariantCulture)}",
                     $"invert_y={InvertMouseY.ToString().ToLowerInvariant()}",
                     $"invert_x={InvertMouseX.ToString().ToLowerInvariant()}",
-                    $"scroll_all_weapons={ScrollAllWeapons.ToString().ToLowerInvariant()}"
+                    $"scroll_all_weapons={ScrollAllWeapons.ToString().ToLowerInvariant()}",
+                    $"chat_key={(ChatKey == Keys.Unknown ? "none" : ChatKey.ToString())}",
+                    "gamepad_deadzone=" + GamepadDeadZone.ToString(CultureInfo.InvariantCulture),
+                    "gamepad_look=" + GamepadLookSensitivity.ToString(CultureInfo.InvariantCulture),
+                    $"gamepad_invert_y={GamepadInvertY.ToString().ToLowerInvariant()}"
                 };
+                foreach (Input.PadAction action in Input.PadBindings.Actions)
+                {
+                    lines.Add($"{Input.PadBindings.SettingKey(action)}="
+                        + Input.PadBindings.Get(action));
+                }
                 foreach (PropertyInfo property in Bindings)
                 {
                     Keybind bind = Bind(property);
@@ -370,6 +470,11 @@ namespace MphRead.Mods
             InvertMouseY = false;
             InvertMouseX = false;
             ScrollAllWeapons = true;
+            ChatKey = Keys.T;
+            Input.PadBindings.Reset();
+            GamepadDeadZone = 0.2f;
+            GamepadLookSensitivity = 1f;
+            GamepadInvertY = false;
         }
     }
 }

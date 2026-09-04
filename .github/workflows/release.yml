@@ -203,19 +203,83 @@ jobs:
       # InstallAndroidDependencies rather than named sdkmanager packages: it
       # asks for whatever the project's TargetFramework declares, so bumping
       # net9.0-android35.0 does not silently leave this behind.
+      # The signing key, when there is one.
+      #
+      # This is what makes the in-app updater possible and it is not a
+      # nicety: Android refuses an update whose signing certificate differs
+      # from the installed app's, and the SDK's debug key is generated on the
+      # machine doing the build -- so every release from a fresh runner used
+      # to carry a *different* certificate and none of them could replace
+      # another. See .claude/build-deploy/BUILD-WORKFLOW.md.
+      #
+      # Absent secrets fall back to the debug key rather than failing the
+      # release: a fork with no keystore still gets an installable APK, it
+      # simply cannot be updated in place.
+      - name: unlock the android keystore
+        id: keystore
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
+        run: |
+          set -euo pipefail
+          if [ -z "${KEYSTORE:-}" ]; then
+            echo "have=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::no ANDROID_KEYSTORE secret; the APK gets a throwaway debug key and cannot update an existing install"
+            exit 0
+          fi
+          # Outside the workspace, so no later step can archive it by accident.
+          printf '%s' "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/android.jks"
+          echo "have=true" >> "$GITHUB_OUTPUT"
+
       - name: publish the APK
         env:
           VERSION: ${{ steps.name.outputs.version }}
+          HAVE_KEYSTORE: ${{ steps.keystore.outputs.have }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           set -euo pipefail
           proj=src/MphRead.Android/MphRead.Android.csproj
           sdk=( -p:AndroidSdkDirectory="$ANDROID_HOME" -p:JavaSdkDirectory="$JAVA_HOME" )
+          signing=()
+          if [ "$HAVE_KEYSTORE" = "true" ]; then
+            # env: rather than the passwords themselves. .NET for Android
+            # reads that prefix as "the variable named this", which keeps
+            # both out of the process table and out of the MSBuild log.
+            signing=(
+              -p:AndroidKeyStore=true
+              -p:AndroidSigningKeyStore="$RUNNER_TEMP/android.jks"
+              -p:AndroidSigningStorePass=env:KEYSTORE_PASSWORD
+              -p:AndroidSigningKeyAlias="$KEY_ALIAS"
+              -p:AndroidSigningKeyPass=env:KEY_PASSWORD
+            )
+          fi
           dotnet build "$proj" -t:InstallAndroidDependencies "${sdk[@]}" \
             -p:AcceptAndroidSDKLicenses=True
           dotnet publish "$proj" -c Release -p:AndroidPackageFormat=apk "${sdk[@]}" \
+            "${signing[@]}" \
             -p:Version="$VERSION" -p:InformationalVersion="$VERSION" \
             -p:ApplicationDisplayVersion="$VERSION" \
             -o publish/android
+
+      # What the updater will compare against on every phone. Printed, not
+      # checked: nothing here knows what the previous release was signed with,
+      # and a fingerprint in the log is what turns "App not installed" into a
+      # two-minute diff against the last release's run.
+      - name: report the APK's signer
+        run: |
+          set -euo pipefail
+          apk=$(ls publish/android/*-Signed.apk | head -1)
+          # apksigner rather than keytool: a package signed only with the v2
+          # or v3 scheme has no jar signature for keytool to print, and .NET
+          # for Android decides which schemes to use on its own.
+          signer=$(ls "$ANDROID_HOME"/build-tools/*/apksigner 2>/dev/null | tail -1 || true)
+          if [ -n "$signer" ]; then
+            "$signer" verify --print-certs "$apk" | grep -Ei "SHA-256 digest|Signer" || true
+          else
+            "$JAVA_HOME/bin/keytool" -printcert -jarfile "$apk" \
+              | grep -E "SHA256:|Owner:" || true
+          fi
 
       - name: nothing from the game is in the output
         run: >
@@ -421,8 +485,9 @@ jobs:
           ( cd publish/win-x64-server && zip -qr "../../dist/FruityPrime-$TAG-server-win-x64.zip" . )
 
           # The APK goes out on its own rather than in an archive: what a phone
-          # wants is a file it can be handed. It is signed with the SDK's debug
-          # key, which installs and is not a store upload.
+          # wants is a file it can be handed. Signed with the release keystore
+          # when the secrets are set, and with a throwaway debug key when they
+          # are not -- the second installs, and can never be updated in place.
           cp publish/android/*-Signed.apk "dist/FruityPrime-$TAG-android.apk"
           ls -la dist
 
