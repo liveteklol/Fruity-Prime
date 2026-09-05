@@ -660,9 +660,13 @@ namespace MphRead.Mods.Launcher.Gui
                 BorderBrush = GuiTheme.EdgeBrush,
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(4),
-                Padding = new Thickness(8, 3, 8, 3),
-                // Directly above the version corner, sharing its right edge.
-                Margin = new Thickness(0, 0, 24, 48),
+                Padding = new Thickness(8, 2, 8, 2),
+                // Directly below the version corner, sharing its right edge.
+                // The version's own margin is what it is and does not move --
+                // it is the corner people know -- so this fits into the 22
+                // points beneath it rather than pushing it up: tighter
+                // padding, and it sits 2 clear of the bottom edge.
+                Margin = new Thickness(0, 0, 24, 2),
                 HorizontalAlignment = HorizontalAlignment.Right,
                 VerticalAlignment = VerticalAlignment.Bottom,
                 IsVisible = false,

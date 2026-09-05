@@ -1125,8 +1125,9 @@ namespace MphRead.Droid
                 {
                     // The wheel is a touchscreen mechanic: it reads where the
                     // pointer is, not how far it moved. While it is open the
-                    // pointer is the finger.
-                    (bool Down, float X, float Y) aim = _controls.AimPosition();
+                    // pointer is the finger -- the one holding WEAPON, or an
+                    // aiming finger if one is down. See WeaponWheelPosition.
+                    (bool Down, float X, float Y) aim = _controls.WeaponWheelPosition();
                     if (aim.Down)
                     {
                         _input.PlacePointer(aim.X, aim.Y);

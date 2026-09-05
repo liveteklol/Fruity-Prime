@@ -183,6 +183,16 @@ Three things come free from doing it that way:
 - **The weapon wheel works**, because it was a touchscreen mechanic on the DS:
   `UpdateWeaponSelect` reads the pointer's absolute position. While WEAPON is
   held the pointer *is* the finger; the rest of the time it accumulates drag.
+- **The wheel is picked with the same thumb that opened it**: press WEAPON,
+  drag into the weapon, let go. This needs one exemption from a general rule
+  --- a thumb that slides off a button releases it, which here closed the
+  wheel before anything could be chosen --- so `_wheelPointer` skips that
+  check exactly as `_fireAimPointer` already did for FIRE's aim drag, and
+  `WeaponWheelPosition` hands the wheel that finger's position. Before this,
+  picking took a second finger, and the finger people lifted to do it was the
+  one on the stick: choosing a weapon meant standing still. The two-finger
+  way still works and still wins when both are down, because a second finger
+  put down while the wheel is open is an explicit choice.
 
 Layout (`TouchControls`, drawn by `TouchOverlayView` with a Canvas rather than
 in GL -- it is a dozen circles that change when touched):
@@ -194,7 +204,7 @@ in GL -- it is a dozen circles that change when touched):
 | JUMP | `Jump` **and** `Boost` -- one button on the DS, and the same key by default: jumping on foot is boosting in the ball |
 | MORPH | `Morph` |
 | ALT | `AltAttack` |
-| WEAPON | `WeaponMenu`, held, with the pointer following the finger |
+| WEAPON | `WeaponMenu`, held, with the pointer following the finger -- including that same finger once it drags off the button |
 | ZOOM | `Zoom` |
 | MENU | `Pause` |
 | Anywhere else on the right | aim |

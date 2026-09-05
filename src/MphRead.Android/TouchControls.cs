@@ -186,6 +186,18 @@ namespace MphRead.Droid
         private float _fireAimLastX;
         private float _fireAimLastY;
 
+        // WEAPON is the same trick for a different reason: the finger that
+        // opens the wheel is also the one that picks off it. Press, drag into
+        // the weapon, let go -- one thumb, and the other one never leaves the
+        // stick. Without this the button releases the moment the finger slides
+        // out of its circle, which closes the wheel before anything can be
+        // chosen, so picking a weapon needed a second finger and standing
+        // still. Only the position is kept: the wheel reads where the finger
+        // is, never how far it moved, so this contributes nothing to the aim.
+        private int _wheelPointer = -1;
+        private float _wheelX;
+        private float _wheelY;
+
         // A quick flick on the right side of the screen -- the aim side,
         // where nothing else about movement is being controlled -- boosts
         // in morph ball, the way a stylus flick did on the DS. See
@@ -658,6 +670,36 @@ namespace MphRead.Droid
             }
         }
 
+        /// <summary>
+        /// Where the weapon wheel should read its cursor from.
+        ///
+        /// The aiming finger when there is one, and otherwise the finger
+        /// holding WEAPON. That order is what keeps both ways of using the
+        /// wheel: press and drag with one thumb, which is what it is for, and
+        /// the older hold-with-one-tap-with-another, which still works and is
+        /// what somebody who learnt it will do. A second finger put down
+        /// while the wheel is open is an explicit choice and wins.
+        ///
+        /// Separate from <see cref="AimPosition"/> rather than folded into it
+        /// because that one also answers for the dialog boxes, and a WEAPON
+        /// press has no business moving a cursor over an OK button.
+        /// </summary>
+        public (bool Down, float X, float Y) WeaponWheelPosition()
+        {
+            lock (_lock)
+            {
+                if (_aimDown)
+                {
+                    return (true, _aimAbsX, _aimAbsY);
+                }
+                if (_wheelPointer != -1)
+                {
+                    return (true, _wheelX, _wheelY);
+                }
+                return (false, _aimAbsX, _aimAbsY);
+            }
+        }
+
         public Dir Direction
         {
             get
@@ -716,6 +758,12 @@ namespace MphRead.Droid
                         _fireAimLastX = x;
                         _fireAimLastY = y;
                         _fireAimSwipe.Reset();
+                    }
+                    else if (button.Action == TouchAction.WeaponMenu)
+                    {
+                        _wheelPointer = pointerId;
+                        _wheelX = x;
+                        _wheelY = y;
                     }
                     return;
                 }
@@ -930,6 +978,15 @@ namespace MphRead.Droid
                     _fireAimLastY = y;
                     return;
                 }
+                if (pointerId == _wheelPointer)
+                {
+                    // Same exemption, and for the same reason: the drag off
+                    // WEAPON *is* the gesture, so it must not be read as
+                    // letting go of the button. No aim delta -- see the field.
+                    _wheelX = x;
+                    _wheelY = y;
+                    return;
+                }
                 // a thumb that slides off a button releases it, and one that
                 // slides onto another does not press it: a button press is
                 // where the finger landed
@@ -995,6 +1052,12 @@ namespace MphRead.Droid
                     _fireAimPointer = -1;
                     _fireAimSwipe.Reset();
                 }
+                if (pointerId == _wheelPointer)
+                {
+                    // Cleared before the button is released, so the frame that
+                    // sees the wheel close no longer reads a stale position.
+                    _wheelPointer = -1;
+                }
                 if (_buttonPointers.Remove(pointerId, out TouchAction action))
                 {
                     ReleaseAction(action);
@@ -1012,6 +1075,7 @@ namespace MphRead.Droid
                 _aimPointer = -1;
                 _aimDown = false;
                 _fireAimPointer = -1;
+                _wheelPointer = -1;
                 _swipeBoostPending = false;
                 _doubleTapJumpPending = false;
                 _lastTapTime = 0;
