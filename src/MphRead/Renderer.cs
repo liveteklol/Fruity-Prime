@@ -269,8 +269,17 @@ namespace MphRead
             }
             _roomLoaded = true;
             GameState.Mode = mode;
+            // The report this is here for is "it crashes when the map loads",
+            // from a machine with no console window: a log that says which
+            // room, and which of the load's steps it reached, is the whole
+            // difference between that report and a fixable one.
+            Mods.DebugLog.Line("room", $"loading \"{name}\" mode={mode} "
+                + $"players={playerCount} layers={nodeLayerMask}/{entityLayerId}");
+            using IDisposable? loadStep = Mods.DebugLog.Step("room", $"load \"{name}\"");
             (RoomEntity room, RoomMetadata meta, CollisionInstance collision, IReadOnlyList<EntityBase> entities)
                 = SceneSetup.LoadGame(name, this, playerCount, bossFlags, nodeLayerMask, entityLayerId);
+            Mods.DebugLog.Line("room", $"\"{name}\" read: {entities.Count} entit(ies), "
+                + $"id={RoomId}, area={AreaId}");
             GameState.StorySave.SetVisitedRoom(RoomId);
             GameState.StorySave.Areas |= (ushort)(1 << AreaId);
             if (GameState.Mode == GameMode.None)
@@ -459,6 +468,19 @@ namespace MphRead
 
         public void OnLoad()
         {
+            // What the driver calls itself, once, at the only moment there is
+            // certainly a context current. Everything about a picture being
+            // wrong on somebody else's machine starts with these three lines,
+            // and asking for them by hand means asking somebody to run a
+            // second program.
+            if (Mods.DebugLog.Active)
+            {
+                Mods.DebugLog.Line("gl", $"vendor={GL.GetString(StringName.Vendor)}");
+                Mods.DebugLog.Line("gl", $"renderer={GL.GetString(StringName.Renderer)}");
+                Mods.DebugLog.Line("gl", $"version={GL.GetString(StringName.Version)}");
+                Mods.DebugLog.Line("gl", "shading language="
+                    + GL.GetString(StringName.ShadingLanguageVersion));
+            }
             GL.ClearColor(_clearColor);
             GL.Enable(EnableCap.DepthTest);
             GL.Enable(EnableCap.Texture2D);

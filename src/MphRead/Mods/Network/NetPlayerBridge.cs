@@ -66,6 +66,19 @@ namespace MphRead.Mods.Network
         public static float WorstSnap { get; private set; }
 
         /// <summary>
+        /// Frames on which a player's room node could not be worked out from
+        /// its position at all, even after the body and half a unit either
+        /// side of it were tried.
+        ///
+        /// The measurement behind "players go invisible up there": the node is
+        /// what the renderer culls against, so a lookup that fails leaves a
+        /// puppet holding a stale one. Non-zero says the map has places the
+        /// portal volumes do not cover, and which map and how often is the
+        /// difference between a room to look at and a fluke.
+        /// </summary>
+        public static long NodeLookupsUnresolved;
+
+        /// <summary>
         /// How far this machine's own player may be from the authority's copy
         /// of it before it is pulled back.
         ///
@@ -237,6 +250,21 @@ namespace MphRead.Mods.Network
         /// previous frame, so gameplay code that tests those edges behaves
         /// the same for a remote player as for a local one.
         /// </summary>
+        /// <summary>
+        /// The bits of an intent that mean somebody pressed something, as
+        /// opposed to the four that describe what state the sender is in.
+        ///
+        /// The difference matters for <see cref="PlayerEntity.ModNoteInput"/>:
+        /// `InPlayState` is set on every packet a living player sends, so
+        /// counting the whole mask would make a puppet look busy while its
+        /// owner stood perfectly still -- and the engine lowers an idle
+        /// player's gun, which their own screen would then be doing and
+        /// nobody else's. Replicating the idle means replicating the idle.
+        /// </summary>
+        private const IntentButtons PressedButtons = ~(IntentButtons.ZoomedState
+            | IntentButtons.AltFormState | IntentButtons.InPlayState
+            | IntentButtons.SpectatingState);
+
         /// <summary>Newest press frame already applied, per slot.</summary>
         private static readonly uint[] _lastPressFrame = new uint[PlayerEntity.SlotCapacity];
         private static readonly bool[] _pressSeen = new bool[PlayerEntity.SlotCapacity];
@@ -277,6 +305,20 @@ namespace MphRead.Mods.Network
                 player.ModSetWeapon((BeamType)intent.WeaponSelect);
             }
             player.ModSetAmmo(intent.AmmoUa, intent.AmmoMissiles);
+            // Somebody is playing this hunter, even though it is not this
+            // machine's keyboard doing it.
+            //
+            // Without this a puppet looked idle from the moment its owner
+            // stopped respawning or changing weapon, and the engine lowers an
+            // idle player's gun -- which `CanShoot` refuses to fire through.
+            // So a player holding still and firing, which is what a sniper
+            // does, had their shots fail to spawn on every other machine
+            // including the authority, whose shots are the only ones that
+            // count. See PlayerEntity.ModNoteInput.
+            if ((intent.Buttons & PressedButtons) != IntentButtons.None)
+            {
+                player.ModNoteInput();
+            }
             // After the weapon, because zoom belongs to one and the engine
             // refuses it on a weapon that cannot. Taken as state rather than
             // rebuilt from the press: see IntentButtons.ZoomedState.
@@ -523,6 +565,11 @@ namespace MphRead.Mods.Network
                     _divergedFrames[slot] = 0;
                 }
                 player.Health = state.Health;
+                // Including for this machine's own player: being frozen is
+                // part of the match, like health and the score, and a victim
+                // who kept walking about while the authority held them still
+                // was the whole of the "frozen players who keep moving" bug.
+                player.ModSetFrozen((state.Flags & PlayerState.FlagFrozen) != 0);
                 return;
             }
             // Converted for the same reason the reported position is: the
@@ -541,6 +588,7 @@ namespace MphRead.Mods.Network
             // whose input is frozen -- Quake 3's spectator, not a player who
             // merely stopped moving.
             player.ModSetSpectating((state.Flags & PlayerState.FlagSpectating) != 0);
+            player.ModSetFrozen((state.Flags & PlayerState.FlagFrozen) != 0);
         }
 
         /// <summary>
@@ -667,6 +715,7 @@ namespace MphRead.Mods.Network
             Array.Clear(_formMismatch);
             Snaps = 0;
             WorstSnap = 0;
+            NodeLookupsUnresolved = 0;
             Array.Clear(_formAttempts);
             Array.Clear(_lastPressFrame);
             Array.Clear(_pressSeen);

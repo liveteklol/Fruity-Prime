@@ -49,6 +49,12 @@ namespace MphRead.Droid
         private static HomeView BuildHome()
         {
             LauncherPrefs.Load();
+            // After the load, because the head has just pointed the
+            // preferences at the app's own data directory -- the package's
+            // directory is read-only, and that is also where the log has to
+            // go. Same switch, same file, same corner of the same screen as
+            // the desktop's.
+            Mods.DebugLog.Attach();
             MenuSettings settings = GameState.LoadSettings();
             GameSettings.Apply(settings);
             IReadOnlyList<string> rooms = Array.Empty<string>();

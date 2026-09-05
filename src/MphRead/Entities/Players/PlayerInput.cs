@@ -217,6 +217,12 @@ namespace MphRead.Entities
                     }
                     int nextIndex = currentIndex;
                     BeamType nextBeam = CurrentWeapon;
+                    // Bounded as well as terminated by the index, because the
+                    // predicate can now be false for every weapon at once --
+                    // and because a CurrentWeapon that is not in the order at
+                    // all leaves currentIndex at -1, which the wraps below can
+                    // never land back on.
+                    int steps = _weaponOrder.Length;
                     if (Controls.NextWeapon.IsPressed)
                     {
                         do
@@ -232,7 +238,7 @@ namespace MphRead.Entities
                             }
                             nextBeam = _weaponOrder[nextIndex];
                         }
-                        while (nextIndex != currentIndex && !_availableWeapons[nextBeam]);
+                        while (nextIndex != currentIndex && --steps > 0 && !CanCycleToWeapon(nextBeam));
                     }
                     else if (Controls.PrevWeapon.IsPressed)
                     {
@@ -249,7 +255,7 @@ namespace MphRead.Entities
                             }
                             nextBeam = _weaponOrder[nextIndex];
                         }
-                        while (nextIndex != currentIndex && !_availableWeapons[nextBeam]);
+                        while (nextIndex != currentIndex && --steps > 0 && !CanCycleToWeapon(nextBeam));
                     }
                     if (nextBeam != CurrentWeapon)
                     {
@@ -257,6 +263,35 @@ namespace MphRead.Entities
                     }
                 }
             }
+        }
+
+        /// <summary>
+        /// Whether next/previous weapon should stop on this beam.
+        ///
+        /// Availability is not enough, and that was the bug: the cycle used to
+        /// skip only weapons the player had not picked up, so it would happily
+        /// stop on one that was out of ammo -- where <c>TryEquipWeapon</c>
+        /// refuses it, plays the fail sound, and leaves the current weapon
+        /// where it was. The next press then computed the same index from the
+        /// same starting weapon and stopped on the same empty one, so the
+        /// cycle was stuck for good in that direction and the only way past it
+        /// was to cycle the other way round.
+        ///
+        /// The ammo test is <c>TryEquipWeapon</c>'s own, so the two cannot
+        /// drift: anything this stops on is something that will equip. An
+        /// empty weapon is still reachable by its own key, which is where the
+        /// "you have no ammo" message belongs -- it answers a player who asked
+        /// for that weapon, rather than one who asked for the next one.
+        /// </summary>
+        private bool CanCycleToWeapon(BeamType beam)
+        {
+            if (!_availableWeapons[beam])
+            {
+                return false;
+            }
+            WeaponInfo info = Weapons.Current[(int)beam];
+            int ammo = _ammo[info.AmmoType];
+            return beam == BeamType.PowerBeam || ammo == -1 || ammo >= info.AmmoCost;
         }
 
         private bool EndWeaponMenu()
@@ -1253,6 +1288,21 @@ namespace MphRead.Entities
                 if (Values.AltFormStrafe != 0)
                 {
                     // Trace, Sylux, Weavel
+                    // The pad's stick and a remote player's relayed aim, in
+                    // the same place the mouse's goes in -- as in ProcessBiped,
+                    // which was the only caller until now. An alt form that
+                    // can aim at all is one of these three, and for them this
+                    // is the same turn the mouse makes: without it a pad could
+                    // walk and shoot in alt form but not look, and a puppet in
+                    // alt form faced wherever its last snapshot left it.
+                    // The pad's stick and a remote player's relayed aim, in
+                    // the same place the mouse's goes in -- as in ProcessBiped,
+                    // which was the only caller until now. An alt form that
+                    // can aim at all is one of these three, and for them this
+                    // is the same turn the mouse makes: without it a pad could
+                    // walk and shoot in alt form but not look, and a puppet in
+                    // alt form faced wherever its last snapshot left it.
+                    ApplyModAim();
                     if (Controls.MouseAim && !Flags1.TestFlag(PlayerFlags1.NoAimInput) && !IsBot)
                     {
                         float aimY = -Input.MouseDeltaY / 4f * Mods.InputSettings.MouseSensitivity

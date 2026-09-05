@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading;
@@ -67,6 +68,21 @@ namespace MphRead.Mods.Network
         private volatile bool _autoPong;
 
         /// <summary>
+        /// Packets held back because <see cref="NetLag"/> is on: arrivals
+        /// waiting to be handed to the game loop, and sends waiting to leave.
+        ///
+        /// Both are plain FIFOs and both are drained from the head only while
+        /// the head is due, so a jittered hold can delay a datagram but never
+        /// overtake the one in front of it. Reordering is a different fault
+        /// with different guards against it, and mixing the two would make a
+        /// run that reproduced one impossible to read.
+        /// </summary>
+        private readonly Queue<(long DueAt, ReceivedPacket Packet)> _heldIn = new();
+        private readonly Queue<(long DueAt, IPEndPoint Target, byte[] Data, int Length)> _heldOut = new();
+        private readonly object _heldLock = new();
+        private Thread? _lagWorker;
+
+        /// <summary>
         /// Answer Ping on this thread instead of queueing it for the game
         /// loop. Opt-in: a session that has a frame to wait for wants this
         /// and a directory server, whose replies are part of its own
@@ -125,6 +141,48 @@ namespace MphRead.Mods.Network
                 Name = "MphRead net"
             };
             _worker.Start();
+            if (NetLag.Active)
+            {
+                // Only when asked for. A thread that wakes a thousand times a
+                // second to look at an empty queue is not something a real
+                // session should be paying for.
+                _lagWorker = new Thread(LagLoop)
+                {
+                    IsBackground = true,
+                    Name = "MphRead net lag"
+                };
+                _lagWorker.Start();
+            }
+        }
+
+        /// <summary>
+        /// Let out whatever the simulated line has finished holding.
+        ///
+        /// Only the send side needs a thread of its own: arrivals are promoted
+        /// by <see cref="Drain"/>, which the game loop calls every frame
+        /// anyway, and a send held until the next frame would put a frame of
+        /// latency on top of the one being simulated.
+        /// </summary>
+        private void LagLoop()
+        {
+            while (_running)
+            {
+                long now = Stopwatch.GetTimestamp();
+                while (true)
+                {
+                    (long DueAt, IPEndPoint Target, byte[] Data, int Length) held;
+                    lock (_heldLock)
+                    {
+                        if (_heldOut.Count == 0 || _heldOut.Peek().DueAt > now)
+                        {
+                            break;
+                        }
+                        held = _heldOut.Dequeue();
+                    }
+                    SendNow(held.Target, held.Data.AsSpan(0, held.Length));
+                }
+                Thread.Sleep(1);
+            }
         }
 
         private void ReceiveLoop()
@@ -174,7 +232,15 @@ namespace MphRead.Mods.Network
                     // about a frame worse than their connection.
                     if (_autoPong && data.Length >= 1 && (PacketType)data[0] == PacketType.Ping)
                     {
-                        Send(sender, PacketType.Pong, data.AsSpan(1));
+                        // The reply carries *both* halves of a simulated line.
+                        // This ping was answered here, on the transport
+                        // thread, before the hold below ever looked at it --
+                        // so without the extra half the round trip the server
+                        // measures comes out at half what was asked for, and
+                        // the one number a latency run is read by would be
+                        // describing the instrument.
+                        Send(sender, PacketType.Pong, data.AsSpan(1),
+                            _lagWorker != null ? NetLag.HoldTicks() : 0);
                         continue;
                     }
                     if (Volatile.Read(ref _inboxCount) >= MaxQueuedPackets)
@@ -191,6 +257,26 @@ namespace MphRead.Mods.Network
                         }
                         PacketsDropped++;
                         Interlocked.Increment(ref TotalPacketsDropped);
+                    }
+                    // The worker rather than NetLag.Active, so the two
+                    // halves cannot disagree: nothing may be held back unless
+                    // there is something running that lets it out again.
+                    if (_lagWorker != null)
+                    {
+                        if (NetLag.Drops())
+                        {
+                            continue;
+                        }
+                        long holdFor = NetLag.HoldTicks();
+                        if (holdFor > 0)
+                        {
+                            lock (_heldLock)
+                            {
+                                _heldIn.Enqueue((Stopwatch.GetTimestamp() + holdFor,
+                                    new ReceivedPacket(sender, data, data.Length)));
+                            }
+                            continue;
+                        }
                     }
                     Interlocked.Increment(ref _inboxCount);
                     _inbox.Enqueue(new ReceivedPacket(sender, data, data.Length));
@@ -210,10 +296,33 @@ namespace MphRead.Mods.Network
         /// <summary>Drain everything received since the last call. Called once per frame.</summary>
         public IEnumerable<ReceivedPacket> Drain()
         {
+            if (_lagWorker != null)
+            {
+                PromoteHeldArrivals();
+            }
             while (_inbox.TryDequeue(out ReceivedPacket packet))
             {
                 Interlocked.Decrement(ref _inboxCount);
                 yield return packet;
+            }
+        }
+
+        private void PromoteHeldArrivals()
+        {
+            long now = Stopwatch.GetTimestamp();
+            while (true)
+            {
+                ReceivedPacket packet;
+                lock (_heldLock)
+                {
+                    if (_heldIn.Count == 0 || _heldIn.Peek().DueAt > now)
+                    {
+                        return;
+                    }
+                    packet = _heldIn.Dequeue().Packet;
+                }
+                Interlocked.Increment(ref _inboxCount);
+                _inbox.Enqueue(packet);
             }
         }
 
@@ -239,20 +348,54 @@ namespace MphRead.Mods.Network
             _inbox.Enqueue(new ReceivedPacket(_playbackSender, data, length));
         }
 
-        public void Send(IPEndPoint target, PacketType type, ReadOnlySpan<byte> payload)
+        /// <param name="extraHoldTicks">
+        /// More simulated line to hold this datagram behind, on top of the
+        /// outbound half. Only the automatic Pong uses it; see the call site.
+        /// </param>
+        public void Send(IPEndPoint target, PacketType type, ReadOnlySpan<byte> payload,
+            long extraHoldTicks = 0)
         {
             Span<byte> buffer = stackalloc byte[NetConfig.MaxPacketSize];
             buffer[0] = (byte)type;
             payload.CopyTo(buffer[1..]);
+            if (_lagWorker != null)
+            {
+                if (NetLag.Drops())
+                {
+                    return;
+                }
+                long holdFor = NetLag.HoldTicks() + extraHoldTicks;
+                if (holdFor > 0)
+                {
+                    // Copied, because the caller's span is a scratch buffer it
+                    // is about to write the next packet into.
+                    byte[] copy = buffer[..(payload.Length + 1)].ToArray();
+                    lock (_heldLock)
+                    {
+                        _heldOut.Enqueue((Stopwatch.GetTimestamp() + holdFor,
+                            target, copy, copy.Length));
+                    }
+                    return;
+                }
+            }
+            SendNow(target, buffer[..(payload.Length + 1)]);
+        }
+
+        private void SendNow(IPEndPoint target, ReadOnlySpan<byte> datagram)
+        {
             try
             {
-                _socket.Send(buffer[..(payload.Length + 1)], target);
+                _socket.Send(datagram, target);
                 Interlocked.Increment(ref TotalPacketsSent);
             }
             catch (SocketException)
             {
                 // Same rationale as above: one unreachable peer must not
                 // take down the session for everyone else.
+            }
+            catch (ObjectDisposedException)
+            {
+                // The session ended while the simulated line still held this.
             }
         }
 

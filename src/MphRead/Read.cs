@@ -58,6 +58,12 @@ namespace MphRead
 
         private static Model? GetModel(string name, bool firstHunt, MetaDir dir)
         {
+            // Every model actually read off disk, when the player has asked
+            // for a log. This is the line that says which file a load died on
+            // -- the crash reports this was built for name a map, and a map is
+            // a hundred of these.
+            Mods.DebugLog.Line("model", $"reading \"{name}\" (dir={dir}"
+                + (firstHunt ? ", first hunt)" : ")"));
             ModelMetadata? meta;
             if (firstHunt)
             {

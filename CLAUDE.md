@@ -83,6 +83,8 @@ export ALSOFT_DRIVERS=null PULSE_SERVER=   # else ALSA retries stall frames
 | `MphRead -servers [-master HOST] [-masterport N]` | print the server list the launcher's browser would show, with each server's map, players and round trip |
 | `MphRead -connect HOST -port N -name X -hunter H` | join from the command line, no launcher |
 | `MphRead -netcheck HOST -port N -name X -hunter H -seconds N [-shots DIR] [-size WxH]` | a real client driven by a script, which reports what it saw. Exit code 0 = pass. `-spectate [SEC]` makes it stop playing and watch, `-rejoin SEC` puts it back in -- the one player state the tour cannot reach on its own |
+| `MphRead -netlag MS[:JITTER]` / `-netloss PCT` | play, or run any check, over a line this client makes up: `-netlag 200` adds 200 ms to the round trip (half each way), `-netlag 200:40` gives it jitter, `-netloss 5` eats one datagram in twenty. Works against the real server, on any platform, with no proxy and no `sudo` -- and unlike `hard/run-latency.sh`'s netem it can be given to **one** client while the others stay fast, which is the case a player with a bad line actually is. Every report says so when it is on |
+| `MphRead -debuglog` | write the file the launcher's corner switch writes, for one run. `.claude/DEBUG-LOGS.md` |
 | `~/mph-net-test/probe-chat.py [HOST] [PORT]` | what the server does with chat, asked the way no real client can: a spoofed sender, and a flood. `.claude/multiplayer/NETWORK-CHAT.md` |
 | `~/mph-net-test/run-remote.sh HOST PORT SECONDS hunter...` | the same check against a server that is not on this machine -- which is the one that matters, since eight clients on one box measure the box |
 | `~/mph-net-test/run-demo.sh SEC [authority\|client]` | record a demo from a scripted client and print what landed in the file. The authority is the case that matters: it is whichever client joined first, so it is normally whoever set the match up, and the server sends it no snapshots at all |
@@ -92,6 +94,7 @@ export ALSOFT_DRIVERS=null PULSE_SERVER=   # else ALSA retries stall frames
 | `MphRead -maptest "ROOM" -players 8 -seconds 22` | load one room with a full house, drive every player, and report what the map holds and whether it survived |
 | `MphRead -maptest "ROOM" -players 8 -bots` | the same, but AI bots instead of the scripted tour -- a different code path, the only one that finds what only `PlayerAi` touches |
 | `MphRead -maptest "ROOM" -renderprobe` | stand on every spawn point in the room in turn, read the frame, walk forward five seconds, read the worst. Catches a room that draws nothing -- the failure no other check can see, because everything else about it passes. `-shots DIR` writes the PNGs, `-allnodes` draws without room-part culling (which separates "the geometry is missing" from "the cull lost it"), `-hudshots` uses a real visible window and reads *its* buffer, which is the only capture that includes the HUD, and `-size WxH` sets that window's shape -- the HUD is laid out in a 4:3 space and stretched, so how it looks is partly a question about the window. Under WSL a HUD capture needs the X11 backend: `WAYLAND_DISPLAY=` `DISPLAY=:0`, or every window read comes back black |
+| `MphRead -maptest "TEST ARENA" -players 8` | the harness's own room (`maps/arena/`): forty units square, eight spawns on a ring looking inward, nothing far from anything. Where damage, hit registration and the affliction states are actually measurable -- a real map's corridors mean most of the tour's shots land on a wall |
 | `MphRead -rooms` | list every multiplayer room, one per line, for a shell loop. **27** is the whole cartridge and the right answer with no custom map source present; anything more is a custom map |
 | `MphRead -q3convert FILE.pk3 -map LEVEL -name ROOM [-noclip]` | a Quake 3 .pk3 to a custom map in one command: textures baked from the level's own art, scale and extents picked from its geometry, spawns from its entities. Places no weapons or powerups -- where those go decides how the map plays. `.claude/mapgen/MAP-PIPELINE.md` |
 | `MphRead -mapgen ["NAME"]` | generate the room binaries for the custom maps in `maps/` (recursively: a map may sit in a folder of its own with its level and textures beside it, or be a single `.fpmap` bundle), from the player's own textures. `-mapmaterials "ROOM"` prints what textures a room can lend. A map is a JSON file; the `.bin` it produces is never committed. `.claude/mapgen/MAP-PIPELINE.md` |
@@ -126,6 +129,7 @@ things you can do on the right.
 | Demos | pick a `.fpdemo` and replay it -- on Android too, where the picker cannot filter by pattern and hands back a `content://` document that has to be copied in first |
 | Settings | display, audio, controls, match rules, and profile (name, hunter, server addresses, updates, game files, credits). Also reachable from the pause menu during a match. **Pro mode HUD** is the whole HUD question in one switch -- no helmet, plain fixed crosshair, weapon list at 170%, fixed weapon, and its own energy, ammo and score readouts in place of the game's; off is the game as the DS drew it. The six settings it answers for have no rows at all, and the rows that remain have no explanations under them. Cheats, bugfixes, the leftover feature flags and the HUD-readout opacity likewise have **no UI** and no longer load from `settings.json` -- they sit at their code defaults |
 | Game files | where the .nds goes. Shown first, and everything else greyed out, when there is nothing set up yet |
+| Debugging logs | one line in the bottom right corner, under the version, on the front card only. Off; switched on it writes `logs/FruityPrime-<when>.log` beside the executable (the app's data directory on Android) with everything the program prints plus the machine, the driver, every model read and the stack of anything that kills it. What "it crashes when the map loads" is answered with. `.claude/DEBUG-LOGS.md` |
 
 Gotchas worth keeping in view without opening another file:
 
@@ -174,6 +178,12 @@ AppCompat descendant, and a Debug APK that carries no managed code unless
 directory, and how to run an emulator here.
 
 ## Gamepads
+
+**A pad and the touchscreen are both live at once on Android.** Using the pad
+puts the on-screen layout away and does nothing else: the surface underneath
+keeps working, so a touch does what it landed on *and* brings the layout back.
+A stick in one hand and a thumb on FIRE is a normal way to hold a phone, and
+the weapon wheel cannot be reached from a pad at all.
 
 A pad plays the game on the desktop and on Android, over USB or Bluetooth,
 in an Xbox-shaped layout: sticks move and aim, right trigger shoots, A jumps,
@@ -322,7 +332,42 @@ another, and a transport queue that dropped the newest packets under load
 instead of the oldest. None of it was actually latency; all of it reproduced
 at single-digit-millisecond pings on loopback or the Pi.
 
+A second round, from reports out of real matches on 2026-09-04: a freeze that
+existed on one machine only, players who went invisible at the top of one map,
+a gun that fell off the bottom of the screen on a pad and could not be raised
+or fired again, a weapon cycle that stopped dead on an empty weapon, and no
+camera at all in alt form on a pad. Only the first is a network fault; the
+rest are input and rendering, and three of the five were invisible to every
+check here because nothing in the harness holds a controller.
+
 Shapes worth keeping without opening anything else:
+
+- **An affliction is not state until it is sent.** Freeze is applied inside
+  `TakeDamage` from the *beam entity*, and `NetDamage.Replay` has no beam to
+  give -- so a player frozen on the authority was frozen nowhere else: they
+  walked around normally on their own screen while the machine running the
+  simulation, which pins a puppet wherever its owner last said it was, drew a
+  block of ice sliding across the room. `PlayerState.FlagFrozen` carries the
+  state instead of the cause, and the countdown still runs locally.
+- **A lookup that fails is not the same as a lookup that is stale.**
+  `GetNodeRefByPosition` returns nothing for a position no room part contains
+  -- the top of AD2 ALINOS PERCH, among others -- and the fallback kept the
+  node the puppet already had, which the viewer often cannot see. That is a
+  player who can shoot you from somewhere you cannot see them, with their
+  shadow still moving about underneath. Now: probe the body and half a unit
+  either side first, and if it still cannot be placed, say so and draw it
+  anyway.
+- **Nothing that answers "has this person touched anything lately" knew about
+  the pad -- or about a remote player.** `Input.HasInput` is written in the
+  pass that turns a keyboard into binds, and three kinds of player never go
+  through it: a pad (ored on afterwards), a puppet (driven from relayed
+  intents), and a scripted client. All three therefore looked idle, and the
+  engine lowers an idle player's gun -- which `CanShoot` and `TryEquipWeapon`
+  both refuse to work through. On a pad that meant a gun that fell off the
+  screen and a player who could not fire again; on a **puppet** it meant a
+  player who held still and fired had their shots fail to spawn *on the
+  authority*, which is the only machine whose shots count. Shots spawned per
+  slot went from 28-63 to 118-142 once it was fixed. `ModNoteInput`.
 
 - **A stale input is not harmless just because it's only a position.** The
   intent stream has no notion of "this predates what just happened," so

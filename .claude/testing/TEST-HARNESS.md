@@ -55,6 +55,19 @@ Map sweeps and probes
   for a fortnight on the strength of the first mistake. A map where *every*
   pad stays silent is `MAPFAIL`; one silent pad is not (some are meant to be
   dropped onto from above).
+- **`TEST ARENA` (`maps/arena/arena.json`).** A room built for this harness
+  rather than for playing: forty units square with a ceiling, one low block in
+  the middle, eight spawns on a ring of nine all looking inward, ammo and
+  health between them. Nothing is more than twenty units from anything else,
+  so the tour's duel and affliction phases actually land their shots -- which
+  is the difference between measuring hit registration and measuring the
+  hallways of MP1 SANCTORUS. MP2 HARVESTER produced no freezes at all across
+  several runs; the arena produces two in thirty seconds. Put its folder in
+  the rig's `bin/maps/` and its name in `bin/maprotation.txt` to run a
+  networked check on it. It reports MAPFAIL for the odd black frame, which
+  `-renderprobe` disagrees with (99.7-99.9% lit from all eight spawns): that
+  is the third-person camera passing through the wall of a small closed box,
+  not the room failing to draw.
 - **The affliction probe.** Freeze/burn/disrupt are states the plain tour can
   never reach, because three things must be true at once: (1) the hunter must
   hold its *own* affinity weapon (`beam + 9`), which the probe issues via

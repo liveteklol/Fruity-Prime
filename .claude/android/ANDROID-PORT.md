@@ -214,19 +214,31 @@ being **used** — a button down, or a stick past the dead zone, which is what
 `GamepadInput.InUse` answers — and the answer is reversed by the next finger
 on the glass.
 
-Three things that are easy to get wrong here and are not:
+**Hiding the layout hides the layout, and nothing else.** The screen keeps
+working the whole time the pad is in use: both are live at once, and that is
+the point — a stick in one hand and a thumb on FIRE is a normal way to hold a
+phone, and the weapon wheel cannot be reached from a pad at all (it reads an
+absolute pointer position; see GAMEPAD.md), so a player who wants it has to be
+able to touch the screen without first paying a press to wake the controls up.
+
+Two things that are easy to get wrong here and are not:
 
 - **The view stays; only the drawing stops.** `TouchOverlayView` is still the
-  only thing receiving touches, so the touch that brings the controls back is
-  an ordinary one. Making the view `Gone` would hand every touch to whatever
-  is underneath and there would be nothing left to bring them back with.
-- **The reviving touch does nothing else.** It is added to `_swallowed` and
-  its move and up are dropped. The controls were not on screen when the finger
-  went down, so where it landed was not a choice — and the middle of the
-  screen, which is where a thumb goes first, is FIRE's half.
-- **Everything held is released on the way out.** A thumb resting on FIRE as
-  the player picks the pad up would otherwise be held for ever: the finger's
-  release lands on a control that is no longer listening.
+  only thing receiving touches, so a touch while the controls are invisible is
+  an ordinary one: it does what it landed on *and* brings the layout back.
+  Making the view `Gone` would hand every touch to whatever is underneath and
+  there would be nothing left to bring them back with.
+- **Nothing is released when the layout goes away.** It used to be —
+  everything held was let go, because a thumb resting on FIRE as the player
+  picked the pad up would otherwise be held for ever, *the finger's release
+  landing on a control that had stopped listening*. Nothing stops listening
+  any more, so the release arrives and does its job; cancelling would instead
+  cut off a player deliberately holding a button with one hand and a stick
+  with the other.
+
+Both of those were the right answer to "the player has put the pad down and
+gone back to the glass", and the wrong one to "the player is using both",
+which is the commoner case. Changed 2026-09-04 on that report.
 
 **The one exception is a dialog box.** `PlayerDialog.CheckButtonPressed` reads
 `Input.ClickX/Y` — the OK button is a *position*, because on the DS it was a
