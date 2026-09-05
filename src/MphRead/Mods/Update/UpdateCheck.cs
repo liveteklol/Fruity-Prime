@@ -87,8 +87,11 @@ namespace MphRead.Mods.Update
                     $"{Mods.Branding.FileName}/{BuildVersion.Display}");
                 client.DefaultRequestHeaders.Add("Accept",
                     "application/vnd.github+json");
-                using HttpResponseMessage response = client.Send(
-                    new HttpRequestMessage(HttpMethod.Get, _api), cancel);
+                // SyncHttp rather than client.Send: the synchronous one does
+                // not exist on Android's handler. See SyncHttp.
+                using HttpResponseMessage response = SyncHttp.Send(client,
+                    new HttpRequestMessage(HttpMethod.Get, _api),
+                    HttpCompletionOption.ResponseContentRead, cancel);
                 // 404 is the answer for a repository that has never published a
                 // release, which is an ordinary state and not a failure. Told
                 // apart from a network problem because "could not reach GitHub"

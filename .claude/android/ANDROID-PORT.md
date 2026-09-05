@@ -511,9 +511,9 @@ controls work in Debug and throw on the first frame of a release APK. Checked,
 not assumed: the members survive in
 `obj/Release/.../android-arm64/linked/OpenTK.Windowing.GraphicsLibraryFramework.dll`.
 
-## Two traps that cost a release each
+## Three traps that cost a release each
 
-Both were found by running the APK, and neither is visible from a build log.
+All three were found by running the APK, and none is visible from a build log.
 
 **The activity's theme must be an AppCompat descendant.** Avalonia's
 `AvaloniaMainActivity` is an AndroidX `AppCompatActivity`, and AppCompat throws
@@ -530,6 +530,21 @@ startup with *"No assemblies found in .../.__override__/<abi>. Assuming this is
 part of Fast Deployment."* The build succeeds, the APK installs, and it is
 hollow. `-p:EmbedAssembliesIntoApk=true` is what makes a debug APK someone can
 be handed; it is ~110 MB rather than 20.
+
+**The synchronous `HttpClient.Send` does not exist here.** .NET for Android
+defaults `UseNativeHttpHandler` to true, which puts
+`Xamarin.Android.Net.AndroidMessageHandler` behind every `HttpClient` -- and
+that handler implements `SendAsync` and nothing else, so the synchronous call
+falls through to `HttpMessageHandler.Send`, whose whole body is a throw. The
+update check used it. On a phone it therefore never reached GitHub at all: it
+caught the `NotSupportedException`, wrote "could not reach GitHub" into
+`UpdateCheck.LastReason`, and the front screen -- which only shows the corner
+when a release was *found* -- said nothing, so a phone sat on v0.3.0 with
+v0.3.1 published and no way to tell that apart from being up to date. The
+desktop was fine throughout, because `SocketsHttpHandler` implements the
+synchronous path. `Mods/Update/SyncHttp.cs` is the one-line answer, and the
+shape to watch for is any synchronous `HttpClient` or `HttpContent` call in the
+shared sources: it compiles on this head and throws on the device.
 
 ## Text input
 

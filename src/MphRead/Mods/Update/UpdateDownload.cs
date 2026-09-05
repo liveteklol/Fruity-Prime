@@ -61,7 +61,10 @@ namespace MphRead.Mods.Update
                 using var client = new HttpClient { Timeout = _timeout };
                 client.DefaultRequestHeaders.Add("User-Agent",
                     $"{Mods.Branding.FileName}/{BuildVersion.Display}");
-                using HttpResponseMessage response = client.Send(
+                // SyncHttp rather than client.Send: the synchronous one does
+                // not exist on Android's handler, which is the one platform
+                // that fetches the package itself. See SyncHttp.
+                using HttpResponseMessage response = SyncHttp.Send(client,
                     new HttpRequestMessage(HttpMethod.Get, url),
                     HttpCompletionOption.ResponseHeadersRead, cancel);
                 if (!response.IsSuccessStatusCode)
@@ -70,7 +73,11 @@ namespace MphRead.Mods.Update
                     return false;
                 }
                 long total = response.Content.Headers.ContentLength ?? expectedBytes;
-                using (Stream source = response.Content.ReadAsStream(cancel))
+                // ReadAsStreamAsync for the same reason as the send above:
+                // the synchronous reads on HttpContent are the ones a handler
+                // may not have implemented.
+                using (Stream source = response.Content
+                    .ReadAsStreamAsync(cancel).GetAwaiter().GetResult())
                 using (var target = new FileStream(partial, FileMode.Create,
                     FileAccess.Write, FileShare.None))
                 {
