@@ -145,7 +145,26 @@ same-day run of the build you are comparing against.** Three clients fit and
 give 0 reliably; that is the local instrument. Eight clients against the Pi
 (`run-remote.sh`) is the real one.
 
-## Last verified status (2026-09-01, the hard-case batch)
+## Last verified status (2026-09-06, map rotation across match boundaries)
+
+`run-rotate.sh 150 Samus Weavel Sylux` -- a local server, four maps,
+30-second matches, so matches both start and end on maps the session did not
+begin on. Three runs of the same scenario on three builds:
+
+| Build | Result |
+|---|---|
+| before the fix | **3 of 3 clients dead** at the end of the first rotated match, all within a second: `ArgumentOutOfRangeException` at `RoomEntity.DrawRoomParts` line `Model.Nodes[nodeIndex]`. Camera holding MP1 SANCTORUS part 5 node 75 in an MP3 PROVING GROUND with 2 parts and 27 nodes, from `CameraSequence.Intro` (`camseq=172 isIntro=True state=Ending`) |
+| the guard alone, intro still stale | 0 of 2 crashed, 4 rotations followed, and the guard's own line fires at each rotated match end: `[room] camera node ref "MP3 PROVING GROUND" part=1 node=19 does not belong to "MP1 SANCTORUS" (9 part(s))`. That is the in-range half of the same fault -- pre-fix it is a black room with every other player culled out of it, not a crash |
+| both fixes | 4 rotations, 3 of 3 clients alive, all on the server's map, and **zero** refused refs -- which is also the evidence `IsOwnNodeRef` rejects nothing legitimate |
+
+Regression on the same build:
+
+| Check | Result |
+|---|---|
+| `run-check.sh 130`, 3 clients | **0 mismatches**, scoreboards agree within 0 events -- the 2026-08-23 baseline |
+| `-maptest -renderprobe`, MP1 SANCTORUS / MP3 PROVING GROUND | 94-99.7% of the frame lit at every spawn point, `0 drew nothing`, and the walk still names real parts (8, 5, 2, 1, 0) -- culling is on, not bypassed by the new guard |
+
+## Previous verified status (2026-09-01, the hard-case batch)
 
 Full detail, including the eight faults it found, in
 `.claude/testing/TEST-HARD-CASES.md`.
@@ -153,7 +172,7 @@ Full detail, including the eight faults it found, in
 | Check | Result |
 |---|---|
 | 8 real clients, 220 s, against the Pi | 0 mismatches, 0 position snaps, 2 ms pings, `dropped=0` |
-| Map rotation with real clients | **was killing every client**; fixed (`NodeRef.None` on rebuild), 0 of 3 crashed afterwards and both rotations were followed |
+| Map rotation with real clients | **was killing every client**; fixed (`NodeRef.None` on rebuild), 0 of 3 crashed afterwards and both rotations were followed. **Superseded 2026-09-06**: that was one of two mechanisms and this batch could not have seen the other, which only fires when a match *ends* on a map the session did not start on -- see the entry above |
 | A player's line cut for 1, 3, 8 and 40 s | heals by itself under the 30 s timeout; at 40 s the peer is dropped, the authority moves, and the same slot comes back within a second of the line returning |
 | Latency 100 / 200 / 300 / 500 ms (kernel `netem`) | scoreboards identical at every level; snaps 0/0/18/190 |
 | Loss 5 / 15 / 30 %, both legs | no divergence; hit registration is what degrades |
@@ -163,7 +182,7 @@ Full detail, including the eight faults it found, in
 | Pi 3B ceiling | 20 concurrent hosted matches / 160 players; past that new players cannot join while those inside keep 98.7 % delivery |
 | Server journal across 3.5 h of hostile testing | zero exceptions or errors |
 
-## Previous verified status (2026-08-23)
+## Earlier verified status (2026-08-23)
 
 | Check | Result |
 |---|---|

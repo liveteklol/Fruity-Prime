@@ -75,12 +75,62 @@ showing results for twelve seconds while the server says the match is running
 sequence and the server's own intermission, so a legitimate ending is never
 cut short, and the next bug of this shape costs a hiccup instead of a player.
 
-**The crash after rotation is unexplained** -- no log, no stack from that
-client. What's known: it spent two minutes in `MatchState.Ending` while
-`NetHooks.AfterSimulation` kept applying snapshots (spawns, replayed deaths,
-effects, sounds) into a scene whose `UpdateScene` never ran to process or
-retire them. That's the state the fixes above prevent, so it may go with them
--- not reproduced since, and not claimed fixed.
+## The results screen flying the previous map's camera (2026-09-06)
+
+**The crash after rotation, explained and fixed.** It was one static:
+`CameraSequence.Intro`, the multiplayer intro fly-through. `SceneSetup` loads
+it when a room is loaded from scratch and **nothing reloaded it for a
+transition**, so after the first rotation it still held the sequence belonging
+to the map the session started on -- for the rest of the session, every map.
+
+That only bites at a match *end*, which is why it hid for so long.
+`GameState.EnsureIntroCamSeq` runs the intro on a loop for the results screen
+(`MatchState.GameOver` with no winner to watch, and all of `Ending`), and
+`SetUp` writes the first keyframe's `NodeRef` straight into the main player's
+`CameraInfo`. Keyframe node refs are resolved by node *name* against whatever
+room was loaded when `Initialize` last ran, so what the camera got handed was
+a part and a node of a room that is no longer in memory, and
+`RoomEntity.UpdateRoomParts` walks the **new** room's portal graph from it.
+
+Both of the reported symptoms are that one ref, and which one you get is only
+which way the rotation went:
+
+| | What the stale indices do | What a player sees |
+|---|---|---|
+| big map -> small map | out of range | `ArgumentOutOfRangeException` in `RoomEntity.DrawRoomParts` at `Model.Nodes[nodeIndex]`, and the process is gone. Measured: MP1 SANCTORUS part 5 node 75, in a MP3 PROVING GROUND with 2 parts and 27 nodes -- **all three clients died within a second of each other**, at the end of the first rotated match |
+| small map -> big map | quietly in range | the room is drawn from a part the camera is not in, so it comes out black, and every other player is culled against the same wrong active set and disappears. Measured: MP3 PROVING GROUND part 1 node 19, in a MP1 SANCTORUS with 9 parts |
+
+Two fixes, and the second is the one that matters longer than this bug:
+
+- `RoomEntity.LoadIntroCamSeq`, called at the end of `LoadRoom`, does for a
+  transition what `SceneSetup` does for a first load -- loads the new room's
+  intro and `Initialize`s it, so its keyframes name this room's nodes. It also
+  clears it for single player and for a custom map, which have none.
+- **A node ref that names another room may not cull anything.** `NodeRef`
+  carries `RoomName` and nothing had ever compared it -- `==` is three ints.
+  `RoomEntity.IsOwnNodeRef` now checks the name *and* every index against the
+  room actually loaded; `UpdateRoomParts` refuses a foreign ref before the
+  bounds test (which fails **open** for a part this room does not have, so it
+  could not catch this), `IsNodeRefVisible`/`IsNodeRefAudible` answer "visible"
+  rather than culling against a number that means something else here, and
+  `DrawRoomParts` range-checks the node and model index it is about to use.
+  Refusing leaves `_partVisInfoHead` null, which `GetDrawInfo` already reads
+  as "draw every part": the room is drawn uncull ed, which is correct and
+  merely slower. `Setup` also clears the vis-info chain, and with `-debuglog`
+  a refused ref writes one `[room] ... does not belong to ...` line per room.
+
+Proved in three runs of `run-rotate.sh`, four maps, 30-second matches:
+before, 3/3 clients crashed at the first rotated match end; with the guard but
+the intro still stale, the log line fires at every rotated match end and every
+client survives all four rotations; with both, four rotations, no crash and
+**zero** refused refs -- which is also the evidence the guard rejects nothing
+legitimate.
+
+**Why `hard/run-rotation.sh` never caught it:** it crosses one boundary
+against the public server's 7-minute matches, so the run always ended in the
+middle of the second map, and the second map's *end* is the only place a
+session-old static can show. Its single-map case ends four matches, but on the
+same room every time, where a stale intro is the right intro.
 
 The netlog couldn't show any of this and now can: `STATE` lines carry
 `matchState=` and `goal=`, and each slot carries

@@ -93,6 +93,7 @@ export ALSOFT_DRIVERS=null PULSE_SERVER=   # else ALSA retries stall frames
 | `MphRead -nounlagged` | resolve shots against the present, the way every build before lag compensation did. The control for measuring it; on by default. `.claude/multiplayer/NETWORK-UNLAGGED.md` |
 | `MphRead -debuglog` | write the file the launcher's corner switch writes, for one run. `.claude/DEBUG-LOGS.md` |
 | `~/mph-net-test/probe-chat.py [HOST] [PORT]` | what the server does with chat, asked the way no real client can: a spoofed sender, and a flood. `.claude/multiplayer/NETWORK-CHAT.md` |
+| `~/mph-net-test/run-rotate.sh SEC hunter...` | the same check, but across the server's map rotation: a local server with 30-second matches and four maps, so several matches both **start and end** on a map the session did not begin on -- which is where anything that outlives a room change shows, and the one case `hard/run-rotation.sh` cannot reach. Reports crashes, the room each client ended on, and how many node refs outlived their room (zero) |
 | `~/mph-net-test/run-remote.sh HOST PORT SECONDS hunter...` | the same check against a server that is not on this machine -- which is the one that matters, since eight clients on one box measure the box |
 | `~/mph-net-test/run-demo.sh SEC [authority\|client]` | record a demo from a scripted client and print what landed in the file. The authority is the case that matters: it is whichever client joined first, so it is normally whoever set the match up, and the server sends it no snapshots at all |
 | `~/mph-net-test/run-rejoin.sh SEC LEAVE REJOIN [host] [port]` | the rejoin scenario, with a control: A hosts and leaves, the authority moves, then one client takes the vacated slot and another takes a fresh one. Prints what each took. `.claude/multiplayer/NETWORK-DIAGNOSTICS.md` |
@@ -456,6 +457,20 @@ plus a double-counted kill that could end a match early for one client and not
 another, and a transport queue that dropped the newest packets under load
 instead of the oldest. None of it was actually latency; all of it reproduced
 at single-digit-millisecond pings on loopback or the Pi.
+
+A third round, from a real match on 2026-09-06: **the results screen was
+flying the previous map's camera.** `CameraSequence.Intro` is a static, loaded
+when a room is loaded from scratch and never reloaded for a transition, so
+after the first rotation every map's end-of-match sequence ran the intro
+belonging to the map the session started on -- and its keyframes hand the main
+player's camera a `NodeRef` naming a room that is no longer in memory. One
+cause, two symptoms, chosen by which way the rotation went: out of range it is
+an `ArgumentOutOfRangeException` in `RoomEntity.DrawRoomParts` that killed
+every client in the match at once, in range it is a room drawn from a part the
+camera is not in -- black, with every other player culled out of it. Fixed
+where it was, and backstopped: `NodeRef` has carried the name of the room it
+was resolved against all along and nothing ever compared it, so nothing may
+cull against a ref this room cannot place. `.claude/multiplayer/NETWORK-MATCHEND.md`.
 
 A second round, from reports out of real matches on 2026-09-04: a freeze that
 existed on one machine only, players who went invisible at the top of one map,

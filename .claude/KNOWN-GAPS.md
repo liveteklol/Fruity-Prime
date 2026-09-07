@@ -111,11 +111,14 @@ claiming coverage that isn't there.
   built *before* `RefusedPacket` meeting that server -- by design it drops an
   unknown packet type and falls back to the eight-second timeout it always
   had, but nobody has run it.
-- **The rotation crash was found on the public server's own rotation and
-  fixed there; no other pair of maps has been tried.** The mechanism -- a
-  pooled player's NodeRef into the room just unloaded -- does not depend on
-  which rooms they are, but only MP1 SANCTORUS -> MP3 PROVING GROUND has been
-  run, three clients at a time.
+- **The rotation crash has two known mechanisms, both fixed, and only four
+  maps have been rotated between.** A pooled player's NodeRef into the room
+  just unloaded (2026-08), and the multiplayer intro camera sequence outliving
+  its room (2026-09-06, `.claude/multiplayer/NETWORK-MATCHEND.md`). Neither
+  depends on which rooms they are, and `IsOwnNodeRef` now refuses any node ref
+  naming another room whatever leaked it -- but the rotations actually run are
+  MP1 SANCTORUS, MP3 PROVING GROUND, MP4 HIGHGROUND and MP2 HARVESTER, two and
+  three clients at a time, on loopback.
 - **Late joiners and bursty features skew the tour's numbers**, not the
   replication. Clients start ~3 s apart; a client that joins a bursty phase
   (bombing, unmorphing) late reports a fraction of what the subject did, and

@@ -87,6 +87,11 @@ namespace MphRead.Entities
             _forceFields.Clear();
             _nodePairs.Clear();
             _morphCameraExcludeNodes.Clear();
+            // The visibility walk's own state is per-room too: the vis-info
+            // chain holds NodeRefs, and one left over from the room being
+            // replaced indexes this one's arrays with the wrong numbers.
+            ClearRoomPartState();
+            _foreignRefLogged = false;
             _partBoundsBuiltFor = -1;
             _nextRoomPartId = 0;
             _doorPortalCount = 0;
@@ -491,6 +496,57 @@ namespace MphRead.Entities
                     Mods.Network.NetRoomChange.AfterRebuild(_scene);
                 }
             }
+            LoadIntroCamSeq();
+        }
+
+        /// <summary>
+        /// Load the multiplayer intro camera sequence belonging to the room
+        /// that has just been loaded.
+        ///
+        /// SceneSetup does this when a room is loaded from scratch and nothing
+        /// did it again for a transition, so after a map rotation
+        /// <see cref="CameraSequence.Intro"/> -- a static -- still held the
+        /// previous room's sequence. Its keyframes each carry a NodeRef,
+        /// resolved by node *name* against whichever room was loaded when
+        /// Initialize last ran, and GameState.EnsureIntroCamSeq runs the
+        /// sequence on a loop for the end-of-match results screen: SetUp
+        /// writes the first keyframe's node ref straight into the main
+        /// player's camera. UpdateRoomParts then walks the *new* room's portal
+        /// graph from a part of the old one -- measured on a rotation from
+        /// MP1 SANCTORUS to MP3 PROVING GROUND, part 5 node 75 against a room
+        /// with 2 parts and 27 nodes.
+        ///
+        /// Out of range that is an ArgumentOutOfRangeException in
+        /// DrawRoomParts, which killed every client in the match at the end of
+        /// the first rotated round. In range -- the same rotation between two
+        /// larger maps -- it is worse to diagnose than to suffer: the room is
+        /// drawn from a part the camera is not in, so it comes out black, and
+        /// every other player is culled against the same wrong active set and
+        /// disappears.
+        /// </summary>
+        private void LoadIntroCamSeq()
+        {
+            CameraSequence.Intro = null;
+            if (!GameState.Multiplayer || PlayerEntity.PlayerCount == 0)
+            {
+                return;
+            }
+            // The 27 multiplayer intros, in room order. A custom map has no
+            // sequence of its own and gets none, exactly as at first load.
+            int seqId = RoomId - 93 + 172;
+            if (seqId < 172 || seqId >= 199)
+            {
+                return;
+            }
+            CameraSequence intro = CameraSequence.Load(seqId, _scene);
+            // Keyframe node refs are resolved here, against this room. The
+            // first-load path leaves this to GameState.Setup; a transition has
+            // nothing that would call it, and an uninitialised keyframe's node
+            // ref is a default-constructed one -- part 0, node 0 -- which is a
+            // valid-looking index into whatever is loaded rather than None.
+            intro.Initialize();
+            intro.Flags |= CamSeqFlags.Loop;
+            CameraSequence.Intro = intro;
         }
 
         private void StartTransition(bool fromDoor, bool resume = false)
@@ -911,6 +967,16 @@ namespace MphRead.Entities
             NodeRef curNodeRef = PlayerEntity.Main.CameraInfo.NodeRef;
             if (_scene.CameraMode != CameraMode.Player || curNodeRef.PartIndex == -1)
             {
+                return;
+            }
+            // The camera has to be holding a part of *this* room, and it has
+            // to be first: the bounds test below fails open for a part index
+            // this room does not have -- PartBoundsDepth cannot answer, so
+            // PartCouldContain says "maybe" -- which is exactly the shape a
+            // ref belonging to a room that is no longer loaded arrives in.
+            if (!IsOwnNodeRef(curNodeRef))
+            {
+                NoteForeignCameraRef(curNodeRef);
                 return;
             }
             // The camera has to actually be in the part it says it is in.
@@ -1356,6 +1422,96 @@ namespace MphRead.Entities
         }
 
         /// <summary>
+        /// Whether a node ref actually indexes *this* room.
+        ///
+        /// A NodeRef is three raw indices and the name of the room they were
+        /// resolved against, and nothing has ever compared the name -- so one
+        /// that outlives its room reads as perfectly valid and indexes the new
+        /// room's arrays with the old room's numbers. Every way that has
+        /// happened so far is a fault in its own right and has been fixed
+        /// where it was (see <see cref="LoadIntroCamSeq"/>); this is the test
+        /// that says the answer is wrong without having to know which way it
+        /// got here, because the cost of missing one is a crash or a black
+        /// room rather than a cosmetic slip.
+        ///
+        /// The name is the reliable half. The indices are checked too, since a
+        /// ref built before this room finished loading carries no name at all
+        /// -- a default-constructed NodeRef is part 0, node 0, which is a
+        /// valid-looking index into anything.
+        /// </summary>
+        private bool IsOwnNodeRef(NodeRef nodeRef)
+        {
+            if (!NameMatches(nodeRef))
+            {
+                return false;
+            }
+            if (nodeRef.PartIndex < 0 || nodeRef.PartIndex >= _nextRoomPartId
+                || nodeRef.PartIndex >= _roomPartMax)
+            {
+                return false;
+            }
+            if (nodeRef.ModelIndex < 0 || nodeRef.ModelIndex > _connectorModels.Count
+                || _models.Count == 0)
+            {
+                return false;
+            }
+            ModelInstance inst = nodeRef.ModelIndex == 0
+                ? _models[0]
+                : _connectorModels[nodeRef.ModelIndex - 1];
+            return nodeRef.NodeIndex >= 0 && nodeRef.NodeIndex < inst.Model.Nodes.Count;
+        }
+
+        private bool _foreignRefLogged = false;
+
+        /// <summary>
+        /// Say so, once per room, when the camera hands the visibility walk a
+        /// node ref belonging to somewhere else.
+        ///
+        /// The guard above turns that into a room drawn without culling --
+        /// correct, merely slower -- so a player sees nothing wrong and
+        /// nothing is reported. Whatever leaked the ref is still a bug, and
+        /// this line is the only thing that would name it.
+        /// </summary>
+        private void NoteForeignCameraRef(NodeRef nodeRef)
+        {
+            if (_foreignRefLogged || !Mods.DebugLog.Active)
+            {
+                return;
+            }
+            _foreignRefLogged = true;
+            Mods.DebugLog.Line("room", $"camera node ref \"{nodeRef.RoomName ?? "(none)"}\""
+                + $" part={nodeRef.PartIndex} node={nodeRef.NodeIndex} model={nodeRef.ModelIndex}"
+                + $" does not belong to \"{_meta?.Name}\" ({_nextRoomPartId} part(s));"
+                + " drawing the room without culling");
+        }
+
+        /// <summary>
+        /// The cheap half of <see cref="IsOwnNodeRef"/>, for the per-entity
+        /// culling tests: only the room name and the one index they go on to
+        /// use as a subscript.
+        /// </summary>
+        private bool CanCullAgainst(NodeRef nodeRef)
+        {
+            return NameMatches(nodeRef) && nodeRef.PartIndex >= 0 && nodeRef.PartIndex < _roomPartMax;
+        }
+
+        /// <summary>
+        /// Whether the room a node ref names is this one.
+        ///
+        /// Only asked of refs into the room's own model. A connector's portal
+        /// is named after the connector rather than the room it was attached
+        /// to (see AddDoorPortal), so the name means something else there and
+        /// those are left to the index checks -- which is enough, because a
+        /// room with no connectors rejects every non-zero model index outright
+        /// and a multiplayer arena never has one.
+        /// </summary>
+        private bool NameMatches(NodeRef nodeRef)
+        {
+            return nodeRef.ModelIndex != 0 || nodeRef.RoomName == null || _meta == null
+                || nodeRef.RoomName == _meta.Name;
+        }
+
+        /// <summary>
         /// Which room part a position is in, for the callers that cannot walk
         /// there -- a remote player whose position arrives over the wire, a
         /// projectile placed where it struck.
@@ -1452,7 +1608,7 @@ namespace MphRead.Entities
 
         public bool IsNodeRefAudible(NodeRef nodeRef)
         {
-            if (nodeRef.PartIndex == -1)
+            if (nodeRef.PartIndex == -1 || !CanCullAgainst(nodeRef))
             {
                 return true;
             }
@@ -1487,6 +1643,16 @@ namespace MphRead.Entities
             if (nodeRef.PartIndex == -1)
             {
                 return false;
+            }
+            // A ref this room cannot place is a ref this room must not cull
+            // against -- it belongs to a room that is no longer loaded, and
+            // the number in it means something else here. Drawing something
+            // that should have been culled costs a model the depth buffer
+            // mostly swallows; hiding something that should have been drawn is
+            // a hunter shooting you from somewhere you cannot see them.
+            if (!CanCullAgainst(nodeRef))
+            {
+                return true;
             }
             return _activeRoomParts[nodeRef.PartIndex];
         }
@@ -1650,14 +1816,23 @@ namespace MphRead.Entities
                 {
                     partInst = _models[0];
                 }
-                else
+                else if (modelIndex - 1 < _connectorModels.Count && modelIndex < _roomCollision.Count)
                 {
                     partInst = _connectorModels[modelIndex - 1];
                     offset = _roomCollision[modelIndex].Translation;
                     transform = Matrix4.CreateScale(partInst.Model.Scale);
                     transform.Row3.Xyz = offset;
                 }
-                if (!partInst.Active)
+                else
+                {
+                    roomPart = roomPart.Next;
+                    continue;
+                }
+                // Every index below walks this model's own node chain from
+                // nodeIndex, so one bad subscript here is the whole difference
+                // between a room drawn and a process gone. It is one
+                // comparison per room part per frame.
+                if (!partInst.Active || nodeIndex < 0 || nodeIndex >= partInst.Model.Nodes.Count)
                 {
                     roomPart = roomPart.Next;
                     continue;

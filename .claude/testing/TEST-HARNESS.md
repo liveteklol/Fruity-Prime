@@ -18,7 +18,23 @@ How to run
 ```bash
 cd ~/mph-net-test
 ./run-check.sh 150 Samus Weavel Sylux Trace Samus Noxus   # seconds, then hunters
+./run-rotate.sh 150 Samus Weavel Sylux                    # the same, across map rotations
 ```
+
+**`run-rotate.sh` exists because `hard/run-rotation.sh` cannot make the point
+it makes.** That one crosses one boundary against the public server's 7-minute
+matches, so a run always ended in the middle of the second map. Anything that
+outlives a room change is only dangerous on the second map's *own* events, and
+a match ending is the biggest of those -- which is how the intro camera
+sequence went on flying the previous map's path, and crashing every client in
+the match, for as long as it did (`.claude/multiplayer/NETWORK-MATCHEND.md`).
+So this one runs a **local** server with 30-second matches and four maps, and
+several matches therefore both start and end somewhere the session did not
+begin. Both rotation directions matter: a stale node index is out of range
+going from a big map to a small one (a crash) and quietly in range the other
+way (a black room). It reports crashes, the rooms each client ended on, and
+-- from `-debuglog` -- how many node refs outlived their room, which should be
+**zero**.
 
 What the harness records
 
