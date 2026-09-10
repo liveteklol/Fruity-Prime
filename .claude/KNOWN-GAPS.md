@@ -3,6 +3,45 @@
 What's below is unproven or partially proven, not broken. Say so rather than
 claiming coverage that isn't there.
 
+- **A player's own gun fires about a third as often on their own machine as
+  the authority fires it from the same intents, and the reason is not
+  established.** Measured 2026-09-10 with `tools/hitrig`, one 200 s arm at
+  320 ms with the target jumping, the Imperialist tapped on a 63-frame cadence:
+
+  | | slot 0 (the shooter, local) | slot 1 (a puppet) |
+  |---|---|---|
+  | on the shooter's machine | **19** beams | 52 beams |
+  | on the authority | **57** beams | 54 beams |
+
+  The *puppet's* count agrees between the two machines, which is what makes
+  this specific: the relayed-intent path reproduces a gun faithfully, and the
+  local input path does not. So the player's screen shows a third of the shots
+  the server resolves, and every one of the other two arrives as damage with no
+  muzzle flash behind it -- which is a large part of what "my shots do not
+  register" describes, and it is nothing to do with where anybody was standing.
+
+  **What has been ruled out**: ammunition (the rig tops the gun to its cap
+  every frame on the client, and the authority receives that same count in the
+  intent), the weapon (`WeaponSelect` carries it and both sides hold the
+  Imperialist), and the trigger reaching the authority at all (it fires *more*,
+  not less). **What has not been looked at**: `_autofireCooldown` and
+  `_timeSinceShot` along the two paths, `PlayerFlags2.Shooting` and
+  `NoShotsFired` after a respawn, and whether `TryFireWeapon` refuses on the
+  client for a reason it cannot refuse on the authority. Follow it with
+  `NetDamage.Fired` on both sides, which is what found it.
+
+  Until it is understood, **every hit-registration percentage measured across
+  the two machines is comparing two different volleys** and should be quoted
+  with the shot counts beside it.
+- **`NetDamage._attacker` resets to slot 0 rather than to `NoSlot`.**
+  `ForgetSlot` sets it to `0` and `Reset` clears the array, so between a reset
+  and the first hit a slot's snapshot names **slot 0** as the attacker.
+  `NetDamage.Replay` reads that as `mine` on the client that holds slot 0.
+  Today it is latent -- `landed` is zero for such a slot, and `Replay` returns
+  on that first -- but it is one reordering away from a client crediting itself
+  with damage it did not deal, and it is a one-word fix (`NoSlot`) whenever
+  that file is next touched.
+
 - **With the server as the authority, nobody gets the snapshot-based form
   correction any more.** `NetPlayerBridge` reconciles a puppet's alt form
   against `IntentButtons.AltFormState` only on the authority -- deliberately,
