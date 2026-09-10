@@ -273,7 +273,13 @@ namespace MphRead.Mods.Network
             // measures an empty gun -- which reads in every report as a sniper
             // who stopped hitting anything. Ammo comes from pickups in a
             // match; a rig is not playing a match.
-            player.ModSetAmmo(player.ModAmmoCap, 0);
+            // Int32.MaxValue rather than a cap read back from the player:
+            // ModSetAmmo clamps to whatever this hunter's cap actually is, so
+            // asking for more than any cap is the one request that cannot be
+            // wrong. Reading the cap and handing it back was a way to top the
+            // gun up with zero if the cap had not been set yet, which reads in
+            // every report as a sniper who stopped hitting.
+            player.ModSetAmmo(Int32.MaxValue, Int32.MaxValue);
             // Zoomed, which is not cosmetic: the Imperialist deals half damage
             // unzoomed, so an unzoomed run measures a different weapon. The
             // press is a toggle on the rising edge, so press towards the state
@@ -297,16 +303,19 @@ namespace MphRead.Mods.Network
             RangeSum += range;
             RangeSamples++;
             HoldRange(player, c, range, Mode == RigMode.Sniper ? LongRange : CloseRange);
-            // Held, not tapped. The Imperialist MP carries
-            // WeaponFlags.RepeatFire and no charge flag, so a held trigger
-            // fires once per `shotCooldown` -- 60 frames, one shot a second,
-            // which is the fastest this weapon can be sampled at all. Tapping
-            // on a cadence of its own only risks the press landing inside the
-            // cooldown and being thrown away, which costs sample size on a
-            // weapon that has very little to spare: a four-minute run is 240
-            // shots at best.
-            c.Shoot.IsDown = onTarget;
-            if (c.Shoot.IsPressed || (onTarget && _frame % 60 == 0))
+            // Tapped on the weapon's own cadence, and the tap is what makes
+            // it fire. Holding looked right -- the Imperialist MP carries
+            // WeaponFlags.RepeatFire, which repeats at `shotCooldown` 60 --
+            // and measured wrong: a four-minute arm with the trigger held for
+            // 5145 frames on target produced 23 beams, against the 85 the
+            // cooldown allows. Whatever the repeat path needs, a fresh press
+            // does not need it.
+            //
+            // 63 frames rather than 60, so a tap never lands inside the
+            // cooldown of the one before it and get thrown away.
+            const int tap = 63;
+            c.Shoot.IsDown = onTarget && _frame % tap < 3;
+            if (c.Shoot.IsDown && _frame % tap == 0)
             {
                 Triggers++;
             }

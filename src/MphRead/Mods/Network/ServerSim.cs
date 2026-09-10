@@ -364,6 +364,33 @@ namespace MphRead.Mods.Network
         /// </summary>
         public string DescribeRewindDepths() => NetUnlagged.DescribeDepths();
 
+        /// <summary>
+        /// How many beams each slot's gun spawned *here*.
+        ///
+        /// The number that says whether the two machines agree about how often
+        /// a trigger goes off at all, which nothing else asks. A client's own
+        /// report counts the same thing for itself, and in a rig run the two
+        /// came out at 23 and 253: the shooter and the authority were not
+        /// disagreeing about where a shot went, they were disagreeing about
+        /// how many there were. A hit rate compared across that gap is
+        /// comparing two different volleys.
+        /// </summary>
+        public string DescribeShots()
+        {
+            var text = new System.Text.StringBuilder("shots spawned here (slot: beams):");
+            bool any = false;
+            for (int i = 0; i < NetDamage.Fired.Length; i++)
+            {
+                if (NetDamage.Fired[i] == 0)
+                {
+                    continue;
+                }
+                any = true;
+                text.Append($" {i}:{NetDamage.Fired[i]}");
+            }
+            return any ? text.ToString() : "shots spawned here: none";
+        }
+
         /// <summary>One line for the periodic server report.</summary>
         public string Describe()
         {

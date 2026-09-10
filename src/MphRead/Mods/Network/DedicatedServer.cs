@@ -465,6 +465,7 @@ namespace MphRead.Mods.Network
                             // prints now that no client is the authority.
                             Log($"sim: {_sim.DescribeUnlagged()}");
                             Log($"sim: {_sim.DescribeRewindDepths()}");
+                            Log($"sim: {_sim.DescribeShots()}");
                         }
                     }
                     // A millisecond between passes while anyone is connected --
