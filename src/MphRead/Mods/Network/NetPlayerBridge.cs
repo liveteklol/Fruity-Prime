@@ -1051,6 +1051,34 @@ namespace MphRead.Mods.Network
         /// the engine's movement step, so the velocity it derives and the
         /// snaps it counts must not be counted twice.
         /// </summary>
+        /// <summary>
+        /// Put a puppet back where the *authority's snapshot* said, after the
+        /// engine's movement step.
+        ///
+        /// The snapshot twin of <see cref="RestoreReportedPosition"/>, and it
+        /// exists for the same reason: a puppet is placed, then simulated one
+        /// frame further, and a shot resolved after that step is tested
+        /// against the result rather than against the position anybody agreed
+        /// on. For a player in the air that frame is vertical and was measured
+        /// at up to 0.377 units, against a headshot band 0.3 units tall.
+        ///
+        /// Which of the two runs is which world the machine is claiming to
+        /// hold: the authority pins to what the owner reported, because that
+        /// is what its history files; a client under
+        /// <see cref="NetHooks.SnapshotOwnsPuppets"/> pins to the snapshot,
+        /// because that is what it draws and what its ack names.
+        /// </summary>
+        public static void RestoreSnapshotPosition(PlayerEntity player, in PlayerState state)
+        {
+            if (!Sane(state.Position) || state.Position == Vector3.Zero
+                || FrozenInPlace(player))
+            {
+                return;
+            }
+            Move(player, InForm(player, state.Position,
+                (state.Flags & PlayerState.FlagAltForm) != 0));
+        }
+
         public static void RestoreReportedPosition(PlayerEntity player, in IntentPacket intent)
         {
             if (!Sane(intent.Position) || intent.Position == Vector3.Zero

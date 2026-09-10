@@ -184,17 +184,35 @@ namespace MphRead.Mods.Network
             {
                 return;
             }
-            if (!NetSession.IsAuthority && (!PinPuppetsOnClients || SnapshotPositions))
-            {
-                return;
-            }
             int slot = player.SlotIndex;
-            if (slot < 0 || slot >= NetSession.RemoteIntents.Length
-                || !NetSession.RemoteIntentValid[slot])
+            if (slot < 0 || slot >= NetSession.RemoteIntents.Length)
             {
                 return;
             }
             if (!player.LoadFlags.TestFlag(LoadFlags.Spawned) || player.Health <= 0)
+            {
+                return;
+            }
+            // A client whose puppets belong to the snapshot puts them back
+            // where the snapshot said, not where the owner's intent did.
+            // Skipping the restore altogether -- which is what this did on its
+            // first run -- leaves the puppet a frame of local physics past
+            // *both* worlds, so the ack pointing one frame further back only
+            // adds its error to that one. Measured as the headshot agreement
+            // getting worse, not better, which is what sent anyone looking.
+            if (SnapshotPositions)
+            {
+                if (NetSession.RemoteStateValid[slot])
+                {
+                    NetPlayerBridge.RestoreSnapshotPosition(player, NetSession.RemoteStates[slot]);
+                }
+                return;
+            }
+            if (!NetSession.IsAuthority && !PinPuppetsOnClients)
+            {
+                return;
+            }
+            if (!NetSession.RemoteIntentValid[slot])
             {
                 return;
             }
