@@ -250,6 +250,16 @@ namespace MphRead.Mods.Network
             {
                 return;
             }
+            // The headshot rig replaces the tour rather than being a phase of
+            // it. A phase would still be one fifteenth of the run, and what it
+            // needs is the whole run holding one weapon at one range -- see
+            // HitRig, which says why the tour is the wrong instrument for the
+            // question rather than merely a slow one.
+            if (HitRig.Active)
+            {
+                HitRig.Drive(player);
+                return;
+            }
             _frame++;
             Drive(player);
         }

@@ -357,6 +357,13 @@ namespace MphRead.Mods.Network
         /// </summary>
         public string DescribeUnlagged() => NetUnlagged.Describe();
 
+        /// <summary>
+        /// The requested-rewind distribution. Only the simulating machine has
+        /// one, and it is the reading that says whether the ceiling is a
+        /// safety rail or a wall the room is standing against.
+        /// </summary>
+        public string DescribeRewindDepths() => NetUnlagged.DescribeDepths();
+
         /// <summary>One line for the periodic server report.</summary>
         public string Describe()
         {

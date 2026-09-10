@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# The rig against a server on this box, with latency injected into the clients.
+#
+#   run-local.sh <label> <mode: jump|sniper> <seconds> <netlag-ms> <maxrewind> [map]
+#
+# The point of the local arm is that the server's own knob (-maxrewind) can be
+# moved between runs without a deploy, and the injected latency is a number the
+# run chose rather than one the internet is choosing while it is measured. The
+# real line is the other arm; this one is where a scenario is proven to work at
+# all before it is spent on a 270 ms round trip.
+set -u
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# The staged copy, not the build tree: a rebuild during a run replaces the
+# assembly under the running processes and takes them down. See stage.sh.
+BUILD="${HITRIG_BIN:-$ROOT/tools/hitrig/bin}"
+DN="${DOTNET:-$HOME/.dotnet/dotnet}"
+export DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
+export LD_LIBRARY_PATH="$BUILD" MESA_GL_VERSION_OVERRIDE=4.5COMPAT
+export ALSOFT_DRIVERS=null PULSE_SERVER=
+
+LABEL="${1:?label}"; MODE="${2:?jump|sniper}"; SECS="${3:?seconds}"
+LAG="${4:-250}"; MAXREWIND="${5:-24}"; MAP="${6:-TEST ARENA}"
+PORT="${HITRIG_PORT:-27997}"
+OUT="${HITRIG_OUT:-/tmp/hitrig}/$LABEL"
+mkdir -p "$OUT"
+cd "$BUILD" || exit 1
+
+cleanup() {
+  for p in $(pgrep -f "FruityPrime.dll -server -port $PORT" 2>/dev/null); do kill -9 "$p" 2>/dev/null; done
+  for p in $(pgrep -f "FruityPrime.dll -netcheck 127.0.0.1 -port $PORT" 2>/dev/null); do kill -9 "$p" 2>/dev/null; done
+}
+trap cleanup EXIT
+cleanup; sleep 1
+
+# One match, long enough that the run never rotates underneath itself: a
+# rotation clears every counter here (NetHitPrediction.ForgetSlot), and half a
+# run's statistics are worse than none.
+printf '%s | Battle | 15 | 99\n' "$MAP" > maprotation.txt
+# HITRIG_SERVER_EXTRA carries the arm's own flag (-pressage, say). Unquoted on
+# purpose: it is a list of flags, and quoting it would hand the server one
+# argument that happens to contain spaces.
+# shellcheck disable=SC2086
+setsid "$DN" FruityPrime.dll -server -port "$PORT" -players 8 -simulate -nomaster \
+    -noautoupdate -maxrewind "$MAXREWIND" ${HITRIG_SERVER_EXTRA:-} \
+    -servername "hitrig $LABEL" \
+    > "$OUT/server.log" 2>&1 < /dev/null &
+sleep 5
+
+pids=()
+i=0
+for spec in ALPHA:Samus BRAVO:Trace; do
+  name="${spec%%:*}"; hunter="${spec##*:}"
+  "$DN" FruityPrime.dll -netcheck 127.0.0.1 -port "$PORT" -name "$name" \
+      -hunter "$hunter" -seconds "$(( SECS - i * 3 ))" -size 320x180 \
+      -hitrig "$MODE" -netlag "$LAG" ${HITRIG_CLIENT_EXTRA:-} \
+      > "$OUT/$name.log" 2>&1 &
+  pids+=($!)
+  i=$(( i + 1 ))
+  sleep 3
+done
+wait "${pids[@]}"
+# The reports are printed on the way out; killing the moment wait returns
+# lost the second client's entire report on the first run of this.
+sleep 6
+echo "== $LABEL ($MODE, ${LAG}ms rtt injected, ceiling $MAXREWIND, $MAP) -> $OUT"

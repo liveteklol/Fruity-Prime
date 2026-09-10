@@ -541,7 +541,12 @@ namespace MphRead.Mods.Network
             // health twice. Damage from anybody else still names another
             // attacker and is replayed exactly as before.
             bool mine = state.AttackerSlot == NetHooks.LocalSlot;
-            bool predicted = mine && NetHitPrediction.Confirm(slot, landed);
+            // The authority's own verdict on where the shot landed, forwarded
+            // so a client can tell "you hit them" from "you hit them in the
+            // head" -- the two are the same confirmation to everything else
+            // here, and on the Imperialist they are a kill and half a kill.
+            bool authorityHeadshot = ((DamageFlags)state.DamageFlags).TestFlag(DamageFlags.Headshot);
+            bool predicted = mine && NetHitPrediction.Confirm(slot, landed, authorityHeadshot);
             if (player.Health <= 0)
             {
                 return; // already down here; the respawn is what matters next

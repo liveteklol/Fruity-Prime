@@ -122,6 +122,68 @@ namespace MphRead.Mods
                     + "against the present");
             }
 
+            // Puppets are put back where their owner said after the movement
+            // step on clients too, not only on the authority. Off by default
+            // and measured against on: see NetHooks.PinPuppetsOnClients for
+            // the frame of physics this removes from between the two worlds.
+            if (HasFlag(args, "clientpin"))
+            {
+                Network.NetHooks.PinPuppetsOnClients = true;
+                Console.WriteLine("[net] puppets are pinned to their owner's "
+                    + "reported position on clients as well as on the authority");
+            }
+
+            // A trigger pull recovered from a press history is rewound by its
+            // own age as well as by its packet's ack. Off by default so the
+            // two can be measured against each other; it costs nothing on a
+            // line that is losing nothing.
+            if (HasFlag(args, "pressage"))
+            {
+                Network.NetUnlagged.PressAgeEnabled = true;
+                Console.WriteLine("[net] recovered trigger pulls are rewound by "
+                    + "their own age as well as by their packet's ack");
+            }
+
+            // The headshot duel, in place of the feature tour. Both arms of a
+            // comparison run the same one, so a difference between them is
+            // the thing being changed rather than the scenario.
+            string? rig = ValueAfter(args, "hitrig");
+            if (rig != null)
+            {
+                if (Network.HitRig.Configure(rig))
+                {
+                    Console.WriteLine($"[net] hit rig: {Network.HitRig.Mode}");
+                }
+                else
+                {
+                    Console.WriteLine($"[net] -hitrig {rig} refused: jump or sniper");
+                }
+            }
+
+            // How far back the rewind may ever be taken, in frames. The one
+            // number an A/B against a real line has to be able to move
+            // without moving anything else: the default 24 (400 ms) was
+            // measured against Japan running into its own ceiling, and a run
+            // that raises it has to be otherwise identical to the run that
+            // did not. Read on the machine that simulates the match, which is
+            // the only one that rewinds anything.
+            string? maxRewind = ValueAfter(args, "maxrewind");
+            if (maxRewind != null)
+            {
+                if (Network.NetUnlagged.ConfigureMaxRewind(maxRewind))
+                {
+                    Console.WriteLine("[net] rewind ceiling "
+                        + $"{Network.NetUnlagged.MaxRewindFrames} frames "
+                        + $"({Network.NetUnlagged.MaxRewindFrames * 1000 / 60} ms)");
+                }
+                else
+                {
+                    Console.WriteLine($"[net] -maxrewind {maxRewind} refused: "
+                        + $"1 to {Network.NetUnlagged.MaxRewindCeiling} frames, "
+                        + "and the history cannot serve more");
+                }
+            }
+
             // Client-side hit resolution, off. The other half of the same
             // measurement: -nounlagged asks what the authority's answer is
             // worth, this asks what not waiting for it is worth. On by

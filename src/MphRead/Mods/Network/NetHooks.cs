@@ -101,10 +101,40 @@ namespace MphRead.Mods.Network
         /// against it. That is what the skip was protecting and all it was
         /// protecting.
         /// </summary>
+        /// <summary>
+        /// Whether a client that is not the authority also puts its puppets
+        /// back after the movement step, the way the authority does.
+        ///
+        /// <b>The measured fault.</b> The restore above has always been the
+        /// authority's alone, so on every other machine a puppet is placed at
+        /// its owner's reported position, then simulated forward one frame,
+        /// and the shot a client resolves for itself is tested against the
+        /// result. The authority's history holds the reported position exactly
+        /// -- it restores -- so the two worlds differ by one frame of that
+        /// puppet's physics, in whatever direction the puppet was moving.
+        ///
+        /// For a player in the air that direction is vertical, and a frame of
+        /// it was measured at up to 0.377 units against a headshot band 0.3
+        /// units tall. The same trial had the client resolve 14 hits where the
+        /// authority resolved 70 of the same shots: the shooter's own machine
+        /// was missing four shots in five that landed, so the flinch, the mark
+        /// and the kill all waited a round trip -- which is "nothing happens
+        /// when I shoot" exactly.
+        ///
+        /// Off by default and on with <c>-clientpin</c>, because it changes
+        /// what every client's collision runs against and that is not a change
+        /// to make on reasoning alone.
+        /// </summary>
+        public static bool PinPuppetsOnClients { get; set; }
+
         public static void AfterRemoteMovement(PlayerEntity player)
         {
-            if (!NetSession.Active || !NetSession.IsAuthority
-                || player.SlotIndex == NetSession.LocalSlot || NetRoomChange.Settling)
+            if (!NetSession.Active || NetRoomChange.Settling
+                || player.SlotIndex == NetSession.LocalSlot)
+            {
+                return;
+            }
+            if (!NetSession.IsAuthority && !PinPuppetsOnClients)
             {
                 return;
             }

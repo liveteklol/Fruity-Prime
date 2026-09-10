@@ -438,6 +438,7 @@ namespace MphRead.Mods.Network
                             // And what the rewind is doing, which nothing else
                             // prints now that no client is the authority.
                             Log($"sim: {_sim.DescribeUnlagged()}");
+                            Log($"sim: {_sim.DescribeRewindDepths()}");
                         }
                     }
                     // A millisecond between passes while anyone is connected --

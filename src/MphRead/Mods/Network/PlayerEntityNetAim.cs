@@ -702,6 +702,13 @@ namespace MphRead.Entities
         /// replicated, so only the owner's count is ever right. Sending it is
         /// cheaper and more honest than trying to replicate item state.
         /// </summary>
+        /// <summary>
+        /// The most universal ammo this player can hold, for the harness's
+        /// top-up. Read rather than assumed: the cap is a per-hunter value and
+        /// the single-player save has a different one again.
+        /// </summary>
+        internal int ModAmmoCap => _ammoMax[UA];
+
         internal void ModSetAmmo(int ua, int missiles)
         {
             // -1 is the engine's "infinite" marker; a puppet must not be
