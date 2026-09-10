@@ -509,13 +509,19 @@ namespace MphRead.Mods
                 AllowMapVotes = !HasFlag(args, "novote"),
                 // This process is the server, so it is the one that may
                 // replace itself. See DedicatedServer.AutoUpdate.
-                AutoUpdate = true,
-                // -simulate makes this server the match's simulation
-                // authority instead of pointing it at the first client to
-                // connect. It needs game files on this machine; without them
-                // it says so and relays as before. See Mods/Network/ServerSim.
-                Simulate = HasFlag(args, "simulate") || HasFlag(args, "authority")
+                AutoUpdate = true
             };
+            // -simulate and -authority used to turn the simulation on. It is
+            // what a server does now, and there is no relay left to fall back
+            // to, so both are accepted and ignored: every systemd unit and
+            // launch script already deployed passes one of them, and a server
+            // that refused to start on an argument it used to require would be
+            // exactly the breakage this line exists to avoid.
+            if (HasFlag(args, "simulate") || HasFlag(args, "authority"))
+            {
+                Console.WriteLine("[net] -simulate is the default now and does "
+                    + "nothing; a server always runs the match itself");
+            }
             // Listed by default. A dedicated server exists to be found, and a
             // server that has to be told to advertise itself is a server
             // nobody finds -- so the flag is the one that opts out.
@@ -539,7 +545,20 @@ namespace MphRead.Mods
                 cancel.Cancel();
                 server.Stop();
             });
-            server.Run(cancel.Token);
+            try
+            {
+                server.Run(cancel.Token);
+            }
+            catch (ProgramException ex)
+            {
+                // A server that cannot run the match, which since this build
+                // is the only kind of server there is. The reason and what to
+                // do about it are already on the log; a stack trace on top of
+                // them would only bury both, and an operator reading a failed
+                // systemd unit wants the sentence, not the frames.
+                Console.WriteLine($"[server] {ex.Message}");
+                Environment.Exit(1);
+            }
             return true;
         }
 

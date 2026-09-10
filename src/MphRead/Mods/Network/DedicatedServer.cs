@@ -7,22 +7,29 @@ using System.Threading;
 namespace MphRead.Mods.Network
 {
     /// <summary>
-    /// Headless relay server. No window, no GL, no game files -- it can run
-    /// on a small ARM64 box from the command line.
+    /// Headless authoritative server. No window and no GL, so it still runs
+    /// on a small ARM64 box from the command line -- but it needs the game
+    /// files now, because it runs the match.
     ///
-    /// It is a relay, not a simulator. MphRead's simulation runs in float
-    /// (Fixed only converts the ROM's 20.12 values on load), so a server
-    /// cannot be trusted to reproduce a client's physics bit-for-bit; and
-    /// reproducing it at all would mean running the whole engine, which
-    /// needs the game files this machine deliberately does not have. So the
-    /// first client to connect is the simulation authority: the server
-    /// assigns slots, forwards intents to that authority, and fans its
-    /// snapshots back out to everyone else.
+    /// <b>A dedicated server used to be a relay and is not one any more.</b>
+    /// The relay made the first client to connect the simulation authority:
+    /// the server assigned slots, forwarded intents to that client, and fanned
+    /// its snapshots back out. Everything wrong with it was the same thing --
+    /// the match was run by a player's machine. That player's own shots
+    /// resolved in the frame they were fired while everybody else's took a
+    /// round trip; their line going down took the match with it until somebody
+    /// else was promoted; and the one machine nobody could inspect was the one
+    /// deciding what everybody hit.
     ///
-    /// What that buys over peer-to-peer hosting: players connect to one
-    /// stable address instead of to whoever happens to be hosting, the
-    /// authority can leave and be replaced without the session dying, and
-    /// only the server needs a reachable port.
+    /// So <see cref="RunsTheMatch"/> defaults to true and a server that cannot
+    /// simulate does not start. That is a deliberate break --
+    /// <see cref="ServerSim.Available"/> wants the game files, which the relay
+    /// never did -- and it is the reason <c>SERVER.md</c> no longer says a
+    /// server needs none.
+    ///
+    /// The relay path survives for exactly the two servers that cannot
+    /// simulate because they live in a process that already has a simulation
+    /// or is about to have several. See <see cref="RunsTheMatch"/>.
     /// </summary>
     public sealed class DedicatedServer
     {
@@ -310,19 +317,38 @@ namespace MphRead.Mods.Network
         public bool AutoUpdate { get; set; }
 
         /// <summary>
-        /// Run the match here rather than pointing the authority at a client.
+        /// Whether this server runs the match itself.
         ///
-        /// Off by default and opted into with <c>-simulate</c>, because it is
-        /// the one thing a dedicated server cannot always do: it needs the
-        /// game files, which this build has never required and which no
-        /// package ships. A server without them keeps working exactly as
-        /// before, and a server that asks for this and has not got them says
-        /// so at startup and falls back rather than refusing to run.
+        /// <b>True by default, and the standalone <c>-server</c> process never
+        /// changes it.</b> That is the whole of "authoritative by default":
+        /// there is no flag to pass and no relay to fall back to, and a server
+        /// that cannot build a world refuses to start rather than becoming
+        /// something else. <c>-simulate</c> and <c>-authority</c> are still
+        /// accepted so deployed units keep starting, and do nothing.
         ///
-        /// See <see cref="ServerSim"/> for what moving the authority here
-        /// buys and, just as important, what it does not.
+        /// The two servers that must set it false are the two inside a process
+        /// that already has a simulation, or is about to have several:
+        ///
+        /// <list type="bullet">
+        /// <item><see cref="NetHostSession"/> -- "Host: this computer". The
+        /// server is a thread inside the host's own game, and that game's
+        /// player owns the session; simulating here would have
+        /// <c>ServerSim.Start</c> call <c>NetSession.StartServerAuthority</c>
+        /// on top of the player who started it.</item>
+        /// <item><see cref="NetMaster"/> -- "Host: online". The directory runs
+        /// one of these per hosted match, several at a time, in one
+        /// process.</item>
+        /// </list>
+        ///
+        /// The reason is the same for both, and it is that
+        /// <see cref="NetSession"/> is static: a process has exactly one
+        /// session, so it can run exactly one match. For those two, a client
+        /// running the match is not a fallback -- it is how hosting works.
+        /// Removing the relay for good means an instance-based NetSession,
+        /// which is its own piece of work; see
+        /// <c>.claude/multiplayer/NETWORK-SERVERAUTH.md</c>.
         /// </summary>
-        public bool Simulate { get; set; }
+        public bool RunsTheMatch { get; init; } = true;
 
         /// <summary>True when this server is the match's simulation authority.</summary>
         public bool Simulating => _sim != null && _sim.Running;
@@ -342,8 +368,8 @@ namespace MphRead.Mods.Network
             Log($"listening on UDP {_transport.LocalPort}, up to {_maxPlayers} players");
             StartSimulation();
             Log(Simulating
-                ? "authority mode: this server simulates the match itself"
-                : "relay mode: the first client to connect is the simulation authority");
+                ? "this server runs the match itself"
+                : "hosted game: the first client to connect runs the match");
             Log($"rotation: {_rotation.Entries.Count} map(s), starting on {_rotation.Current}");
 
             // The bound port, taken once: the heartbeat has to advertise the
@@ -609,33 +635,45 @@ namespace MphRead.Mods.Network
         // ------------------------------------------------- the simulation
 
         /// <summary>
-        /// Build the world this server is about to be the authority for.
+        /// Build the world this server is the authority for, or refuse to run.
         ///
-        /// Inert unless <see cref="Simulate"/> was asked for. A refusal is a
-        /// line and a fall back to relaying, never a server that will not
-        /// start: the operator asked for the better arrangement and this
-        /// machine cannot provide it, which is a different thing from a
-        /// misconfiguration.
+        /// <b>There is no fallback, and that is the change.</b> The fallback
+        /// was the relay, and the relay handed the match to a player's
+        /// machine. A server that cannot build a world cannot run a match, and
+        /// saying so at startup is better than starting and being something
+        /// else. An installation that has been running without the game files
+        /// stops here, with the reason, on the first start after the update.
+        ///
+        /// Skipped entirely -- not failed -- when <see cref="RunsTheMatch"/>
+        /// is false, which is a hosted game rather than a misconfiguration.
         /// </summary>
+        /// <exception cref="ProgramException">
+        /// The world could not be built. Thrown rather than logged and limped
+        /// past: the process exits, systemd reports a failed unit, and the
+        /// operator sees a stopped server instead of one quietly running
+        /// somebody else's match.
+        /// </exception>
         private void StartSimulation()
         {
-            if (!Simulate)
+            if (!RunsTheMatch)
             {
                 return;
             }
             if (!ServerSim.Available(out string why))
             {
-                Log($"-simulate asked for, but {why}");
-                Log("carrying on as a relay; the first client to connect will be the authority");
-                return;
+                Log($"cannot run the match: {why}");
+                Log("a dedicated server runs the match itself now, so this one will not "
+                    + "start. Put the game files on this machine and paths.txt beside "
+                    + "the binary -- see SERVER.md");
+                throw new ProgramException($"the server cannot run the match: {why}");
             }
             var sim = new ServerSim();
             RotationEntry entry = _rotation.Current;
             if (!sim.Start(entry.RoomKey, entry.Mode, _maxPlayers, SendSnapshot,
                 () => EndMatch(_now, "score")))
             {
-                Log("carrying on as a relay; the first client to connect will be the authority");
-                return;
+                Log($"cannot run the match: the room \"{entry.RoomKey}\" would not load");
+                throw new ProgramException($"the server could not load \"{entry.RoomKey}\"");
             }
             _sim = sim;
             SyncSimulationState(_now);

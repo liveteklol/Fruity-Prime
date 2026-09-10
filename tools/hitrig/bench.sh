@@ -37,13 +37,21 @@ export HITRIG_OUT="$OUT"
 # 35 Hz). The point is a ceiling the room does not stand against.
 RAISED=30
 
-# Four arms, three of them one change away from the first, so each change can
-# be read on its own before the combination is read at all.
+# Three arms, each a superset of the one before, so a change can be read where
+# it lands rather than only in the total.
 #
-#   base     what v0.8.0 does: ceiling 24, no client pin, no press age
-#   pin      + puppets pinned on clients too (a client flag, not a server one)
-#   ceiling  + the ceiling raised instead (a server flag, not a client one)
-#   all      both, and the press-age correction on top
+#   base   what v0.8.0 does: the 400 ms ceiling, puppets positioned from
+#          relayed intents on every machine, and an ack naming the newest
+#          snapshot received rather than the one applied
+#   snap   + the client's puppets positioned from the snapshot alone -- the
+#          world it draws, and the world the authority's history holds -- with
+#          the ack that names it. A client-side change only
+#   all    + the ceiling raised past what a 320 ms line asks for, and a
+#          recovered trigger pull rewound by its own age. Server-side
+#
+# -clientpin is not an arm: -snapshotpuppets subsumes it, since a puppet the
+# snapshot owns is never placed from an intent for the movement step to carry
+# away in the first place.
 run() {
   local label="$1" mode="$2" ceiling="$3" server="$4" client="$5"
   echo "== $label ($mode, ceiling $ceiling, server '${server:-none}', client '${client:-none}')"
@@ -52,7 +60,7 @@ run() {
     "$HERE/run-local.sh" "$label" "$mode" "$SECS" "$LAG" "$ceiling" > /dev/null 2>&1
 }
 
-ARMS="base:24::  pin:24::-clientpin  ceiling:$RAISED::  all:$RAISED:-pressage:-clientpin"
+ARMS="base:24::  snap:24::-snapshotpuppets  all:$RAISED:-pressage:-snapshotpuppets"
 
 for mode in jump sniper; do
   for arm in $ARMS; do

@@ -554,7 +554,12 @@ namespace MphRead.Mods.Network
                 // It lists itself the way any other server does, over the
                 // loopback -- which is exactly the case SetPublicAddress
                 // exists for.
-                Reporter = new MasterReporter("127.0.0.1", _port)
+                Reporter = new MasterReporter("127.0.0.1", _port),
+                // The directory runs one of these per hosted match, several at
+                // a time, in this one process -- and a process has one static
+                // NetSession, so it can run one match. The client that joins a
+                // hosted game runs it. See DedicatedServer.RunsTheMatch.
+                RunsTheMatch = false
             };
             var cancel = new CancellationTokenSource();
             var entry = new Hosted

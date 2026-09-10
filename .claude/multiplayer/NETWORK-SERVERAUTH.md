@@ -241,14 +241,41 @@ the "two sources" objection is weaker, and clients reconciling form from the
 snapshot may now be safe. That is a change to make with a measurement, not
 because it sounds right.
 
+## The relay is gone from a dedicated server, and not from the other two
+
+`RunsTheMatch` defaults to true and the standalone `-server` path never changes
+it, so a dedicated server simulates or does not start. `-simulate` and
+`-authority` are accepted and do nothing, which is what keeps every systemd
+unit and launch script already deployed starting after the update.
+
+**The client-authority path is still there, and it has to be**, because
+`DedicatedServer` is instantiated in two other places that cannot simulate:
+
+| Caller | What it is | Why not |
+|---|---|---|
+| `NetHostSession` | "Host: this computer" -- a server on a thread inside the host's own game | the player who started it already owns the process's session |
+| `NetMaster` | "Host: online" -- one server per hosted match, several at a time, in the directory's process | one process, several matches |
+
+The reason is the same for both and it is that **`NetSession` is static**:
+`ServerSim.Start` calls `NetSession.StartServerAuthority`, and a process has
+exactly one session, so it can run exactly one match. For those two, a client
+running the match is not a fallback -- it is how hosting works, and deleting
+`PacketType.Authority` would delete hosting rather than the relay.
+
+Removing it everywhere means an instance-based `NetSession`. That is a real
+piece of work -- the network state is static end to end, and every hook, the
+unlagged history, the damage pipeline and the prediction all read it as a
+global -- and it should not be started as a side effect of anything else.
+
 ## What is still owed
 
-- **The game files.** A simulating server needs them, and "a dedicated server
-  needs no game files" has been true of every build so far. `ServerSim.Available`
-  is the whole of the concession: without them the server says so at startup
-  and relays exactly as before. Shipping them is not an option
-  (`tools/check-no-game-assets.sh`), so today this is a server whose operator
-  has a dump on the box.
+- **The game files, and they are now required.** A simulating server needs
+  them, and "a dedicated server needs no game files" was true of every build up
+  to and including v0.8.0. It is not true any more: `RunsTheMatch` defaults to
+  true, `ServerSim.Available` is checked at startup, and a server without them
+  **exits 1 with the reason** rather than relaying. Shipping them is not an
+  option (`tools/check-no-game-assets.sh`), so this is a server whose operator
+  has a dump on the box. `SERVER.md` says so on the first screen.
 
   **What a simulating server actually needs is 52 MB**, not the 103 MB of a
   full extraction, found by pruning until it stopped loading and then checking

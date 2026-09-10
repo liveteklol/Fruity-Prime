@@ -367,7 +367,6 @@ namespace MphRead.Mods.Network
             NetPlayerBridge.Reset();
             Chat.ChatBox.Clear();
             IsAuthority = false;
-            _authorityNeedsStateApply = false;
             _snapshotSink = null;
             _serverMatchEnded = null;
             if (_transport != null)
@@ -397,6 +396,7 @@ namespace MphRead.Mods.Network
             ReAnnouncements = 0;
             LongestServerSilence = 0;
             AuthorityStandDowns = 0;
+            _authorityNeedsStateApply = false;
             AuthorityFrames = 0;
             Refused = false;
             SnapshotStreamResets = 0;
@@ -661,8 +661,9 @@ namespace MphRead.Mods.Network
 
         /// <summary>
         /// How many times this client gave the simulation back on being
-        /// re-admitted. Non-zero means it was out of touch long enough for the
-        /// server to have moved the authority.
+        /// re-admitted. Non-zero means it was out of touch long enough for
+        /// whoever it is playing on to have moved the authority -- which only
+        /// a hosted game does now; a dedicated server never hands it over.
         /// </summary>
         public static int AuthorityStandDowns { get; private set; }
 
@@ -773,6 +774,22 @@ namespace MphRead.Mods.Network
                     HandleSnapshot(packet);
                     break;
                 case PacketType.Authority when Role == NetRole.Client:
+                    // Still accepted, and it has to be.
+                    //
+                    // A *dedicated* server never sends this any more: it runs
+                    // the match itself and refuses to start if it cannot. But
+                    // the same DedicatedServer class also runs inside somebody
+                    // else's game ("Host -> This computer") and several at a
+                    // time inside the directory's process ("Host -> Online"),
+                    // and neither of those can simulate: ServerSim.Start takes
+                    // over the whole static NetSession, of which a process has
+                    // exactly one. For those two, a client running the match
+                    // is not a fallback -- it is the arrangement.
+                    //
+                    // So this is what a hosted game looks like on the wire,
+                    // and refusing it would delete hosting rather than the
+                    // relay. Removing it for good needs an instance-based
+                    // NetSession; see .claude/multiplayer/NETWORK-SERVERAUTH.md.
                     if (!IsAuthority)
                     {
                         IsAuthority = true;
@@ -1133,7 +1150,17 @@ namespace MphRead.Mods.Network
         /// NetRole.Client, so without this nothing would ever broadcast
         /// snapshots and no player would see another move.
         /// </summary>
+        /// <summary>
+        /// Whether this process runs the match.
+        ///
+        /// True for <see cref="NetRole.Server"/>, set once by
+        /// <see cref="StartServerAuthority"/> -- and still settable on a
+        /// client, by a <c>PacketType.Authority</c> from a server running
+        /// inside somebody's game or inside the directory. A dedicated server
+        /// never sends one: it runs the match itself.
+        /// </summary>
         public static bool IsAuthority { get; private set; }
+
         private static bool _authorityNeedsStateApply;
 
         public static bool ConsumeAuthorityStateSync()

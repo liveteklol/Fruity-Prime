@@ -4,7 +4,8 @@ You do not need any of this to play online. **Host → Where: Online** in the la
 machine to run the match and joins you to it, with nothing to open on your router. This page is for
 running a machine of your own that is always up.
 
-A server needs **no game files** and keeps nothing on disk. A Raspberry Pi is enough.
+A server **runs the match itself**, so it needs the game files. It keeps nothing
+else on disk, and a Raspberry Pi is still enough.
 
 ```bash
 # Linux
@@ -12,6 +13,38 @@ A server needs **no game files** and keeps nothing on disk. A Raspberry Pi is en
 # Windows -- the console binary, not FruityPrime.exe
 FruityPrimeServer.exe -server -port 27888 -players 8 -servername "My server"
 ```
+
+## Game files are required
+
+**This changed, and it is a breaking change.** A server used to be a relay: the
+first client to connect ran the match, and the server only forwarded packets,
+so it needed nothing. Now the server runs the match, which means it runs the
+engine, which means it needs the files.
+
+Put a `paths.txt` beside the binary pointing at them, the same file a client
+uses:
+
+```
+0.35.1.0
+AMHP1=/home/you/fruityprime-server/files/AMHP1
+```
+
+A server without them **will not start**. It says so and exits:
+
+```
+[server] cannot run the match: game files could not be located
+[server] a dedicated server runs the match itself now, so this one will not
+         start. Put the game files on this machine and paths.txt beside the
+         binary -- see SERVER.md
+```
+
+That is deliberate. The alternative was to fall back to relaying, and relaying
+is the thing being removed: it put the match on a player's machine, where that
+player's own shots resolved instantly while everybody else's took a round trip,
+and where a disconnection took the match with it.
+
+`-simulate` and `-authority` are still accepted and now do nothing -- an
+existing systemd unit or launch script keeps working unchanged.
 
 | Flag | |
 |---|---|
