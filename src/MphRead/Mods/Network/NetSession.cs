@@ -77,6 +77,22 @@ namespace MphRead.Mods.Network
         public static int LocalSlot { get; private set; } = 0;
         public static uint NetFrame { get; private set; }
         public static uint LastSnapshotFrame => _lastSnapshotFrame;
+
+        /// <summary>
+        /// This machine's own frame number when the newest snapshot arrived,
+        /// so "how long since the authority last spoke" can be asked without
+        /// comparing two machines' clocks.
+        ///
+        /// One number rather than one per slot: a snapshot carries every
+        /// active slot at once, so they are all exactly as fresh as each
+        /// other. Zero before the first one.
+        /// </summary>
+        public static uint SnapshotArrived { get; private set; }
+
+        /// <summary>Frames since the newest snapshot, or a large number before the first.</summary>
+        public static uint SnapshotAge => SnapshotArrived == 0
+            ? UInt32.MaxValue
+            : NetFrame >= SnapshotArrived ? NetFrame - SnapshotArrived : 0;
         public static string? LastError { get; private set; }
 
         /// <summary>Latest authoritative state per slot, applied by clients.</summary>
@@ -130,7 +146,28 @@ namespace MphRead.Mods.Network
         public static long StatesApplied { get; private set; }
         public static long IntentsReceived { get; private set; }
 
-        public static void NoteStatesApplied() => StatesApplied++;
+        public static void NoteStatesApplied()
+        {
+            StatesApplied++;
+            AppliedSnapshotFrame = _lastSnapshotFrame;
+        }
+
+        /// <summary>
+        /// The snapshot frame this client has actually *applied*, as opposed
+        /// to the newest one it has received.
+        ///
+        /// The two differ by one frame and the difference is the whole of what
+        /// an ack is for. A snapshot arrives in <see cref="Update"/>, at the
+        /// top of the frame; it is applied in <c>NetHooks.AfterSimulation</c>,
+        /// at the bottom. So for the whole of the frame in between -- the
+        /// frame in which this client aims, fires, and resolves its own shot
+        /// -- the world it is holding is the *previous* snapshot's, while
+        /// <see cref="LastSnapshotFrame"/> already names the new one.
+        ///
+        /// Acking the newer of the two asks the authority to rewind one frame
+        /// less far than the shooter was actually looking, every time.
+        /// </summary>
+        public static uint AppliedSnapshotFrame { get; private set; }
 
         private static SnapshotSink? _snapshotSink;
 
@@ -273,6 +310,8 @@ namespace MphRead.Mods.Network
             NetUnlagged.Reset();
             NetHitPrediction.Reset();
             _lastSnapshotFrame = 0;
+            SnapshotArrived = 0;
+            AppliedSnapshotFrame = 0;
             Array.Clear(_lastSlotIntentFrame);
             Array.Clear(RemoteStateValid);
             Array.Clear(RemoteIntentValid);
@@ -369,6 +408,8 @@ namespace MphRead.Mods.Network
             SnapshotsOutOfOrder = 0;
             IntentsOutOfOrder = 0;
             _lastSnapshotFrame = 0;
+            SnapshotArrived = 0;
+            AppliedSnapshotFrame = 0;
             StatesApplied = 0;
             IntentsReceived = 0;
             ServerMatch = null;
@@ -1268,6 +1309,7 @@ namespace MphRead.Mods.Network
             }
             _lateSnapshotRun = 0;
             _lastSnapshotFrame = header.Frame;
+            SnapshotArrived = Math.Max(NetFrame, 1);
             SnapshotsReceived++;
             // Rng.cs reproduces the game's original LCG and its state is
             // global, so adopting the host's words keeps every random

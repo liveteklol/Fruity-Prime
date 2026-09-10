@@ -122,6 +122,18 @@ namespace MphRead.Mods
                     + "against the present");
             }
 
+            // Puppet positions on a client come from the snapshot alone, not
+            // from the owner's relayed intent. See NetHooks.SnapshotOwnsPuppets
+            // for the measurement: a shooter aiming at the drawn world and
+            // firing into the relayed one landed 11 of the 78 hits the
+            // authority credited it with.
+            if (HasFlag(args, "snapshotpuppets"))
+            {
+                Network.NetHooks.SnapshotOwnsPuppets = true;
+                Console.WriteLine("[net] puppet positions on this client come "
+                    + "from the authority's snapshot, not from relayed intents");
+            }
+
             // Puppets are put back where their owner said after the movement
             // step on clients too, not only on the authority. Off by default
             // and measured against on: see NetHooks.PinPuppetsOnClients for

@@ -291,7 +291,17 @@ namespace MphRead.Mods.Network
                 // NetUnlagged. Zero on the authority itself, which is never
                 // behind, and on a client that has not been sent a snapshot
                 // yet; both are read as "no rewind".
-                AckFrame = NetSession.LastSnapshotFrame
+                // The snapshot this client is holding, which under
+                // -snapshotpuppets is also the one its own shot was resolved
+                // against; otherwise the newest one received, which is what
+                // every build before this one sent. The two differ by one
+                // frame -- a snapshot arrives at the top of the frame and is
+                // applied at the bottom -- and the newer of them asks the
+                // authority to rewind one frame less far than the shooter was
+                // looking. See NetSession.AppliedSnapshotFrame.
+                AckFrame = NetHooks.SnapshotOwnsPuppets && NetSession.AppliedSnapshotFrame != 0
+                    ? NetSession.AppliedSnapshotFrame
+                    : NetSession.LastSnapshotFrame
             };
         }
 
