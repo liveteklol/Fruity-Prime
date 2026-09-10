@@ -178,10 +178,29 @@ namespace MphRead.Mods.Network
             ClearControls(c);
             if (player.Health == 0)
             {
-                // Holding fire is what asks for an early respawn. A rig that
-                // waited out every death timer would spend a third of a short
-                // run with nobody on the map.
+                // Holding fire is what asks for an early respawn -- on a
+                // client it is the only thing that does, since ForceSpawn
+                // defers to the authority there. A rig that waited out every
+                // death timer would spend a third of a short run with nobody
+                // on the map, and the Imperialist kills in one headshot.
+                //
+                // The respawn happens inside PlayerProcess on a frame when the
+                // trigger is still held, so the player comes back alive with
+                // its finger down and fires once before this method next runs.
+                // Measured at 75 stray shots in a four-minute run, and they
+                // are not harmless: they are shots at the *sniper*, who holds
+                // a range and never jumps, so they quietly filled the clamp's
+                // error measurement with a target that was standing still --
+                // which is how that number came out with a vertical component
+                // of exactly zero on a run whose runner was airborne 60% of
+                // the time.
+                //
+                // So the gun is pointed at the floor for as long as it is
+                // held. The respawn still happens and the stray shot goes into
+                // the ground a foot away.
                 c.Shoot.IsDown = true;
+                AimDeltaX = 0;
+                AimDeltaY = -TurnRate;
                 FinishControls(player, c);
                 return;
             }

@@ -176,6 +176,17 @@ namespace MphRead.Mods.Network
         /// 0.3 has moved the band off the shot and a total error over 0.9 has
         /// moved the whole hunter.
         /// </summary>
+        /// <summary>
+        /// Clamped shots by shooter slot.
+        ///
+        /// Here because the error above came out with a vertical component of
+        /// zero on a run whose target spent 60% of its frames in the air,
+        /// which is either a broken measurement or a shot fired by somebody
+        /// else at somebody who was standing still. The two are told apart by
+        /// asking who pulled the trigger, and nothing else in the report can.
+        /// </summary>
+        public static readonly long[] ClampedByShooter = new long[Slots];
+
         public static long ClampErrorSamples { get; private set; }
         public static double ClampErrorSum { get; private set; }
         public static double ClampErrorVerticalSum { get; private set; }
@@ -314,6 +325,7 @@ namespace MphRead.Mods.Network
             WorstRequested = 0;
             StalePresses = 0;
             StalePressFrames = 0;
+            Array.Clear(ClampedByShooter);
             ClampErrorSamples = 0;
             ClampErrorSum = 0;
             ClampErrorVerticalSum = 0;
@@ -530,6 +542,10 @@ namespace MphRead.Mods.Network
         /// </summary>
         private static void MeasureClampError(int shooterSlot, int requested, int served)
         {
+            if (shooterSlot >= 0 && shooterSlot < Slots)
+            {
+                ClampedByShooter[shooterSlot]++;
+            }
             uint now = NetSession.NetFrame;
             if (now < (uint)requested)
             {
@@ -778,6 +794,18 @@ namespace MphRead.Mods.Network
                     + $"mean {FramesRefused / (double)ShotsClamped:F1} frames refused)";
             }
             text += $", worst asked {WorstRequested}";
+            if (ShotsClamped > 0)
+            {
+                var by = new System.Text.StringBuilder(", clamped by slot");
+                for (int i = 0; i < ClampedByShooter.Length; i++)
+                {
+                    if (ClampedByShooter[i] > 0)
+                    {
+                        by.Append($" {i}:{ClampedByShooter[i]}");
+                    }
+                }
+                text += by.ToString();
+            }
             if (ClampErrorSamples > 0)
             {
                 text += $", error {ClampErrorSum / ClampErrorSamples:F2} units mean "
