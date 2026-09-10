@@ -101,20 +101,118 @@ namespace MphRead.Mods.Network
         /// against it. That is what the skip was protecting and all it was
         /// protecting.
         /// </summary>
+        /// <summary>
+        /// Whether a client that is not the authority also puts its puppets
+        /// back after the movement step, the way the authority does.
+        ///
+        /// <b>The measured fault.</b> The restore above has always been the
+        /// authority's alone, so on every other machine a puppet is placed at
+        /// its owner's reported position, then simulated forward one frame,
+        /// and the shot a client resolves for itself is tested against the
+        /// result. The authority's history holds the reported position exactly
+        /// -- it restores -- so the two worlds differ by one frame of that
+        /// puppet's physics, in whatever direction the puppet was moving.
+        ///
+        /// For a player in the air that direction is vertical, and a frame of
+        /// it was measured at up to 0.377 units against a headshot band 0.3
+        /// units tall. The same trial had the client resolve 14 hits where the
+        /// authority resolved 70 of the same shots: the shooter's own machine
+        /// was missing four shots in five that landed, so the flinch, the mark
+        /// and the kill all waited a round trip -- which is "nothing happens
+        /// when I shoot" exactly.
+        ///
+        /// Off by default and on with <c>-clientpin</c>, because it changes
+        /// what every client's collision runs against and that is not a change
+        /// to make on reasoning alone.
+        /// </summary>
+        public static bool PinPuppetsOnClients { get; set; }
+
+        /// <summary>
+        /// Whether a client that is not the authority lets the snapshot own
+        /// its puppets' positions outright, instead of pinning them to the
+        /// owner's relayed intent first.
+        ///
+        /// <b>The fault this closes is that a client aims at one world and
+        /// shoots into another, in the same frame.</b> The order on a client
+        /// is: apply relayed intents and simulate (ProcessInput, then
+        /// UpdateScene), then apply the snapshot (AfterSimulation), then draw.
+        /// So the position a player sees -- and the position the rig, or a
+        /// person, aims at -- is the snapshot's; and the position their own
+        /// beam is then tested against is the relayed intent's, plus a frame
+        /// of local physics. The authority's rewind history holds the
+        /// snapshot's, because that is what <c>Record</c> files.
+        ///
+        /// Measured, four minutes at 320 ms with the target jumping: the
+        /// sniper's beams overlapped the target <b>11</b> times on its own
+        /// machine while the authority resolved <b>78</b> hits from the same
+        /// shots. The shooter was missing seven shots in eight that landed --
+        /// every one of them a flinch, a mark and a kill that waited a round
+        /// trip.
+        ///
+        /// The relayed intent is still what drives everything a position
+        /// cannot express -- firing, morphing, the aim, the animation -- and
+        /// it is still the fallback whenever the authority has gone quiet, so
+        /// a stall in the snapshot stream does not freeze every puppet on the
+        /// map. Only the position is handed over.
+        ///
+        /// Off by default and on with <c>-snapshotpuppets</c>.
+        /// </summary>
+        public static bool SnapshotOwnsPuppets { get; set; }
+
+        /// <summary>
+        /// How long the snapshot stream may go quiet before the relayed
+        /// intents are trusted with a puppet's position again. Twelve frames
+        /// is a fifth of a second, well past any single lost datagram at 60
+        /// snapshots a second and well short of anything a player would call
+        /// a freeze.
+        /// </summary>
+        private const uint SnapshotStaleFrames = 12;
+
+        /// <summary>
+        /// Whether this frame's puppet positions come from the snapshot alone.
+        /// False on the authority, which has no snapshot to take them from and
+        /// is the machine composing one.
+        /// </summary>
+        private static bool SnapshotPositions => SnapshotOwnsPuppets
+            && !NetSession.IsAuthority && !NetSession.IsHost
+            && NetSession.SnapshotAge <= SnapshotStaleFrames;
+
         public static void AfterRemoteMovement(PlayerEntity player)
         {
-            if (!NetSession.Active || !NetSession.IsAuthority
-                || player.SlotIndex == NetSession.LocalSlot || NetRoomChange.Settling)
+            if (!NetSession.Active || NetRoomChange.Settling
+                || player.SlotIndex == NetSession.LocalSlot)
             {
                 return;
             }
             int slot = player.SlotIndex;
-            if (slot < 0 || slot >= NetSession.RemoteIntents.Length
-                || !NetSession.RemoteIntentValid[slot])
+            if (slot < 0 || slot >= NetSession.RemoteIntents.Length)
             {
                 return;
             }
             if (!player.LoadFlags.TestFlag(LoadFlags.Spawned) || player.Health <= 0)
+            {
+                return;
+            }
+            // A client whose puppets belong to the snapshot puts them back
+            // where the snapshot said, not where the owner's intent did.
+            // Skipping the restore altogether -- which is what this did on its
+            // first run -- leaves the puppet a frame of local physics past
+            // *both* worlds, so the ack pointing one frame further back only
+            // adds its error to that one. Measured as the headshot agreement
+            // getting worse, not better, which is what sent anyone looking.
+            if (SnapshotPositions)
+            {
+                if (NetSession.RemoteStateValid[slot])
+                {
+                    NetPlayerBridge.RestoreSnapshotPosition(player, NetSession.RemoteStates[slot]);
+                }
+                return;
+            }
+            if (!NetSession.IsAuthority && !PinPuppetsOnClients)
+            {
+                return;
+            }
+            if (!NetSession.RemoteIntentValid[slot])
             {
                 return;
             }
@@ -170,6 +268,11 @@ namespace MphRead.Mods.Network
             {
                 if (player.LoadFlags.TestFlag(LoadFlags.Spawned) && player.Health > 0
                     && !NetRoomChange.Settling
+                    // Not while the snapshot owns this puppet: the whole point
+                    // is that the position it is drawn at and the position it
+                    // is shot at are the same one, and this is the write that
+                    // made them differ.
+                    && !SnapshotPositions
                     // And not from an intent that stopped coming. The pin is
                     // "this player says they are here", which is only true
                     // while they are still saying it: once their line goes,

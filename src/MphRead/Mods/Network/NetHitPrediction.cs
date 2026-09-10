@@ -147,6 +147,22 @@ namespace MphRead.Mods.Network
         /// <summary>Whether that prediction was the one that killed them here.</summary>
         private static readonly bool[,] _pendingLethal = new bool[Slots, PendingCapacity];
 
+        /// <summary>
+        /// Whether this machine resolved that hit as a headshot.
+        ///
+        /// The question <see cref="Confirmed"/> cannot answer and the one the
+        /// Imperialist is played on. A headshot is decided by a single
+        /// comparison in <c>BeamProjectileEntity</c> -- the impact point must
+        /// be at least 0.8 units above the victim's position, on a body 1.6
+        /// units tall -- so the band is 0.3 units, the top eighth of a hunter.
+        /// A rewind that lands the victim a frame out vertically, which is
+        /// what a jump pad does in a frame, turns a headshot into a body shot
+        /// while leaving the *hit* perfectly confirmed. So a client whose
+        /// every prediction is confirmed can still be a client whose every
+        /// instant kill was refused, and nothing here would have said so.
+        /// </summary>
+        private static readonly bool[,] _pendingHeadshot = new bool[Slots, PendingCapacity];
+
         private static readonly int[] _pendingCount = new int[Slots];
         private static readonly int[] _pendingHead = new int[Slots];
 
@@ -287,6 +303,26 @@ namespace MphRead.Mods.Network
         public static long DrainPredicted { get; private set; }
 
         /// <summary>
+        /// Headshots this machine resolved on somebody else, and what the
+        /// authority said about the same hits when it answered.
+        ///
+        /// <see cref="HeadshotsDowngraded"/> is the number this whole exercise
+        /// is about: the shooter saw a head hit, the authority agreed a hit
+        /// landed and called it a body shot. On the Imperialist that is the
+        /// difference between an instant kill and half a health bar, and it is
+        /// invisible to <see cref="Confirmed"/>, which counts the hit and asks
+        /// nothing about where it landed.
+        ///
+        /// <see cref="HeadshotsUpgraded"/> is the opposite error and is worth
+        /// counting for the same reason a mispredicted hit is: it says the two
+        /// machines disagree about the victim's height, not which way.
+        /// </summary>
+        public static long HeadshotsPredicted { get; private set; }
+        public static long HeadshotsAgreed { get; private set; }
+        public static long HeadshotsDowngraded { get; private set; }
+        public static long HeadshotsUpgraded { get; private set; }
+
+        /// <summary>
         /// Your own splash, on you, resolved the frame it went off -- the
         /// rocket jump. Counted apart from <see cref="Predicted"/> because it
         /// is not the same claim: source, target and input are all on this
@@ -356,6 +392,7 @@ namespace MphRead.Mods.Network
             Array.Clear(_pendingFrame);
             Array.Clear(_pendingDamage);
             Array.Clear(_pendingLethal);
+            Array.Clear(_pendingHeadshot);
             Array.Clear(_pendingCount);
             Array.Clear(_pendingHead);
             Array.Clear(_healFrame);
@@ -375,6 +412,10 @@ namespace MphRead.Mods.Network
             Array.Clear(_shownHealth);
             Array.Clear(_predictedFrame);
             DrainPredicted = 0;
+            HeadshotsPredicted = 0;
+            HeadshotsAgreed = 0;
+            HeadshotsDowngraded = 0;
+            HeadshotsUpgraded = 0;
             _markerTimer = 0;
         }
 
@@ -537,7 +578,12 @@ namespace MphRead.Mods.Network
                     LethalHeld++;
                     lethal = false;
                 }
-                Push(victim.SlotIndex, NetSession.NetFrame, (int)damage, lethal);
+                bool headshot = flags.TestFlag(DamageFlags.Headshot);
+                Push(victim.SlotIndex, NetSession.NetFrame, (int)damage, lethal, headshot);
+                if (headshot && !self)
+                {
+                    HeadshotsPredicted++;
+                }
                 // Counted apart from the rest. The confirmed percentage is a
                 // claim about shots aimed at other people over a wire; a hit
                 // on yourself, resolved on the machine that fired it, would
@@ -584,7 +630,14 @@ namespace MphRead.Mods.Network
         /// the sound and the knockback all happened when the trigger was
         /// pulled.
         /// </summary>
-        public static bool Confirm(int slot, int landed = 1)
+        /// <param name="authorityHeadshot">
+        /// Whether the authority's own resolution of the hit it is reporting
+        /// carried <see cref="DamageFlags.Headshot"/>. The snapshot names only
+        /// the last attacker and the flags of the last hit, so this can only
+        /// be asked of the newest prediction being retired -- which is the one
+        /// it describes.
+        /// </param>
+        public static bool Confirm(int slot, int landed = 1, bool authorityHeadshot = false)
         {
             if (slot < 0 || slot >= Slots)
             {
@@ -611,15 +664,37 @@ namespace MphRead.Mods.Network
             int take = Math.Clamp(landed, 1, _pendingCount[slot]);
             for (int i = 0; i < take; i++)
             {
-                _pendingHead[slot] = (_pendingHead[slot] + 1) % PendingCapacity;
+                int head = _pendingHead[slot];
+                bool predictedHeadshot = _pendingHeadshot[slot, head];
+                _pendingHeadshot[slot, head] = false;
+                _pendingHead[slot] = (head + 1) % PendingCapacity;
                 _pendingCount[slot]--;
                 if (self)
                 {
                     SelfConfirmed++;
+                    continue;
                 }
-                else
+                Confirmed++;
+                // Only the last of a batch is described by the flags this
+                // snapshot carries; the earlier ones in the same window are
+                // hits whose flags were overwritten before they were sent, and
+                // scoring them against this one would invent disagreements
+                // that the wire never reported either way.
+                if (i != take - 1)
                 {
-                    Confirmed++;
+                    continue;
+                }
+                if (predictedHeadshot && authorityHeadshot)
+                {
+                    HeadshotsAgreed++;
+                }
+                else if (predictedHeadshot)
+                {
+                    HeadshotsDowngraded++;
+                }
+                else if (authorityHeadshot)
+                {
+                    HeadshotsUpgraded++;
                 }
             }
             return true;
@@ -648,6 +723,7 @@ namespace MphRead.Mods.Network
                 _pendingFrame[slot, i] = 0;
                 _pendingDamage[slot, i] = 0;
                 _pendingLethal[slot, i] = false;
+                _pendingHeadshot[slot, i] = false;
             }
             _pendingCount[slot] = 0;
             _pendingHead[slot] = 0;
@@ -964,7 +1040,7 @@ namespace MphRead.Mods.Network
             }
         }
 
-        private static void Push(int slot, uint frame, int damage, bool lethal)
+        private static void Push(int slot, uint frame, int damage, bool lethal, bool headshot)
         {
             if (slot < 0 || slot >= Slots)
             {
@@ -981,6 +1057,7 @@ namespace MphRead.Mods.Network
             _pendingFrame[slot, tail] = frame;
             _pendingDamage[slot, tail] = Math.Max(0, damage);
             _pendingLethal[slot, tail] = lethal;
+            _pendingHeadshot[slot, tail] = headshot;
             _pendingCount[slot]++;
         }
 
@@ -1019,6 +1096,41 @@ namespace MphRead.Mods.Network
             return $"hit prediction: {Predicted} predicted, {Confirmed} confirmed "
                 + $"({agreed:F1}%), {Denied} denied, {Unpredicted} unpredicted, "
                 + deaths + drain + self;
+        }
+
+        /// <summary>
+        /// The headshot line, which is a different claim from the one above
+        /// and reads as a pass while that one does.
+        ///
+        /// A hit whose flags disagree is `confirmed` to everything else here:
+        /// the authority says a hit landed, the prediction is retired, the
+        /// percentage is unmoved. What the shooter saw was an instant kill and
+        /// what they got was a body shot, and this is the only line that says
+        /// so.
+        /// </summary>
+        public static string DescribeHeadshots()
+        {
+            long answered = HeadshotsAgreed + HeadshotsDowngraded;
+            if (HeadshotsPredicted == 0 && HeadshotsUpgraded == 0)
+            {
+                return "headshots: none predicted here";
+            }
+            string text = $"headshots: {HeadshotsPredicted} predicted";
+            if (answered > 0)
+            {
+                text += $", {HeadshotsAgreed} agreed by the authority "
+                    + $"({HeadshotsAgreed * 100.0 / answered:F1}%), "
+                    + $"{HeadshotsDowngraded} downgraded to body shots";
+            }
+            else
+            {
+                text += ", none answered yet";
+            }
+            if (HeadshotsUpgraded > 0)
+            {
+                text += $", {HeadshotsUpgraded} the authority called a headshot and this machine did not";
+            }
+            return text;
         }
     }
 }

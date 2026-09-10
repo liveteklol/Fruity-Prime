@@ -38,9 +38,41 @@ amount they are behind it.
 | `PlayerEntity.ModPlaceAt` | position + hitbox + room node, in `PlayerEntityNetAim.cs` |
 
 Rewind depth = `authority NetFrame − AckFrame`, clamped to `MaxRewindFrames`
-(24 = 400 ms). History is `HistoryFrames` 64 ≈ 1.07 s, which is Zandronum's
-`UNLAGGEDTICS 35` (one second at 35 Hz) expressed at 60 and rounded to a power
-of two.
+(default 24 = 400 ms, movable with `-maxrewind N`). History is `HistoryFrames`
+64 ≈ 1.07 s, which is Zandronum's `UNLAGGEDTICS 35` (one second at 35 Hz)
+expressed at 60 and rounded to a power of two.
+
+### The ceiling is ours, and it is 2.5x tighter than Q-Zandronum's
+
+Worth stating plainly, because it was not: **Q-Zandronum has no second clamp.**
+`UNLAGGED_Gametic` bounds the rewind by the history and by nothing else --
+
+```c
+int unlaggedGametic = ( ... CLIENTFLAGS_PING_UNLAGGED ) ?
+        gametic - ( player->ulPing * TICRATE / 1000 ) :
+        pClient->lLastServerGametic + 1;
+if ( unlaggedGametic > gametic ) unlaggedGametic = gametic;
+if ( (gametic - unlaggedGametic) >= UNLAGGEDTICS)
+        unlaggedGametic = gametic - UNLAGGEDTICS + 1;      // UNLAGGEDTICS 35
+```
+
+-- so its ceiling **is** its history: one second, `doomdef.h:66`. The 400 ms
+here is a bound this port added on top, and on an intercontinental line it is
+the binding one. The Japan server has been reporting a mean of 19.6 frames with
+the worst pinned at exactly 24 over runs of nine thousand shots: a distribution
+standing against its ceiling, not a tail touching it.
+
+Two smaller differences in the same function, for the record: Q-Zandronum
+rewinds to `lastServerGametic + 1`, one tic *shallower* than the raw ack -- the
+opposite direction from "give the shooter more" -- and it offers a
+ping-derived depth as an alternative, which this port deliberately does not
+(see *Why the ack and not the ping*).
+
+`NetUnlagged` now counts what the ceiling refuses: `ShotsClamped`,
+`FramesRefused`, `WorstRequested`, a histogram of requested depths, and -- for
+every clamped shot -- the distance between where the rewind went and where it
+was asked to go, since frames are not the quantity that decides a headshot and
+units are. `.claude/testing/HITRIG.md`.
 
 ### Why the ack and not the ping
 

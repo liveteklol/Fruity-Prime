@@ -291,7 +291,17 @@ namespace MphRead.Mods.Network
                 // NetUnlagged. Zero on the authority itself, which is never
                 // behind, and on a client that has not been sent a snapshot
                 // yet; both are read as "no rewind".
-                AckFrame = NetSession.LastSnapshotFrame
+                // The snapshot this client is holding, which under
+                // -snapshotpuppets is also the one its own shot was resolved
+                // against; otherwise the newest one received, which is what
+                // every build before this one sent. The two differ by one
+                // frame -- a snapshot arrives at the top of the frame and is
+                // applied at the bottom -- and the newer of them asks the
+                // authority to rewind one frame less far than the shooter was
+                // looking. See NetSession.AppliedSnapshotFrame.
+                AckFrame = NetHooks.SnapshotOwnsPuppets && NetSession.AppliedSnapshotFrame != 0
+                    ? NetSession.AppliedSnapshotFrame
+                    : NetSession.LastSnapshotFrame
             };
         }
 
@@ -320,6 +330,27 @@ namespace MphRead.Mods.Network
         private static readonly uint[] _lastPressFrame = new uint[PlayerEntity.SlotCapacity];
         private static readonly bool[] _pressSeen = new bool[PlayerEntity.SlotCapacity];
 
+        /// <summary>
+        /// How many frames old the trigger pull being applied this frame is.
+        ///
+        /// Zero on the ordinary path, where the packet that carries a press is
+        /// the packet composed on the frame it happened. It is not zero when
+        /// that packet was lost or arrived out of order: the edge is then
+        /// recovered from the press history of a *later* packet
+        /// (<see cref="MissedPresses"/>), and applied with that later packet's
+        /// ack, aim and position -- so the authority rewinds by the newer
+        /// packet's round trip and resolves an older shot against a world
+        /// several frames too new. That is the mechanism, and this is the
+        /// number that corrects it: <see cref="Mods.Network.NetUnlagged"/>
+        /// adds it back on to the rewind depth.
+        ///
+        /// A reordered intent is thrown away outright
+        /// (<see cref="NetSession.AcceptSlotIntent"/>), so a straggler's shot
+        /// reaches the simulation by this same route and carries the same
+        /// error.
+        /// </summary>
+        public static readonly int[] ShootPressAge = new int[PlayerEntity.SlotCapacity];
+
         public static void ApplyIntent(PlayerEntity player, in IntentPacket intent)
         {
             if (!Sane(intent.Aim))
@@ -329,7 +360,11 @@ namespace MphRead.Mods.Network
                 return;
             }
             PlayerControls c = player.Controls;
-            IntentButtons missed = MissedPresses(player.SlotIndex, intent);
+            IntentButtons missed = MissedPresses(player.SlotIndex, intent, out int shootAge);
+            if (player.SlotIndex >= 0 && player.SlotIndex < ShootPressAge.Length)
+            {
+                ShootPressAge[player.SlotIndex] = shootAge;
+            }
             Set(c.MoveLeft, intent.Buttons.HasFlag(IntentButtons.MoveLeft), missed.HasFlag(IntentButtons.MoveLeft));
             Set(c.MoveRight, intent.Buttons.HasFlag(IntentButtons.MoveRight), missed.HasFlag(IntentButtons.MoveRight));
             Set(c.MoveUp, intent.Buttons.HasFlag(IntentButtons.MoveUp), missed.HasFlag(IntentButtons.MoveUp));
@@ -420,8 +455,10 @@ namespace MphRead.Mods.Network
         /// The frame each entry belongs to is what stops a press being
         /// applied twice when the redundant copies arrive.
         /// </summary>
-        private static IntentButtons MissedPresses(int slot, in IntentPacket intent)
+        private static IntentButtons MissedPresses(int slot, in IntentPacket intent,
+            out int shootAge)
         {
+            shootAge = 0;
             if (slot < 0 || slot >= _lastPressFrame.Length || intent.Presses == null)
             {
                 return IntentButtons.None;
@@ -449,6 +486,15 @@ namespace MphRead.Mods.Network
                     continue;
                 }
                 missed |= (IntentButtons)intent.Presses[i];
+                // The oldest trigger pull in this packet, because that is the
+                // one whose world is furthest from the one the packet's ack
+                // names. The loop runs oldest-first, so the first Shoot it
+                // finds is it, and `i` is its age in frames.
+                if (shootAge == 0
+                    && ((IntentButtons)intent.Presses[i]).HasFlag(IntentButtons.Shoot))
+                {
+                    shootAge = i;
+                }
             }
             // Every frame up to this packet is now accounted for, whether or
             // not it carried a press. Leaving gaps here let the same frame be
@@ -893,6 +939,7 @@ namespace MphRead.Mods.Network
             Array.Clear(_formAttempts);
             Array.Clear(_lastPressFrame);
             Array.Clear(_pressSeen);
+            Array.Clear(ShootPressAge);
             Array.Clear(_pressHistory);
             Array.Clear(_authoritySpawned);
             Array.Clear(_divergedFrames);
@@ -938,6 +985,7 @@ namespace MphRead.Mods.Network
             _formAttempts[slot] = 0;
             _lastPressFrame[slot] = 0;
             _pressSeen[slot] = false;
+            ShootPressAge[slot] = 0;
             _pressHistory[slot] = 0;
             _authoritySpawned[slot] = false;
             _divergedFrames[slot] = 0;
@@ -1003,6 +1051,34 @@ namespace MphRead.Mods.Network
         /// the engine's movement step, so the velocity it derives and the
         /// snaps it counts must not be counted twice.
         /// </summary>
+        /// <summary>
+        /// Put a puppet back where the *authority's snapshot* said, after the
+        /// engine's movement step.
+        ///
+        /// The snapshot twin of <see cref="RestoreReportedPosition"/>, and it
+        /// exists for the same reason: a puppet is placed, then simulated one
+        /// frame further, and a shot resolved after that step is tested
+        /// against the result rather than against the position anybody agreed
+        /// on. For a player in the air that frame is vertical and was measured
+        /// at up to 0.377 units, against a headshot band 0.3 units tall.
+        ///
+        /// Which of the two runs is which world the machine is claiming to
+        /// hold: the authority pins to what the owner reported, because that
+        /// is what its history files; a client under
+        /// <see cref="NetHooks.SnapshotOwnsPuppets"/> pins to the snapshot,
+        /// because that is what it draws and what its ack names.
+        /// </summary>
+        public static void RestoreSnapshotPosition(PlayerEntity player, in PlayerState state)
+        {
+            if (!Sane(state.Position) || state.Position == Vector3.Zero
+                || FrozenInPlace(player))
+            {
+                return;
+            }
+            Move(player, InForm(player, state.Position,
+                (state.Flags & PlayerState.FlagAltForm) != 0));
+        }
+
         public static void RestoreReportedPosition(PlayerEntity player, in IntentPacket intent)
         {
             if (!Sane(intent.Position) || intent.Position == Vector3.Zero

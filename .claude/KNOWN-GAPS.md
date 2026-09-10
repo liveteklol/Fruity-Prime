@@ -3,6 +3,49 @@
 What's below is unproven or partially proven, not broken. Say so rather than
 claiming coverage that isn't there.
 
+- **The rig's own shooter fired a third of what it asked for, and the reason
+  was the rig.** *Closed 2026-09-10.* `HitRig.FinishControls` wrote its binds
+  after the pass that sets `Input.HasInput`, so the engine saw an idle player,
+  lowered the gun, and `TryFireWeapon` refused at the `GunAnimation.UpDown`
+  check -- ahead of `NetDamage.NoteFired`, so the refused shots did not even
+  register as attempted. `NetTestScript.FinishControls` has carried the fix
+  since the tour hit the same wall; this driver is newer and missed it.
+
+  | slot 0 (the shooter) | its own machine | the observer | the authority |
+  |---|---|---|---|
+  | before | **19** | 52 | 57 |
+  | after (70 s sniper arm) | **28** | 26 | 30 |
+
+  Every hit-registration percentage measured before this compared two
+  different volleys and should be discarded, not re-read.
+
+- **The authority spawns beams for a dead player that the player's own machine
+  never spawned, and the reason is not established.** Fell out of the arm that
+  closed the gap above: in the same 70 s run, slot 1 -- the runner, which
+  presses fire only while dead, since holding fire is what asks for an early
+  respawn -- read **0** beams on its own machine, **15** on the observer and
+  **29** on the authority. Three machines, three answers, for a slot that
+  fired nothing it meant to fire.
+
+  The shape that fits is the revive boundary: the trigger is still held when
+  the authority's copy comes back, and it empties into the floor there, while
+  the owner's copy comes back later with the trigger already released. That is
+  a guess. What is measured is the disagreement.
+
+  It does not touch the headshot numbers -- those shots are aimed at the floor
+  by design (`HitRig.Drive`) and land on nobody -- but it does inflate the
+  authority's shot count, so quote per-slot counts rather than a total. Follow
+  it with `NetDamage.Fired` around a death, on all three machines.
+
+- **`NetDamage._attacker` resets to slot 0 rather than to `NoSlot`.**
+  `ForgetSlot` sets it to `0` and `Reset` clears the array, so between a reset
+  and the first hit a slot's snapshot names **slot 0** as the attacker.
+  `NetDamage.Replay` reads that as `mine` on the client that holds slot 0.
+  Today it is latent -- `landed` is zero for such a slot, and `Replay` returns
+  on that first -- but it is one reordering away from a client crediting itself
+  with damage it did not deal, and it is a one-word fix (`NoSlot`) whenever
+  that file is next touched.
+
 - **With the server as the authority, nobody gets the snapshot-based form
   correction any more.** `NetPlayerBridge` reconciles a puppet's alt form
   against `IntentButtons.AltFormState` only on the authority -- deliberately,

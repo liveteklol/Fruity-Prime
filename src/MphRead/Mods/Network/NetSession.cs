@@ -77,6 +77,22 @@ namespace MphRead.Mods.Network
         public static int LocalSlot { get; private set; } = 0;
         public static uint NetFrame { get; private set; }
         public static uint LastSnapshotFrame => _lastSnapshotFrame;
+
+        /// <summary>
+        /// This machine's own frame number when the newest snapshot arrived,
+        /// so "how long since the authority last spoke" can be asked without
+        /// comparing two machines' clocks.
+        ///
+        /// One number rather than one per slot: a snapshot carries every
+        /// active slot at once, so they are all exactly as fresh as each
+        /// other. Zero before the first one.
+        /// </summary>
+        public static uint SnapshotArrived { get; private set; }
+
+        /// <summary>Frames since the newest snapshot, or a large number before the first.</summary>
+        public static uint SnapshotAge => SnapshotArrived == 0
+            ? UInt32.MaxValue
+            : NetFrame >= SnapshotArrived ? NetFrame - SnapshotArrived : 0;
         public static string? LastError { get; private set; }
 
         /// <summary>Latest authoritative state per slot, applied by clients.</summary>
@@ -130,7 +146,28 @@ namespace MphRead.Mods.Network
         public static long StatesApplied { get; private set; }
         public static long IntentsReceived { get; private set; }
 
-        public static void NoteStatesApplied() => StatesApplied++;
+        public static void NoteStatesApplied()
+        {
+            StatesApplied++;
+            AppliedSnapshotFrame = _lastSnapshotFrame;
+        }
+
+        /// <summary>
+        /// The snapshot frame this client has actually *applied*, as opposed
+        /// to the newest one it has received.
+        ///
+        /// The two differ by one frame and the difference is the whole of what
+        /// an ack is for. A snapshot arrives in <see cref="Update"/>, at the
+        /// top of the frame; it is applied in <c>NetHooks.AfterSimulation</c>,
+        /// at the bottom. So for the whole of the frame in between -- the
+        /// frame in which this client aims, fires, and resolves its own shot
+        /// -- the world it is holding is the *previous* snapshot's, while
+        /// <see cref="LastSnapshotFrame"/> already names the new one.
+        ///
+        /// Acking the newer of the two asks the authority to rewind one frame
+        /// less far than the shooter was actually looking, every time.
+        /// </summary>
+        public static uint AppliedSnapshotFrame { get; private set; }
 
         private static SnapshotSink? _snapshotSink;
 
@@ -273,6 +310,8 @@ namespace MphRead.Mods.Network
             NetUnlagged.Reset();
             NetHitPrediction.Reset();
             _lastSnapshotFrame = 0;
+            SnapshotArrived = 0;
+            AppliedSnapshotFrame = 0;
             Array.Clear(_lastSlotIntentFrame);
             Array.Clear(RemoteStateValid);
             Array.Clear(RemoteIntentValid);
@@ -328,7 +367,6 @@ namespace MphRead.Mods.Network
             NetPlayerBridge.Reset();
             Chat.ChatBox.Clear();
             IsAuthority = false;
-            _authorityNeedsStateApply = false;
             _snapshotSink = null;
             _serverMatchEnded = null;
             if (_transport != null)
@@ -358,6 +396,7 @@ namespace MphRead.Mods.Network
             ReAnnouncements = 0;
             LongestServerSilence = 0;
             AuthorityStandDowns = 0;
+            _authorityNeedsStateApply = false;
             AuthorityFrames = 0;
             Refused = false;
             SnapshotStreamResets = 0;
@@ -369,6 +408,8 @@ namespace MphRead.Mods.Network
             SnapshotsOutOfOrder = 0;
             IntentsOutOfOrder = 0;
             _lastSnapshotFrame = 0;
+            SnapshotArrived = 0;
+            AppliedSnapshotFrame = 0;
             StatesApplied = 0;
             IntentsReceived = 0;
             ServerMatch = null;
@@ -620,8 +661,9 @@ namespace MphRead.Mods.Network
 
         /// <summary>
         /// How many times this client gave the simulation back on being
-        /// re-admitted. Non-zero means it was out of touch long enough for the
-        /// server to have moved the authority.
+        /// re-admitted. Non-zero means it was out of touch long enough for
+        /// whoever it is playing on to have moved the authority -- which only
+        /// a hosted game does now; a dedicated server never hands it over.
         /// </summary>
         public static int AuthorityStandDowns { get; private set; }
 
@@ -732,6 +774,22 @@ namespace MphRead.Mods.Network
                     HandleSnapshot(packet);
                     break;
                 case PacketType.Authority when Role == NetRole.Client:
+                    // Still accepted, and it has to be.
+                    //
+                    // A *dedicated* server never sends this any more: it runs
+                    // the match itself and refuses to start if it cannot. But
+                    // the same DedicatedServer class also runs inside somebody
+                    // else's game ("Host -> This computer") and several at a
+                    // time inside the directory's process ("Host -> Online"),
+                    // and neither of those can simulate: ServerSim.Start takes
+                    // over the whole static NetSession, of which a process has
+                    // exactly one. For those two, a client running the match
+                    // is not a fallback -- it is the arrangement.
+                    //
+                    // So this is what a hosted game looks like on the wire,
+                    // and refusing it would delete hosting rather than the
+                    // relay. Removing it for good needs an instance-based
+                    // NetSession; see .claude/multiplayer/NETWORK-SERVERAUTH.md.
                     if (!IsAuthority)
                     {
                         IsAuthority = true;
@@ -1092,7 +1150,17 @@ namespace MphRead.Mods.Network
         /// NetRole.Client, so without this nothing would ever broadcast
         /// snapshots and no player would see another move.
         /// </summary>
+        /// <summary>
+        /// Whether this process runs the match.
+        ///
+        /// True for <see cref="NetRole.Server"/>, set once by
+        /// <see cref="StartServerAuthority"/> -- and still settable on a
+        /// client, by a <c>PacketType.Authority</c> from a server running
+        /// inside somebody's game or inside the directory. A dedicated server
+        /// never sends one: it runs the match itself.
+        /// </summary>
         public static bool IsAuthority { get; private set; }
+
         private static bool _authorityNeedsStateApply;
 
         public static bool ConsumeAuthorityStateSync()
@@ -1268,6 +1336,7 @@ namespace MphRead.Mods.Network
             }
             _lateSnapshotRun = 0;
             _lastSnapshotFrame = header.Frame;
+            SnapshotArrived = Math.Max(NetFrame, 1);
             SnapshotsReceived++;
             // Rng.cs reproduces the game's original LCG and its state is
             // global, so adopting the host's words keeps every random

@@ -75,10 +75,49 @@ namespace MphRead.Mods.Network
         /// a client can ask for, which is not. The ack is a number the sender
         /// chose, and a sender that chooses a very old one is asking to shoot
         /// at where everybody stood a second ago -- so this is the ceiling on
-        /// how much of that anyone is allowed. 24 frames is 400 ms, past any
-        /// line the game is playable on.
+        /// how much of that anyone is allowed. 24 frames is 400 ms, which was
+        /// chosen as "past any line the game is playable on" -- and measured
+        /// against real players on the Japan server it is not. Nine thousand
+        /// compensated shots came out at a mean of 19.6 frames with the worst
+        /// pinned at exactly 24, which is a distribution running into its own
+        /// ceiling rather than a tail touching it. Every shot the clamp
+        /// reaches is resolved against a world its shooter never saw, and on
+        /// a headshot band 0.3 units tall that is the whole band.
+        ///
+        /// So it is a ceiling that can be moved rather than a constant: the
+        /// one number an A/B run has to be able to change without changing
+        /// anything else. <c>-maxrewind N</c>, and the default is what every
+        /// build before this one did.
         /// </summary>
-        public const int MaxRewindFrames = 24;
+        public static int MaxRewindFrames { get; set; } = DefaultMaxRewindFrames;
+
+        /// <summary>The ceiling every build before this one had, and the baseline arm.</summary>
+        public const int DefaultMaxRewindFrames = 24;
+
+        /// <summary>
+        /// The furthest the ceiling may be raised. The history is
+        /// <see cref="HistoryFrames"/> deep and the cell for the frame a shot
+        /// is fired in has not been written yet, so a rewind of the full 64
+        /// would read a cell as it is being overwritten.
+        /// </summary>
+        public const int MaxRewindCeiling = HistoryFrames - 8;
+
+        /// <summary>
+        /// Set the ceiling from the command line. A number the history cannot
+        /// serve is refused rather than clamped quietly: a run whose ceiling
+        /// is not the one it was asked for measures nothing.
+        /// </summary>
+        public static bool ConfigureMaxRewind(string? value)
+        {
+            if (!Int32.TryParse(value, System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture, out int frames)
+                || frames < 1 || frames > MaxRewindCeiling)
+            {
+                return false;
+            }
+            MaxRewindFrames = frames;
+            return true;
+        }
 
         /// <summary>
         /// Whether reconciliation runs at all. Off restores the previous
@@ -93,6 +132,68 @@ namespace MphRead.Mods.Network
         public static bool Enabled { get; set; } = true;
 
         /// <summary>
+        /// Whether a trigger pull recovered from a packet's press history is
+        /// rewound by its own age as well as by the packet's ack.
+        ///
+        /// The case it covers: an intent is lost or arrives out of order, so
+        /// the Shoot edge it carried reaches the simulation from the press
+        /// history of a *later* packet -- with that packet's ack, which is
+        /// newer by exactly the frames in between. The shot is then resolved
+        /// against a world several frames ahead of the one it was aimed in,
+        /// and the deeper the loss the worse it is. See
+        /// <see cref="NetPlayerBridge.ShootPressAge"/>.
+        ///
+        /// Off by default and on with <c>-pressage</c>, so the two can be
+        /// measured against each other rather than argued about. It is second
+        /// order next to the ceiling -- it costs nothing on a clean line,
+        /// because on a clean line the age is always zero.
+        /// </summary>
+        public static bool PressAgeEnabled { get; set; }
+
+        /// <summary>
+        /// Shots whose rewind was deepened because their trigger pull had been
+        /// recovered from a press history, and the frames added across them.
+        /// Zero on a line that is losing nothing, which is what makes a
+        /// non-zero reading worth having.
+        /// </summary>
+        public static long StalePresses { get; private set; }
+        public static long StalePressFrames { get; private set; }
+
+        /// <summary>
+        /// How far a clamped shot's victims were from where the shooter saw
+        /// them, in units, and the worst of it.
+        ///
+        /// The reading the frame counts cannot give. "Refused four frames of
+        /// rewind" is only a number of frames; what decides a headshot is how
+        /// far a body moved in those frames, and that is a different quantity
+        /// for a player standing still, strafing, and coming off a jump pad.
+        /// The history holds both positions -- where the rewind went and where
+        /// it was asked to go -- so the error is a subtraction, taken for every
+        /// clamped shot at no cost.
+        ///
+        /// Against the geometry: the headshot band is 0.3 units tall and the
+        /// body capsule is about 0.9 units across, so a vertical error over
+        /// 0.3 has moved the band off the shot and a total error over 0.9 has
+        /// moved the whole hunter.
+        /// </summary>
+        /// <summary>
+        /// Clamped shots by shooter slot.
+        ///
+        /// Here because the error above came out with a vertical component of
+        /// zero on a run whose target spent 60% of its frames in the air,
+        /// which is either a broken measurement or a shot fired by somebody
+        /// else at somebody who was standing still. The two are told apart by
+        /// asking who pulled the trigger, and nothing else in the report can.
+        /// </summary>
+        public static readonly long[] ClampedByShooter = new long[Slots];
+
+        public static long ClampErrorSamples { get; private set; }
+        public static double ClampErrorSum { get; private set; }
+        public static double ClampErrorVerticalSum { get; private set; }
+        public static float ClampErrorWorst { get; private set; }
+        public static float ClampErrorWorstVertical { get; private set; }
+
+        /// <summary>
         /// Shots that were resolved somewhere other than the present, and how
         /// far back. <see cref="WorstRewind"/> is the deepest single rewind,
         /// which under a healthy line should sit near a client's round trip
@@ -101,6 +202,41 @@ namespace MphRead.Mods.Network
         public static long ShotsCompensated { get; private set; }
         public static long FramesRewound { get; private set; }
         public static int WorstRewind { get; private set; }
+
+        /// <summary>
+        /// Shots whose shooter asked to be taken further back than
+        /// <see cref="MaxRewindFrames"/> allows, and the frames of rewind
+        /// refused across all of them.
+        ///
+        /// The pair the mean rewind cannot tell you. A mean of 19.6 frames
+        /// under a ceiling of 24 is either a healthy distribution with a tail
+        /// that happens to touch the top, or a distribution whose top half has
+        /// been folded onto the ceiling -- and those two want opposite things
+        /// done about them. This counts the folding directly: every clamped
+        /// shot is one resolved against a world its shooter never saw, by
+        /// <see cref="FramesRefused"/> / <see cref="ShotsClamped"/> frames on
+        /// average.
+        /// </summary>
+        public static long ShotsClamped { get; private set; }
+        public static long FramesRefused { get; private set; }
+
+        /// <summary>
+        /// The deepest rewind anybody *asked* for, as opposed to the deepest
+        /// one served. Under a ceiling that is never reached the two are the
+        /// same number; the gap between them is how far the ceiling is from
+        /// covering the room.
+        /// </summary>
+        public static int WorstRequested { get; private set; }
+
+        /// <summary>
+        /// How many shots asked for each depth, so the shape of the
+        /// distribution can be read rather than inferred from its mean.
+        /// Indexed by requested frames, with everything past the ring's reach
+        /// in the last cell -- an ack older than the history is a different
+        /// fault and belongs in <see cref="HistoryMisses"/>, not in a bucket
+        /// that would make the tail look fatter than it is.
+        /// </summary>
+        public static readonly long[] DepthHistogram = new long[HistoryFrames + 1];
 
         /// <summary>
         /// Beam steps run during catch-up, and how many of them ended in a
@@ -184,6 +320,18 @@ namespace MphRead.Mods.Network
             ShotsCompensated = 0;
             FramesRewound = 0;
             WorstRewind = 0;
+            ShotsClamped = 0;
+            FramesRefused = 0;
+            WorstRequested = 0;
+            StalePresses = 0;
+            StalePressFrames = 0;
+            Array.Clear(ClampedByShooter);
+            ClampErrorSamples = 0;
+            ClampErrorSum = 0;
+            ClampErrorVerticalSum = 0;
+            ClampErrorWorst = 0;
+            ClampErrorWorstVertical = 0;
+            Array.Clear(DepthHistogram);
             CatchUpSteps = 0;
             CatchUpHits = 0;
             HistoryMisses = 0;
@@ -249,8 +397,9 @@ namespace MphRead.Mods.Network
         /// the ack is the exact frame the client is answering -- and having
         /// only one of them means there is only one thing to be wrong.
         /// </summary>
-        private static int RewindFor(int slot)
+        private static int RewindFor(int slot, out int requested)
         {
+            requested = 0;
             if (slot < 0 || slot >= Slots || slot == NetSession.LocalSlot)
             {
                 // The authority's own player already aims and resolves
@@ -272,6 +421,24 @@ namespace MphRead.Mods.Network
                 return 0;
             }
             long depth = now - ack;
+            // Plus however long the trigger pull sat in a press history before
+            // it reached here. The ack belongs to the packet that carried the
+            // edge, not to the frame the edge happened on, and those are the
+            // same frame only when nothing was lost.
+            if (PressAgeEnabled && slot < NetPlayerBridge.ShootPressAge.Length)
+            {
+                int age = NetPlayerBridge.ShootPressAge[slot];
+                if (age > 0)
+                {
+                    depth += age;
+                    StalePresses++;
+                    StalePressFrames += age;
+                }
+            }
+            // Recorded before the clamp, because the clamp is the thing being
+            // measured. A depth past the ring is filed in the last cell rather
+            // than dropped: it is still a shot that asked for more than it got.
+            requested = (int)Math.Min(depth, HistoryFrames);
             if (depth > MaxRewindFrames)
             {
                 depth = MaxRewindFrames;
@@ -314,7 +481,24 @@ namespace MphRead.Mods.Network
                 return;
             }
             int slot = shooter.SlotIndex;
-            int rewind = RewindFor(slot);
+            int rewind = RewindFor(slot, out int requested);
+            if (requested > 0 && requested < DepthHistogram.Length)
+            {
+                DepthHistogram[requested]++;
+            }
+            if (requested > WorstRequested)
+            {
+                WorstRequested = requested;
+            }
+            if (requested > rewind)
+            {
+                // The shooter asked to be taken back further than the ceiling
+                // allows, so this shot is about to be resolved against a world
+                // it never saw -- by exactly this many frames.
+                ShotsClamped++;
+                FramesRefused += requested - rewind;
+                MeasureClampError(slot, requested, rewind);
+            }
             if (rewind <= 0)
             {
                 return;
@@ -345,6 +529,64 @@ namespace MphRead.Mods.Network
                 _beamsBefore[i] = beams[i].Lifespan > 0;
             }
             _inProgress = true;
+        }
+
+        /// <summary>
+        /// How far the ceiling put this shot's victims from where its shooter
+        /// was looking at them.
+        ///
+        /// Both positions are already in the ring: the one the rewind will use
+        /// and the one it was asked for. Nothing is moved and nothing is
+        /// simulated -- this is two lookups and a subtraction, per victim, on
+        /// the shots that were clamped and no others.
+        /// </summary>
+        private static void MeasureClampError(int shooterSlot, int requested, int served)
+        {
+            if (shooterSlot >= 0 && shooterSlot < Slots)
+            {
+                ClampedByShooter[shooterSlot]++;
+            }
+            uint now = NetSession.NetFrame;
+            if (now < (uint)requested)
+            {
+                return;
+            }
+            int wanted = (int)((now - (uint)requested) % HistoryFrames);
+            int got = (int)((now - (uint)served) % HistoryFrames);
+            if (_stamp[wanted] != now - (uint)requested || _stamp[got] != now - (uint)served)
+            {
+                // One of the two is not in the ring any more, so the
+                // subtraction would be between a position and whatever
+                // overwrote it. A shot that cannot be measured is not a shot
+                // with no error.
+                return;
+            }
+            for (int i = 0; i < Slots && i < PlayerEntity.Players.Count; i++)
+            {
+                if (i == shooterSlot || !_inPlay[i, wanted] || !_inPlay[i, got])
+                {
+                    continue;
+                }
+                Vector3 error = _position[i, got] - _position[i, wanted];
+                if (!Single.IsFinite(error.X) || !Single.IsFinite(error.Y)
+                    || !Single.IsFinite(error.Z))
+                {
+                    continue;
+                }
+                float length = error.Length;
+                float vertical = MathF.Abs(error.Y);
+                ClampErrorSamples++;
+                ClampErrorSum += length;
+                ClampErrorVerticalSum += vertical;
+                if (length > ClampErrorWorst)
+                {
+                    ClampErrorWorst = length;
+                }
+                if (vertical > ClampErrorWorstVertical)
+                {
+                    ClampErrorWorstVertical = vertical;
+                }
+            }
         }
 
         /// <summary>
@@ -533,10 +775,82 @@ namespace MphRead.Mods.Network
                     + $"(history misses {HistoryMisses})";
             }
             double mean = FramesRewound / (double)ShotsCompensated;
-            return $"lag compensation: {ShotsCompensated} shots rewound, "
+            string text = $"lag compensation: {ShotsCompensated} shots rewound, "
                 + $"mean {mean:F1} frames ({mean * 1000 / 60:F0} ms), worst {WorstRewind}, "
                 + $"catch-up {CatchUpSteps} steps / {CatchUpHits} hits, "
                 + $"history misses {HistoryMisses}";
+            // The clamp, said plainly. Without this the only evidence that a
+            // ceiling of MaxRewindFrames is doing anything is a "worst" that
+            // happens to equal it, which is also what a single outlier looks
+            // like.
+            // A clamped shot is still a compensated one -- it is rewound, just
+            // not as far as it asked -- so ShotsCompensated is the whole
+            // population and the denominator, not something to add to.
+            text += $"; ceiling {MaxRewindFrames} frames "
+                + $"({MaxRewindFrames * 1000 / 60} ms), clamped {ShotsClamped}";
+            if (ShotsClamped > 0)
+            {
+                text += $" ({ShotsClamped * 100.0 / Math.Max(1, ShotsCompensated):F1}% of shots, "
+                    + $"mean {FramesRefused / (double)ShotsClamped:F1} frames refused)";
+            }
+            text += $", worst asked {WorstRequested}";
+            if (ShotsClamped > 0)
+            {
+                var by = new System.Text.StringBuilder(", clamped by slot");
+                for (int i = 0; i < ClampedByShooter.Length; i++)
+                {
+                    if (ClampedByShooter[i] > 0)
+                    {
+                        by.Append($" {i}:{ClampedByShooter[i]}");
+                    }
+                }
+                text += by.ToString();
+            }
+            if (ClampErrorSamples > 0)
+            {
+                text += $", error {ClampErrorSum / ClampErrorSamples:F2} units mean "
+                    + $"({ClampErrorVerticalSum / ClampErrorSamples:F2} vertical), "
+                    + $"worst {ClampErrorWorst:F2} ({ClampErrorWorstVertical:F2} vertical)";
+            }
+            if (PressAgeEnabled)
+            {
+                text += $"; stale presses {StalePresses}";
+                if (StalePresses > 0)
+                {
+                    text += $" (+{StalePressFrames / (double)StalePresses:F1} frames each)";
+                }
+            }
+            return text;
+        }
+
+        /// <summary>
+        /// The requested-depth distribution as one line of buckets, which is
+        /// the reading the mean cannot give: a ceiling that is doing damage
+        /// shows up here as a pile against the last bucket below it and
+        /// nothing above, and a ceiling that is merely present shows up as a
+        /// tail that thins out on its own.
+        ///
+        /// Empty depths are skipped rather than printed as zeros -- a run
+        /// against one line occupies four or five buckets out of sixty-four.
+        /// </summary>
+        public static string DescribeDepths()
+        {
+            var text = new System.Text.StringBuilder("rewind depths asked (frames: shots):");
+            bool any = false;
+            for (int i = 0; i < DepthHistogram.Length; i++)
+            {
+                if (DepthHistogram[i] == 0)
+                {
+                    continue;
+                }
+                any = true;
+                text.Append($" {i}:{DepthHistogram[i]}");
+                if (i == MaxRewindFrames)
+                {
+                    text.Append("<-ceiling");
+                }
+            }
+            return any ? text.ToString() : "rewind depths asked: none";
         }
     }
 }

@@ -24,6 +24,7 @@ loading everything.
 - render/CEL-SHADING.md — flat colours in place of textures, and the depth-kink ink pass
 - render/FRAME-PACING.md — 60 Hz of simulation under a picture drawn at the display's rate: the split, why interpolation was taken back out, and how both halves are tested without a 144 Hz monitor
 - mapgen/MAP-PIPELINE.md — custom maps: the generator, the Quake 3 importer, the format traps
+- testing/HITRIG.md — the headshot rig: the geometry a headshot turns on, why the feature tour cannot measure it, and how an A/B arm is run
 - testing/TEST-HARNESS.md — netcheck/maptest, map sweeps, the world and affliction probes
 - testing/TEST-HARD-CASES.md — disconnects, blackouts, latency, loss, capacity, spectators, the Pi's ceiling
 - testing/TEST-METRICS.md — reading results, common traps, last verified status

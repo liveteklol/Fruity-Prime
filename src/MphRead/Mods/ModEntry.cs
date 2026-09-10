@@ -122,6 +122,80 @@ namespace MphRead.Mods
                     + "against the present");
             }
 
+            // Puppet positions on a client come from the snapshot alone, not
+            // from the owner's relayed intent. See NetHooks.SnapshotOwnsPuppets
+            // for the measurement: a shooter aiming at the drawn world and
+            // firing into the relayed one landed 11 of the 78 hits the
+            // authority credited it with.
+            if (HasFlag(args, "snapshotpuppets"))
+            {
+                Network.NetHooks.SnapshotOwnsPuppets = true;
+                Console.WriteLine("[net] puppet positions on this client come "
+                    + "from the authority's snapshot, not from relayed intents");
+            }
+
+            // Puppets are put back where their owner said after the movement
+            // step on clients too, not only on the authority. Off by default
+            // and measured against on: see NetHooks.PinPuppetsOnClients for
+            // the frame of physics this removes from between the two worlds.
+            if (HasFlag(args, "clientpin"))
+            {
+                Network.NetHooks.PinPuppetsOnClients = true;
+                Console.WriteLine("[net] puppets are pinned to their owner's "
+                    + "reported position on clients as well as on the authority");
+            }
+
+            // A trigger pull recovered from a press history is rewound by its
+            // own age as well as by its packet's ack. Off by default so the
+            // two can be measured against each other; it costs nothing on a
+            // line that is losing nothing.
+            if (HasFlag(args, "pressage"))
+            {
+                Network.NetUnlagged.PressAgeEnabled = true;
+                Console.WriteLine("[net] recovered trigger pulls are rewound by "
+                    + "their own age as well as by their packet's ack");
+            }
+
+            // The headshot duel, in place of the feature tour. Both arms of a
+            // comparison run the same one, so a difference between them is
+            // the thing being changed rather than the scenario.
+            string? rig = ValueAfter(args, "hitrig");
+            if (rig != null)
+            {
+                if (Network.HitRig.Configure(rig))
+                {
+                    Console.WriteLine($"[net] hit rig: {Network.HitRig.Mode}");
+                }
+                else
+                {
+                    Console.WriteLine($"[net] -hitrig {rig} refused: jump or sniper");
+                }
+            }
+
+            // How far back the rewind may ever be taken, in frames. The one
+            // number an A/B against a real line has to be able to move
+            // without moving anything else: the default 24 (400 ms) was
+            // measured against Japan running into its own ceiling, and a run
+            // that raises it has to be otherwise identical to the run that
+            // did not. Read on the machine that simulates the match, which is
+            // the only one that rewinds anything.
+            string? maxRewind = ValueAfter(args, "maxrewind");
+            if (maxRewind != null)
+            {
+                if (Network.NetUnlagged.ConfigureMaxRewind(maxRewind))
+                {
+                    Console.WriteLine("[net] rewind ceiling "
+                        + $"{Network.NetUnlagged.MaxRewindFrames} frames "
+                        + $"({Network.NetUnlagged.MaxRewindFrames * 1000 / 60} ms)");
+                }
+                else
+                {
+                    Console.WriteLine($"[net] -maxrewind {maxRewind} refused: "
+                        + $"1 to {Network.NetUnlagged.MaxRewindCeiling} frames, "
+                        + "and the history cannot serve more");
+                }
+            }
+
             // Client-side hit resolution, off. The other half of the same
             // measurement: -nounlagged asks what the authority's answer is
             // worth, this asks what not waiting for it is worth. On by
@@ -435,13 +509,19 @@ namespace MphRead.Mods
                 AllowMapVotes = !HasFlag(args, "novote"),
                 // This process is the server, so it is the one that may
                 // replace itself. See DedicatedServer.AutoUpdate.
-                AutoUpdate = true,
-                // -simulate makes this server the match's simulation
-                // authority instead of pointing it at the first client to
-                // connect. It needs game files on this machine; without them
-                // it says so and relays as before. See Mods/Network/ServerSim.
-                Simulate = HasFlag(args, "simulate") || HasFlag(args, "authority")
+                AutoUpdate = true
             };
+            // -simulate and -authority used to turn the simulation on. It is
+            // what a server does now, and there is no relay left to fall back
+            // to, so both are accepted and ignored: every systemd unit and
+            // launch script already deployed passes one of them, and a server
+            // that refused to start on an argument it used to require would be
+            // exactly the breakage this line exists to avoid.
+            if (HasFlag(args, "simulate") || HasFlag(args, "authority"))
+            {
+                Console.WriteLine("[net] -simulate is the default now and does "
+                    + "nothing; a server always runs the match itself");
+            }
             // Listed by default. A dedicated server exists to be found, and a
             // server that has to be told to advertise itself is a server
             // nobody finds -- so the flag is the one that opts out.
@@ -465,7 +545,20 @@ namespace MphRead.Mods
                 cancel.Cancel();
                 server.Stop();
             });
-            server.Run(cancel.Token);
+            try
+            {
+                server.Run(cancel.Token);
+            }
+            catch (ProgramException ex)
+            {
+                // A server that cannot run the match, which since this build
+                // is the only kind of server there is. The reason and what to
+                // do about it are already on the log; a stack trace on top of
+                // them would only bury both, and an operator reading a failed
+                // systemd unit wants the sentence, not the frames.
+                Console.WriteLine($"[server] {ex.Message}");
+                Environment.Exit(1);
+            }
             return true;
         }
 

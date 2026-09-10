@@ -362,3 +362,4 @@ maps/**/*.tex
 # is what the workflow does before it publishes, so this is a build artifact
 # and not a source: what belongs in git is the folder it is cooked from.
 maps/**/*.fpmap
+tools/hitrig/bin/

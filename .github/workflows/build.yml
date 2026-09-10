@@ -115,13 +115,13 @@ jobs:
         if: matrix.id == 'win-x64'
         run: tools/check-subsystem.sh gui publish/${{ matrix.id }}/FruityPrime.exe
 
-      # Both x64 Linux builds exist to be servers -- one with a launcher
-      # attached, one without -- so neither is finished until it has actually
-      # started. Keyed on rid rather than id: it needs no game files, no
-      # display and no sound device, which is what makes it runnable on this
-      # x64 runner, and the ARM64 build cannot say the same being built for a
-      # processor this runner does not have.
-      - name: the dedicated server runs
+      # Both x64 Linux builds contain a dedicated server -- one with a launcher
+      # attached, one without. CI cannot contain the proprietary game files an
+      # authoritative server needs, so it verifies the safe startup contract:
+      # a clear, non-zero refusal and a working directory, rather than the old
+      # relay behaviour. Keyed on rid because the ARM64 build cannot run on
+      # this x64 runner.
+      - name: the dedicated-server startup contract holds
         if: matrix.rid == 'linux-x64'
         run: tools/check-dedicated-server.sh publish/${{ matrix.id }}
 
@@ -280,8 +280,8 @@ jobs:
         shell: bash
         run: tools/check-no-game-assets.sh publish/win-x64-server
 
-      # The same script the Linux job runs, on Windows.
-      - name: the dedicated server runs
+      # The same startup-contract script the Linux job runs, on Windows.
+      - name: the dedicated-server startup contract holds
         shell: bash
         run: tools/check-dedicated-server.sh publish/win-x64-server
 
