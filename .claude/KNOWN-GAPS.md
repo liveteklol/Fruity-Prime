@@ -3,36 +3,40 @@
 What's below is unproven or partially proven, not broken. Say so rather than
 claiming coverage that isn't there.
 
-- **A player's own gun fires about a third as often on their own machine as
-  the authority fires it from the same intents, and the reason is not
-  established.** Measured 2026-09-10 with `tools/hitrig`, one 200 s arm at
-  320 ms with the target jumping, the Imperialist tapped on a 63-frame cadence:
+- **The rig's own shooter fired a third of what it asked for, and the reason
+  was the rig.** *Closed 2026-09-10.* `HitRig.FinishControls` wrote its binds
+  after the pass that sets `Input.HasInput`, so the engine saw an idle player,
+  lowered the gun, and `TryFireWeapon` refused at the `GunAnimation.UpDown`
+  check -- ahead of `NetDamage.NoteFired`, so the refused shots did not even
+  register as attempted. `NetTestScript.FinishControls` has carried the fix
+  since the tour hit the same wall; this driver is newer and missed it.
 
-  | | slot 0 (the shooter, local) | slot 1 (a puppet) |
-  |---|---|---|
-  | on the shooter's machine | **19** beams | 52 beams |
-  | on the authority | **57** beams | 54 beams |
+  | slot 0 (the shooter) | its own machine | the observer | the authority |
+  |---|---|---|---|
+  | before | **19** | 52 | 57 |
+  | after (70 s sniper arm) | **28** | 26 | 30 |
 
-  The *puppet's* count agrees between the two machines, which is what makes
-  this specific: the relayed-intent path reproduces a gun faithfully, and the
-  local input path does not. So the player's screen shows a third of the shots
-  the server resolves, and every one of the other two arrives as damage with no
-  muzzle flash behind it -- which is a large part of what "my shots do not
-  register" describes, and it is nothing to do with where anybody was standing.
+  Every hit-registration percentage measured before this compared two
+  different volleys and should be discarded, not re-read.
 
-  **What has been ruled out**: ammunition (the rig tops the gun to its cap
-  every frame on the client, and the authority receives that same count in the
-  intent), the weapon (`WeaponSelect` carries it and both sides hold the
-  Imperialist), and the trigger reaching the authority at all (it fires *more*,
-  not less). **What has not been looked at**: `_autofireCooldown` and
-  `_timeSinceShot` along the two paths, `PlayerFlags2.Shooting` and
-  `NoShotsFired` after a respawn, and whether `TryFireWeapon` refuses on the
-  client for a reason it cannot refuse on the authority. Follow it with
-  `NetDamage.Fired` on both sides, which is what found it.
+- **The authority spawns beams for a dead player that the player's own machine
+  never spawned, and the reason is not established.** Fell out of the arm that
+  closed the gap above: in the same 70 s run, slot 1 -- the runner, which
+  presses fire only while dead, since holding fire is what asks for an early
+  respawn -- read **0** beams on its own machine, **15** on the observer and
+  **29** on the authority. Three machines, three answers, for a slot that
+  fired nothing it meant to fire.
 
-  Until it is understood, **every hit-registration percentage measured across
-  the two machines is comparing two different volleys** and should be quoted
-  with the shot counts beside it.
+  The shape that fits is the revive boundary: the trigger is still held when
+  the authority's copy comes back, and it empties into the floor there, while
+  the owner's copy comes back later with the trigger already released. That is
+  a guess. What is measured is the disagreement.
+
+  It does not touch the headshot numbers -- those shots are aimed at the floor
+  by design (`HitRig.Drive`) and land on nobody -- but it does inflate the
+  authority's shot count, so quote per-slot counts rather than a total. Follow
+  it with `NetDamage.Fired` around a death, on all three machines.
+
 - **`NetDamage._attacker` resets to slot 0 rather than to `NoSlot`.**
   `ForgetSlot` sets it to `0` and `Reset` clears the array, so between a reset
   and the first hit a slot's snapshot names **slot 0** as the attacker.
