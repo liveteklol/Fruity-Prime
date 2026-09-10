@@ -450,11 +450,33 @@ namespace MphRead.Mods.Network
 
         private static void FinishControls(PlayerEntity player, PlayerControls c)
         {
+            bool any = false;
             for (int i = 0; i < c.All.Length && i < _wasDown.Length; i++)
             {
                 Keybind bind = c.All[i];
                 bind.IsPressed = bind.IsDown && !_wasDown[i];
                 bind.IsReleased = !bind.IsDown && _wasDown[i];
+                any |= bind.IsDown || bind.IsReleased;
+            }
+            if (any)
+            {
+                // Say that somebody is playing this player. The rig writes
+                // binds after the pass that answers "has anyone touched
+                // anything lately", so without this its own shooter went idle,
+                // the engine lowered the gun, and `TryFireWeapon` refused at
+                // the `GunAnimation.UpDown` check -- *before* NetDamage.NoteFired,
+                // so the shot did not even count as attempted.
+                //
+                // That is the whole of the "a player's own gun fires a third
+                // as often as the authority fires it" gap: 19 beams here
+                // against 57 on the authority for the same slot, while the
+                // *puppet's* count agreed (52/54) because NetPlayerBridge
+                // already notes input for puppets. The asymmetry was the
+                // instrument's, not the netcode's, and every hit-registration
+                // percentage measured before this compared two different
+                // volleys. NetTestScript.FinishControls carries the same call
+                // for the same reason; this driver is newer and missed it.
+                player.ModNoteInput();
             }
             player.ModApplyScriptAim(AimDeltaX, AimDeltaY);
         }
