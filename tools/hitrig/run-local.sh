@@ -30,7 +30,21 @@ cleanup() {
   for p in $(pgrep -f "FruityPrime.dll -netcheck 127.0.0.1 -port $PORT" 2>/dev/null); do kill -9 "$p" 2>/dev/null; done
 }
 trap cleanup EXIT
-cleanup; sleep 1
+cleanup
+# Wait for the socket to actually be gone, not for a second and a hope. A
+# previous arm's server still holding the port makes the new one fail to bind,
+# and the clients then find nothing there -- which is a run whose logs are
+# empty rather than a run that failed, and it cost two arms of a benchmark
+# before this loop existed. A stale client still connected is the other half:
+# it joins the new server as a third slot and quietly changes the scenario.
+for _ in $(seq 1 30); do
+  ss -lun 2>/dev/null | grep -q ":$PORT " || break
+  sleep 1
+done
+if ss -lun 2>/dev/null | grep -q ":$PORT "; then
+  echo "port $PORT is still held; refusing to start an arm that cannot bind" >&2
+  exit 1
+fi
 
 # One match, long enough that the run never rotates underneath itself: a
 # rotation clears every counter here (NetHitPrediction.ForgetSlot), and half a
