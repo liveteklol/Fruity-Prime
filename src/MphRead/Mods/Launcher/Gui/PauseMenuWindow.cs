@@ -279,12 +279,12 @@ namespace MphRead.Mods.Launcher.Gui
         /// <summary>
         /// Pick a map and put it to the room.
         ///
-        /// The same grid the front screen chooses a map from -- pictures, not
-        /// a list of names, because "which map is that" is the question a
-        /// name cannot answer and the whole reason the previews exist. What
-        /// happens after the click is the server's: this sends the proposal
-        /// and closes, and the answer arrives as a line in the chat and a
-        /// prompt on everybody's screen, this player's included.
+        /// The same screen a match is chosen from, with the strip of sources
+        /// taken away: calling a vote is picking a map, and picking a map is
+        /// what that screen does. What happens after is the server's -- this
+        /// sends the proposal and closes, and the answer arrives as a line in
+        /// the chat and a prompt on everybody's screen, this player's
+        /// included.
         /// </summary>
         private async void OpenMapVote()
         {
@@ -313,15 +313,21 @@ namespace MphRead.Mods.Launcher.Gui
                     Chat.ChatBox.System("no maps to vote for");
                     return;
                 }
-                string current = NetSession.ServerMatch?.RoomKey ?? rooms[0];
-                var view = new MapPickerView(rooms, current);
-                var window = new MapPickerWindow(view);
+                var view = new PlayScreen(GameState.LoadSettings(), rooms,
+                    PlayScreen.Face.Vote, overGame: true);
+                var window = new ScreenWindow(view, "Vote");
+                string? chosen = null;
                 view.Closed += (_, _) => window.Close();
+                view.Voted += (_, room) =>
+                {
+                    chosen = room;
+                    window.Close();
+                };
                 CoverGameWindow(window);
                 await window.ShowDialog(this);
-                if (view.RoomKey != null)
+                if (chosen != null)
                 {
-                    MapVote.Propose(view.RoomKey);
+                    MapVote.Propose(chosen);
                     Close();
                 }
             }

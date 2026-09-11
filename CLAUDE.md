@@ -144,17 +144,41 @@ export ALSOFT_DRIVERS=null PULSE_SERVER=   # else ALSA retries stall frames
 **One launcher, in Avalonia, on Windows, Linux, macOS and Android** — one
 thread, one toolkit setup per process
 (`GuiLauncher.EnsureSetup`), each visit a nested dispatcher loop. `-launcher`
-opens a front screen, not a settings dialog: a map picture on the left, the
-things you can do on the right.
+opens a front screen, not a settings dialog.
 
-| Entry | What it does |
+**Four screens, and they all have the same layout.** It is
+OpenQuake3/defrag's: a photograph, a column of words anchored in the
+bottom-left corner, a dim line under it, the wordmark in the opposite one, and
+— on anything that asks a question — a cross in the bottom-left corner meaning
+no and a tick in the bottom-right meaning yes. No card, no panel, no box
+anywhere. Those anchors are `Gui/UiLayout.cs` and nowhere else; there were
+nine screens with nine answers to them before, which is why joining a server
+took five presses.
+
+| Screen | What it does |
 |---|---|
-| Host | the story from a save slot, or a match: map, mode, hunter, and a `Where` row -- **Local** is an offline match with 0-7 bots and their skill, **Online** asks the directory to run it. The listen-host path (`NetHostSession`, the dedicated server in this process over the loopback) still exists and is still what `LaunchKind.Host` can do, but the card no longer offers it: the port, "let the directory run it" and "list it" rows are built and forced rather than shown, because every one of them is a question about the player's router. Running a server yourself is the dedicated server's job |
-| Join | name, hunter, `host` or `host:port`, and a live line saying what that server is running. **Find a server** opens the browser |
-| Demos | pick a `.fpdemo` and replay it -- on Android too, where the picker cannot filter by pattern and hands back a `content://` document that has to be copied in first |
-| Settings | display, audio, controls, match rules, and profile (name, hunter, server addresses, updates, game files, credits). Also reachable from the pause menu during a match. **Pro mode HUD** is the whole HUD question in one switch -- no helmet, plain fixed crosshair, weapon list at 170%, fixed weapon, and its own energy, ammo and score readouts in place of the game's; off is the game as the DS drew it. Two rows appear under it while it is on and nowhere else, because they are questions only it can answer: **Crosshair size** (Small / Medium / Big) and **Crosshair type** (Cross, Dot, Cross + dot, Circle, Brackets), the type row carrying a live picture of the answer at the chosen size. The six settings pro mode answers for have no rows at all, and the rows that remain have no explanations under them. Cheats, bugfixes, the leftover feature flags and the HUD-readout opacity likewise have **no UI** and no longer load from `settings.json` -- they sit at their code defaults |
-| Game files | where the .nds goes. Shown first, and everything else greyed out, when there is nothing set up yet |
-| Debugging logs | one line in the bottom right corner, under the version, on the front card only. Off; switched on it writes `logs/FruityPrime-<when>.log` beside the executable (the app's data directory on Android) with everything the program prints plus the machine, the driver, every model read and the stack of anything that kills it. What "it crashes when the map loads" is answered with. **Share logs** sits to its left, only when logs exist, and zips them into the phone's share sheet -- the app's own directory being one no file manager will browse. `.claude/DEBUG-LOGS.md` |
+| Start | Play, Settings, Quit. The build sits in the corner under them and is the update button when there is one to take. Replaced entirely by the game-files screen while there is nothing to load -- a menu whose entries are all refused is a program that looks broken |
+| Play | one list, and a strip over it saying what the list is: **Online** (the directory's servers, with name, hunter and an address box beside them), **Offline** (maps, with match type, hunter, bots and skill -- and a `Where` row whose **Online** asks the directory to run it), **Story** (save slots, hunter, continue or start over), **Demo** (this machine's recordings, plus the system picker last). Pressing a row *is* the choice: click a server and you join it. This one screen replaced seven -- host, join, browser, adventure, demos, the map grid and the vote picker |
+| Settings | three pages, not six. **Game** is display, audio and the match rules; **Controls** is mouse, pen, touch, pad and keys; **Player** is name, hunter, suit, server addresses, updates, game files, the debugging-log switch and the credits. Reachable from the pause menu during a match, where the backdrop is the scrim alone so the game shows through. **Pro mode HUD** is the whole HUD question in one switch -- no helmet, plain fixed crosshair, weapon list at 170%, fixed weapon, and its own energy, ammo and score readouts in place of the game's; off is the game as the DS drew it. Two rows appear under it while it is on and nowhere else: **Crosshair size** and **Crosshair type**, the type row carrying a live picture of the answer at the chosen size. Cheats, bugfixes, the leftover feature flags and the HUD-readout opacity have **no UI** and no longer load from `settings.json` |
+| Confirm | one sentence and the two marks. Quitting, leaving a match, resetting every keybind and wiping a save slot are four consequences and one screen |
+| Pause | the same column, over the scrim, and **longer than the rest on purpose**: Resume, Vote map, Spectate/Rejoin, Fullscreen, Record demo, Settings, Leave match, Quit. Voting on a map, going fullscreen, spectating and recording are things you can only want *during* a match, so this is the one screen they can live on -- everything else is short precisely so this can be long. **Vote map** opens Play with the strip taken away, because calling a vote is picking a map |
+
+The debugging-log switch left the front corner for Settings → Player. It is
+not something anybody came to the launcher for: it is what somebody is asked
+to turn on when they report a crash nobody else can reproduce. Switched on it
+writes `logs/FruityPrime-<when>.log` beside the executable (the app's data
+directory on Android) with everything the program prints plus the machine, the
+driver, every model read and the stack of anything that kills it. **Share
+logs** sits under it, only when logs exist, and zips them into the phone's
+share sheet -- the app's own directory being one no file manager will browse.
+`.claude/DEBUG-LOGS.md`
+
+`-uishot DIR` photographs all of it with no display: `start`, the four faces
+of `play`, `play-vote`, `settings`, `settings-player`, `setup`, `confirm`,
+`pausemenu`, `pausemenu-small` and `serverbrowser`. It needs `libICE` and
+`libSM`, which the game itself does not -- without them it reports "no
+Avalonia backend on this machine", which reads as a missing display rather
+than a missing package.
 
 Gotchas worth keeping in view without opening another file:
 

@@ -681,6 +681,11 @@ namespace MphRead.Mods.Render
             // ES has no glPolygonMode. Only the debug views ask for Line.
         }
 
+        public static void LineWidth(float width)
+        {
+            // Goes with PolygonMode above -- no wireframe to widen on ES.
+        }
+
         public static void DebugMessageCallback(DebugProc callback, IntPtr userParam)
         {
         }

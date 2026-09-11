@@ -110,7 +110,9 @@ namespace MphRead
 
         private bool _showTextures = true;
         private bool _showColors = true;
-        private bool _wireframe = false;
+        // 0 is fill; 1..MaxWireframeLevel is wireframe, line width = level
+        private int _wireframeLevel = 0;
+        private const int MaxWireframeLevel = 5;
         // 0 - lines + fill, 1 - lines only, 2 - fill only
         private int _volumeEdges = 0;
         private bool _faceCulling = true;
@@ -4256,10 +4258,12 @@ namespace MphRead
                     GL.CullFace(TriangleFace.Front);
                 }
             }
+            bool wireframe = _wireframeLevel > 0 || item.Wireframe;
             GL.PolygonMode(TriangleFace.FrontAndBack,
-                _wireframe || item.Wireframe
+                wireframe
                 ? OpenTK.Graphics.OpenGL.PolygonMode.Line
                 : OpenTK.Graphics.OpenGL.PolygonMode.Fill);
+            GL.LineWidth(wireframe ? Math.Max(1, _wireframeLevel) : 1);
             if (item.Type == RenderItemType.Mesh)
             {
                 GL.CallList(item.ListId);
@@ -5615,7 +5619,7 @@ namespace MphRead
                 }
                 else if (e.Control)
                 {
-                    _wireframe = !_wireframe;
+                    _wireframeLevel = (_wireframeLevel + 1) % (MaxWireframeLevel + 1);
                 }
             }
             else if (e.Key == Keys.B)
@@ -6109,7 +6113,7 @@ namespace MphRead
             _sb.AppendLine(" - Hold Shift to move the camera faster");
             _sb.AppendLine($" - T toggles texturing ({OnOff(_showTextures)})");
             _sb.AppendLine($" - Ctrl+C toggles vertex colors ({OnOff(_showColors)})");
-            _sb.AppendLine($" - Ctrl+Q toggles wireframe ({OnOff(_wireframe)})");
+            _sb.AppendLine($" - Ctrl+Q cycles wireframe (level {_wireframeLevel}/{MaxWireframeLevel})");
             _sb.AppendLine($" - B toggles face culling ({OnOff(_faceCulling)})");
             _sb.AppendLine($" - F toggles texture filtering ({OnOff(FilteringOn)})");
             _sb.AppendLine($" - L toggles lighting ({OnOff(LightingOn)})");

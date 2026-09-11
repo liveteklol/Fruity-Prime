@@ -12,7 +12,7 @@ namespace MphRead.Mods.Launcher.Gui
     /// One server in the browser, drawn as columns rather than as a line of
     /// prose.
     ///
-    /// The list used to be <see cref="MenuEntry"/>s whose subtitle was a
+    /// The list used to be menu lines whose subtitle was a
     /// sentence -- "1.2.3.4:27888 -- MP3 PROVING GROUND (Battle) 3/8 players,
     /// 41 ms". Everything was there and none of it was comparable: the map
     /// started at a different x on every row, so picking the emptiest server,
@@ -180,7 +180,7 @@ namespace MphRead.Mods.Launcher.Gui
             var full = new Rect(0, 0, Bounds.Width, Bounds.Height);
             // Transparent fill first: an unfilled area is not hit-testable, so
             // the whole row has to be painted for the whole row to be
-            // clickable. Same as MenuEntry.
+            // clickable. Same as UiWord.
             context.FillRectangle(Brushes.Transparent, full);
             if (_hot || IsFocused)
             {

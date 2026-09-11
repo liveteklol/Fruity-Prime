@@ -85,10 +85,15 @@
     <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.11" />
     <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.11" />
     <!-- Loaded at runtime through avares://, Avalonia's own asset scheme: a
-         plain EmbeddedResource is not visible to AssetLoader. The wordmark
-         is the splash screen's default picture; the mark is the window icon. -->
+         plain EmbeddedResource is not visible to AssetLoader. The wordmark is
+         the corner of every launcher screen; the mark is the window icon. -->
     <AvaloniaResource Include="Assets\fruity-prime-logo.png" />
     <AvaloniaResource Include="Assets\fruity-prime-mark.png" />
+    <!-- The launcher's two faces and its backdrop: fonts from
+         OpenQuake3/defrag's ui/font, whose UI this one is built to. -->
+    <AvaloniaResource Include="Assets\Fonts\heyNovember.ttf" />
+    <AvaloniaResource Include="Assets\Fonts\Roboto-Bold.ttf" />
+    <AvaloniaResource Include="Assets\Backgrounds\launcher-bg.jpg" />
   </ItemGroup>
 
   <ItemGroup>

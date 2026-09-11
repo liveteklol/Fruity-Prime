@@ -1,6 +1,5 @@
 using System;
 using System.IO;
-using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
 using Avalonia.Platform;
@@ -29,7 +28,8 @@ namespace MphRead.Mods.Launcher.Gui
         public static readonly Color Edge = Color.FromRgb(38, 46, 60);
         public static readonly Color Text = Color.FromRgb(230, 234, 242);
         public static readonly Color TextDim = Color.FromRgb(138, 147, 166);
-        public static readonly Color Accent = Color.FromRgb(41, 197, 255);
+        /// <summary>The one accent colour everywhere: the same warm the main menu's Play uses.</summary>
+        public static readonly Color Accent = Color.FromRgb(255, 179, 71);
         public static readonly Color Warm = Color.FromRgb(255, 179, 71);
         public static readonly Color Good = Color.FromRgb(110, 231, 135);
         public static readonly Color Bad = Color.FromRgb(255, 107, 107);
@@ -45,6 +45,12 @@ namespace MphRead.Mods.Launcher.Gui
         public static readonly IBrush GoodBrush = new SolidColorBrush(Good);
         public static readonly IBrush BadBrush = new SolidColorBrush(Bad);
 
+        /// <summary>Panel and PanelLight, thinned so the backdrop still shows through them.</summary>
+        public static readonly IBrush GlassBrush =
+            new SolidColorBrush(Color.FromArgb(220, Panel.R, Panel.G, Panel.B));
+        public static readonly IBrush GlassLightBrush =
+            new SolidColorBrush(Color.FromArgb(220, PanelLight.R, PanelLight.G, PanelLight.B));
+
         /// <summary>
         /// What the pause menu and the in-game settings lay over the match.
         ///
@@ -58,14 +64,19 @@ namespace MphRead.Mods.Launcher.Gui
             new SolidColorBrush(Color.FromArgb(196, Ink.R, Ink.G, Ink.B));
 
         /// <summary>
-        /// The display face. Inter is embedded in the build rather than looked
-        /// up on the system: the WinForms theme can ask for Bahnschrift and
-        /// fall back through four more faces because Windows is known to have
-        /// them, and there is no equivalent list that every Linux install has.
-        /// A launcher that renders in whatever the fontconfig default happens
-        /// to be is a launcher that looks different on every distribution.
+        /// The display face: Roboto Bold, embedded rather than looked up on the
+        /// system for the same reason the WinForms theme's Bahnschrift lookup
+        /// does not apply here -- there is no font every Linux install has.
+        /// Every menu uses this one weight, the same way OpenQuake3/defrag's
+        /// own UI does (its "default.ttf" is this exact file under another
+        /// name); hierarchy there is colour and size; nothing is ever regular.
         /// </summary>
-        public static readonly FontFamily Display = new("avares://Avalonia.Fonts.Inter/Assets#Inter");
+        public static readonly FontFamily Display =
+            new("avares://FruityPrime/Assets/Fonts/Roboto-Bold.ttf#Roboto");
+
+        /// <summary>Hey November, from the same font folder: reserved for Play, and nothing else.</summary>
+        public static readonly FontFamily Title =
+            new("avares://FruityPrime/Assets/Fonts/heyNovember.ttf#Hey November");
 
         public static Typeface Face(bool bold) => new(Display,
             FontStyle.Normal, bold ? FontWeight.SemiBold : FontWeight.Normal);
@@ -107,13 +118,5 @@ namespace MphRead.Mods.Launcher.Gui
                 (byte)(color.G + (target - color.G) * t),
                 (byte)(color.B + (target - color.B) * t));
         }
-
-        /// <summary>
-        /// A rounded rectangle as a geometry, for the card and button shapes.
-        /// Avalonia has RoundedRect on DrawingContext, so this exists only for
-        /// the places that need the path itself.
-        /// </summary>
-        public static RoundedRect Round(Rect rect, double radius)
-            => new(rect, radius);
     }
 }

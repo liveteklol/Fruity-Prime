@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Reflection;
+using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
@@ -18,48 +19,33 @@ using FrameTiming = MphRead.Mods.Render.FrameTiming;
 namespace MphRead.Mods.Launcher.Gui
 {
     /// <summary>
-    /// Settings, in the same language as the front screen: a rail of sections,
-    /// one page at a time beside it, everything painted here.
+    /// Settings, in the same language as every other screen: the same picture,
+    /// the same strip of names across the top, the same two marks in the
+    /// bottom corners.
+    ///
+    /// Three pages, not six. Display, audio and the match rules were three
+    /// lists of switches about the game in front of you, and splitting them
+    /// three ways meant deciding which of the three a thing was before you
+    /// could look for it -- the FPS limit and the render scale are a
+    /// "Display" question, the point goal is a "Match" one, and both are just
+    /// "Game". Likewise the profile and the credits: they are the same page,
+    /// which is the one about you and this copy of the program.
     ///
     /// The same view opens from the front screen, from the pause menu inside a
     /// match, and from the Android head -- which is why nothing here needs a
     /// restart to take effect except the window mode, and why it is a
     /// <see cref="UserControl"/> rather than a <see cref="Window"/>: a phone has
     /// no second window to open it in. <see cref="SettingsWindow"/> is the frame
-    /// the desktop puts around it.
-    ///
-    /// Below <see cref="_narrowWidth"/> the rail turns into a strip across the
-    /// top and the footer drops to the bottom. The sections, the rows and every
-    /// value they read and write are the same objects either way.
+    /// the desktop puts around it over a match.
     /// </summary>
     internal sealed class SettingsView : UserControl
     {
         private readonly MenuSettings _settings;
         private readonly bool _inGame;
-        private readonly StackPanel _rail = new() { Spacing = 2 };
 
-        /// <summary>
-        /// The same section buttons, wrapped over as many lines as they need.
-        ///
-        /// A narrow screen used to put them in a row inside a horizontal
-        /// scroller, and the row could not be scrolled with a finger: every
-        /// button in it takes the pointer for itself, so the drag never
-        /// reached the scroller and the sections past the fourth were simply
-        /// unreachable on a phone. Wrapping needs no gesture at all.
-        /// </summary>
-        private readonly WrapPanel _railWrap = new();
         private readonly Panel _pages = new();
-        private readonly List<(MenuEntry Button, Control Page)> _sections = new();
-        private readonly Grid _grid = new();
-        private readonly Border _railPanel;
-        private Caption? _heading;
-        private readonly Border _footerPanel;
-        private readonly ScrollViewer _railScroll;
-        private bool _narrow;
-        private bool _laidOut;
-
-        /// <summary>Below this width the rail goes across the top.</summary>
-        private const double _narrowWidth = 720;
+        private readonly List<(string Name, Control Page)> _sections = new();
+        private UiTabs _tabs = null!;
 
         /// <summary>Raised when this view is finished with, saved or not.</summary>
         public event EventHandler? Closed;
@@ -166,8 +152,6 @@ namespace MphRead.Mods.Launcher.Gui
         private ToggleRow _autoUpdate = null!;
         private Note _saveError = null!;
 
-        private const double _railWidth = 216;
-
         /// <summary>True when the user pressed save rather than closing.</summary>
         public bool Saved { get; private set; }
 
@@ -182,143 +166,69 @@ namespace MphRead.Mods.Launcher.Gui
             _settings = settings;
             _inGame = inGame;
 
-            Background = GuiTheme.InkBrush;
+            Background = Brushes.Transparent;
             Focusable = true;
 
-            _railScroll = new ScrollViewer
-            {
-                Content = _rail,
-                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
-            };
-            Control footer = BuildFooter();
-            _railPanel = new Border
-            {
-                Background = GuiTheme.PanelBrush,
-                Child = _railScroll
-            };
-            _footerPanel = new Border
-            {
-                Background = GuiTheme.PanelBrush,
-                Child = footer
-            };
-            // A grid rather than a docked panel so that the sections come
-            // before the footer in the tab order: a DockPanel fills with its
-            // *last* child, which would have put Save and Cancel first and made
-            // the first Tab in the window a press away from closing it.
-            _grid.Children.Add(_railPanel);
-            _grid.Children.Add(_pages);
-            _grid.Children.Add(_footerPanel);
-            ApplyLayout(narrow: false);
-            Content = _grid;
-            SizeChanged += (_, e) => ApplyLayout(e.NewSize.Width < _narrowWidth);
-
-            _heading = new Caption("Settings") { Height = 34 };
-            _rail.Children.Add(_heading);
             BuildPages();
-            // The sections did not exist when the first layout ran, so the one
-            // that is wanted is chosen again now that they do.
-            _laidOut = false;
-            ApplyLayout(_narrow);
-            ShowPage(_sections[0].Page);
+            _pages.Margin = UiLayout.BodyMargin;
+
+            _tabs = new UiTabs(_sections.ConvertAll(s => s.Name))
+            {
+                HorizontalAlignment = HorizontalAlignment.Left,
+                VerticalAlignment = VerticalAlignment.Top,
+                Margin = UiLayout.TabMargin
+            };
+            _tabs.Changed += (_, _) => ShowPage(_tabs.Index);
+
+            var cancel = new UiMark(UiMark.Shape.Cancel, "cancel")
+            {
+                HorizontalAlignment = HorizontalAlignment.Left,
+                VerticalAlignment = VerticalAlignment.Bottom,
+                Margin = new Thickness(UiLayout.CornerX, 0, 0, UiLayout.CornerY)
+            };
+            cancel.Click += (_, _) => Close();
+            var save = new UiMark(UiMark.Shape.Accept, inGame ? "apply" : "save")
+            {
+                HorizontalAlignment = HorizontalAlignment.Right,
+                VerticalAlignment = VerticalAlignment.Bottom,
+                Margin = new Thickness(0, 0, UiLayout.CornerX, UiLayout.CornerY)
+            };
+            save.Click += (_, _) => TryCommit();
+            _saveError = new Note("", GuiTheme.Warm)
+            {
+                IsVisible = false,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Bottom,
+                Margin = new Thickness(0, 0, 0, UiLayout.CornerY)
+            };
+
+            // Over a match the backdrop is the scrim alone, so the game shows
+            // through; away from one it is the same picture every other screen
+            // uses, so Settings never reads as a different program.
+            Panel root = UiLayout.Backdrop(inGame);
+            root.Children.Add(_pages);
+            root.Children.Add(UiLayout.Heading("settings"));
+            root.Children.Add(_tabs);
+            root.Children.Add(cancel);
+            root.Children.Add(save);
+            root.Children.Add(_saveError);
+            Content = root;
+            ShowPage(0);
         }
 
         /// <summary>
-        /// A rail beside the pages, or a strip of sections above them.
+        /// Put the keyboard on the strip as the view appears.
         ///
-        /// One tree moved between cells rather than two trees: a section added
-        /// to <see cref="BuildPages"/> appears on a phone without anybody
-        /// having to remember it twice.
-        /// </summary>
-        private void ApplyLayout(bool narrow)
-        {
-            if (_laidOut && narrow == _narrow)
-            {
-                return;
-            }
-            _narrow = narrow;
-            _laidOut = true;
-            if (narrow)
-            {
-                _grid.ColumnDefinitions = new ColumnDefinitions("*");
-                _grid.RowDefinitions = new RowDefinitions("Auto,*,Auto");
-                MoveSections(_railWrap);
-                _railScroll.Content = _railWrap;
-                _railScroll.HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled;
-                _railScroll.VerticalScrollBarVisibility = ScrollBarVisibility.Disabled;
-                _railPanel.Width = Double.NaN;
-                _railPanel.Padding = new Thickness(12, 8, 12, 6);
-                _footerPanel.Width = Double.NaN;
-                _footerPanel.Padding = new Thickness(12, 6, 12, 10);
-                Place(_railPanel, 0, 0, rowSpan: 1);
-                Place(_pages, 1, 0, rowSpan: 1);
-                Place(_footerPanel, 2, 0, rowSpan: 1);
-                return;
-            }
-            _grid.ColumnDefinitions = new ColumnDefinitions("Auto,*");
-            _grid.RowDefinitions = new RowDefinitions("*,Auto");
-            MoveSections(_rail);
-            _railScroll.Content = _rail;
-            _railScroll.HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled;
-            _railScroll.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
-            _railPanel.Width = _railWidth;
-            _railPanel.Padding = new Thickness(18, 20, 14, 4);
-            _footerPanel.Width = _railWidth;
-            _footerPanel.Padding = new Thickness(18, 4, 14, 14);
-            Place(_railPanel, 0, 0, rowSpan: 1);
-            Place(_footerPanel, 1, 0, rowSpan: 1);
-            Place(_pages, 0, 1, rowSpan: 2);
-        }
-
-        /// <summary>
-        /// Put the section buttons in one panel or the other.
-        ///
-        /// One set of buttons moved between two panels rather than two sets
-        /// kept in step: a section added to <see cref="BuildPages"/> turns up
-        /// in both shapes without anybody having to remember it twice, which
-        /// is the same reason the pages themselves are shared.
-        ///
-        /// The heading goes with them only down the column. Across the top it
-        /// would be a fifth thing on the first line that is not a section.
-        /// </summary>
-        private void MoveSections(Panel target)
-        {
-            if (_sections.Count == 0 || ReferenceEquals(_sections[0].Button.Parent, target))
-            {
-                return;
-            }
-            _rail.Children.Clear();
-            _railWrap.Children.Clear();
-            if (ReferenceEquals(target, _rail) && _heading != null)
-            {
-                _rail.Children.Add(_heading);
-            }
-            foreach ((MenuEntry button, Control _) in _sections)
-            {
-                target.Children.Add(button);
-            }
-        }
-
-        private static void Place(Control control, int row, int column, int rowSpan)
-        {
-            Grid.SetRow(control, row);
-            Grid.SetColumn(control, column);
-            Grid.SetRowSpan(control, rowSpan);
-        }
-
-        /// <summary>
-        /// Put the keyboard on the first section as the view appears.
-        ///
-        /// Without it the window opens with nothing focused, and the first Tab
+        /// Without it the screen opens with nothing focused, and the first Tab
         /// goes to whatever the tree happens to offer first rather than to the
-        /// rail -- which is the difference between a window that can be driven
-        /// from the keyboard and one that can be driven from the keyboard once
-        /// you have found out how.
+        /// strip -- which is the difference between a screen that can be
+        /// driven from the keyboard and one that can be driven from the
+        /// keyboard once you have found out how.
         /// </summary>
         protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
         {
             base.OnAttachedToVisualTree(e);
-            Dispatcher.UIThread.Post(() => _sections[0].Button.Focus(),
-                DispatcherPriority.Background);
+            Dispatcher.UIThread.Post(() => _tabs.FocusSelected(), DispatcherPriority.Background);
         }
 
         protected override void OnKeyDown(KeyEventArgs e)
@@ -343,47 +253,42 @@ namespace MphRead.Mods.Launcher.Gui
             // padding: padding is not taken off the width the content is
             // measured with, so every wrapped note ran off the right edge of
             // the window by exactly that much.
-            page.Margin = new Thickness(26, 22, 26, 22);
+            page.Margin = new Thickness(0);
             var scroll = new ScrollViewer
             {
                 Content = page,
                 IsVisible = false,
                 HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
             };
-            var button = new MenuEntry(name, titleSize: 15) { Height = 32 };
-            button.Click += (_, _) => ShowPage(scroll);
-            _rail.Children.Add(button);
             _pages.Children.Add(scroll);
-            _sections.Add((button, scroll));
+            _sections.Add((name, scroll));
             return page;
         }
 
         /// <summary>
-        /// Open on a named section rather than the first one.
+        /// Open on a named page rather than the first.
         ///
-        /// For <c>-uishot</c>, which is the only way any of these pages can be
-        /// looked at from a machine with no display -- and which could
-        /// otherwise photograph nothing but Display, every other page being
-        /// behind a click.
+        /// For <c>-uishot</c>, which is the only way any of these can be
+        /// looked at from a machine with no display.
         /// </summary>
         internal void ShowSection(string name)
         {
-            foreach ((MenuEntry button, Control page) in _sections)
+            for (int i = 0; i < _sections.Count; i++)
             {
-                if (String.Equals(button.Title, name, StringComparison.OrdinalIgnoreCase))
+                if (String.Equals(_sections[i].Name, name, StringComparison.OrdinalIgnoreCase))
                 {
-                    ShowPage(page);
+                    _tabs.Index = i;
+                    ShowPage(i);
                     return;
                 }
             }
         }
 
-        private void ShowPage(Control page)
+        private void ShowPage(int index)
         {
-            foreach ((MenuEntry button, Control candidate) in _sections)
+            for (int i = 0; i < _sections.Count; i++)
             {
-                candidate.IsVisible = ReferenceEquals(candidate, page);
-                button.Selected = ReferenceEquals(candidate, page);
+                _sections[i].Page.IsVisible = i == index;
             }
         }
 
@@ -407,14 +312,24 @@ namespace MphRead.Mods.Launcher.Gui
             return control;
         }
 
+        /// <summary>
+        /// Three pages. The split is by what a question is *about*, not by
+        /// which subsystem answers it: everything about the game in front of
+        /// you, everything about how you drive it, and everything about you
+        /// and this copy of the program.
+        /// </summary>
         private void BuildPages()
         {
-            BuildDisplay();
-            BuildAudio();
-            BuildControls();
-            BuildMatch();
-            BuildLauncher();
-            BuildCredits();
+            StackPanel game = AddSection("Game");
+            BuildDisplay(game);
+            BuildAudio(game);
+            BuildMatch(game);
+
+            BuildControls(AddSection("Controls"));
+
+            StackPanel player = AddSection("Player");
+            BuildLauncher(player);
+            BuildCredits(player);
         }
 
         /// <summary>
@@ -426,26 +341,28 @@ namespace MphRead.Mods.Launcher.Gui
         /// and, being a page rather than a corner, it can say what each person
         /// actually did.
         /// </summary>
-        private void BuildCredits()
+        private void BuildCredits(StackPanel page)
         {
-            StackPanel page = AddSection("Credits");
             Heading(page, "Credits");
             Explain(page, Mods.Credits.Summary);
             page.Children.Add(new Caption(Mods.Credits.Author));
             page.Children.Add(new Note(Mods.Credits.ForkWork));
-            // The address is put in the row itself when there is no browser to
-            // hand it to -- a headless session, or a handler that refused --
-            // so the button says something either way rather than appearing to
-            // do nothing. Same fallback the update badge uses.
-            var support = new MenuEntry("\u2615 Support this project", titleSize: 15);
+            // The address is put in a line under the word when there is no
+            // browser to hand it to -- a headless session, or a handler that
+            // refused -- so pressing it says something either way rather than
+            // appearing to do nothing.
+            var support = new UiWord("\u2615 Support this project", 15);
+            var supportUrl = new Note("") { IsVisible = false };
             support.Click += (_, _) =>
             {
                 if (!Mods.Update.Updater.OpenLink(Mods.Credits.SupportUrl))
                 {
-                    support.Subtitle = Mods.Credits.SupportUrl;
+                    supportUrl.Text = Mods.Credits.SupportUrl;
+                    supportUrl.IsVisible = true;
                 }
             };
             page.Children.Add(support);
+            page.Children.Add(supportUrl);
             Heading(page, "Built on");
             foreach (Mods.Credits.Entry entry in Mods.Credits.Entries)
             {
@@ -461,9 +378,8 @@ namespace MphRead.Mods.Launcher.Gui
 
         // ------------------------------------------------------------- display
 
-        private void BuildDisplay()
+        private void BuildDisplay(StackPanel page)
         {
-            StackPanel page = AddSection("Display");
             // A phone has one window, it is already the whole screen, and it
             // has no F11. Everything in this group is about a desktop window.
             if (!OperatingSystem.IsAndroid())
@@ -553,9 +469,8 @@ namespace MphRead.Mods.Launcher.Gui
 
         // --------------------------------------------------------------- audio
 
-        private void BuildAudio()
+        private void BuildAudio(StackPanel page)
         {
-            StackPanel page = AddSection("Audio");
             Heading(page, "Volume");
             _sfxVolume = Add(page, new SliderRow("Sound effects",
                 Percent(_settings.SfxVolume, 35)));
@@ -576,9 +491,8 @@ namespace MphRead.Mods.Launcher.Gui
 
         // ------------------------------------------------------------ controls
 
-        private void BuildControls()
+        private void BuildControls(StackPanel page)
         {
-            StackPanel page = AddSection("Controls");
             Heading(page, "Mouse");
             _sensitivity = Add(page, new SliderRow("Sensitivity",
                 SensitivityToSlider(InputSettings.MouseSensitivity),
@@ -648,11 +562,9 @@ namespace MphRead.Mods.Launcher.Gui
             {
                 rows.Add(Add(page, new KeyRow(property)));
             }
-            var reset = new MenuEntry("Reset to defaults", titleSize: 13)
+            var reset = new UiWord("Reset to defaults", 15, colour: GuiTheme.Warm)
             {
-                Height = 30,
-                Accent = GuiTheme.Warm,
-                Margin = new Thickness(0, 8, 0, 0)
+                Margin = new Thickness(0, 10, 0, 0)
             };
             reset.Click += (_, _) =>
             {
@@ -731,10 +643,9 @@ namespace MphRead.Mods.Launcher.Gui
             _stylusOpacity = Add(page, new SliderRow("Bottom screen opacity",
                 (int)MathF.Round(Mods.Input.StylusZone.Opacity * 100),
                 v => $"{v}%", min: 4, max: 60, keyStep: 2));
-            var place = new MenuEntry("Place the bottom screen", titleSize: 13)
+            var place = new UiWord("Place the bottom screen", 15)
             {
-                Height = 30,
-                Margin = new Thickness(0, 6, 0, 0)
+                Margin = new Thickness(0, 8, 0, 0)
             };
             place.Click += (_, _) =>
             {
@@ -829,9 +740,8 @@ namespace MphRead.Mods.Launcher.Gui
 
         // ---------------------------------------------------------- match rules
 
-        private void BuildMatch()
+        private void BuildMatch(StackPanel page)
         {
-            StackPanel page = AddSection("Match rules");
             Heading(page, "Match rules");
             _pointGoal = Add(page, new FieldRow("Point goal", _settings.PointGoal, boxWidth: 120));
             _timeLimit = Add(page, new FieldRow("Time limit", _settings.TimeLimit, boxWidth: 120));
@@ -860,9 +770,8 @@ namespace MphRead.Mods.Launcher.Gui
         /// here: the front screen asks the questions a session needs answering
         /// now, and a default server address is not one of them.
         /// </summary>
-        private void BuildLauncher()
+        private void BuildLauncher(StackPanel page)
         {
-            StackPanel page = AddSection("Profile");
             Heading(page, "You");
             _playerName = Add(page, new FieldRow("Your name", LauncherPrefs.PlayerName,
                 boxWidth: 200));
@@ -894,14 +803,132 @@ namespace MphRead.Mods.Launcher.Gui
                 LauncherPrefs.AutoUpdate));
 
             Heading(page, "Game files");
-            var files = new MenuEntry("Game files", GameFiles.Describe(), titleSize: 15);
-            files.SubtitleColor = GameFiles.Ready ? GuiTheme.Good : GuiTheme.Warm;
+            var files = new UiWord("Game files", 15);
             files.Click += (_, _) =>
             {
                 GameFilesRequested?.Invoke(this, EventArgs.Empty);
                 Close();
             };
             page.Children.Add(files);
+            page.Children.Add(new Note(GameFiles.Describe(),
+                GameFiles.Ready ? GuiTheme.Good : GuiTheme.Warm));
+
+            BuildDebugLogs(page);
+        }
+
+        /// <summary>
+        /// The switch that turns the log file on.
+        ///
+        /// It used to be the smallest thing on the front screen, in the corner
+        /// under the version. It is not something anybody came to the launcher
+        /// for: it is what somebody is asked to turn on when they report a
+        /// crash nobody else can reproduce, and it costs a growing directory
+        /// and a lock on every line the program prints. The bottom of the page
+        /// about this copy of the program is where that belongs -- findable
+        /// when described over a chat window, and out of the way the rest of
+        /// the time.
+        ///
+        /// It says where the file went once it is on, because "turn on logging
+        /// and send me the file" has a second half.
+        /// </summary>
+        private void BuildDebugLogs(StackPanel page)
+        {
+            Heading(page, "Debugging");
+            var row = new ToggleRow("Write a debugging log", LauncherPrefs.DebugLogs);
+            var where = new Note("");
+            row.Changed += (_, _) =>
+            {
+                LauncherPrefs.DebugLogs = row.On;
+                LauncherPrefs.Save();
+                if (row.On)
+                {
+                    // Straight away, so the run that is about to crash is the
+                    // run in the file -- being asked to restart first is where
+                    // a report like this is usually lost.
+                    DebugLog.Attach();
+                    DebugLog.Line("launcher", "debug logging turned on from the settings");
+                }
+                else
+                {
+                    DebugLog.Line("launcher", "debug logging turned off from the settings");
+                    DebugLog.Detach();
+                }
+                where.Text = LogLocation();
+                _shareLogs!.IsVisible = LogShare.Available;
+            };
+            where.Text = LogLocation();
+            page.Children.Add(row);
+            page.Children.Add(where);
+            // Only where something can receive a file, which today is Android
+            // alone -- the app's own directory being one no file manager will
+            // browse.
+            _shareLogs = new UiWord("\u2197 Share logs", 15, colour: GuiTheme.TextDim)
+            {
+                IsVisible = LogShare.Available
+            };
+            _shareLogs.Click += async (_, _) => await ShareLogs();
+            _shareError = new Note("", GuiTheme.Warm) { IsVisible = false };
+            page.Children.Add(_shareLogs);
+            page.Children.Add(_shareError);
+        }
+
+        private UiWord? _shareLogs;
+        private Note? _shareError;
+        private bool _sharing;
+
+        private static string LogLocation()
+        {
+            if (!LauncherPrefs.DebugLogs)
+            {
+                return "Everything this build can say about itself, written to a file "
+                    + "for a bug report.";
+            }
+            return DebugLog.Path is string path
+                ? $"Writing to {path}"
+                : "Logging starts with the next run.";
+        }
+
+        /// <summary>
+        /// Zip the logs and hand them over.
+        ///
+        /// Off the UI thread, because it reads and compresses however many
+        /// files <c>DebugLog</c> is keeping. The chooser itself goes back on
+        /// the UI thread: on Android it is an activity. Everything it can say,
+        /// it says on the row -- a control that greys out and reports nothing
+        /// is one people press again.
+        /// </summary>
+        private async Task ShareLogs()
+        {
+            if (_sharing || _shareLogs == null || LogShare.Current is not ILogShare sharer)
+            {
+                return;
+            }
+            _sharing = true;
+            _shareLogs.Text = "\u2197 Zipping\u2026";
+            string name = LogArchive.FileName();
+            string path = "";
+            string error = "";
+            bool built = await Task.Run(() =>
+            {
+                try
+                {
+                    path = sharer.StagingPath(name);
+                }
+                catch (Exception ex)
+                {
+                    error = ex.Message;
+                    return false;
+                }
+                return LogArchive.Create(path, out error);
+            });
+            if (built)
+            {
+                built = sharer.Share(path, name, out error);
+            }
+            _sharing = false;
+            _shareLogs.Text = "\u2197 Share logs";
+            _shareError!.Text = error;
+            _shareError.IsVisible = !built;
         }
 
         /// <summary>host, or host:port. Leaves both alone on anything else, so a
@@ -930,34 +957,7 @@ namespace MphRead.Mods.Launcher.Gui
             return true;
         }
 
-        // -------------------------------------------------------------- footer
-
-        private Control BuildFooter()
-        {
-            var save = new MenuEntry(_inGame ? "Apply" : "Save and close", titleSize: 15)
-            {
-                Primary = true,
-                Height = 40
-            };
-            save.Click += (_, _) => TryCommit();
-            var cancel = new MenuEntry("Cancel", titleSize: 13)
-            {
-                Height = 26,
-                Accent = GuiTheme.TextDim
-            };
-            cancel.Click += (_, _) => Close();
-            _saveError = new Note("", GuiTheme.Warm) { IsVisible = false };
-            var footer = new StackPanel
-            {
-                Spacing = 6,
-                Margin = new Thickness(0, 12, 0, 0),
-                VerticalAlignment = VerticalAlignment.Bottom
-            };
-            footer.Children.Add(save);
-            footer.Children.Add(cancel);
-            footer.Children.Add(_saveError);
-            return footer;
-        }
+        // -------------------------------------------------------------- saving
 
         /// <summary>
         /// Save, and say so on the window if it does not work.

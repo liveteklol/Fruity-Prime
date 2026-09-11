@@ -13,11 +13,12 @@ namespace MphRead.Droid
     /// The Avalonia application on Android.
     ///
     /// A phone has one view rather than a desktop full of windows, so this is a
-    /// single view lifetime -- and the view it shows is <see cref="HomeView"/>,
+    /// single view lifetime -- and the view it shows is <see cref="StartScreen"/>,
     /// the desktop front screen itself. Not a copy of it, not a phone-shaped
-    /// rewrite of it: the same file, which folds to one column below a width and
-    /// opens its settings and map grid as overlays where there is no second
-    /// window to open. A change to the launcher is a change to both platforms,
+    /// rewrite of it: the same file, which opens every other screen on one
+    /// stack over the picture -- the same stack the desktop uses, since there
+    /// is no second window to open anything in here.
+    /// A change to the launcher is a change to both platforms,
     /// which is the whole reason this is Avalonia.
     ///
     /// What is left here is the front half of the loop the desktop's
@@ -28,7 +29,7 @@ namespace MphRead.Droid
     public class AndroidApp : Application
     {
         /// <summary>The front screen, for the activity to drive after a match.</summary>
-        internal static HomeView? Home { get; private set; }
+        internal static StartScreen? Home { get; private set; }
 
         public override void Initialize()
         {
@@ -46,7 +47,7 @@ namespace MphRead.Droid
             base.OnFrameworkInitializationCompleted();
         }
 
-        private static HomeView BuildHome()
+        private static StartScreen BuildHome()
         {
             LauncherPrefs.Load();
             // Keys, mouse feel, pad bindings and the touch layout. The
@@ -72,7 +73,7 @@ namespace MphRead.Droid
                 GameFiles.ApplyPaths();
                 rooms = ThumbnailGenerator.MultiplayerRooms();
             }
-            var home = new HomeView(settings, rooms);
+            var home = new StartScreen(settings, rooms);
             home.Done += (_, plan) =>
             {
                 if (plan.Kind == LaunchKind.None)

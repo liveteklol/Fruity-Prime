@@ -22,7 +22,7 @@ namespace MphRead.Mods.Launcher.Gui
 
         /// <summary>
         /// Its own width when nothing constrains it, for the same reason
-        /// <see cref="MenuEntry.MeasureOverride"/> has one: in a row, a
+        /// <see cref="UiWord.MeasureOverride"/> has one: in a row, a
         /// control that measures to nothing is drawn on top of its neighbours.
         /// </summary>
         protected override Size MeasureOverride(Size availableSize)
@@ -234,7 +234,7 @@ namespace MphRead.Mods.Launcher.Gui
 
         public override void Render(DrawingContext context)
         {
-            // See MenuEntry.Render: hit testing follows the drawing.
+            // See UiWord.Render: hit testing follows the drawing.
             context.FillRectangle(Brushes.Transparent,
                 new Rect(0, 0, Bounds.Width, Bounds.Height));
             if (IsFocused)
@@ -351,7 +351,7 @@ namespace MphRead.Mods.Launcher.Gui
 
         public override void Render(DrawingContext context)
         {
-            // See MenuEntry.Render: hit testing follows the drawing.
+            // See UiWord.Render: hit testing follows the drawing.
             context.FillRectangle(Brushes.Transparent,
                 new Rect(0, 0, Bounds.Width, Bounds.Height));
             if (IsFocused)

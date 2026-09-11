@@ -4,7 +4,7 @@ using Avalonia.Controls;
 namespace MphRead.Mods.Launcher.Gui
 {
     /// <summary>
-    /// A frame around <see cref="HomeView"/>, and nothing else.
+    /// A frame around <see cref="StartScreen"/>, and nothing else.
     ///
     /// Everything the front screen *is* lives in the view, which is what the
     /// Android head shows directly; this is the title bar, the icon and the
@@ -16,14 +16,14 @@ namespace MphRead.Mods.Launcher.Gui
     /// </summary>
     internal sealed class HomeWindow : Window
     {
-        private readonly HomeView _view;
+        private readonly StartScreen _view;
 
         /// <summary>What the screen decided. Kind None means it was closed.</summary>
         public LaunchPlan Plan => _view.Plan;
 
         public HomeWindow(MenuSettings settings, IReadOnlyList<string> rooms)
         {
-            _view = new HomeView(settings, rooms);
+            _view = new StartScreen(settings, rooms);
             _view.Done += (_, _) => Close();
 
             Title = Mods.Branding.Name;
