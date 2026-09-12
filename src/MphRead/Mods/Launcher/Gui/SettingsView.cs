@@ -587,12 +587,11 @@ namespace MphRead.Mods.Launcher.Gui
             _invertX = Add(page, new ToggleRow("Invert horizontal aim", InputSettings.InvertMouseX));
             _scrollAllWeapons = Add(page, new ToggleRow("Wheel cycles every weapon",
                 InputSettings.ScrollAllWeapons));
-            // On by default and worth leaving on with a mouse: no mouse
-            // movement reaches the threshold, so it does nothing at all until
-            // a pen is used. The switch is here for the one case it could get
-            // wrong -- a very high-DPI mouse flicked at a very high
-            // sensitivity -- and for anybody who would rather find out than
-            // be protected. See Mods.Input.PointerInput.
+            // Off by default: a fast flick with a high-DPI mouse at high
+            // sensitivity can clear the jump threshold too, which zeroed a
+            // real player's aim rather than protecting it. Worth turning on
+            // for a pen tablet, where the same guard is the difference
+            // between usable and not. See Mods.Input.PointerInput.
             _penTablet = Add(page, new ToggleRow("Pen tablet: ignore pointer jumps",
                 Mods.Input.PointerInput.GuardJumps));
             BuildStylusZone(page);
@@ -794,12 +793,12 @@ namespace MphRead.Mods.Launcher.Gui
 
         private static int SensitivityToSlider(float sensitivity)
         {
-            return Math.Clamp((int)Math.Round((sensitivity - 0.1f) / 2.9f * 100), 0, 100);
+            return Math.Clamp((int)Math.Round((sensitivity - 0.01f) / 2.99f * 100), 0, 100);
         }
 
         private static float SliderToSensitivity(int value)
         {
-            return 0.1f + value / 100f * 2.9f;
+            return 0.01f + value / 100f * 2.99f;
         }
 
         // The pad's look runs 0.25x to 3x, which is 50 to 630 degrees a second

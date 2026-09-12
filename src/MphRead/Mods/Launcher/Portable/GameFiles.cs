@@ -114,6 +114,18 @@ namespace MphRead.Mods.Launcher
         /// </summary>
         public static bool RunSetup(string romPath, Action<string> report)
         {
+            // Checked here rather than in each caller, since the GUI file
+            // picker, the text launcher's path prompt and Android's in-process
+            // setup all funnel through this one entry point. A file that
+            // isn't one of the seven known dumps is refused before anything
+            // is extracted -- see RomWhitelist.
+            if (!RomWhitelist.TryIdentify(romPath, out string? label))
+            {
+                report("This .nds file doesn't match a known Metroid Prime Hunters "
+                    + "dump (checked by MD5) -- nothing was extracted.");
+                return false;
+            }
+            report($"Recognised: Metroid Prime Hunters, {label}");
             if (InProcessSetup)
             {
                 return RunSetupHere(romPath, report);

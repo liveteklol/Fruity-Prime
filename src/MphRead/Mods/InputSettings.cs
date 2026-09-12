@@ -353,7 +353,7 @@ namespace MphRead.Mods
                         if (Single.TryParse(value, NumberStyles.Float,
                             CultureInfo.InvariantCulture, out float parsed))
                         {
-                            MouseSensitivity = Math.Clamp(parsed, 0.05f, 10f);
+                            MouseSensitivity = Math.Clamp(parsed, 0.01f, 10f);
                         }
                         continue;
                     }

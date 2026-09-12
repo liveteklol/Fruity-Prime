@@ -44,11 +44,16 @@ namespace MphRead.Mods.Input
         public static float JumpPixels { get; set; } = 600;
 
         /// <summary>
-        /// Whether the guard is applied. On by default: it costs a mouse
-        /// nothing -- no mouse movement reaches the threshold -- and it is
-        /// the whole difference between a tablet working and not.
+        /// Whether the guard is applied. Off by default: "no mouse movement
+        /// reaches the threshold" turned out to be wrong for a real player --
+        /// a fast flick with a high-DPI mouse at high sensitivity clears 600
+        /// px in a single 60 Hz simulation frame and had its aim zeroed for
+        /// it, reported as "my aim doesn't follow anymore" after this guard
+        /// shipped. A pen tablet user turns it back on from the aim
+        /// settings; a mouse player, who vastly outnumbers them, is no
+        /// longer silently penalised for owning a fast mouse.
         /// </summary>
-        public static bool GuardJumps { get; set; } = true;
+        public static bool GuardJumps { get; set; } = false;
 
         /// <summary>
         /// Pointer jumps ignored so far. Zero for anybody using a mouse,
