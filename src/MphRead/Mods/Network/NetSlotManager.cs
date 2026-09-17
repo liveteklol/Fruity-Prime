@@ -131,15 +131,11 @@ namespace MphRead.Mods.Network
             // MatchStart), and a rule that only spoke up when the value was
             // out of range had nothing to say about eight players all
             // correctly holding zero.
-            int wanted = GameState.Teams ? slot % 2 : slot;
-            if (player.TeamIndex != wanted
-                && (GameState.Teams
-                    ? player.TeamIndex < 0 || player.TeamIndex > 1
-                    : player.TeamIndex < 0 || player.TeamIndex >= PlayerEntity.MaxPlayers
-                        || TeamIndexTaken(player.TeamIndex, slot)))
+            int wanted = GameState.Teams ? Math.Max(0, (int)NetSession.SlotTeamIndex[slot]) : slot;
+            if (player.TeamIndex != wanted)
             {
                 player.TeamIndex = wanted;
-                player.Team = player.TeamIndex % 2 == 0 ? Team.Orange : Team.Green;
+                player.Team = wanted == 0 ? Team.Orange : Team.Green;
             }
             // The hunter comes from the server's roster, not from this
             // machine's menu: a client that used its own choice for every

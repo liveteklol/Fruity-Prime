@@ -53,7 +53,7 @@ namespace MphRead.Mods.Network
     /// The host therefore owns the simulation and clients apply what it
     /// sends. Divergence becomes a correction rather than a desync.
     /// </summary>
-    public static class NetSession
+    public static partial class NetSession
     {
         private static NetTransport? _transport;
         private static readonly List<RemotePeer> _peers = new();
@@ -256,11 +256,13 @@ namespace MphRead.Mods.Network
             }
         }
 
-        public static void StartClient(string address, int port = NetConfig.DefaultPort)
+        public static void StartClient(string address, int port = NetConfig.DefaultPort, Guid ownerToken = default)
         {
             Stop();
             try
             {
+                _ownerToken = ownerToken;
+                _lastServerPacket = Clock;
                 _transport = new NetTransport(0);
                 // The server measures everyone's round trip by pinging them,
                 // so the reply must not wait for a frame boundary: see
@@ -303,7 +305,7 @@ namespace MphRead.Mods.Network
         public static void StartPlayback()
         {
             Stop();
-            _transport = new NetTransport(0);
+            _transport = new NetTransport(0, playbackOnly: true);
             Role = NetRole.Client;
             LocalSlot = -1;
             NetFrame = 0;
@@ -377,9 +379,11 @@ namespace MphRead.Mods.Network
 
         public static void Stop()
         {
+            ResetLobbySession();
             NetPlayerSetup.Reset();
             SpectatorMode.Reset();
             DemoRecorder.Stop();
+            ReplayCapture.Reset();
             NetMatchSync.Reset();
             NetSlotManager.Reset();
             NetDamage.Reset();
@@ -544,7 +548,8 @@ namespace MphRead.Mods.Network
             // client still joins an old server -- it simply gets the old
             // behaviour when its connection drops.
             BinaryPrimitives.WriteUInt32LittleEndian(_scratch.AsSpan(2, 4), ClientId);
-            _transport.Send(_hostEndPoint, PacketType.Hello, _scratch.AsSpan(0, 6));
+            _ownerToken.TryWriteBytes(_scratch.AsSpan(6, 16));
+            _transport.Send(_hostEndPoint, PacketType.Hello, _scratch.AsSpan(0, 22));
         }
 
         /// <summary>
@@ -579,6 +584,8 @@ namespace MphRead.Mods.Network
         /// </summary>
         public static void Update(double time)
         {
+            DemoClip.Tick();
+            if (Role == NetRole.Client && !DemoPlayback.IsActive) time = Clock;
             if (Role == NetRole.Server)
             {
                 // No socket here: DedicatedServer owns it, drains it on its
@@ -603,6 +610,7 @@ namespace MphRead.Mods.Network
                 DemoRecorder.Record(packet);
                 Handle(packet, time);
             }
+            PumpLobby(time);
             if (Role == NetRole.Host)
             {
                 DropTimedOutPeers(time);
@@ -711,6 +719,13 @@ namespace MphRead.Mods.Network
 
         private static void Handle(ReceivedPacket packet, double time)
         {
+            // Reconnects/authority handovers belong to the recording client's connection,
+            // never to the spectator watching it. In particular Welcome must not assign a
+            // local player, and Bye must not destroy the final replay scene.
+            if (DemoPlayback.IsActive && packet.Type is PacketType.Welcome or PacketType.Authority
+                or PacketType.Bye or PacketType.Refused) return;
+            if (Role == NetRole.Client && !DemoPlayback.IsActive
+                && (_hostEndPoint == null || !packet.Sender.Equals(_hostEndPoint))) return;
             if (Role == NetRole.Client)
             {
                 if (_lastServerPacket > 0 && time > _lastServerPacket)
@@ -727,6 +742,12 @@ namespace MphRead.Mods.Network
             }
             switch (packet.Type)
             {
+                case PacketType.SessionState when Role == NetRole.Client:
+                    if (SessionStatePacket.TryRead(packet.Payload, out var session)) ApplySessionState(session);
+                    break;
+                case PacketType.LobbyCommandResult when Role == NetRole.Client:
+                    if (LobbyCommandResultPacket.TryRead(packet.Payload, out var result)) ApplyLobbyResult(result);
+                    break;
                 case PacketType.Hello when Role == NetRole.Host:
                     HandleHello(packet, time);
                     break;
@@ -764,6 +785,7 @@ namespace MphRead.Mods.Network
                     if (packet.Payload.Length >= 1)
                     {
                         int assigned = packet.Payload[0];
+                        if (assigned >= PlayerEntity.SlotCapacity) break;
                         // A different slot from the one we were playing is
                         // the server having failed to recognise us -- an
                         // older server, which cannot match a reconnection to
@@ -822,7 +844,7 @@ namespace MphRead.Mods.Network
                     }
                     break;
                 case PacketType.Refused when Role == NetRole.Client:
-                    if (packet.Payload.Length >= 1 && LocalSlot < 0)
+                    if (packet.Payload.Length >= 1 && (LocalSlot < 0 || packet.Payload[0] == RefusedPacket.ReasonKicked))
                     {
                         // Only while still waiting to be let in. A refusal
                         // arriving mid-match would be a stale datagram from
@@ -970,7 +992,7 @@ namespace MphRead.Mods.Network
                     }
                 }
             }
-            Chat.ChatBox.Receive(chat);
+            Chat.NetChat.Receive(chat);
         }
 
         /// <summary>
@@ -991,6 +1013,7 @@ namespace MphRead.Mods.Network
                 Name = PlayerName,
                 Text = text
             };
+            Chat.NetChat.Remember(chat);
             chat.Write(_scratch);
             if (Role == NetRole.Host)
             {
@@ -1287,7 +1310,11 @@ namespace MphRead.Mods.Network
             {
                 return;
             }
-            ApplyRoster(RosterPacket.Read(packet.Payload));
+            if (!RosterPacket.TryRead(packet.Payload, out var roster)) return;
+            if (_rosterRevision is { } previous && roster.Revision != previous
+                && !SessionStatePacket.IsNewer(roster.Revision, previous)) return;
+            _rosterRevision = roster.Revision;
+            ApplyRoster(roster);
         }
 
         /// <summary>
@@ -1301,7 +1328,16 @@ namespace MphRead.Mods.Network
         /// </summary>
         public static void ApplyRoster(RosterPacket roster)
         {
+            for (int slot = 0; slot < SlotOccupied.Length; slot++)
+            {
+                bool present = false;
+                for (int i = 0; i < roster.Count; i++) present |= roster.Slots[i] == slot;
+                if (present != SlotOccupied[slot]) ReplayCapture.Event(present
+                    ? ReplayEventType.PlayerJoined : ReplayEventType.PlayerLeft, slot);
+            }
             Array.Clear(SlotOccupied);
+            Array.Clear(SlotLobbyReady);
+            Array.Fill(SlotTeamIndex, (sbyte)-1);
             for (int i = 0; i < roster.Count; i++)
             {
                 int slot = roster.Slots[i];
@@ -1310,6 +1346,8 @@ namespace MphRead.Mods.Network
                     continue;
                 }
                 SlotOccupied[slot] = true;
+                SlotTeamIndex[slot] = roster.Teams[i];
+                SlotLobbyReady[slot] = roster.LobbyReady[i];
                 // Nicknames is what the scoreboard draws, so writing here is
                 // what makes the other player's name appear on Tab.
                 GameState.Nicknames[slot] = roster.Names[i];
@@ -1330,7 +1368,9 @@ namespace MphRead.Mods.Network
             {
                 return;
             }
-            ApplyMatchState(MatchStatePacket.Read(packet.Payload), rotated);
+            var state = MatchStatePacket.Read(packet.Payload);
+            if (PersistentLobby && (IsInLobby || state.MatchId != ServerSession?.MatchId)) return;
+            ApplyMatchState(state, rotated);
         }
 
         /// <summary>
@@ -1339,6 +1379,8 @@ namespace MphRead.Mods.Network
         /// </summary>
         public static void ApplyMatchState(MatchStatePacket state, bool rotated)
         {
+            if (ServerMatch?.MatchId != state.MatchId) ReplayCapture.Event(ReplayEventType.MatchStarted);
+            if (state.Ending && ServerMatch?.Ending != true) ReplayCapture.Event(ReplayEventType.MatchEnded);
             string? previous = ServerMatch?.RoomKey;
             ServerMatch = state;
             // Fire on an actual map change, whether the server announced it
@@ -1389,6 +1431,7 @@ namespace MphRead.Mods.Network
 
         private static void HandleSnapshot(ReceivedPacket packet)
         {
+            if (FreezeGameplay) return;
             ReadOnlySpan<byte> payload = packet.Payload;
             if (payload.Length < SnapshotHeader.Size)
             {
@@ -1433,6 +1476,7 @@ namespace MphRead.Mods.Network
             _lateSnapshotRun = 0;
             _lastSnapshotFrame = header.Frame;
             SnapshotArrived = Math.Max(NetFrame, 1);
+            ReplayCapture.Observe(packet.Data.AsSpan(0, packet.Length));
             SnapshotsReceived++;
             // Rng.cs reproduces the game's original LCG and its state is
             // global, so adopting the host's words keeps every random
@@ -1452,6 +1496,7 @@ namespace MphRead.Mods.Network
                 offset += PlayerState.Size;
                 if (state.SlotIndex < RemoteStates.Length)
                 {
+                    ReplayCapture.AcceptedState(state);
                     RemoteStates[state.SlotIndex] = state;
                     RemoteStateValid[state.SlotIndex] = true;
                     if (count < _snapshotScratch.Length)
@@ -1548,6 +1593,7 @@ namespace MphRead.Mods.Network
         /// <summary>Client -> host: this frame's intent for the local player.</summary>
         public static void SendIntent(IntentPacket intent)
         {
+            if (FreezeGameplay) return;
             if (_transport == null || Role != NetRole.Client || _hostEndPoint == null)
             {
                 return;
@@ -1663,6 +1709,7 @@ namespace MphRead.Mods.Network
                 state.Kills = (ushort)Math.Clamp(GameState.Kills[i], 0, UInt16.MaxValue);
                 state.Deaths = (ushort)Math.Clamp(GameState.Deaths[i], 0, UInt16.MaxValue);
                 NetDamage.Write(i, ref state);
+                ReplayCapture.AcceptedState(state);
                 state.Write(_scratch.AsSpan(offset));
                 offset += PlayerState.Size;
                 count++;

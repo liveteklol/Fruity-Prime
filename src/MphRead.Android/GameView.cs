@@ -182,6 +182,7 @@ namespace MphRead.Droid
             bool alt = e?.IsAltPressed ?? false;
             if (!composing)
             {
+                if (MphRead.Mods.Replay.ReplayInput.HandleKey(Map(keyCode))) return true;
                 // The results screen's hunter picker owns the arrow keys
                 // while it is up. The panel is drawn by the shared HUD, so it
                 // appears here whether or not this head hooks it -- and a
@@ -195,7 +196,7 @@ namespace MphRead.Droid
                 // The one key that opens it, and only where there is a match
                 // to talk in. Everything else belongs to whoever asked next.
                 return MphRead.Mods.Chat.ChatBox.HandleKeyDown(Map(keyCode), control, alt,
-                    canOpen: Scene != null, swallowOpeningChar: false);
+                    canOpen: Scene != null && !Mods.Network.DemoPlayback.IsActive, swallowOpeningChar: false);
             }
             Keys key = Map(keyCode);
             if (key == Keys.Enter || key == Keys.Escape || key == Keys.Backspace)
@@ -237,6 +238,11 @@ namespace MphRead.Droid
                 Keycode.Del => Keys.Backspace,
                 Keycode.Space => Keys.Space,
                 Keycode.Tab => Keys.Tab,
+                Keycode.Period => Keys.Period,
+                Keycode.Comma => Keys.Comma,
+                Keycode.LeftBracket => Keys.LeftBracket,
+                Keycode.RightBracket => Keys.RightBracket,
+                Keycode.MoveHome => Keys.Home,
                 // The arrows, which nothing here used to need: they are the
                 // results screen's picker, and a pad's d-pad arrives as these
                 // same codes on Android.
@@ -733,6 +739,7 @@ namespace MphRead.Droid
                 {
                     Scene = _build(_input, _size);
                     Scene.OnLoad();
+                    MphRead.Mods.Network.NetSession.MarkMatchLoaded();
                 }
                 catch (Exception ex)
                 {
@@ -741,6 +748,7 @@ namespace MphRead.Droid
                     // match with what went wrong on screen, rather than taking
                     // the process down from a thread nobody is watching.
                     Console.WriteLine($"[android] the match could not start: {ex}");
+                    MphRead.Mods.Network.NetSession.ReportMatchLoadFailed(ex.Message);
                     Scene = null;
                     _ended = true;
                     _onError(ex.Message);
@@ -775,6 +783,18 @@ namespace MphRead.Droid
             private bool DrawFrame()
             {
                 Scene scene = Scene!;
+                if (Mods.Network.DemoPlayback.IsActive && Mods.Network.ReplayController.TakeRebuild(out uint target, out bool resume))
+                {
+                    scene.DoCleanup();
+                    scene.UnloadGl();
+                    Mods.Network.DemoPlayback.Stop();
+                    Mods.SpectatorMode.Reset();
+                    BuildScene();
+                    if (Scene == null || _ended) return false;
+                    scene = Scene;
+                    Mods.Network.ReplayController.ContinueSeek(target, resume);
+                    FrameTiming.Reset();
+                }
                 double elapsed = WaitForTick();
                 GameState.ApplyPause();
                 int steps = FrameTiming.Advance(elapsed);
@@ -782,8 +802,16 @@ namespace MphRead.Droid
                 {
                     ApplyInput();
                     scene.OnSimulationFrame();
+                    if (MphRead.Mods.Network.NetSession.Refused || MphRead.Mods.Network.NetSession.SessionTimedOut)
+                    { End(scene); return false; }
+                    if (MphRead.Mods.Network.NetSession.PersistentLobby && MphRead.Mods.Network.NetSession.IsInLobby)
+                    {
+                        End(scene, keepSession: true);
+                        return false;
+                    }
                 }
                 RequestFrameRate();
+                if (Mods.Network.ReplayController.IsSeeking) return true;
                 scene.OnDrawFrame();
                 if (!scene.OnRenderFrame())
                 {
@@ -851,7 +879,7 @@ namespace MphRead.Droid
                 }
             }
 
-            private void End(Scene scene)
+            private void End(Scene scene, bool keepSession = false)
             {
                 _ended = true;
                 scene.DoCleanup();
@@ -871,7 +899,8 @@ namespace MphRead.Droid
                     // the player on a dead view.
                     Console.WriteLine($"[android] the save could not be written: {ex}");
                 }
-                _onEnd();
+                if (keepSession) MainActivity.Instance?.RunOnUiThread(() => MainActivity.Instance?.EndMatchToLobby());
+                else _onEnd();
             }
 
             /// <summary>
@@ -982,7 +1011,8 @@ namespace MphRead.Droid
                 bool view = _controls.IsHeld(TouchAction.ScanVisor);
                 if (view && !_spectateViewHeld)
                 {
-                    Mods.SpectatorMode.ToggleView();
+                    if (Mods.Network.DemoPlayback.IsActive) Mods.Replay.ReplayCamera.ToggleFree();
+                    else Mods.SpectatorMode.ToggleView();
                 }
                 _spectateViewHeld = view;
                 bool menuHeld = _controls.IsHeld(TouchAction.Pause);
@@ -1005,7 +1035,7 @@ namespace MphRead.Droid
                     _input.ApplyKey(Keys.S, (dir & TouchControls.Dir.Down) != 0);
                     _input.ApplyKey(Keys.A, (dir & TouchControls.Dir.Left) != 0);
                     _input.ApplyKey(Keys.D, (dir & TouchControls.Dir.Right) != 0);
-                    _input.ApplyKey(Keys.Space, _controls.IsHeld(TouchAction.Jump));
+                    _input.ApplyKey(Mods.Network.DemoPlayback.IsActive ? Keys.E : Keys.Space, _controls.IsHeld(TouchAction.Jump));
                     _input.ApplyKey(Keys.V, _controls.IsHeld(TouchAction.Morph));
                     (float X, float Y) look = _controls.TakeAimDelta();
                     if (look.X != 0 || look.Y != 0)

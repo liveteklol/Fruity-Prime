@@ -1,5 +1,11 @@
 # Multiplayer — match end, rotation and the double-counted kill
 
+Protocol 8 adds an optional persistent lobby lifecycle. The results timing and
+ballot below remain shared: Continuous servers rotate automatically, while
+Lobby servers seed their next lobby and stop the simulation without dropping
+peers. Results readiness is named `PostMatchReady`, separate from `LobbyReady`.
+See [NETWORK-LOBBY.md](NETWORK-LOBBY.md).
+
 A match that somebody won used to end the session for that client alone:
 `GameState.ProcessFrame` ran the winner's camera, then the scoreboard, then
 faded to black -- correct offline, and on a server it meant every client

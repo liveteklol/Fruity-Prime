@@ -1,186 +1,162 @@
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.IO;
 
 namespace MphRead.Mods.Network
 {
-    /// <summary>
-    /// The last few seconds of the match, kept in memory so they can be saved
-    /// after the fact.
-    ///
-    /// A demo has to be started before the thing worth watching happens, which
-    /// is the one moment nobody knows it is about to. So this records all the
-    /// time and keeps only a window: press the button and the window becomes a
-    /// file, press nothing and it is thrown away.
-    ///
-    /// It holds the same three streams <see cref="DemoRecorder"/> writes --
-    /// what arrived from the server, this client's own intents, and, when this
-    /// client is the authority, the snapshots it published -- because a clip
-    /// missing any of them opens on an empty room for the reasons that class
-    /// documents at length.
-    ///
-    /// Kept apart from DemoRecorder rather than folded into it: a full
-    /// recording started from the menu is a deliberate act with a file
-    /// attached, and this is a rolling buffer with none. They run at the same
-    /// time and neither interferes with the other -- a player recording the
-    /// whole match can still cut a short out of it, which is the case that
-    /// made them separate classes instead of one with a mode.
-    /// </summary>
+    /// <summary>Bounded pooled packet pages; each bootstrap belongs to the beginning of its page.</summary>
     internal static class DemoClip
     {
-        /// <summary>The lengths the settings screen offers, in seconds.</summary>
-        public static readonly int[] Lengths = { 5, 10, 15 };
-
-        /// <summary>
-        /// How much to keep. Zero switches the buffer off entirely, which is
-        /// what an unbound button means: nothing can ask for a clip, so
-        /// nothing is worth keeping.
-        /// </summary>
-        public static int Seconds { get; set; } = 10;
-
-        /// <summary>
-        /// Frames of slack over the asked-for window.
-        ///
-        /// A clip trimmed exactly to the second starts on whatever packet
-        /// happened to be first, which is usually mid-snapshot; a little extra
-        /// gives the reader a complete one to open on. Cheap: this is a few
-        /// hundred kilobytes at most.
-        /// </summary>
-        private const uint Slack = 30;
-
-        private static readonly Queue<DemoRecord> _records = new();
-
-        /// <summary>
-        /// Bytes held. Tracked rather than measured so a long stall -- a match
-        /// paused on a menu, a client hitching -- cannot grow this without
-        /// bound while the frame counter stands still.
-        /// </summary>
-        private static long _bytes;
-
-        private const long MaxBytes = 24 * 1024 * 1024;
-
-        public static bool Active => Seconds > 0 && NetSession.Active && !DemoPlayback.IsActive;
-
-        /// <summary>Seconds actually held right now, for the HUD to say so.</summary>
-        public static double Held
+        public static readonly int[] Lengths = { 15, 30, 60, 120 };
+        public static readonly int[] PostRollLengths = { 0, 2, 3, 5 };
+        private static int _seconds = 30;
+        public static int Seconds
         {
-            get
-            {
-                if (_records.Count == 0)
-                {
-                    return 0;
-                }
-                uint first = 0;
-                foreach (DemoRecord record in _records)
-                {
-                    first = record.Frame;
-                    break;
-                }
-                return Math.Max(0, (NetSession.NetFrame - first) / 60.0);
-            }
+            get => _seconds;
+            set { _seconds = Math.Clamp(value, 0, 120); if (_seconds == 0) Purge(); }
         }
+        public static int PostRollSeconds { get; set; } = 3;
+        private const long MaxBytes = 24 * 1024 * 1024;
+        private const int PageSize = 64 * 1024;
+        private readonly record struct Entry(uint Frame, int Offset, ushort Length);
+        private sealed class Page : IDisposable
+        {
+            public readonly byte[] Buffer;
+            public readonly List<Entry> Entries = new(512);
+            public readonly List<ReplayEvent> Events = new();
+            public readonly uint First;
+            public readonly ReplayMetadata Metadata;
+            public int Used;
+            public Page(uint frame)
+            {
+                First = frame;
+                Metadata = ReplayCapture.Capture(ReplayType.Clip);
+                Buffer = ArrayPool<byte>.Shared.Rent(PageSize);
+            }
+            public void Dispose() => ArrayPool<byte>.Shared.Return(Buffer);
+        }
+        private static readonly Queue<Page> Pages = new();
+        private static Page? _tail;
+        private static long _bytes;
+        private static string? _pendingPath;
+        private static uint _finishFrame;
+        public static bool IsSaving => _pendingPath != null;
+        public static string? LastError { get; private set; }
+        public static string? LastSavedPath { get; private set; }
+        internal static long BufferedBytes => _bytes;
+        internal static int BufferedPages => Pages.Count;
+        public static bool Active => Seconds > 0 && NetSession.Active && !DemoPlayback.IsActive;
+        public static double Held => Pages.Count == 0 || NetSession.NetFrame < Pages.Peek().First
+            ? 0 : (NetSession.NetFrame - Pages.Peek().First) / 60.0;
 
         public static void Add(ReadOnlySpan<byte> data)
         {
-            if (!Active || data.Length == 0 || data.Length > UInt16.MaxValue)
-            {
-                return;
-            }
-            _records.Enqueue(new DemoRecord(NetSession.NetFrame, data.ToArray()));
-            _bytes += data.Length;
-            Trim();
-        }
-
-        private static void Trim()
-        {
-            uint window = (uint)(Seconds * 60) + Slack;
-            uint now = NetSession.NetFrame;
-            while (_records.Count > 0)
-            {
-                DemoRecord oldest = _records.Peek();
-                // Unsigned, so the subtraction has to be guarded rather than
-                // compared: a counter that restarted at a room change would
-                // otherwise wrap into an enormous age and empty the buffer.
-                bool tooOld = now >= oldest.Frame && now - oldest.Frame > window;
-                if (!tooOld && _bytes <= MaxBytes)
-                {
-                    break;
-                }
-                _bytes -= oldest.Data.Length;
-                _records.Dequeue();
-            }
-        }
-
-        /// <summary>
-        /// Throw the window away.
-        ///
-        /// Called at the end of a match, when nobody asked for a clip, and
-        /// when the button is rebound -- binding it is the moment a player
-        /// starts meaning to use it, and inheriting whatever was in memory
-        /// from before then would hand them somebody else's few seconds.
-        /// </summary>
-        public static void Purge()
-        {
-            _records.Clear();
-            _bytes = 0;
-        }
-
-        /// <summary>
-        /// Write what is held to a demo file. Returns the path, or null if
-        /// there was nothing to write or the write failed.
-        ///
-        /// Frames are rebased so the clip starts at zero: the reader clocks
-        /// records off the first one, and a file whose first record is at
-        /// frame ninety thousand would sit still for twenty-five minutes
-        /// before showing anything.
-        /// </summary>
-        public static string? Save()
-        {
-            if (_records.Count == 0)
-            {
-                return null;
-            }
-            string room = NetSession.ServerMatch?.RoomKey ?? "match";
-            foreach (char bad in Path.GetInvalidFileNameChars())
-            {
-                room = room.Replace(bad, '_');
-            }
-            room = room.Replace(' ', '_');
-            // Seconds are not fine enough on their own. Two presses inside the
-            // same second built the same name, and the writer opens with
-            // Create -- so the second clip silently replaced the first, which
-            // is the one case where pressing the button lost a clip instead of
-            // saving one. Every press writes: a spare file costs 25 KB and
-            // nothing else, and refusing one risks losing the moment somebody
-            // pressed the button for.
-            string stamp = $"{room}_clip_{DateTime.Now:yyyy-MM-dd_HH-mm-ss}";
-            string path = Paths.Combine(Paths.Export, "_demos", stamp + DemoFile.Extension);
-            for (int i = 2; File.Exists(path) && i < 1000; i++)
-            {
-                path = Paths.Combine(Paths.Export, "_demos", $"{stamp}_{i}{DemoFile.Extension}");
-            }
+            if (!Active || data.Length is < 1 or > NetConfig.MaxPacketSize || NetSession.ServerMatch == null) return;
+            uint frame = NetSession.NetFrame;
+            if (_tail != null && frame < _tail.First) Purge();
             try
             {
-                using var writer = new DemoWriter(path);
-                uint start = 0;
-                bool first = true;
-                foreach (DemoRecord record in _records)
+                if (_tail == null || frame - _tail.First >= 60 || _tail.Used + data.Length > _tail.Buffer.Length
+                    || _tail.Entries.Count >= 4096)
                 {
-                    if (first)
-                    {
-                        start = record.Frame;
-                        first = false;
-                    }
-                    writer.WriteRecord(record.Frame >= start ? record.Frame - start : 0,
-                        record.Data);
+                    _tail = new Page(frame);
+                    Pages.Enqueue(_tail);
+                    // Include descriptor capacity and bootstrap overhead for even 1-byte packet floods.
+                    _bytes += _tail.Buffer.Length + 96 * 1024;
                 }
+                data.CopyTo(_tail.Buffer.AsSpan(_tail.Used));
+                _tail.Entries.Add(new(frame, _tail.Used, (ushort)data.Length));
+                _tail.Used += data.Length;
+                Trim(frame);
             }
-            catch (IOException ex)
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
             {
-                Console.WriteLine($"[demo] could not save the clip: {ex.Message}");
-                return null;
+                LastError = "Replay buffer unavailable: " + ex.Message;
             }
+        }
+
+        public static void AddEvent(ReplayEvent value)
+        {
+            if (Active && _tail != null && _tail.Events.Count < 2048) _tail.Events.Add(value);
+        }
+
+        public static void Tick()
+        {
+            if (IsSaving && NetSession.NetFrame >= _finishFrame) Finish();
+            Trim(NetSession.NetFrame);
+        }
+
+        private static void Trim(uint now)
+        {
+            uint window = (uint)Math.Clamp(Seconds, 0, 120) * 60 + 60;
+            if (IsSaving) window += (uint)Math.Clamp(PostRollSeconds, 0, 5) * 60;
+            while (Pages.Count > 0 && (_bytes > MaxBytes
+                || (now >= Pages.Peek().First && now - Pages.Peek().First > window)))
+            {
+                Page page = Pages.Dequeue();
+                _bytes -= page.Buffer.Length + 96 * 1024;
+                if (page == _tail) _tail = null;
+                page.Dispose();
+            }
+        }
+
+        public static void Purge()
+        {
+            // A disconnect during post-roll keeps the requested available portion.
+            if (IsSaving) Finish();
+            while (Pages.Count > 0) Pages.Dequeue().Dispose();
+            _tail = null; _bytes = 0;
+        }
+
+        public static string? Save()
+        {
+            if (IsSaving) Finish();
+            Tick();
+            if (Pages.Count == 0) return null;
+            LastError = null;
+            string room = Pages.Peek().Metadata.RoomKey;
+            foreach (char c in Path.GetInvalidFileNameChars()) room = room.Replace(c, '_');
+            string name = $"{room}_clip_{DateTime.Now:yyyy-MM-dd_HH-mm-ss-fff}_{Guid.NewGuid():N}{DemoFile.Extension}";
+            _pendingPath = Paths.Combine(Paths.Export, "_demos", name);
+            _finishFrame = NetSession.NetFrame + (uint)Math.Clamp(PostRollSeconds, 0, 5) * 60;
+            string path = _pendingPath;
+            if (PostRollSeconds <= 0) return Finish() ? path : null;
             return path;
+        }
+
+        private static bool Finish()
+        {
+            string? path = _pendingPath;
+            _pendingPath = null;
+            if (path == null || Pages.Count == 0) return false;
+            ReplayWriterV3? writer = null;
+            try
+            {
+                Page first = Pages.Peek();
+                uint start = first.First;
+                if (first.Metadata.MapHash == 0) throw new IOException("The clip's map could not be identified.");
+                writer = new ReplayWriterV3(path, first.Metadata);
+                foreach (Page page in Pages)
+                {
+                    foreach (Entry entry in page.Entries)
+                        writer.WriteRecord(entry.Frame - start, page.Buffer.AsSpan(entry.Offset, entry.Length));
+                    foreach (ReplayEvent value in page.Events)
+                        if (value.Frame >= start) writer.WriteEvent(value with { Frame = value.Frame - start });
+                }
+                writer.Dispose();
+                LastSavedPath = path;
+                Chat.ChatBox.System("Saved replay clip: " + Path.GetFileName(path));
+                return true;
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is InvalidDataException)
+            {
+                writer?.Abort();
+                LastError = "Could not save replay: " + ex.Message;
+                Console.WriteLine($"[replay] {LastError}");
+                Chat.ChatBox.System(LastError);
+                return false;
+            }
         }
     }
 }

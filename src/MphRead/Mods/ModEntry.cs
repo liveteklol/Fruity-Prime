@@ -33,6 +33,43 @@ namespace MphRead.Mods
         /// </summary>
         public static bool TryHandleHeadless(string[] args)
         {
+            if (HasFlag(args, "replayformatcheck"))
+            {
+                Environment.ExitCode = Network.ReplayFormatCheck.Run();
+                return true;
+            }
+            if (ValueAfter(args, "replayvalidate") is string validatePath)
+            {
+                var result = Network.ReplayArchive.Validate(validatePath);
+                Console.WriteLine($"[replayvalidate] {result}");
+                Environment.ExitCode = result == Network.ReplayOpenResult.Success ? 0 : 1;
+                return true;
+            }
+            if (ValueAfter(args, "replayrecover") is string recoverPath)
+            {
+                bool recovered = Network.ReplayArchive.Recover(recoverPath, out string? output, out var result);
+                Console.WriteLine($"[replayrecover] {result}: {output}");
+                Environment.ExitCode = recovered ? 0 : 1;
+                return true;
+            }
+            if (HasFlag(args, "replaycontrolcheck"))
+            {
+                Environment.ExitCode = Network.ReplayControlCheck.Run();
+                return true;
+            }
+
+            if (HasFlag(args, "netlobbytest"))
+            {
+                Environment.ExitCode = NetLobbyTest.Run();
+                return true;
+            }
+#if MPHREAD_AVALONIA
+            if (ValueAfter(args, "lobbyshot") is string lobbyShot)
+            {
+                Environment.ExitCode = RunLobbyCapture(lobbyShot);
+                return true;
+            }
+#endif
             // Keys and mouse feel, before anything creates a player. Called
             // here because this runs for every invocation, launcher or not.
             InputSettings.Load();
@@ -599,6 +636,8 @@ namespace MphRead.Mods
 
             var server = new Network.DedicatedServer(port, maxPlayers, rotation)
             {
+                SessionPolicy = HasFlag(args, "lobby") ? Network.ServerSessionPolicy.Lobby : Network.ServerSessionPolicy.Continuous,
+                OwnerToken = Guid.TryParse(ValueAfter(args, "ownertoken"), out var ownerToken) ? ownerToken : Guid.Empty,
                 ServerName = ValueAfter(args, "servername") ?? ValueAfter(args, "name")
                     ?? Environment.MachineName,
                 FriendlyFire = HasFlag(args, "friendlyfire"),
@@ -1477,6 +1516,18 @@ namespace MphRead.Mods
                 return true;
             }
 
+#if MPHREAD_AVALONIA
+            if (ValueAfter(args, "replayshot") is string replayShots && ValueAfter(args, "demo") is string replayFile)
+            {
+                Environment.ExitCode = Launcher.Gui.UiCapture.RunReplay(replayShots, replayFile);
+                return true;
+            }
+#endif
+            if (ValueAfter(args, "replaydeterminism") is string replayPath)
+            {
+                Environment.ExitCode = Network.ReplayDeterminism.Run(replayPath, ValueAfter(args, "replayhashout"));
+                return true;
+            }
             // What a recorded match actually contains. Reads the file and
             // nothing else -- no room, no window, no game files.
             string? demoInfo = ValueAfter(args, "demoinfo");
@@ -1772,6 +1823,11 @@ namespace MphRead.Mods
             return 1;
 #endif
         }
+
+#if MPHREAD_AVALONIA
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        private static int RunLobbyCapture(string directory) => Launcher.Gui.UiCapture.RunLobby(directory);
+#endif
 
         /// <summary>
         /// The layout studies: `-uidesign DIR`. Same shape as the capture

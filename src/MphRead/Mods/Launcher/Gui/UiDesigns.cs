@@ -1270,7 +1270,7 @@ namespace MphRead.Mods.Launcher.Gui
         // the content every style has to carry
         // =====================================================================
 
-        private static readonly string[] _playTabs = { "Online", "Offline", "Story", "Clips" };
+        private static readonly string[] _playTabs = { "Online", "Offline", "Story", "Replays" };
         private static readonly string[] _settingsTabs = { "Game", "Controls", "Player" };
 
         private static readonly string[] _pause =

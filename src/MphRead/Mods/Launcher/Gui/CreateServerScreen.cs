@@ -601,7 +601,7 @@ namespace MphRead.Mods.Launcher.Gui
             int port = await Task.Run(() => LocalServer.Start(name, maps,
                 maxPlayers: PlayerEntity.SlotCapacity, timeLimit: 7 * 60, pointGoal: 7,
                 masterHost: LauncherPrefs.MasterHost, masterPort: LauncherPrefs.MasterPort,
-                listed: LauncherPrefs.ListHostedGame, cancel: cancel.Token));
+                listed: LauncherPrefs.ListHostedGame, cancel: cancel.Token, lobby: true));
             if (port < 0)
             {
                 Fail(LocalServer.LastError ?? "the server would not start");
@@ -610,7 +610,7 @@ namespace MphRead.Mods.Launcher.Gui
             Say($"Joining your server on 127.0.0.1:{port.ToString(CultureInfo.InvariantCulture)}...",
                 GuiTheme.TextDim);
             bool joined = await Task.Run(() =>
-                NetLaunch.Join("127.0.0.1", port, player, hunter));
+                NetLaunch.Connect("127.0.0.1", port, player, hunter, ownerToken: LocalServer.OwnerToken));
             if (!joined)
             {
                 // The server is up and this client could not get into it. It
@@ -667,7 +667,7 @@ namespace MphRead.Mods.Launcher.Gui
             HostedGame game = await Task.Run(() => NetMasterClient.RequestGame(host, port,
                 maps[0].RoomKey, mode, timeLimit: 7 * 60, pointGoal: 7,
                 maxPlayers: PlayerEntity.SlotCapacity, serverName: name,
-                rotation: maps));
+                rotation: maps, policy: ServerSessionPolicy.Lobby));
             if (!game.Started)
             {
                 Fail(game.Reason.Length > 0 ? game.Reason
@@ -675,7 +675,7 @@ namespace MphRead.Mods.Launcher.Gui
                 return;
             }
             bool joined = await Task.Run(() =>
-                NetLaunch.Join(game.Host, game.Port, player, hunter));
+                NetLaunch.Connect(game.Host, game.Port, player, hunter, ownerToken: game.OwnerToken));
             if (!joined)
             {
                 NetSession.Stop();

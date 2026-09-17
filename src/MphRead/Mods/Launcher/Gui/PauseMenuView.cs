@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Globalization;
 using Avalonia;
 using Avalonia.Controls;
@@ -101,13 +102,102 @@ namespace MphRead.Mods.Launcher.Gui
                 };
                 menu.Children.Add(window);
             }
+            if (DemoPlayback.IsActive)
+            {
+                Add(menu, ReplayController.IsPaused ? "Play replay" : "Pause replay", () =>
+                { ReplayController.TogglePause(); Resumed?.Invoke(this, EventArgs.Empty); });
+                var rate = new ComboBox { ItemsSource = new[] { "0.25x speed", "0.5x speed", "1x speed", "2x speed", "4x speed" },
+                    SelectedIndex = Array.IndexOf(ReplayController.Rates, ReplayController.PlaybackRate), Width = 240 };
+                rate.SelectionChanged += (_, _) => { if (rate.SelectedIndex >= 0) ReplayController.SetPlaybackRate(ReplayController.Rates[rate.SelectedIndex]); };
+                menu.Children.Add(rate);
+                Add(menu, "Previous frame", () => { ReplayController.Seek(ReplayController.CurrentFrame > 0 ? ReplayController.CurrentFrame - 1 : 0, false); Resumed?.Invoke(this, EventArgs.Empty); });
+                Add(menu, "Restart replay", () => { ReplayController.Restart(); Resumed?.Invoke(this, EventArgs.Empty); });
+                Add(menu, "Next frame", () => { ReplayController.StepForward(); Resumed?.Invoke(this, EventArgs.Empty); });
+                Add(menu, "Previous player", () => { SpectatorMode.CyclePrevious(); Resumed?.Invoke(this, EventArgs.Empty); });
+                Add(menu, "Next player", () => { SpectatorMode.CycleNext(); Resumed?.Invoke(this, EventArgs.Empty); });
+                var timeline = new Slider { Minimum = 0, Maximum = Math.Max(1, ReplayController.DurationFrames),
+                    Value = ReplayController.CurrentFrame, Width = 320 };
+                var selectedTime = new TextBlock { Text = Replay.ReplayHud.Time((uint)timeline.Value) + " / " + Replay.ReplayHud.Time(ReplayController.DurationFrames), Foreground = GuiTheme.TextDimBrush };
+                timeline.PropertyChanged += (_, e) => { if (e.Property == RangeBase.ValueProperty) selectedTime.Text = Replay.ReplayHud.Time((uint)timeline.Value) + " / " + Replay.ReplayHud.Time(ReplayController.DurationFrames); };
+                timeline.PointerReleased += (_, _) => { ReplayController.Seek((uint)timeline.Value); Resumed?.Invoke(this, EventArgs.Empty); };
+                menu.Children.Add(selectedTime);
+                menu.Children.Add(timeline);
+                Replay.ReplayCamera.EnsureTrack();
+                var profile = new ComboBox { ItemsSource = new[] { "Faithful camera (default)", "Presentation camera" }, SelectedIndex = (int)Replay.ReplayCamera.Profile, Width = 280 };
+                var track = new CheckBox { Content = "Play camera track by replay frame", IsChecked = Replay.ReplayCamera.PlayTrack,
+                    IsEnabled = Replay.ReplayCamera.Profile == Replay.ReplayPresentationProfile.Presentation };
+                profile.SelectionChanged += (_, _) =>
+                {
+                    if (profile.SelectedIndex < 0) return;
+                    Replay.ReplayCamera.SetProfile((Replay.ReplayPresentationProfile)profile.SelectedIndex);
+                    track.IsEnabled = profile.SelectedIndex == 1;
+                    track.IsChecked = Replay.ReplayCamera.PlayTrack;
+                };
+                track.IsCheckedChanged += (_, _) => Replay.ReplayCamera.PlayTrack = track.IsChecked == true;
+                menu.Children.Add(profile);
+                menu.Children.Add(new TextBlock { Text = "Presentation smooths chase camera only; gameplay is unchanged.", Foreground = GuiTheme.TextDimBrush, TextWrapping = TextWrapping.Wrap, MaxWidth = 320 });
+                menu.Children.Add(track);
+                var cameraModes = new ComboBox { ItemsSource = new[] { "First person", "Third-person chase", "Free camera", "Orbit camera" }, SelectedIndex = (int)Replay.ReplayCamera.Mode, Width = 240 };
+                cameraModes.SelectionChanged += (_, _) => { if (cameraModes.SelectedIndex >= 0) Replay.ReplayCamera.SetMode((Replay.ReplayCameraMode)cameraModes.SelectedIndex); };
+                menu.Children.Add(cameraModes);
+                void CameraSlider(string label, float value, double min, double max, Action<float> set)
+                {
+                    menu.Children.Add(new TextBlock { Text = label, Foreground = GuiTheme.TextDimBrush });
+                    var slider = new Slider { Minimum = min, Maximum = max, Value = value, Width = 240 };
+                    slider.PropertyChanged += (_, e) => { if (e.Property == RangeBase.ValueProperty) set((float)slider.Value); };
+                    menu.Children.Add(slider);
+                }
+                CameraSlider("Camera distance", Replay.ReplayCamera.Distance, 1, 20, n => Replay.ReplayCamera.Distance = n);
+                CameraSlider("Camera height", Replay.ReplayCamera.Height, 0.5, 8, n => Replay.ReplayCamera.Height = n);
+                CameraSlider("Camera FOV", Replay.ReplayCamera.FieldOfView, 40, 120, n => Replay.ReplayCamera.FieldOfView = n);
+                var players = new ComboBox { ItemsSource = GameState.Nicknames.Select((name, slot) => $"{slot + 1}: {name}").ToArray(), SelectedIndex = PlayerEntity.MainPlayerIndex, Width = 240 };
+                players.SelectionChanged += (_, _) => SpectatorMode.Watch(players.SelectedIndex);
+                menu.Children.Add(players);
+                var director = new CheckBox { Content = "Follow kill/objective events", IsChecked = Replay.ReplayCamera.Director };
+                director.IsCheckedChanged += (_, _) => Replay.ReplayCamera.Director = director.IsChecked == true;
+                menu.Children.Add(director);
+                Add(menu, "Watch last killer", () => { Replay.ReplayCamera.WatchEvent(false); Resumed?.Invoke(this, EventArgs.Empty); });
+                Add(menu, "Watch last victim", () => { Replay.ReplayCamera.WatchEvent(true); Resumed?.Invoke(this, EventArgs.Empty); });
+                var lookAt = new ComboBox { ItemsSource = new[] { "Keyframe: recorded orientation" }.Concat(GameState.Nicknames.Select((name, slot) => $"Look at {slot + 1}: {name}")).ToArray(), SelectedIndex = Replay.ReplayCamera.LookAtSlot + 1, Width = 280 };
+                lookAt.SelectionChanged += (_, _) => Replay.ReplayCamera.LookAtSlot = lookAt.SelectedIndex - 1;
+                menu.Children.Add(lookAt);
+                menu.Children.Add(new TextBlock { Text = $"Camera keyframes: {Replay.ReplayCamera.KeyframeCount}/64" + (Replay.ReplayCamera.TrackError == null ? "" : " — " + Replay.ReplayCamera.TrackError), Foreground = GuiTheme.TextDimBrush, TextWrapping = TextWrapping.Wrap, MaxWidth = 320 });
+                Add(menu, "Remove keyframe at current frame", () => { Replay.ReplayCamera.RemoveKeyframe(); Resumed?.Invoke(this, EventArgs.Empty); });
+                Add(menu, "Save camera keyframe", () => { Replay.ReplayCamera.Bookmark(); Resumed?.Invoke(this, EventArgs.Empty); });
+                Add(menu, "Preview next camera keyframe", () => { Replay.ReplayCamera.RestoreBookmark(); Resumed?.Invoke(this, EventArgs.Empty); });
+                if (DemoPlayback.Events.Count > 0)
+                {
+                    var filters = new ComboBox { ItemsSource = new[] { "All events", "Kills", "Deaths", "Objectives", "Score" }, SelectedIndex = 0, Width = 240 };
+                    filters.SelectionChanged += (_, _) => ReplayController.EventFilter = filters.SelectedIndex switch
+                    { 1 => ReplayEventType.Kill, 2 => ReplayEventType.PlayerDeath, 3 => ReplayEventType.Objective, 4 => ReplayEventType.ScoreChanged, _ => null };
+                    menu.Children.Add(filters);
+                    Add(menu, "Previous event", () => { ReplayController.JumpEvent(false); Resumed?.Invoke(this, EventArgs.Empty); });
+                    Add(menu, "Next event", () => { ReplayController.JumpEvent(true); Resumed?.Invoke(this, EventArgs.Empty); });
+                }
+                Add(menu, "Mark clip start", () => { ReplayController.MarkIn(); Resumed?.Invoke(this, EventArgs.Empty); });
+                Add(menu, "Mark clip end", () => { ReplayController.MarkOut(); Resumed?.Invoke(this, EventArgs.Empty); });
+                Add(menu, "Save selected clip", () =>
+                {
+                    try { Chat.ChatBox.System($"Clip export: {ReplayController.SaveSelection()}"); }
+                    catch (Exception ex) { Chat.ChatBox.System("Clip export failed: " + ex.Message); }
+                    Resumed?.Invoke(this, EventArgs.Empty);
+                });
+                Add(menu, "Go to selected time", () =>
+                { ReplayController.Seek((uint)timeline.Value); Resumed?.Invoke(this, EventArgs.Empty); });
+            }
             if (!DemoPlayback.IsActive && NetSession.Active)
             {
+                if (DemoClip.Active) Add(menu, $"Save last {DemoClip.Seconds} seconds", () =>
+                {
+                    string? path = DemoClip.Save();
+                    Chat.ChatBox.System(path == null ? "Nothing to clip yet" : DemoClip.IsSaving ? "Saving replay..." : "Saved replay clip");
+                    Resumed?.Invoke(this, EventArgs.Empty);
+                });
                 Add(menu, DemoRecorder.IsRecording ? "Stop recording" : "Record demo",
                     () => RecordToggleRequested?.Invoke(this, EventArgs.Empty));
             }
             Add(menu, "Settings", () => SettingsRequested?.Invoke(this, EventArgs.Empty));
-            Add(menu, "Leave match", () => LeaveRequested?.Invoke(this, EventArgs.Empty));
+            Add(menu, DemoPlayback.IsActive ? "Exit replay" : "Leave match", () => LeaveRequested?.Invoke(this, EventArgs.Empty));
             Add(menu, "Quit", () => QuitRequested?.Invoke(this, EventArgs.Empty));
 
             // Centred, like every other screen behind the front one. Each
@@ -127,7 +217,7 @@ namespace MphRead.Mods.Launcher.Gui
             // words in a column, just smaller.
             _scaler = new LayoutTransformControl
             {
-                Child = menu,
+                Child = DemoPlayback.IsActive ? null : menu,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center
             };
@@ -145,7 +235,17 @@ namespace MphRead.Mods.Launcher.Gui
             // is no yes and no to answer it with -- and Resume as a tick in
             // the corner while it is also the first word of the menu is one
             // action drawn twice.
-            Content = UiLayout.Page(overGame: true, UiLayout.WellShort, "",
+
+            _neededHeight = menu.Children.Count * 40 + UiLayout.WellTop + UiLayout.WellBottom + 70;
+            if (DemoPlayback.IsActive)
+            {
+                var replayPage = UiLayout.Backdrop(overGame: true);
+                replayPage.Children.Add(new ScrollViewer { Content = menu, Margin = new Thickness(20),
+                    MaxWidth = 480, HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Stretch, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
+                Content = replayPage;
+            }
+            else Content = UiLayout.Page(overGame: true, UiLayout.WellShort, "",
                 strip: null, body: _scaler, centreBody: true);
             SizeChanged += (_, e) => FitToHost(e.NewSize.Height);
         }
@@ -156,8 +256,7 @@ namespace MphRead.Mods.Launcher.Gui
         /// What the column needs at full size: eight words, their spacing, and
         /// the corner it is anchored in.
         /// </summary>
-        private const double NeededHeight = 8 * 26 + 7 * 14
-            + UiLayout.WellTop + UiLayout.WellBottom + 70;
+        private readonly double _neededHeight;
 
         /// <summary>
         /// Fit the column to the height it has been given, down to half size.
@@ -166,11 +265,11 @@ namespace MphRead.Mods.Launcher.Gui
         /// </summary>
         private void FitToHost(double height)
         {
-            if (height <= 0)
+            if (DemoPlayback.IsActive || height <= 0)
             {
                 return;
             }
-            double scale = Math.Clamp(height / NeededHeight, 0.5, 1);
+            double scale = Math.Clamp(height / _neededHeight, 0.35, 1);
             if (_scaler.LayoutTransform is ScaleTransform current
                 && Math.Abs(current.ScaleY - scale) < 0.001)
             {

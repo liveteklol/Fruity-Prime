@@ -20,13 +20,14 @@ namespace MphRead.Mods.Network
     /// </summary>
     internal static class DemoRecorder
     {
-        private static DemoWriter? _writer;
+        private static ReplayWriterV3? _writer;
         private static uint _startFrame;
 
         public static bool IsRecording => _writer != null;
 
         /// <summary>Where the file being written now lives, for a "saved to..." message.</summary>
         public static string? CurrentPath { get; private set; }
+        public static string? LastError { get; private set; }
 
         public static bool Start()
         {
@@ -34,15 +35,24 @@ namespace MphRead.Mods.Network
             {
                 return false;
             }
+            LastError = null;
+            if (NetSession.ServerMatch == null)
+            {
+                LastError = "The server has not supplied a match to record yet.";
+                return false;
+            }
             string room = SanitizeFileName(NetSession.ServerMatch?.RoomKey ?? "match");
-            string fileName = $"{room}_{DateTime.Now:yyyy-MM-dd_HH-mm-ss}{DemoFile.Extension}";
+            string fileName = $"{room}_{DateTime.Now:yyyy-MM-dd_HH-mm-ss-fff}_{Guid.NewGuid():N}{DemoFile.Extension}";
             string path = Paths.Combine(Paths.Export, "_demos", fileName);
             try
             {
-                _writer = new DemoWriter(path);
+                ReplayMetadata metadata = ReplayCapture.Capture(ReplayType.FullMatch);
+                if (metadata.MapHash == 0) throw new IOException("The match map could not be identified.");
+                _writer = new ReplayWriterV3(path, metadata);
             }
-            catch (IOException ex)
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
             {
+                LastError = ex.Message;
                 Console.WriteLine($"[demo] could not start recording: {ex.Message}");
                 _writer = null;
                 return false;
@@ -54,13 +64,48 @@ namespace MphRead.Mods.Network
 
         public static void Stop()
         {
-            _writer?.Dispose();
-            _writer = null;
-            CurrentPath = null;
+            try { _writer?.Dispose(); }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+            {
+                LastError = "Recording interrupted; completed chunks remain in the .part file. " + ex.Message;
+                Console.WriteLine($"[replay] {LastError}");
+            }
+            finally { _writer = null; CurrentPath = null; }
+        }
+
+        internal static void RecordEvent(ReplayEvent value)
+        {
+            _writer?.WriteEvent(value with { Frame = value.Frame >= _startFrame ? value.Frame - _startFrame : 0 });
+        }
+
+        private static void Write(ReadOnlySpan<byte> data)
+        {
+            if (_writer == null) return;
+            try { _writer.WriteRecord(Frame(), data); }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is InvalidDataException)
+            {
+                LastError = "Recording interrupted; recover its .part file. " + ex.Message;
+                Console.WriteLine($"[replay] {LastError}");
+                _writer.Abort(); _writer = null; CurrentPath = null;
+            }
         }
 
         internal static void Record(ReceivedPacket packet)
         {
+            if (DemoPlayback.IsActive) return;
+            if (packet.Length == 1 + MatchStatePacket.Size
+                && (PacketType)packet.Data[0] is PacketType.MatchState or PacketType.MapChange
+                && NetSession.ServerMatch is { } previous)
+            {
+                var next = MatchStatePacket.Read(packet.Data.AsSpan(1, MatchStatePacket.Size));
+                if (next.RoomKey != previous.RoomKey || next.MatchId != previous.MatchId)
+                {
+                    // A full-match recording ends at rotation. Never bootstrap a new map
+                    // with the prior map's snapshot or silently reuse its content hash.
+                    Stop(); ReplayCapture.Reset();
+                    return;
+                }
+            }
             // The clip buffer first, and whether or not a full recording is
             // running: the two are independent, and a player recording the
             // whole match can still cut a short out of it.
@@ -69,7 +114,7 @@ namespace MphRead.Mods.Network
             {
                 return;
             }
-            _writer.WriteRecord(Frame(), packet.Data.AsSpan(0, packet.Length));
+            Write(packet.Data.AsSpan(0, packet.Length));
         }
 
         /// <summary>
@@ -92,7 +137,7 @@ namespace MphRead.Mods.Network
             buffer[1] = (byte)slot;
             intentBytes.CopyTo(buffer[2..]);
             DemoClip.Add(buffer);
-            _writer?.WriteRecord(Frame(), buffer);
+            Write(buffer);
         }
 
         /// <summary>
@@ -124,7 +169,8 @@ namespace MphRead.Mods.Network
             buffer[0] = (byte)PacketType.Snapshot;
             payload.CopyTo(buffer[1..]);
             DemoClip.Add(buffer);
-            _writer?.WriteRecord(Frame(), buffer);
+            ReplayCapture.Observe(buffer);
+            Write(buffer);
         }
 
         /// <summary>

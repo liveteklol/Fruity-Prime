@@ -142,6 +142,9 @@ namespace MphRead.Mods.Launcher.Gui
                 window.Close();
                 return;
             }
+            if (window.HasScene && NetSession.PersistentLobby && NetSession.IsInLobby && !_endMatch)
+                EndNetworkMatchToLobby(window);
+            if (window.HasScene && (NetSession.Refused || NetSession.SessionTimedOut)) _endMatch = true;
             if (_endMatch)
             {
                 _endMatch = false;
@@ -218,6 +221,7 @@ namespace MphRead.Mods.Launcher.Gui
                 Hunters.Reroll();
                 _front = new StartScreen(_settings, _rooms);
                 _front.Done += (_, plan) => Decided(plan);
+                _front.MatchRequested += (_, plan) => Decided(plan);
             }
             else
             {
@@ -282,12 +286,14 @@ namespace MphRead.Mods.Launcher.Gui
         private static void StartMatch(RenderWindow window, LaunchPlan plan)
         {
             _played = plan;
+            _front?.SuspendLobby();
             UiSurface.Current?.Hide();
             try
             {
                 if (!MatchStart.Begin(window, _settings, plan))
                 {
-                    ShowFrontScreen();
+                    NetSession.ReportMatchLoadFailed("The map could not be loaded.");
+                    EndMatch(window);
                 }
             }
             catch (Exception ex)
@@ -304,10 +310,16 @@ namespace MphRead.Mods.Launcher.Gui
                 Mods.DebugLog.Exception("crash", ex);
                 // Back to the front screen rather than out of the program: a
                 // map that will not load is a reason to pick another one.
-                window.EndScene();
-                MatchStart.AfterMatch();
-                ShowFrontScreen();
+                NetSession.ReportMatchLoadFailed(ex.Message);
+                EndMatch(window);
             }
+        }
+
+        private static void EndNetworkMatchToLobby(RenderWindow window)
+        {
+            CloseMenu(); window.EndScene(); MatchStart.AfterMatch();
+            NetSession.ResetMatchState(); PauseMenu.Reset();
+            if (_front != null) { UiSurface.Current?.Show(_front); _front.ResumeLobby(); }
         }
 
         private static void EndMatch(RenderWindow window)

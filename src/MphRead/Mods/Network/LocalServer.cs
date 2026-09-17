@@ -45,6 +45,7 @@ namespace MphRead.Mods.Network
 
         /// <summary>Why the last attempt produced nothing.</summary>
         public static string? LastError { get; private set; }
+        public static Guid OwnerToken { get; private set; }
 
         /// <summary>
         /// The release tag of the package last installed, or "".
@@ -263,9 +264,10 @@ namespace MphRead.Mods.Network
             IReadOnlyList<(string RoomKey, GameMode Mode)> rotation,
             int maxPlayers, float timeLimit, int pointGoal,
             string masterHost, int masterPort, bool listed,
-            CancellationToken cancel = default)
+            CancellationToken cancel = default, bool lobby = false)
         {
             LastError = null;
+            OwnerToken = lobby ? new Guid(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16)) : Guid.Empty;
             ServerBinary? found = Available();
             if (found == null)
             {
@@ -323,6 +325,12 @@ namespace MphRead.Mods.Network
                 start.ArgumentList.Add(argument);
             }
             start.ArgumentList.Add("-server");
+            if (lobby)
+            {
+                start.ArgumentList.Add("-lobby");
+                start.ArgumentList.Add("-ownertoken");
+                start.ArgumentList.Add(OwnerToken.ToString("N"));
+            }
             start.ArgumentList.Add("-port");
             start.ArgumentList.Add(port.ToString(CultureInfo.InvariantCulture));
             start.ArgumentList.Add("-players");

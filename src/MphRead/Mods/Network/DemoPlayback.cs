@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.IO;
 
 namespace MphRead.Mods.Network
 {
@@ -32,6 +34,14 @@ namespace MphRead.Mods.Network
         private static bool _started;
 
         public static bool IsActive { get; private set; }
+        public static string? CurrentPath { get; private set; }
+        public static IReadOnlyList<ReplayEvent> Events => _reader?.Metadata?.Events ?? Array.Empty<ReplayEvent>();
+        internal static ReplayMetadata? Metadata => _reader?.Metadata;
+        public static uint CurrentFrame => _frame;
+        public static uint LastFrame { get; private set; }
+        public static ReplayOpenResult LastResult { get; private set; }
+        public static double CurrentSeconds => _frame / 60.0;
+        public static double DurationSeconds => LastFrame / 60.0;
 
         /// <summary>True once the file has no more records -- the scene holds on the last state rather than closing itself.</summary>
         public static bool AtEnd => IsActive && _pending == null;
@@ -78,24 +88,73 @@ namespace MphRead.Mods.Network
         public static bool Join(string path, int timeoutMs = 8000)
         {
             _ = timeoutMs; // kept for the call site; nothing here waits on a clock
+            Stop();
             LastError = null;
-            _reader = DemoReader.Open(path);
+            _reader = DemoReader.Open(path, out ReplayOpenResult result);
+            LastResult = result;
             if (_reader == null)
             {
-                LastError = "That file isn't a demo this build recognises "
-                    + "(wrong extension, damaged, or from a different build).";
+                LastError = $"Cannot open replay: {result}.";
                 Console.WriteLine($"[demo] \"{path}\": {LastError}");
                 return false;
             }
             if (_reader.ProtocolVersion != NetConfig.ProtocolVersion)
             {
-                Console.WriteLine($"[demo] recorded with protocol {_reader.ProtocolVersion}, "
-                    + $"this build is {NetConfig.ProtocolVersion} -- it may not play back correctly");
+                LastResult = ReplayOpenResult.ProtocolMismatch;
+                LastError = $"This replay uses network protocol {_reader.ProtocolVersion}. "
+                    + $"This build uses protocol {NetConfig.ProtocolVersion}. "
+                    + "This replay cannot be safely played by this build.";
+                _reader.Dispose();
+                _reader = null;
+                return false;
             }
+            // Reconstructed scenes must start from the same presentation/simulation
+            // random streams, regardless of what was played earlier in this process.
+            Rng.SetRng1(Rng.Rng1StartValue);
+            Rng.SetRng2(Rng.Rng2StartValue);
+            Entities.SpinningEntityBase.ResetReplayRotation();
+            if (CurrentPath != path) { ReplayController.ClearSelection(); Replay.ReplayCamera.ClearBookmarks(); }
+            CurrentPath = path;
+            LastFrame = _reader.FormatVersion == 3 ? _reader.DurationFrames : DemoLibrary.Duration(path);
             NetSession.StartPlayback();
             IsActive = true;
             _frame = 0;
             _started = false;
+            if (_reader.Metadata is ReplayMetadata metadata)
+            {
+                if (metadata.ExpectedHashes.Count > 0 && (metadata.HashSchema != ReplayStateHash.Schema || metadata.HashBuildId != ReplayStateHash.BuildId))
+                    Console.WriteLine("[replay] Expected state hashes belong to a different engine build/schema; packet playback remains available, hash verification is skipped.");
+                LastResult = ReplayMapIdentity.Validate(metadata);
+                if (LastResult != ReplayOpenResult.Success)
+                {
+                    LastError = $"Cannot load replay map: {LastResult}.";
+                    Stop();
+                    return false;
+                }
+                foreach (byte[] packet in metadata.Bootstrap.Packets)
+                    NetSession.InjectPlaybackPacket(packet, packet.Length);
+                NetSession.Update(0);
+                if (NetSession.ServerMatch?.RoomKey.Length is not > 0)
+                {
+                    LastResult = ReplayOpenResult.MissingMatchState;
+                    LastError = "Replay bootstrap has no match state.";
+                    Stop();
+                    return false;
+                }
+                NetSession.RewindPlayback();
+                foreach (byte[] packet in metadata.Bootstrap.Packets)
+                    NetSession.InjectPlaybackPacket(packet, packet.Length);
+                _pending = _reader.ReadNext();
+                if (_pending == null)
+                {
+                    LastResult = _reader.LastResult == ReplayOpenResult.Success ? ReplayOpenResult.Empty : _reader.LastResult;
+                    LastError = $"Cannot play replay: {LastResult}.";
+                    Stop();
+                    return false;
+                }
+                ReplayController.Begin();
+                return true;
+            }
             _pending = _reader.ReadNext();
             bool hadRecords = _pending != null;
             long knownAt = -1;
@@ -119,6 +178,7 @@ namespace MphRead.Mods.Network
                     break;
                 }
             }
+            LastResult = _reader.LastResult != ReplayOpenResult.Success ? _reader.LastResult : !hadRecords ? ReplayOpenResult.Empty : ReplayOpenResult.MissingMatchState;
             LastError = !hadRecords
                 ? "That demo file is empty -- nothing was ever recorded to it."
                 : "That demo has no match info in its first few seconds -- "
@@ -148,7 +208,8 @@ namespace MphRead.Mods.Network
         private static bool Rewind(string path)
         {
             _reader?.Dispose();
-            _reader = DemoReader.Open(path);
+            _reader = DemoReader.Open(path, out ReplayOpenResult result);
+            LastResult = result;
             if (_reader == null)
             {
                 LastError = "That demo could not be read a second time.";
@@ -160,6 +221,7 @@ namespace MphRead.Mods.Network
             _started = false;
             _pending = _reader.ReadNext();
             NetSession.RewindPlayback();
+            ReplayController.Begin();
             return true;
         }
 
@@ -169,7 +231,7 @@ namespace MphRead.Mods.Network
         /// </summary>
         public static void PumpFrame()
         {
-            if (!IsActive || _reader == null)
+            if (!IsActive || _reader == null || AtEnd)
             {
                 return;
             }
@@ -181,21 +243,48 @@ namespace MphRead.Mods.Network
                 _frame++;
             }
             _started = true;
-            while (_pending is DemoRecord record && record.Frame <= _frame)
+            try
             {
-                NetSession.InjectPlaybackPacket(record.Data, record.Data.Length);
-                _pending = _reader.ReadNext();
+                while (_pending is DemoRecord record && record.Frame <= _frame)
+                {
+                    NetSession.InjectPlaybackPacket(record.Data, record.Data.Length);
+                    _pending = _reader.ReadNext();
+                }
+            }
+            catch (InvalidDataException ex)
+            {
+                LastResult = ReplayOpenResult.Corrupt;
+                LastError = "Replay stopped: " + ex.Message;
+                _pending = null;
+                return;
+            }
+            if (_pending == null)
+            {
+                LastResult = _reader.LastResult;
+                if (LastResult != ReplayOpenResult.Success) LastError = $"Replay stopped: {LastResult}.";
             }
         }
 
         public static void Stop()
         {
+            ReplayVerification.Reset();
             IsActive = false;
+            ReplayController.Stop();
+            Replay.ReplayHud.Reset();
+            Replay.ReplayCamera.Reset();
             _reader?.Dispose();
             _reader = null;
             _pending = null;
             _frame = 0;
             _started = false;
+        }
+
+        internal static void FailVerification(string error)
+        {
+            LastResult = ReplayOpenResult.StateMismatch;
+            LastError = error;
+            _pending = null;
+            Console.WriteLine("[replay] " + error);
         }
     }
 }

@@ -41,6 +41,62 @@ namespace MphRead.Mods.Launcher.Gui
         /// </summary>
         private static readonly Size _windowSize = new Size(940, 560);
 
+        public static int RunLobby(string directory)
+        {
+            if (!GuiLauncher.EnsureSetup()) return 1;
+            Directory.CreateDirectory(directory);
+            int written = 0;
+            Dispatcher.UIThread.Invoke(() =>
+            {
+                List<string> rooms = RoomList();
+                var state = new SessionStatePacket { Policy = ServerSessionPolicy.Lobby, Phase = SessionPhase.Lobby,
+                    MaxPlayers = 8, OwnerSlot = 0, Revision = 7, RuleFlags = SessionRules.RequireReady | SessionRules.AllowJoinInProgress,
+                    Match = new MatchDefinition { RoomKey = rooms[0], Mode = GameMode.BattleTeams, Format = MatchFormat.FourVsFour,
+                        TimeLimitSeconds = 600, PointGoal = 20, ShadowFreeze = true } };
+                NetSession.ApplySessionState(state);
+                var roster = RosterPacket.Create(); roster.Count = 8; roster.Revision = 7;
+                for (int i = 0; i < 8; i++)
+                {
+                    roster.Slots[i] = (byte)i; roster.Names[i] = i == 0 ? "Jarrett" : $"Player {i + 1}";
+                    roster.Hunters[i] = (byte)(i % 7); roster.Colors[i] = (byte)(i % 4);
+                    roster.Teams[i] = (sbyte)(i % 2); roster.LobbyReady[i] = i < 5; roster.Pings[i] = (ushort)(23 + 11 * i);
+                }
+                NetSession.ApplyRoster(roster);
+                Chat.NetChat.Remember(new ChatPacket { Name = "Player 2", Text = "Ready for the next round.", Kind = ChatPacket.KindSay });
+                foreach (var (name, size) in new[] { ("lobby-desktop", new Size(1280, 720)),
+                    ("lobby-phone", new Size(960, 540)), ("lobby-short", new Size(800, 400)) })
+                {
+                    var lobby = new LobbyScreen(rooms); lobby.Suspend();
+                    if (Capture(lobby, Path.Combine(directory, name + ".png"), size)) written++;
+                }
+                NetSession.Stop();
+            });
+            Console.WriteLine($"[lobbyshot] wrote {written} layouts to {directory}");
+            return written == 3 ? 0 : 1;
+        }
+
+        public static int RunReplay(string directory, string replay)
+        {
+            if (!GuiLauncher.EnsureSetup()) return 1;
+            Directory.CreateDirectory(directory);
+            if (!DemoPlayback.Join(replay)) { Console.WriteLine(DemoPlayback.LastError); return 1; }
+            int written = 0;
+            try
+            {
+                Dispatcher.UIThread.Invoke(() =>
+                {
+                    foreach (var (name, size) in new[] { ("desktop", new Size(1280, 720)), ("phone", new Size(960, 540)), ("short", new Size(800, 400)) })
+                    {
+                        if (Capture(new PauseMenuView(offerWindowMode: true), Path.Combine(directory, "replay-controls-" + name + ".png"), size)) written++;
+                        if (Capture(new PlayScreen(new MenuSettings(), RoomList(), PlayScreen.Face.Clips), Path.Combine(directory, "replay-library-" + name + ".png"), size)) written++;
+                    }
+                });
+            }
+            finally { DemoPlayback.Stop(); NetSession.Stop(); }
+            Console.WriteLine($"[replayshot] {written} layouts written to {directory}");
+            return written == 6 ? 0 : 1;
+        }
+
         public static int Run(string directory)
         {
             if (!GuiLauncher.EnsureSetup())

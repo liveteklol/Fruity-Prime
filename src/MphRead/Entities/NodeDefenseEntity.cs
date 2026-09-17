@@ -314,6 +314,8 @@ namespace MphRead.Entities
                 if (_occupiedBy[i])
                 {
                     GameState.NodesCaptured[i]++;
+                    Mods.Network.ReplayCapture.Event(Mods.Network.ReplayEventType.Objective, i,
+                        value: GameState.NodesCaptured[i]);
                     if (player.LoadFlags.TestFlag(LoadFlags.Active))
                     {
                         _capturedPlayer = player;

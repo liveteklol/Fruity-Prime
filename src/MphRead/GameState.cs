@@ -444,7 +444,7 @@ namespace MphRead
                 }
                 if (MatchTime != 0 && !ForceEndGame)
                 {
-                    if (Multiplayer)
+                    if (Multiplayer && MatchTime > 0)
                     {
                         var time = TimeSpan.FromSeconds(MatchTime);
                         if (time.TotalMinutes < 1 && time.Seconds <= 59 && !_tempoChanged)

@@ -58,6 +58,7 @@ namespace MphRead.Mods.Launcher.Gui
         public event EventHandler? GameFilesRequested;
 
         private ChoiceRow? _windowRow;
+        private ChoiceRow? _clipPostRollRow;
         private ChoiceRow? _clipSecondsRow;
         private SliderRow _resolutionScale = null!;
         private ToggleRow _lightingRow = null!;
@@ -598,6 +599,9 @@ namespace MphRead.Mods.Launcher.Gui
                 Array.ConvertAll(Mods.Network.DemoClip.Lengths, n => $"{n} seconds"),
                 Math.Max(0, Array.IndexOf(Mods.Network.DemoClip.Lengths,
                     Mods.Network.DemoClip.Seconds))));
+            _clipPostRollRow = Add(page, new ChoiceRow("Clip post-roll",
+                Array.ConvertAll(Mods.Network.DemoClip.PostRollLengths, n => $"{n} seconds"),
+                Math.Max(0, Array.IndexOf(Mods.Network.DemoClip.PostRollLengths, Mods.Network.DemoClip.PostRollSeconds))));
             foreach (PropertyInfo property in InputSettings.Bindings)
             {
                 rows.Add(Add(page, new KeyRow(property)));
@@ -1049,6 +1053,8 @@ namespace MphRead.Mods.Launcher.Gui
                     PauseMenu.RequestFullscreenToggle();
                 }
             }
+            if (_clipPostRollRow != null)
+                Mods.Network.DemoClip.PostRollSeconds = Mods.Network.DemoClip.PostRollLengths[Math.Clamp(_clipPostRollRow.Index, 0, Mods.Network.DemoClip.PostRollLengths.Length - 1)];
             if (_clipSecondsRow != null)
             {
                 Mods.Network.DemoClip.Seconds = Mods.Network.DemoClip.Lengths[

@@ -15,6 +15,7 @@ loading everything.
 - DEBUG-LOGS.md — the launcher's corner switch: what it writes, where, and why it exists
 - GAMEPAD.md — controllers on the desktop and Android: the layout, the feel, and how to test one without owning one
 - multiplayer/NETWORK-BROWSER.md — server discovery, directory, hosting
+- multiplayer/NETWORK-LOBBY.md — persistent sessions, lobby authority, protocol 8, load barrier, shared UI and regression commands
 - multiplayer/NETWORK-CHAT.md — the in-game chat line: the packet, the relay's rules, the input traps
 - multiplayer/NETWORK-DEMOS.md — recording and replaying a match: format, clocking, the gaps
 - multiplayer/NETWORK-MATCHEND.md — match end, rotation, the double-counted-kill bug

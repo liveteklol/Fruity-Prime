@@ -1,5 +1,10 @@
 # Multiplayer — server browser, directory, and hosting without a port
 
+Protocol 8 status replies also publish session phase, match format, lobby policy
+and join-in-progress permission without taking a slot. Create server now opens
+a lobby and returns an owner token to its creator. The shared lobby is the
+entry point before a match; see [NETWORK-LOBBY.md](NETWORK-LOBBY.md).
+
 ## Asking a server what it's running
 
 `PacketType.StatusQuery`/`StatusReply` (`NetStatus`) answers "what map, what

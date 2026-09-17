@@ -146,6 +146,7 @@ namespace MphRead.Mods.Launcher
 
             if (NetSession.Active)
             {
+                NetLaunch.DisableCheatsForMatch();
                 NetLaunch.BuildPlayers(window.Scene, plan.Hunter,
                     localRecolor: LauncherPrefs.LastColor, teams: teamPlay);
             }
@@ -157,6 +158,7 @@ namespace MphRead.Mods.Launcher
                 ? NetLaunch.RoomPlayerCount
                 : 0);
             window.LoadScene();
+            NetSession.MarkMatchLoaded();
             return true;
         }
 

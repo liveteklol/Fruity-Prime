@@ -14,14 +14,23 @@ namespace MphRead.Mods.Network
         public DateTime Recorded { get; }
         public long Bytes { get; }
 
+        public ReplayMetadata? Metadata { get; }
+        public ReplayOpenResult Compatibility { get; }
+        public uint DurationFrames { get; }
+        public string DisplayName => DemoLibrary.DisplayName(Path, Room.Length > 0 ? Room : FileName);
+        public bool Favorite => File.Exists(Path + ".favorite");
+        public ReplayIntegrity Integrity => DemoLibrary.VerifiedIntegrity(Path) ?? Metadata?.Integrity ?? (Compatibility is ReplayOpenResult.Corrupt or ReplayOpenResult.InvalidMagic ? ReplayIntegrity.Corrupt : Compatibility == ReplayOpenResult.Truncated ? ReplayIntegrity.Truncated : ReplayIntegrity.Unknown);
         public string FileName => System.IO.Path.GetFileName(Path);
 
-        public DemoRecording(string path, string room, DateTime recorded, long bytes)
+        public DemoRecording(string path, string room, DateTime recorded, long bytes, ReplayMetadata? metadata = null, ReplayOpenResult compatibility = ReplayOpenResult.Success, uint duration = 0)
         {
             Path = path;
             Room = room;
             Recorded = recorded;
             Bytes = bytes;
+            Metadata = metadata;
+            Compatibility = compatibility;
+            DurationFrames = duration;
         }
     }
 
@@ -49,6 +58,33 @@ namespace MphRead.Mods.Network
         /// a *relative* path resolved against the working directory. That is
         /// fine for writing and useless for handing to anything else.
         /// </summary>
+        private static readonly Dictionary<string, (long Bytes, DateTime Modified, uint Frames)> Durations = new();
+        private static readonly Dictionary<string, (long Bytes, DateTime Modified, ReplayIntegrity Integrity)> Validation = new();
+        public static ReplayIntegrity? VerifiedIntegrity(string path)
+        {
+            var info = new FileInfo(path);
+            return Validation.TryGetValue(path, out var value) && info.Exists && value.Bytes == info.Length && value.Modified == info.LastWriteTimeUtc ? value.Integrity : null;
+        }
+        public static void NoteValidation(string path, ReplayOpenResult result)
+        {
+            var info = new FileInfo(path);
+            if (!info.Exists) return;
+            Validation[path] = (info.Length, info.LastWriteTimeUtc, result == ReplayOpenResult.Success ? ReplayIntegrity.Healthy : result == ReplayOpenResult.Truncated ? ReplayIntegrity.Truncated : ReplayIntegrity.Corrupt);
+        }
+        public static uint Duration(string path)
+        {
+            var info = new FileInfo(path);
+            if (!info.Exists) return 0;
+            if (Durations.TryGetValue(path, out var cached) && cached.Bytes == info.Length && cached.Modified == info.LastWriteTimeUtc)
+                return cached.Frames;
+            using var reader = DemoReader.Open(path);
+            uint frames = reader?.DurationFrames ?? 0;
+            if (reader != null && reader.FormatVersion == 2)
+                while (reader.ReadNext() is DemoRecord record) frames = record.Frame;
+            Durations[path] = (info.Length, info.LastWriteTimeUtc, frames);
+            return frames;
+        }
+
         public static string Directory =>
             Path.GetFullPath(Paths.Combine(Paths.Export, "_demos"));
 
@@ -71,12 +107,17 @@ namespace MphRead.Mods.Network
                     return found;
                 }
                 foreach (string path in System.IO.Directory
-                    .EnumerateFiles(directory, "*" + DemoFile.Extension))
+                    .EnumerateFiles(directory, "*" + DemoFile.Extension + "*"))
                 {
+                    if (!path.EndsWith(DemoFile.Extension, StringComparison.OrdinalIgnoreCase) && !path.EndsWith(DemoFile.Extension + ".part", StringComparison.OrdinalIgnoreCase)) continue;
                     var info = new FileInfo(path);
                     (string room, DateTime? stamp) = ReadName(info.Name);
-                    found.Add(new DemoRecording(path, room,
-                        stamp ?? info.LastWriteTime, info.Length));
+                    using var reader = DemoReader.Open(path, out ReplayOpenResult result, metadataOnly: true);
+                    ReplayMetadata? metadata = reader?.Metadata;
+                    if (reader != null && reader.ProtocolVersion != NetConfig.ProtocolVersion) result = ReplayOpenResult.ProtocolMismatch;
+                    found.Add(new DemoRecording(path, metadata?.RoomKey ?? room,
+                        metadata?.RecordedAtUtc.ToLocalTime() ?? stamp ?? info.LastWriteTime, info.Length,
+                        metadata, result, reader?.FormatVersion == 2 && Durations.TryGetValue(path, out var cached) && cached.Bytes == info.Length && cached.Modified == info.LastWriteTimeUtc ? cached.Frames : reader?.DurationFrames ?? 0));
                 }
             }
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
@@ -85,7 +126,7 @@ namespace MphRead.Mods.Network
                 // screen that refuses to open.
                 Console.WriteLine($"[demo] could not list {Directory}: {ex.Message}");
             }
-            found.Sort((a, b) => b.Recorded.CompareTo(a.Recorded));
+            found.Sort((a, b) => a.Favorite == b.Favorite ? b.Recorded.CompareTo(a.Recorded) : b.Favorite.CompareTo(a.Favorite));
             return found;
         }
 
@@ -117,9 +158,44 @@ namespace MphRead.Mods.Network
         /// <summary>"4 Sep 2026, 18:22 — 1.4 MB".</summary>
         public static string Describe(DemoRecording demo)
         {
-            return $"{demo.Recorded:d MMM yyyy, HH:mm} — {Size(demo.Bytes)}";
+            string duration = demo.DurationFrames > 0 ? Replay.ReplayHud.Time(demo.DurationFrames) : "duration unknown";
+            string integrity = demo.Integrity switch { ReplayIntegrity.Unknown => "Not checked", ReplayIntegrity.Healthy => "Healthy", ReplayIntegrity.Recovered => "Recovered", ReplayIntegrity.Truncated => "Incomplete", _ => "Damaged" };
+            string compatibility = demo.Compatibility switch { ReplayOpenResult.Success => "Compatible", ReplayOpenResult.ProtocolMismatch => "Incompatible protocol", ReplayOpenResult.UnsupportedFormat => "Unsupported format", _ => "Cannot read" };
+            return $"{duration} / {integrity} / {compatibility}";
+        }
+        public static string Details(DemoRecording demo)
+        {
+            string details = $"{demo.Recorded:d MMM yyyy, HH:mm} / {Size(demo.Bytes)}";
+            if (demo.Metadata is ReplayMetadata metadata)
+                details = $"{metadata.Mode} / {metadata.Players.Count} players / {(metadata.Type == ReplayType.FullMatch ? "Full match" : "Clip")}\n"
+                    + string.Join(", ", System.Linq.Enumerable.Select(metadata.Players, p => p.Name)) + "\n"
+                    + (metadata.BuildMatches ? "Same build" : "Different build") + " / " + details;
+            return details;
         }
 
+        public static string DisplayName(string path, string fallback)
+        {
+            try { return File.Exists(path + ".name") ? File.ReadAllText(path + ".name").Trim() : fallback; }
+            catch (IOException) { return fallback; }
+        }
+        public static void Rename(string path, string name)
+        {
+            name = name.Trim();
+            if (name.Length == 0 || name.Length > 100) throw new ArgumentException("Use a replay name between 1 and 100 characters.");
+            File.WriteAllText(path + ".name", name);
+        }
+        public static void ToggleFavorite(string path)
+        {
+            string marker = path + ".favorite";
+            if (File.Exists(marker)) File.Delete(marker); else File.WriteAllText(marker, "");
+        }
+        public static void Delete(string path)
+        {
+            File.Delete(path);
+            File.Delete(path + ".name");
+            File.Delete(path + ".favorite");
+            Durations.Remove(path);
+        }
         private static string Size(long bytes)
         {
             if (bytes >= 1024 * 1024)

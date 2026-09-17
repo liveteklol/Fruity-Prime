@@ -122,16 +122,19 @@ namespace MphRead.Mods.Network
                 ? MapRotation.FromList(request.Rotation, request.TimeLimit, request.PointGoal)
                 : MapRotation.SingleMatch(request.RoomKey, mode,
                     request.TimeLimit, request.PointGoal);
+            Guid ownerToken = request.Policy == ServerSessionPolicy.Lobby ? new Guid(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16)) : Guid.Empty;
             var server = new DedicatedServer(port,
                 Math.Clamp((int)request.MaxPlayers, 2, MphRead.Entities.PlayerEntity.SlotCapacity),
                 rotation)
             {
                 ServerName = name,
+                SessionPolicy = request.Policy, Format = request.Format, OwnerToken = ownerToken,
                 Reporter = ReporterFactory?.Invoke(),
                 // See the class note: one static NetSession per process, and
                 // it belongs to this machine's own match.
                 RunsTheMatch = false
             };
+            server.SetSessionOptions(request.RequireReady, request.AllowJoinInProgress);
             var cancel = new CancellationTokenSource();
             var entry = new Hosted
             {
@@ -175,7 +178,7 @@ namespace MphRead.Mods.Network
             _hosted.Add(entry);
             Log($"started \"{name}\" on port {port} for {asker.Address} "
                 + $"({request.RoomKey}, {mode}, {rotation.Entries.Count} map(s))");
-            return new HostReplyPacket { Started = true, Port = (ushort)port, Reason = "" };
+            return new HostReplyPacket { Started = true, Port = (ushort)port, Reason = "", OwnerToken = ownerToken };
         }
 
         private int FreePort(double now)

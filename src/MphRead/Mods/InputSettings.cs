@@ -430,6 +430,11 @@ namespace MphRead.Mods
                             : Enum.TryParse(value, out Keys parsedClip) ? parsedClip : _clipKey;
                         continue;
                     }
+                    if (key == "clip_postroll" && Int32.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int postRoll))
+                    {
+                        Network.DemoClip.PostRollSeconds = postRoll;
+                        continue;
+                    }
                     if (key == "clip_seconds"
                         && Int32.TryParse(value, NumberStyles.Integer,
                             CultureInfo.InvariantCulture, out int clipSeconds))
@@ -539,6 +544,7 @@ namespace MphRead.Mods
                     $"chat_key={(ChatKey == Keys.Unknown ? "none" : ChatKey.ToString())}",
                     $"clip_key={(ClipKey == Keys.Unknown ? "none" : ClipKey.ToString())}",
                     $"clip_seconds={Network.DemoClip.Seconds.ToString(CultureInfo.InvariantCulture)}",
+                    $"clip_postroll={Network.DemoClip.PostRollSeconds.ToString(CultureInfo.InvariantCulture)}",
                     "gamepad_deadzone=" + GamepadDeadZone.ToString(CultureInfo.InvariantCulture),
                     "gamepad_look=" + GamepadLookSensitivity.ToString(CultureInfo.InvariantCulture),
                     $"gamepad_invert_y={GamepadInvertY.ToString().ToLowerInvariant()}"
@@ -584,7 +590,8 @@ namespace MphRead.Mods
             ScrollAllWeapons = true;
             ChatKey = Keys.T;
             ClipKey = Keys.F10;
-            Network.DemoClip.Seconds = 10;
+            Network.DemoClip.Seconds = 30;
+            Network.DemoClip.PostRollSeconds = 3;
             Input.PadBindings.Reset();
             Input.TouchSettings.Reset();
             GamepadDeadZone = 0.2f;

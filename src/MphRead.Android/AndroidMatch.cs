@@ -50,6 +50,7 @@ namespace MphRead.Droid
             var scene = new Scene(size, input.Keyboard, input.Mouse, _ => { }, close);
             if (NetSession.Active)
             {
+                NetLaunch.DisableCheatsForMatch();
                 BuildNetworkedMatch(scene, plan);
             }
             else

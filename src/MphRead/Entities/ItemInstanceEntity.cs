@@ -222,6 +222,8 @@ namespace MphRead.Entities
 
         private static ushort _nextItemRotation = 0;
 
+        internal static void ResetReplayRotation() => _nextItemRotation = 0;
+
         public SpinningEntityBase(float spinSpeed, Vector3 spinAxis,
             EntityType type, Scene scene) : base(type, scene)
         {

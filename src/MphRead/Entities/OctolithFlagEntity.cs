@@ -340,6 +340,8 @@ namespace MphRead.Entities
             Music.PlayRoomMusic(_scene.RoomId, track: 0);
             GameState.Points[_carrier.SlotIndex]++;
             GameState.OctolithScores[_carrier.SlotIndex]++;
+            Mods.Network.ReplayCapture.Event(Mods.Network.ReplayEventType.Objective, _carrier.SlotIndex,
+                value: GameState.OctolithScores[_carrier.SlotIndex]);
             SetAtBase();
         }
 

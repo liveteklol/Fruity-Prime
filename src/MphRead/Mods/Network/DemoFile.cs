@@ -115,6 +115,8 @@ namespace MphRead.Mods.Network
         /// <param name="frame">Simulation frames since this writer was created.</param>
         public void WriteRecord(uint frame, ReadOnlySpan<byte> data)
         {
+            if (data.Length is < 1 or > ushort.MaxValue)
+                throw new InvalidDataException("Invalid v2 packet size.");
             if (frame < _lastFrame)
             {
                 // Only reachable if the frame counter were ever wound back.
@@ -177,15 +179,25 @@ namespace MphRead.Mods.Network
     internal sealed class DemoReader : IDisposable
     {
         private readonly FileStream _stream;
-        private readonly DeflateStream _deflate;
+        private readonly DeflateStream? _deflate;
+        private readonly ReplayReaderV3? _v3;
         private readonly byte[] _header = new byte[7];
         private uint _frame;
+        private bool _ended;
+        private ReplayOpenResult _result;
 
         public byte ProtocolVersion { get; }
+        public byte FormatVersion => _v3 != null ? (byte)3 : (byte)2;
+        public ReplayMetadata? Metadata => _v3?.Metadata;
+        public uint DurationFrames => _v3?.DurationFrames ?? _frame;
+        public ReplayOpenResult LastResult => _v3?.LastResult ?? _result;
 
         /// <summary>Null if the file doesn't look like a demo at all (bad magic, wrong version, truncated header).</summary>
-        public static DemoReader? Open(string path)
+        public static DemoReader? Open(string path) => Open(path, out _);
+
+        public static DemoReader? Open(string path, out ReplayOpenResult result, bool metadataOnly = false)
         {
+            result = ReplayOpenResult.Success;
             FileStream? stream = null;
             try
             {
@@ -195,40 +207,54 @@ namespace MphRead.Mods.Network
                     < header.Length)
                 {
                     stream.Dispose();
+                    result = ReplayOpenResult.Truncated;
                     return null;
                 }
-                if (!header[..DemoFile.Magic.Length].SequenceEqual(DemoFile.Magic)
-                    || header[4] != DemoFile.FormatVersion)
+                if (!header[..DemoFile.Magic.Length].SequenceEqual(DemoFile.Magic))
                 {
                     stream.Dispose();
+                    result = ReplayOpenResult.InvalidMagic;
                     return null;
                 }
-                return new DemoReader(stream, header[5]);
+                if (header[4] is not (2 or 3))
+                {
+                    stream.Dispose();
+                    result = ReplayOpenResult.UnsupportedFormat;
+                    return null;
+                }
+                return new DemoReader(stream, header[5], header[4], metadataOnly);
             }
-            catch (IOException)
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException
+                || ex is ArgumentException || ex is InvalidDataException || ex is OverflowException)
             {
                 stream?.Dispose();
+                result = ReplayFormatV3.Failure(ex);
                 return null;
             }
         }
 
-        private DemoReader(FileStream stream, byte protocolVersion)
+        private DemoReader(FileStream stream, byte protocolVersion, byte version, bool metadataOnly)
         {
             _stream = stream;
-            _deflate = new DeflateStream(stream, CompressionMode.Decompress, leaveOpen: true);
             ProtocolVersion = protocolVersion;
+            if (version == 3) _v3 = new ReplayReaderV3(stream, protocolVersion, metadataOnly);
+            else _deflate = new DeflateStream(stream, CompressionMode.Decompress, leaveOpen: true);
         }
 
         /// <summary>The next record, or null at end of file.</summary>
         public DemoRecord? ReadNext()
         {
+            if (_v3 != null) return _v3.ReadNext();
+            if (_ended) return null;
             try
             {
-                if (!Fill(_header.AsSpan(0, 1)))
+                int first = _deflate!.ReadByte();
+                if (first < 0)
                 {
+                    _ended = true;
                     return null;
                 }
-                uint delta = _header[0];
+                uint delta = (byte)first;
                 if (delta == DemoFile.LongGap)
                 {
                     if (!Fill(_header.AsSpan(0, 4)))
@@ -242,6 +268,8 @@ namespace MphRead.Mods.Network
                     return null;
                 }
                 int length = System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(_header);
+                if (length == 0 || delta > ReplayFormatV3.MaxFrame - _frame)
+                    throw new InvalidDataException("Invalid v2 packet/frame.");
                 byte[] data = new byte[length];
                 if (!Fill(data))
                 {
@@ -255,10 +283,14 @@ namespace MphRead.Mods.Network
                 // The deflate stream stops mid-block: the process that wrote
                 // it did not get to close it. Everything up to the last flush
                 // has already been handed over; treat the rest as the end.
+                _result = ReplayOpenResult.Corrupt;
+                _ended = true;
                 return null;
             }
-            catch (IOException)
+            catch (IOException ex)
             {
+                _result = ex is EndOfStreamException ? ReplayOpenResult.Truncated : ReplayOpenResult.IoError;
+                _ended = true;
                 return null;
             }
         }
@@ -266,13 +298,14 @@ namespace MphRead.Mods.Network
         /// <summary>True when the whole span was read; false at a clean or ragged end of file.</summary>
         private bool Fill(Span<byte> destination)
         {
-            return _deflate.ReadAtLeast(destination, destination.Length,
-                throwOnEndOfStream: false) == destination.Length;
+            _deflate!.ReadExactly(destination);
+            return true;
         }
 
         public void Dispose()
         {
-            _deflate.Dispose();
+            _v3?.Dispose();
+            _deflate?.Dispose();
             _stream.Dispose();
         }
     }

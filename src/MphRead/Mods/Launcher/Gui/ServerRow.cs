@@ -163,7 +163,13 @@ namespace MphRead.Mods.Launcher.Gui
                 return;
             }
             _map = status.RoomKey;
-            _mode = NetStatus.ModeName(status.Mode);
+            _mode = status.LobbyEnabled ? status.Phase switch
+            {
+                SessionPhase.Lobby => "LOBBY", SessionPhase.Starting => "LOADING",
+                SessionPhase.PostMatch => "RESULTS", _ => "IN MATCH"
+            } : NetStatus.ModeName(status.Mode);
+            ToolTip.SetTip(this, $"{status.Phase} · {status.Format} · "
+                + (status.AllowJoinInProgress ? "Join in progress allowed" : "Join in progress disabled"));
             _players = status.MaxPlayers > 0
                 ? $"{status.Players}/{status.MaxPlayers}"
                 : status.Players.ToString(CultureInfo.InvariantCulture);

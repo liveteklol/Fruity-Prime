@@ -218,7 +218,7 @@ namespace MphRead.Mods.Network
         /// keyboard, so no slot is exempt from being a puppet.
         /// </summary>
         public bool Start(string roomKey, GameMode mode, int maxPlayers,
-            SnapshotSink sink, Action matchEnded)
+            SnapshotSink sink, Action matchEnded, RosterPacket? roster = null)
         {
             Stop();
             Mods.Headless.Enter();
@@ -232,6 +232,7 @@ namespace MphRead.Mods.Network
                 // the first four.
                 PlayerEntity.MaxPlayers = Math.Clamp(maxPlayers, 2, PlayerEntity.SlotCapacity);
                 NetSession.StartServerAuthority(sink, matchEnded);
+                if (roster is { } players) NetSession.ApplyRoster(players);
                 // A size, because the scene divides by it when it builds a
                 // projection. Nothing here ever builds one; this is the DS's
                 // own, so a stray aspect ratio is at least the right one.
@@ -266,6 +267,10 @@ namespace MphRead.Mods.Network
                 Console.WriteLine($"[sim] could not load \"{roomKey}\": {ex}");
                 NetLog.Event($"server simulation failed to start: {ex}");
                 Stop();
+                // Loading can fail before _scene is assigned. Release the partial
+                // authority session and assets so another lobby start can retry.
+                NetSession.Stop();
+                Read.ClearCache();
                 return false;
             }
         }

@@ -19,6 +19,10 @@ namespace MphRead.Mods.Network
         private readonly string? _serverName;
         private readonly string? _message;
 
+        public SessionPhase Phase { get; init; }
+        public MatchFormat Format { get; init; }
+        public bool LobbyEnabled { get; init; }
+        public bool AllowJoinInProgress { get; init; }
         public bool Online { get; init; }
         public string RoomKey
         {
@@ -140,6 +144,7 @@ namespace MphRead.Mods.Network
                 while (DateTime.UtcNow < deadline)
                 {
                     byte[] reply = socket.Receive(ref from);
+                    if (!from.Equals(endPoint)) continue;
                     if (reply.Length >= 1 + ServerStatusPacket.Size
                         && reply[0] == (byte)PacketType.StatusReply)
                     {
@@ -186,6 +191,7 @@ namespace MphRead.Mods.Network
                 while (DateTime.UtcNow < deadline)
                 {
                     byte[] reply = socket.Receive(ref from);
+                    if (!from.Equals(endPoint)) continue;
                     if (reply.Length >= 1 && reply[0] == (byte)PacketType.Welcome)
                     {
                         welcomed = true;
@@ -282,6 +288,8 @@ namespace MphRead.Mods.Network
                 Latency = latency,
                 Legacy = legacy,
                 Protocol = status.Protocol,
+                Phase = status.Phase, Format = status.Format, LobbyEnabled = status.LobbyEnabled,
+                AllowJoinInProgress = status.AllowJoinInProgress,
                 CanHost = (status.Flags & ServerStatusPacket.FlagCanHost) != 0,
                 Message = message
             };

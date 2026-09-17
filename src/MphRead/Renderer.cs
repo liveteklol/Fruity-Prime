@@ -1490,6 +1490,66 @@ namespace MphRead
         /// </summary>
         public void OnSimulationFrame()
         {
+            if (!Mods.Network.DemoPlayback.IsActive) { RunSimulationFrame(); return; }
+            // Input and free camera remain on the presentation clock while paused.
+            _frameTime = 1 / 60f;
+            if (!Mods.Headless.Active) Mods.Input.GamepadDesktop.Poll();
+            Mods.Input.GamepadInput.BeginFrame();
+            Mods.Replay.ReplayInput.PollGamepad();
+            Mods.SpectatorMode.NoteScoreboard(_keyboardState.IsKeyDown(Keys.Tab)
+                || Mods.Input.GamepadInput.State.Down(Mods.Input.GamepadButtons.Back));
+            bool? camera = Mods.SpectatorMode.TakeCameraRequest();
+            if (camera.HasValue) SetFreeCamera(camera.Value);
+            if (!Mods.PauseMenu.Open)
+            {
+                OnKeyHeld();
+                if (_freeCam && Mods.Input.GamepadInput.Active)
+                {
+                    var pad = Mods.Input.GamepadInput.State;
+                    if (Math.Abs(pad.LeftY) > 0.2f) _cameraPosition += _cameraFacing * pad.LeftY * 0.15f;
+                    if (Math.Abs(pad.LeftX) > 0.2f) _cameraPosition += _cameraRight * pad.LeftX * 0.15f;
+                    UpdateCameraRotation(MathHelper.DegreesToRadians(Mods.Input.GamepadInput.AimDeltaX),
+                        MathHelper.DegreesToRadians(Mods.Input.GamepadInput.AimDeltaY));
+                }
+            }
+            int frames = Mods.Network.ReplayController.FramesDue();
+            float volume = Sound.Sfx.Volume;
+            float musicVolume = Music.UserVolume;
+            bool mute = Mods.Network.ReplayController.IsSeeking && !Mods.Headless.Active;
+            if (mute) { Sound.Sfx.Volume = 0; Music.SetUserVolume(0); }
+            try
+            {
+                for (int i = 0; i < frames && !Mods.Network.DemoPlayback.AtEnd; i++)
+                {
+                    bool seeking = Mods.Network.ReplayController.IsSeeking;
+                    RunSimulationFrame();
+                    Mods.Network.ReplayVerification.AfterFrame(this);
+                    Mods.Network.ReplayController.AfterFrame();
+                    if (seeking && !Mods.Network.ReplayController.IsSeeking) break;
+                }
+            }
+            finally
+            {
+                if (mute)
+                {
+                    Sound.Sfx.Instance.StopAllSound();
+                    Sound.Sfx.Volume = volume;
+                    Music.SetUserVolume(musicVolume);
+                }
+            }
+        }
+
+        private void RunSimulationFrame()
+        {
+            if (Mods.Network.NetSession.FreezeGameplay)
+            {
+                // The recorded session packet that releases the load barrier must
+                // still arrive while gameplay is frozen. Playback has no socket.
+                Mods.Network.DemoPlayback.PumpFrame();
+                if (Mods.Network.NetSession.IsStarting) Mods.Network.NetSession.MarkMatchLoaded();
+                Mods.Network.NetSession.Pump();
+                return;
+            }
             // The effect clock, before anything can spawn an effect. See
             // _effectFrame: it has to be the same value for the spawn and for
             // the ProcessEffects call that belongs to this step, and the
@@ -1525,7 +1585,8 @@ namespace MphRead
                 }
                 Mods.Network.DemoPlayback.PumpFrame();
                 Mods.Network.NetSession.Update(_globalElapsedTime);
-                if (Mods.Network.DemoPlayback.IsActive && !Mods.SpectatorMode.IsSpectating)
+                if (Mods.Network.NetSession.FreezeGameplay) return;
+                if (Mods.Network.DemoPlayback.IsActive && !Mods.Headless.Active && !Mods.SpectatorMode.IsSpectating)
                 {
                     // No local player to spawn as during playback -- watch
                     // as soon as anyone recorded becomes available, rather
@@ -1550,8 +1611,11 @@ namespace MphRead
                 // binds ProcessInput has just filled in. Suppressed by exactly
                 // the things that suppress a keyboard, and by spectating,
                 // where PlayerEntity.Main is somebody else's hunter.
-                Mods.Input.GamepadDesktop.Poll();
-                Mods.Input.GamepadInput.BeginFrame();
+                if (!Mods.Network.DemoPlayback.IsActive)
+                {
+                    Mods.Input.GamepadDesktop.Poll();
+                    Mods.Input.GamepadInput.BeginFrame();
+                }
                 // Straight after the edges are worked out and before anything
                 // consumes them. A pad has no key events to hook, so the
                 // results screen's picker has to be polled, and it takes the
@@ -1567,7 +1631,7 @@ namespace MphRead
                 Mods.Network.NetHooks.AfterInput(this);
                 _room?.UpdateTransition();
             }
-            OnKeyHeld();
+            if (!Mods.Network.DemoPlayback.IsActive) OnKeyHeld();
             if (ProcessFrame && _room != null)
             {
                 GameState.ProcessFrame(this);
@@ -1637,7 +1701,7 @@ namespace MphRead
                 Mods.Render.FrameTiming.MaxCatchUpSteps);
             _pendingFadeSteps = Math.Min(_pendingFadeSteps + 1,
                 Mods.Render.FrameTiming.MaxCatchUpSteps);
-            if (Mods.Headless.Active)
+            if (Mods.Headless.Active || Mods.Network.DemoPlayback.IsActive)
             {
                 ModStepDrawPassTimers();
             }
@@ -1749,6 +1813,7 @@ namespace MphRead
             _singleParticleCount = 0;
             if (ProcessFrame || CameraMode != CameraMode.Player)
             {
+                ModReplayCamera();
                 TransformCamera();
                 UpdateCameraPosition();
             }
@@ -2585,6 +2650,7 @@ namespace MphRead
                 // the camera is not a player's.
                 PlayerEntity.Main.DrawHudObjects();
             }
+            Mods.Replay.ReplayHud.Draw(this);
             if (_movieFrameIndex != -1)
             {
                 DrawMovieFrame();
@@ -6073,7 +6139,7 @@ namespace MphRead
         {
             if (_keyboardState.IsKeyDown(Keys.LeftAlt) || _keyboardState.IsKeyDown(Keys.RightAlt))
             {
-                Selection.OnKeyHeld(_keyboardState);
+                if (!Mods.Network.DemoPlayback.IsActive) Selection.OnKeyHeld(_keyboardState);
                 return;
             }
             if (!AllowCameraMovement || _inputMode == InputMode.PlayerOnly)
@@ -6093,7 +6159,7 @@ namespace MphRead
                 {
                     _cameraPosition -= _cameraFacing * moveStep;
                 }
-                if (_keyboardState.IsKeyDown(Keys.Space)) // move up
+                if (_keyboardState.IsKeyDown(Mods.Network.DemoPlayback.IsActive ? Keys.E : Keys.Space)) // move up
                 {
                     _cameraPosition = _cameraPosition.WithY(_cameraPosition.Y + moveStep);
                 }
@@ -7209,6 +7275,13 @@ namespace MphRead
         protected override void OnRenderFrame(FrameEventArgs args)
         {
             ApplyFrameRateSettings();
+            if (Mods.Network.NetLaunch.TickTerminalLobby(this))
+            {
+                GL.Clear(ClearBufferMask.ColorBufferBit);
+                SwapBuffers();
+                base.OnRenderFrame(args);
+                return;
+            }
 #if MPHREAD_SHELL
             // The launcher and the in-game menus, which are screens in this
             // window rather than windows of their own: the shell starts and
@@ -7241,6 +7314,18 @@ namespace MphRead
                 return;
             }
 #endif
+            if (Mods.Network.DemoPlayback.IsActive && Mods.Network.ReplayController.TakeRebuild(out uint target, out bool resume))
+            {
+                string path = Mods.Network.DemoPlayback.CurrentPath!;
+                EndScene();
+                Mods.Network.DemoPlayback.Stop();
+                Mods.SpectatorMode.Reset();
+                var plan = new Mods.Launcher.LaunchPlan { Kind = Mods.Launcher.LaunchKind.Demo, DemoPath = path };
+                if (!Mods.Launcher.MatchStart.Begin(this, new MenuSettings(), plan))
+                { EndOrClose(); return; }
+                Mods.Network.ReplayController.ContinueSeek(target, resume);
+                Mods.Render.FrameTiming.Reset();
+            }
             // The pause menu wants the pointer back, and so does the results
             // screen: its hunter picker is something you click, and a grabbed
             // cursor has no position on screen to click with.
@@ -7317,6 +7402,7 @@ namespace MphRead
             {
                 Mods.Chat.ChatBox.Open(swallowOpeningChar: false);
             }
+            if (Mods.Network.ReplayController.IsSeeking) return;
             Scene.OnDrawFrame();
             if (!Scene.OnRenderFrame())
             {
@@ -7460,6 +7546,13 @@ namespace MphRead
 
         protected override void OnMouseDown(MouseButtonEventArgs e)
         {
+            if (Mods.Network.DemoPlayback.IsActive && !Mods.PauseMenu.Open && e.Button == MouseButton.Right)
+            {
+                Mods.SpectatorMode.CyclePrevious();
+                Mods.Network.ReplayController.NoteInput();
+                return;
+            }
+
 #if MPHREAD_SHELL
             // A screen is up in this window -- the launcher, the pause menu,
             // the settings. It gets the whole of the input while it is, the
@@ -7747,7 +7840,7 @@ namespace MphRead
                 string? clip = Mods.Network.DemoClip.Save();
                 if (clip != null)
                 {
-                    Mods.Chat.ChatBox.System($"saved the last {held:0} s to "
+                    Mods.Chat.ChatBox.System($"{(Mods.Network.DemoClip.IsSaving ? "saving" : "saved")} the last {held:0} s to "
                         + System.IO.Path.GetFileName(clip));
                 }
                 else
@@ -7771,8 +7864,18 @@ namespace MphRead
             // PlayerInput.ProcessInput -- so there is nothing this can
             // conflict with, and it is how a spectator gets back to the
             // overview they started in.
+            if (Mods.Replay.ReplayInput.HandleKey(e.Key))
+            {
+                base.OnKeyDown(e);
+                return;
+            }
+            if (Mods.Network.DemoPlayback.IsActive && e.Key != Keys.Escape)
+            {
+                base.OnKeyDown(e);
+                return;
+            }
             if (e.Key == Keys.Space
-                && (Mods.Network.DemoPlayback.IsActive || Mods.SpectatorMode.IsSpectating))
+                && Mods.SpectatorMode.IsSpectating)
             {
                 if (Mods.Network.DemoPlayback.IsActive)
                 {

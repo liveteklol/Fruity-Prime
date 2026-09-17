@@ -27,6 +27,18 @@ jobs:
       - name: every custom map has the level it converts
         run: tools/check-maps-shipped.sh
 
+  lobby-tests:
+    name: lobby protocol and lifecycle
+    needs: assets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '9.0.x'
+      - name: persistent lobby regression without game assets
+        run: dotnet run --project src/MphRead/MphRead.csproj -c Release -- -netlobbytest
+
   build:
     name: ${{ matrix.id }}
     needs: assets

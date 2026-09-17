@@ -113,3 +113,15 @@ A server refuses a client built against a different protocol, at the first packe
 its log. That is deliberate: the wire format does not move between versions, so an old client would
 read every byte correctly and then play a different game. Update the server before handing out a
 client built from a newer release.
+# Persistent lobby sessions
+
+Standalone servers keep continuous map rotation by default. Add `-lobby` to
+use Lobby → Starting → Match → Results → Lobby on one persistent connection.
+The first admitted player owns a manually launched lobby. Servers created by
+the launcher use lobby mode and reserve ownership with a private creator token.
+Protocol 8 clients and servers must be deployed together.
+
+The owner selects the map, rules and FFA/2v2/4v4 format; players choose hunters,
+suits and teams, then ready up. The server validates Start and waits up to
+15 seconds for loaded participants before releasing gameplay. Four-team
+gameplay remains gated until the engine supports it throughout.
