@@ -121,6 +121,7 @@ namespace MphRead
         public FrustumInfo FrustumInfo { get; } = new FrustumInfo();
 
         private bool _showTextures = true;
+        internal bool ShowTextures => _showTextures;
         private bool _showColors = true;
         // 0 is fill; 1..MaxWireframeLevel is wireframe, line width = level
         private int _wireframeLevel = 0;

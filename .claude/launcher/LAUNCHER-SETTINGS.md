@@ -48,6 +48,13 @@ Saving and applying
 
 Notable toggles
 
+- **Bright player skins** is under Display / Visibility, off by default. Save
+  or Apply updates remote multiplayer bodies immediately and persists
+  `bright_skins` in `launcher.txt`. Suit identity supplies FFA colors; centralized
+  team definitions supply team colors. Cloak, damage and Double Damage take
+  priority, and ice/effects/first-person equipment retain normal rendering.
+  See `.claude/render/BRIGHT-SKINS.md` for eligibility and validation.
+
 - **FPS limit is the picture's rate only**, and sits directly under Render
   scale: the two are the same question from both ends -- how much picture, and
   how often -- and they are what somebody not getting a smooth game comes to

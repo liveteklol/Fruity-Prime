@@ -25,6 +25,7 @@ loading everything.
 - multiplayer/NETWORK-HITCLAIMS.md — a client declaring which of its own shots landed and the authority arbitrating them: the five checks, the grace window, and the rule that decides who dies when two people kill each other
 - multiplayer/NETWORK-SMOOTHING.md — remote players read off a playout clock instead of snapped to whichever snapshot arrived last, and the sub-frame ack that keeps hit registration exact through it
 - render/CEL-SHADING.md — flat colours in place of textures, and the depth-kink ink pass
+- render/BRIGHT-SKINS.md — local high-contrast multiplayer bodies, status precedence and checks
 - render/FRAME-PACING.md — 60 Hz of simulation under a picture drawn at the display's rate: the split, why interpolation was taken back out, and how both halves are tested without a 144 Hz monitor
 - mapgen/MAP-PIPELINE.md — custom maps: the generator, the Quake 3 importer, the format traps
 - testing/HITRIG.md — the headshot rig: the geometry a headshot turns on, why the feature tour cannot measure it, and how an A/B arm is run

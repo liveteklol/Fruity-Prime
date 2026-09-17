@@ -82,6 +82,9 @@ namespace MphRead.Mods
         /// <summary>Per-vertex lighting. Off is flatter and cheaper.</summary>
         public static bool Lighting { get; set; } = true;
 
+        /// <summary>High-contrast multiplayer body colors, local to this client.</summary>
+        public static bool BrightSkins { get; set; }
+
         /// <summary>
         /// Cel shading: every surface goes to flat colour and the shapes in
         /// the room are drawn around in ink.

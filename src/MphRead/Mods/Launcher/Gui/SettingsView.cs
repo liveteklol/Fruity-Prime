@@ -64,6 +64,7 @@ namespace MphRead.Mods.Launcher.Gui
         private ToggleRow _fogRow = null!;
         private ToggleRow _filteringRow = null!;
         private ToggleRow _celRow = null!;
+        private ToggleRow _brightSkinsRow = null!;
         private ToggleRow _fpsRow = null!;
 
         /// <summary>
@@ -418,6 +419,10 @@ namespace MphRead.Mods.Launcher.Gui
 
             Heading(page, "Cel shading");
             _celRow = Add(page, new ToggleRow("Cel shading", RenderOptions.CelShading));
+
+            Heading(page, "Visibility");
+            _brightSkinsRow = Add(page, new ToggleRow("Bright player skins", RenderOptions.BrightSkins));
+            Explain(page, "Use high-contrast player colors to improve visibility and team identification.");
 
             // One switch, and none of what it drives.
             //
@@ -1067,6 +1072,7 @@ namespace MphRead.Mods.Launcher.Gui
             FrameTiming.FrameRateCap = cap;
             _settings.FrameRateCap = FrameTiming.CapString(cap);
             _settings.CelShading = RenderOptions.OnOff(_celRow.On);
+            RenderOptions.BrightSkins = _brightSkinsRow.On;
             _settings.CelBands = "8";
             _settings.CelEdge = "50";
             Features.ProHud = _proHud.On;

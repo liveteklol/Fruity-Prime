@@ -2,6 +2,7 @@ using System;
 using System.Buffers;
 using System.Diagnostics;
 using MphRead.Formats;
+using MphRead.Mods.Render;
 using OpenTK.Mathematics;
 
 namespace MphRead.Entities
@@ -32,6 +33,7 @@ namespace MphRead.Entities
             {
                 UpdateSpireAltAttack();
             }
+            Vector4? brightSkin = BrightSkins.GetColor(this);
             int lod = 0;
             Flags2 &= ~PlayerFlags2.Lod1;
             if (!IsMainPlayer && !Features.MaxPlayerDetail
@@ -61,16 +63,16 @@ namespace MphRead.Entities
                     }
                     if (Hunter == Hunter.Kanden)
                     {
-                        DrawKandenAlt();
+                        DrawKandenAlt(brightSkin);
                     }
                     else if (Hunter == Hunter.Spire && Flags2.TestFlag(PlayerFlags2.AltAttack))
                     {
-                        DrawSpireAltAttack();
+                        DrawSpireAltAttack(brightSkin);
                     }
                     else
                     {
                         UpdateTransforms(_altModel, _modelTransform, Recolor);
-                        GetDrawItems(_altModel, _altModel.Model.Nodes[0], _curAlpha);
+                        GetDrawItems(_altModel, _altModel.Model.Nodes[0], _curAlpha, overrideColor: brightSkin);
                     }
                     PaletteOverride = null;
                     if (_frozenGfxTimer > 0)
@@ -142,7 +144,7 @@ namespace MphRead.Entities
                             alpha = Math.Clamp(alpha, 0, 1);
                         }
                         UpdateMaterials(_bipedModel2, Recolor);
-                        GetDrawItems(_bipedModel2, _bipedModel2.Model.Nodes[0], alpha);
+                        GetDrawItems(_bipedModel2, _bipedModel2.Model.Nodes[0], alpha, overrideColor: brightSkin);
                         PaletteOverride = null;
                         if (_chargeEffect != null || _muzzleEffect != null)
                         {
@@ -216,7 +218,7 @@ namespace MphRead.Entities
             DrawVolumes();
         }
 
-        private void DrawKandenAlt()
+        private void DrawKandenAlt(Vector4? brightSkin)
         {
             for (int i = 0; i < _kandenSegMtx.Length; i++)
             {
@@ -224,7 +226,7 @@ namespace MphRead.Entities
             }
             _altModel.Model.UpdateMatrixStack();
             UpdateMaterials(_altModel, Recolor);
-            GetDrawItems(_altModel, _altModel.Model.Nodes[0], _curAlpha);
+            GetDrawItems(_altModel, _altModel.Model.Nodes[0], _curAlpha, overrideColor: brightSkin);
         }
 
         private void UpdateSpireAltAttack()
@@ -235,7 +237,7 @@ namespace MphRead.Entities
             _spireRockPosR = _spireAltNodes[1]!.Animation.Row3.Xyz + Position;
         }
 
-        private void DrawSpireAltAttack()
+        private void DrawSpireAltAttack(Vector4? brightSkin)
         {
             _altModel.Model.Nodes[0].Animation = _modelTransform;
             for (int i = 1; i < _altModel.Model.Nodes.Count; i++)
@@ -247,10 +249,11 @@ namespace MphRead.Entities
             }
             _altModel.Model.UpdateMatrixStack();
             UpdateMaterials(_altModel, Recolor);
-            GetDrawItems(_altModel, _altModel.Model.Nodes[0], _curAlpha);
+            GetDrawItems(_altModel, _altModel.Model.Nodes[0], _curAlpha, overrideColor: brightSkin);
         }
 
-        private void GetDrawItems(ModelInstance inst, Node node, float alpha, int polygonId = -1, int recolor = -1)
+        private void GetDrawItems(ModelInstance inst, Node node, float alpha, int polygonId = -1, int recolor = -1,
+            Vector4? overrideColor = null)
         {
             if (alpha <= 0)
             {
@@ -274,7 +277,9 @@ namespace MphRead.Entities
                     Material material = model.Materials[mesh.MaterialId];
                     Vector3 emission = GetEmission(inst, material, mesh.MaterialId);
                     Matrix4 texcoordMatrix = GetTexcoordMatrix(inst, material, mesh.MaterialId, node, recolor);
-                    Vector4? color = null;
+                    Vector4? color = PaletteOverride == null
+                        ? BrightSkins.ForMaterial(overrideColor, material.TextureId != -1,
+                            material.CurrentAlpha * alpha, _scene.ShowTextures) : null;
                     SelectionType selectionType = SelectionType.None;
                     int? bindingOverride = GetBindingOverride(inst, material, mesh.MaterialId);
                     _scene.AddRenderItem(material, polygonId, alpha, emission, GetLightInfo(), texcoordMatrix,
@@ -283,12 +288,12 @@ namespace MphRead.Entities
                 }
                 if (node.ChildIndex != -1)
                 {
-                    GetDrawItems(inst, model.Nodes[node.ChildIndex], alpha, polygonId, recolor);
+                    GetDrawItems(inst, model.Nodes[node.ChildIndex], alpha, polygonId, recolor, overrideColor);
                 }
             }
             if (node.NextIndex != -1)
             {
-                GetDrawItems(inst, model.Nodes[node.NextIndex], alpha, polygonId, recolor);
+                GetDrawItems(inst, model.Nodes[node.NextIndex], alpha, polygonId, recolor, overrideColor);
             }
         }
 

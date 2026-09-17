@@ -317,7 +317,8 @@ namespace MphRead.Mods.Network
                 Hunter hunter = i == 0 && MainHunter.HasValue
                     ? MainHunter.Value
                     : (Hunter)(i % 7);
-                Scene.AddPlayer(hunter, recolor: 0, team: -1);
+                // Team modes need real team identities, just like launcher bot matches.
+                Scene.AddPlayer(hunter, recolor: 0, team: GameState.IsTeamMode(mode) ? i % 2 : -1);
             }
             for (int i = 0; i < PlayerEntity.Players.Count; i++)
             {
