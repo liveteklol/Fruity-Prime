@@ -57,15 +57,8 @@ namespace MphRead.Mods.Network
         MapPick = 29,       // client -> server, which of them this player wants
         HitClaim = 30,      // client -> authority, "this shot of mine landed"
         HitVerdict = 31,    // authority -> client, what it did with those claims
-        // 32-35 are reserved for handing a custom map to a client that does
-        // not have it. Reserved rather than implemented: the numbers are
-        // spent now so that the protocol 7 refusal covers the transfer as
-        // well, and a client built today cannot meet a server that speaks it
-        // and misread a chunk as something else. The shape is settled --
-        // MapOffer names the map and its hash, MapWant asks for the bytes,
-        // MapChunk carries them, MapDone closes the transfer -- and nothing
-        // in this build sends or answers any of them.
-        // See .claude/mapgen/MAP-PIPELINE.md.
+        // Map transfer is negotiated before loading a custom room. All requests
+        // are bounded and identify package hashes rather than peer filenames.
         MapOffer = 32,      // server -> client, "the next map is custom: name, hash, size"
         MapWant = 33,       // client -> server, "send it, from byte N"
         MapChunk = 34,      // server -> client, one piece of the .fpmap
@@ -1799,14 +1792,10 @@ namespace MphRead.Mods.Network
         ///   behind resolves 85% of a 320 ms line's shots against a world
         ///   nobody was looking at, measured.
         ///
-        /// It also spends packet numbers 32-35 on a custom-map transfer that
-        /// is **not implemented**. That is deliberate: the numbers cost
-        /// nothing now and spending them here means the refusal this version
-        /// already forces is the same refusal that will cover the transfer,
-        /// rather than a second bump a month later. See
-        /// <see cref="PacketType.MapOffer"/>.
+        /// Protocol 8 requires custom-map identity/hash negotiation before a
+        /// client loads the room; a name-only peer cannot safely join it.
         /// </summary>
-        public const int ProtocolVersion = 7;
+        public const int ProtocolVersion = 8;
         /// <summary>
         /// Frames between intent packets. One, so every frame.
         ///

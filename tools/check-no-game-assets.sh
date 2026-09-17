@@ -46,6 +46,9 @@ allowed() {
   [ -f "$ALLOW_FILE" ] || return 1
   local path="$1" pattern
   while IFS= read -r pattern; do
+    # Git may check this text file out as CRLF on Windows. The carriage
+    # return is a line ending, not part of an allow-list glob.
+    pattern="${pattern%$'\r'}"
     case "$pattern" in ''|'#'*) continue ;; esac
     # shellcheck disable=SC2254
     case "$path" in $pattern) return 0 ;; esac
@@ -97,7 +100,7 @@ if [ "$#" -eq 0 ]; then
   echo "== checking what git is tracking =="
   mapfile -t tracked < <(git ls-files)
   check_list "tracked by git" "${tracked[@]}"
-  if ! grep -q '^thumbnails/$' .gitignore; then
+  if ! grep -qE $'^thumbnails/\r?$' .gitignore; then
     report ".gitignore" "no longer ignores thumbnails/, so previews can be committed"
   fi
 else

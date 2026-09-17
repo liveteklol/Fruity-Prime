@@ -1,9 +1,9 @@
 # Maps
 
-No level lives here, only recipes: the game ships the 27 multiplayer rooms of
-the cartridge and nothing else. What lives here is the *hook* for custom ones —
-drop a `.json` in, or a folder with a `.json` in it, and the game builds it and
-lists it. A map whose source level is not on this machine is left out rather
+This folder contains native recipes and the DUST2 source level. These custom
+maps supplement the cartridge's 27 multiplayer rooms. Drop a `.json` project
+or `.fpmap` package into this folder, or create one in Map Studio, and the game
+builds and lists it. A map with a missing source dependency is left out rather
 than listed and broken.
 
 Each `.json` describes one custom room. The binaries a room is actually made
@@ -39,8 +39,8 @@ What ships, and what you hand somebody, is a **`.fpmap` bundle**: the recipe,
 the level and the baked textures in one file, with the level trimmed to the
 lumps the importer actually reads. de_dust2 comes out at 376 KB against the
 2.8 MB its folder weighs, and it is one file rather than three — which is what
-makes a map something you can send, and what a downloader will want when a
-server starts offering its maps to the players joining it.
+makes a map something you can send, and the unit used when a
+server offers its maps to players joining it.
 
 ```
 FruityPrime -mapbundle           # cook every map beside the executable
@@ -65,3 +65,7 @@ The format, the Quake 3 importer and the traps are in
 `../.claude/mapgen/MAP-PIPELINE.md`. `FruityPrime -mapgen` builds every map in
 this folder; `FruityPrime -mapmaterials "MP3 PROVING GROUND"` prints the
 textures a shipped room can lend.
+
+## Map Studio and native packages
+
+Open Map Studio on the desktop front screen, or run -mapstudio. Create a native arena, edit objects, validate, build, playtest and package without hand-editing coordinates. Native .fpmap files need no external level. Version 2 adds stable identity, custom assets and verified server downloads; old JSON and packages remain supported. See [the Map Studio guide](../.claude/mapgen/MAP-STUDIO.md) for controls, commands, recovery and current limits.

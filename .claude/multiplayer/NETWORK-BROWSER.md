@@ -265,3 +265,7 @@ for every row it hasn't probed yet, and a plain auto-property would hand that
 row a null to call `.Length` on, crashing the window on the first row of the
 first list anyone opened. No headless check could have caught it; `-servers`
 exists partly so this path is checkable without a Windows box.
+
+## Custom-map identity (protocol 8)
+
+Join and rotation now require a matching custom-map identity/hash or a verified download from the selected server. See [MAP-STUDIO.md](../mapgen/MAP-STUDIO.md) for packet limits, staging/install behavior and testing. Version 7 peers must update; map transfer is no longer only reserved packet numbers.

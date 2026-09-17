@@ -112,6 +112,12 @@ namespace MphRead.Mods.Network
             {
                 return;
             }
+            if(!NetMapTransfer.Ensure(wanted,force:true))
+            {
+                Console.WriteLine("[net] map rotation refused: "+NetMapTransfer.LastError);
+                NetSession.Stop();
+                return;
+            }
             (RoomMetadata? meta, _) = Metadata.GetRoomByName(wanted);
             if (meta == null)
             {

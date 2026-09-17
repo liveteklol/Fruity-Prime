@@ -72,6 +72,12 @@ namespace MphRead.Mods.Network
                 if (NetSession.LocalSlot >= 0 && NetSession.ServerMatch?.RoomKey.Length > 0)
                 {
                     MatchStatePacket state = NetSession.ServerMatch.Value;
+                    if(!NetMapTransfer.Ensure(state.RoomKey,force:true))
+                    {
+                        LastJoinError=NetMapTransfer.LastError??"Could not verify the server map.";
+                        NetSession.Stop();
+                        return false;
+                    }
                     Console.WriteLine($"[net] joining {state.RoomKey} ({(GameMode)state.Mode}), "
                         + $"{state.TimeRemaining:0} s remaining, slot {NetSession.LocalSlot}");
                     DisableCheatsForMatch();

@@ -22,6 +22,11 @@ namespace MphRead.Mods.MapGen
     /// </summary>
     public class MapDefinition
     {
+        public int FormatVersion { get; set; } = 1;
+        public Guid MapId { get; set; }
+        public string? Author { get; set; }
+        public string? Version { get; set; }
+        public string? Description { get; set; }
         public string Name { get; set; } = "CUSTOM";
         public string? InGameName { get; set; }
 
@@ -55,11 +60,22 @@ namespace MphRead.Mods.MapGen
         /// <summary>Set to convert a level from another engine instead of building from brushes.</summary>
         public MapImport? Import { get; set; }
 
+        /// <summary>
+        /// Collision read from a Wavefront OBJ, replacing whatever the
+        /// geometry would have produced. See <see cref="MapCollision"/>.
+        /// </summary>
+        public MapCollision? Collision { get; set; }
+
         /// <summary>Where to stand the camera for the launcher's map picture.</summary>
         public MapPreview? Preview { get; set; }
 
         public List<MapMaterial> Materials { get; set; } = new List<MapMaterial>();
         public List<MapBrush> Brushes { get; set; } = new List<MapBrush>();
+        public List<MapGeometry> Geometry { get; set; } = new();
+        public List<MapAsset> Assets { get; set; } = new();
+        public MapAudioSettings? Audio { get; set; }
+        public MapCapabilities? Capabilities { get; set; }
+        public List<MapNavigationLink> NavigationLinks { get; set; } = new();
         public List<MapSpawn> Spawns { get; set; } = new List<MapSpawn>();
         public List<MapJumpPad> JumpPads { get; set; } = new List<MapJumpPad>();
         public List<MapItem> Items { get; set; } = new List<MapItem>();
@@ -67,6 +83,11 @@ namespace MphRead.Mods.MapGen
         private static readonly JsonSerializerOptions _options = new JsonSerializerOptions()
         {
             PropertyNameCaseInsensitive = true,
+            // Every recipe in the repository is camelCase, having been written
+            // by hand before anything generated one. Reading is
+            // case-insensitive either way; this is so a recipe a command
+            // writes looks like the ones beside it.
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
             ReadCommentHandling = JsonCommentHandling.Skip,
             AllowTrailingCommas = true,
             WriteIndented = true,
@@ -96,6 +117,7 @@ namespace MphRead.Mods.MapGen
 
         public static MapDefinition Load(string path)
         {
+            if(!MapBundle.Is(path)&&new FileInfo(path).Length>8*1024*1024)throw new InvalidDataException("Map project exceeds 8 MiB.");
             string text = MapBundle.Is(path)
                 ? MapBundle.ReadRecipe(path)
                     ?? throw new ProgramException($"{Path.GetFileName(path)} has no map in it.")
@@ -105,6 +127,10 @@ namespace MphRead.Mods.MapGen
             {
                 throw new ProgramException($"Could not read map definition {path}.");
             }
+            if (result.FormatVersion is < 1 or > 2)
+                throw new MapAuthoringException("FP-MAP-008", $"Unsupported map format {result.FormatVersion}.");
+            MapValidator.RequireRuntimeName(result.Name);
+            if(result.FormatVersion==1)result.Name=result.Name.ToUpperInvariant();
             result.BaseDirectory = Path.GetDirectoryName(Path.GetFullPath(path));
             result.SourcePath = Path.GetFullPath(path);
             result.BundlePath = MapBundle.Is(path) ? result.SourcePath : null;
@@ -113,12 +139,17 @@ namespace MphRead.Mods.MapGen
                 result.Import.BaseDirectory = result.BaseDirectory;
                 result.Import.BundlePath = result.BundlePath;
             }
+            if (result.Collision != null)
+            {
+                result.Collision.BaseDirectory = result.BaseDirectory;
+                result.Collision.BundlePath = result.BundlePath;
+            }
             return result;
         }
 
         public void Save(string path)
         {
-            File.WriteAllText(path, Serialize());
+            AtomicFile.Write(path, System.Text.Encoding.UTF8.GetBytes(Serialize()));
         }
 
         /// <summary>The recipe as it would be written, for a bundle to carry.</summary>
@@ -137,6 +168,96 @@ namespace MphRead.Mods.MapGen
     {
         public float[] Position { get; set; } = new float[3];
         public float[] Target { get; set; } = new float[3];
+    }
+
+    /// <summary>
+    /// Collision read from a Wavefront OBJ rather than derived from the
+    /// geometry.
+    ///
+    /// It **replaces** what the geometry produced rather than adding to it,
+    /// and that is the whole point: the reason to reach for this is that a
+    /// converted level carries collision nobody can ever touch -- on df_dust2,
+    /// 372 faces and about a quarter of the room's collision area, outside the
+    /// part of the map anyone can reach -- and adding could never delete one
+    /// of them. Export with `tools/collision-to-obj.py`, edit, name it here.
+    ///
+    /// Writing a whole room's collision from nothing is not what this is for
+    /// and would be miserable; the OBJ to start from is the one the exporter
+    /// writes.
+    /// </summary>
+    public class MapCollision
+    {
+        /// <summary>
+        /// The .obj, looked for beside the recipe, then in maps/, then beside
+        /// the game files -- the same places a level and a texture pack are.
+        /// </summary>
+        public string Source { get; set; } = "";
+
+        /// <summary>
+        /// Set when the file was written with the exporter's `--zup`, which is
+        /// what Blender and most other tools want. The game is Y up and so is
+        /// the exporter by default.
+        /// </summary>
+        public bool ZUp { get; set; }
+
+        [JsonIgnore]
+        public string? BaseDirectory { get; set; }
+        [JsonIgnore]
+        public string? BundlePath { get; set; }
+
+        /// <summary>The bytes, out of the bundle or off the disk, or null when
+        /// the file is not on this machine.</summary>
+        public byte[]? ReadBytes()
+        {
+            if (string.IsNullOrEmpty(Source))
+            {
+                return null;
+            }
+            if (BundlePath != null)
+            {
+                // A package must be self-contained; never read a local file
+                // to satisfy a missing dependency from a downloaded map.
+                return MapBundle.ReadEntry(BundlePath, Source)
+                    ?? throw new InvalidDataException("Packaged collision mesh is missing.");
+            }
+            string? path = Resolve();
+            if (path == null) return null;
+            if (new FileInfo(path).Length > MapPackageReader.MaxEntryBytes)
+                throw new InvalidDataException("Collision mesh exceeds the size limit.");
+            return File.ReadAllBytes(path);
+        }
+
+        public string? Resolve()
+        {
+            if (string.IsNullOrEmpty(Source))
+            {
+                return null;
+            }
+            foreach (string candidate in Candidates())
+            {
+                if (File.Exists(candidate))
+                {
+                    return candidate;
+                }
+            }
+            return null;
+        }
+
+        private IEnumerable<string> Candidates()
+        {
+            if (Path.IsPathRooted(Source))
+            {
+                yield return Source;
+                yield break;
+            }
+            if (BaseDirectory != null)
+            {
+                yield return Path.Combine(BaseDirectory, Source);
+            }
+            yield return Source;
+            yield return Path.Combine(CustomRooms.MapDirectory, Source);
+            yield return Path.Combine(Mods.Launcher.GameFiles.Root, Source);
+        }
     }
 
     /// <summary>
@@ -170,7 +291,7 @@ namespace MphRead.Mods.MapGen
 
         public string? Resolve()
         {
-            if (Source.Length == 0)
+            if (string.IsNullOrEmpty(Source))
             {
                 return null;
             }
@@ -197,15 +318,18 @@ namespace MphRead.Mods.MapGen
 
         private IEnumerable<string> Candidates(string name)
         {
-            yield return name;
             if (Path.IsPathRooted(name))
             {
+                yield return name;
                 yield break;
             }
             if (BaseDirectory != null)
             {
                 yield return Path.Combine(BaseDirectory, name);
             }
+            // A project owns its relative dependencies. Keep the historical
+            // working-directory fallback only when that project has no match.
+            yield return name;
             yield return Path.Combine(CustomRooms.MapDirectory, name);
             yield return Path.Combine(Mods.Launcher.GameFiles.Root, name);
         }
@@ -340,6 +464,23 @@ namespace MphRead.Mods.MapGen
         /// it off and the map file's own spawns are the only ones.
         /// </summary>
         public bool KeepSpawns { get; set; } = true;
+
+        /// <summary>
+        /// Take the level's own pickups -- its health, armour, ammo and
+        /// weapons -- as items, on top of whatever the recipe's own
+        /// <see cref="MapDefinition.Items"/> lists.
+        ///
+        /// True is what every map did before there was a choice, and is
+        /// therefore the default: an existing recipe still generates the room
+        /// it was generating. False makes the recipe the only answer to where
+        /// the pickups are, which is what you want once they are written down
+        /// -- otherwise moving one in the recipe leaves the level's original
+        /// where it was and the map has both.
+        ///
+        /// `-mapitems "ROOM"` prints the level's pickups as an `items` block
+        /// to paste in, which is the other half of turning this off.
+        /// </summary>
+        public bool KeepItems { get; set; } = true;
     }
 
     /// <summary>
@@ -350,6 +491,8 @@ namespace MphRead.Mods.MapGen
     /// </summary>
     public class MapMaterial
     {
+        public Guid Id { get; set; }
+        public string? Texture { get; set; }
         public string Name { get; set; } = "mat";
         /// <summary>Index of the material in the source room to take the texture and palette from.</summary>
         public int SourceMaterial { get; set; }
@@ -360,6 +503,8 @@ namespace MphRead.Mods.MapGen
     /// <summary>An axis-aligned box. Six quads of geometry, six faces of collision.</summary>
     public class MapBrush
     {
+        public Guid Id { get; set; }
+        public string? Label { get; set; }
         public float[] Min { get; set; } = new float[3];
         public float[] Max { get; set; } = new float[3];
         public int Material { get; set; }
@@ -372,9 +517,9 @@ namespace MphRead.Mods.MapGen
         public string? Terrain { get; set; }
     }
 
-    public class MapSpawn
+    public class MapSpawn : MapEntityDefinition
     {
-        public float[] Position { get; set; } = new float[3];
+        public int Team { get; set; } = -1;
         /// <summary>Degrees, 0 = facing +Z, counter-clockwise seen from above.</summary>
         public float Yaw { get; set; }
     }
@@ -383,9 +528,8 @@ namespace MphRead.Mods.MapGen
     /// A jump pad. Either give it a Target and let the launch velocity be
     /// solved for, or set Vector and Speed directly.
     /// </summary>
-    public class MapJumpPad
+    public class MapJumpPad : MapEntityDefinition
     {
-        public float[] Position { get; set; } = new float[3];
         public float[]? Target { get; set; }
         public float[]? Vector { get; set; }
         public float Speed { get; set; }
@@ -399,10 +543,9 @@ namespace MphRead.Mods.MapGen
         public ushort ControlLockTime { get; set; } = 30;
     }
 
-    public class MapItem
+    public class MapItem : MapEntityDefinition
     {
-        public float[] Position { get; set; } = new float[3];
-        public string Type { get; set; } = "MissileExpansion";
+        public string Type { get; set; } = "MissileSmall";
         public bool HasBase { get; set; } = true;
         public ushort SpawnInterval { get; set; } = 300;
     }

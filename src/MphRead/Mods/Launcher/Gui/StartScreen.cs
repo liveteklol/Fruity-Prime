@@ -102,6 +102,12 @@ namespace MphRead.Mods.Launcher.Gui
                 GuiTheme.Text, () => _ = OpenSettings());
             options.HorizontalAlignment = HorizontalAlignment.Center;
             rest.Children.Add(options);
+#if MPHREAD_SHELL
+            UiWord studio = Word("Map Studio", GuiTheme.Display, UiLayout.WordSize,
+                GuiTheme.Text, OpenMapStudio);
+            studio.HorizontalAlignment = HorizontalAlignment.Center;
+            rest.Children.Add(studio);
+#endif
             UiWord quit = Word("Quit", GuiTheme.Display, UiLayout.WordSize,
                 GuiTheme.Text, AskToQuit);
             quit.HorizontalAlignment = HorizontalAlignment.Center;
@@ -195,6 +201,13 @@ namespace MphRead.Mods.Launcher.Gui
         {
             _finished = false;
             Plan = default;
+#if MPHREAD_SHELL
+            if (_returnToStudio)
+            {
+                _returnToStudio = false;
+                return;
+            }
+#endif
             while (_stack.Count > 0)
             {
                 Pop();
@@ -288,6 +301,27 @@ namespace MphRead.Mods.Launcher.Gui
             Push(view);
             return Task.CompletedTask;
         }
+
+#if MPHREAD_SHELL
+        private MapStudioScreen? _studio;
+        private bool _returnToStudio;
+        public void OpenMapStudio()
+        {
+            if (_studio == null)
+            {
+                _studio = new MapStudioScreen();
+                _studio.Closed += (_, _) => { Pop(); _studio = null; RefreshRooms(); };
+                _studio.PlayRequested += (_, definition) =>
+                {
+                    _returnToStudio = true;
+                    Shell.PrepareStudioPreview(definition);
+                    Finish(new LaunchPlan { Kind = LaunchKind.Offline, RoomKey = definition.Name,
+                        Hunter = Hunter.Samus, Mode = GameMode.Battle, Bots = 0, BotLevel = 5, PlayerName = "Map author" });
+                };
+            }
+            Push(_studio);
+        }
+#endif
 
         /// <summary>
         /// Run a server rather than join one -- pushed over the browser rather

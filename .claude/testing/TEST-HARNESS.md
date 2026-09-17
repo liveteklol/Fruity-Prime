@@ -185,3 +185,11 @@ and the swap). Only valid on a visible window -- a hidden one has no usable
 back buffer under Mesa, which is the whole reason the offscreen target exists.
 The window is bigger because the HUD is authored for 256x192 and scaled to it:
 at 320x180 a weapon icon is a few pixels and a capture of it says nothing.
+
+## Map Studio implementation verification (2026-09-16)
+
+Desktop Release and dedicated-server builds completed without warnings. Android Release completed with the existing 14 XML-documentation warnings. The mapcheck console suite passed 82 checks, including synthetic custom-texture runtime packing and collision/entity readback and hot-reload cache invalidation. Native TEST ARENA/TEST PADS and imported DUST2 packages passed the release dependency checker. Static editor captures were inspected at 1440x900 and 960x600.
+
+Twenty-two-second, eight-player bot audits for TEST ARENA, DUST2 and STUDIO REGRESSION exited 0. TEST PADS completed its report with 8/8 spawns and stable rendering, then intermittently exited with Windows native fast-fail 0xC0000409. The unchanged baseline also reproduced that exit failure. Treat the TEST PADS process result as unresolved, rather than calling its report a passing process-level test. A separate earlier scripted TEST PADS run exercised all four pads successfully. Custom audio playback and public-Internet transfers still need device/network testing.
+
+A private loopback client starting without DUST2 downloaded the dedicated server's package, verified archive/content hashes and identity, compiled in staging, installed and joined. The final run also used 5% simulated loss and 40 ms delay with 10 ms jitter. This tests retries and reordering on loopback, not real-Internet behavior.

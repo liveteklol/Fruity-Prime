@@ -218,7 +218,7 @@
        publishes. -->
   <ItemGroup>
     <!-- What ships: the bundles, and any map file loose at the top of maps/. -->
-    <None Include="..\..\maps\**\*.fpmap;..\..\maps\*.json;..\..\maps\*.bsp;..\..\maps\*.tex" Link="maps\%(RecursiveDir)%(Filename)%(Extension)">
+    <None Include="..\..\maps\**\*.fpmap;..\..\maps\*.json;..\..\maps\*.bsp;..\..\maps\*.tex;..\..\maps\*.obj" Link="maps\%(RecursiveDir)%(Filename)%(Extension)">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
     <!-- What a map is worked on as: a folder holding the recipe, somebody
@@ -227,8 +227,8 @@
          package carrying the folder as well as the bundle would carry the
          same map twice, one copy of it naming a .pk3 that is deliberately not
          there. -->
-    <None Include="..\..\maps\**\*.json;..\..\maps\**\*.bsp;..\..\maps\**\*.tex;..\..\maps\**\*.pk3"
-          Exclude="..\..\maps\*.json;..\..\maps\*.bsp;..\..\maps\*.tex"
+    <None Include="..\..\maps\**\*.json;..\..\maps\**\*.bsp;..\..\maps\**\*.tex;..\..\maps\**\*.pk3;..\..\maps\**\*.obj;..\..\maps\**\*.mtl"
+          Exclude="..\..\maps\*.json;..\..\maps\*.bsp;..\..\maps\*.tex;..\..\maps\*.obj"
           Link="maps\%(RecursiveDir)%(Filename)%(Extension)">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>Never</CopyToPublishDirectory>
