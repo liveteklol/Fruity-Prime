@@ -1152,21 +1152,19 @@ namespace MphRead.Droid
                 // One button on the DS, and the same key here by default:
                 // jumping on foot is boosting in the ball.
                 _input.Apply(controls.Boost, jump);
-                // A quick flick on the aim side also boosts, the way a stylus
-                // flick did on the DS -- see PlayerInput's boost handling for
-                // how this one-shot is consumed. Only the ball boosts, and
-                // telling the controls that is what keeps a fast turn on foot
-                // from being read as a flick.
+                // Only detect flicks in alt form so a fast turn on foot is
+                // still just aiming. Shared player code maps the one-shot to
+                // Samus's aimed boost or Spire's normal alt attack.
                 _controls.SwipeBoostEnabled = main.IsAltForm;
                 (bool Fired, float X, float Y) swipe = _controls.TakeSwipeBoost();
                 if (swipe.Fired && main.IsAltForm)
                 {
-                    main.SwipeBoostRequested = true;
+                    main.AltFlickRequested = true;
                     // Which way the thumb went, for the boost to follow. The
                     // engine turns it into a world direction; here it is still
                     // just the screen's.
-                    main.SwipeBoostX = swipe.X;
-                    main.SwipeBoostY = swipe.Y;
+                    main.AltFlickX = swipe.X;
+                    main.AltFlickY = swipe.Y;
                 }
                 _input.Apply(controls.Morph, _controls.IsHeld(TouchAction.Morph));
                 // Two binds, two buttons, exactly as the desktop has them:

@@ -852,3 +852,11 @@ watched for, in this order:
    `GlEs.EmitIndices`, which is the one piece of this with no test behind it.
 4. Untextured or wrongly-coloured meshes: that is the `imm_color`/`a_color_set`
    path, i.e. a mesh whose display list never set a colour of its own.
+
+### Alt-form flick routing
+
+`GameView.ApplyInput` hands a detected swipe to the shared player's
+`AltFlickRequested/X/Y` state. Samus uses its existing aimed boost and Spire
+requests the ordinary one-shot AltAttack input, including its network press
+history. Other hunters ignore it. The touch recognizer's private swipe APIs,
+thresholds, FIRE button and ordinary movement/aim controls are unchanged.

@@ -175,3 +175,21 @@ and the swap). Only valid on a visible window -- a hidden one has no usable
 back buffer under Mesa, which is the whole reason the offscreen target exists.
 The window is bigger because the HUD is authored for 256x192 and scaled to it:
 at 320x180 a weapon icon is a few pixels and a capture of it says nothing.
+
+## Alt-form deterministic regressions
+
+Run `dotnet src/MphRead/bin/Release/net9.0/FruityPrime.dll -altformcheck` after a
+Release build. This command needs no extracted assets or display. It checks
+camera basis preservation/recovery, shared mouse/touch gesture routing, Spire's
+canonical press through packet serialization and duplicate suppression, the
+8/30/12-frame reconciliation boundaries, lifecycle resets and allocation-free
+reconciliation. Failures produce a nonzero exit code. Real animation, boost
+physics, Weavel turret creation, hitbox convergence and Android touch hardware
+still require the gameplay harness/device checks described above.
+
+Validation for this change: desktop and Windows dedicated-server Release builds
+passed with zero warnings; Android Release APK built with the installed SDK/JDK
+(14 existing documentation warnings). All 104 `-altformcheck` assertions passed
+in desktop and server builds. The existing dedicated-server startup/directory
+checks passed on isolated local ports. Asset-backed gameplay and Android touch
+hardware validation were not run because extracted game files were unavailable.

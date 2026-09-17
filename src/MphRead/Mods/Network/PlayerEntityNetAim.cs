@@ -649,6 +649,8 @@ namespace MphRead.Entities
             }
         }
 
+        internal bool ModFormTransitionActive => IsMorphing || IsUnmorphing;
+
         /// <summary>
         /// Put a remote player into or out of alt form to match the authority.
         ///
@@ -668,10 +670,14 @@ namespace MphRead.Entities
         /// The owner's relayed input normally does this by itself; this is
         /// for the case where the two machines have ended up disagreeing.
         /// </summary>
-        internal void ModStartFormSwitch()
+        internal bool ModStartFormSwitch()
         {
             bool switched = TrySwitchForms(force: true);
-            NetLog.Event($"slot {SlotIndex} form switch requested -> {switched}, now {ModFormState()}");
+            if (NetLog.Enabled)
+            {
+                NetLog.Event($"slot {SlotIndex} form switch requested -> {switched}, now {ModFormState()}");
+            }
+            return switched;
         }
 
         /// <summary>

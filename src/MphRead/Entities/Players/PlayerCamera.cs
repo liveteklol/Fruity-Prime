@@ -844,6 +844,8 @@ namespace MphRead.Entities
 
     public class CameraInfo
     {
+        private const float HorizontalBasisEpsilon = 1f / 4096f;
+        private const float HorizontalBasisEpsilonSq = HorizontalBasisEpsilon * HorizontalBasisEpsilon;
         public Vector3 Position;
         public Vector3 PrevPosition;
         public Vector3 Target;
@@ -868,6 +870,10 @@ namespace MphRead.Entities
             Target = Vector3.Zero;
             UpVector = Vector3.UnitY;
             Fov = 39 * 2;
+            Field48 = 0;
+            Field4C = -1;
+            Field50 = -1;
+            Field54 = 0;
         }
 
         public void Update()
@@ -895,12 +901,22 @@ namespace MphRead.Entities
             Facing = Target - Position;
             float facingX = Facing.X;
             float facingZ = Facing.Z;
-            float hMag = MathF.Sqrt(facingX * facingX + facingZ * facingZ);
+            float horizontalSq = facingX * facingX + facingZ * facingZ;
             Facing = Facing.Normalized();
-            Field48 = facingX / hMag;
-            Field4C = facingZ / hMag;
-            Field50 = Field4C;
-            Field54 = -Field48;
+            // A vertical or invalid camera keeps the last usable movement basis.
+            if (Single.IsFinite(horizontalSq) && horizontalSq > HorizontalBasisEpsilonSq)
+            {
+                float invMag = 1f / MathF.Sqrt(horizontalSq);
+                float forwardX = facingX * invMag;
+                float forwardZ = facingZ * invMag;
+                if (Single.IsFinite(forwardX) && Single.IsFinite(forwardZ))
+                {
+                    Field48 = forwardX;
+                    Field4C = forwardZ;
+                    Field50 = forwardZ;
+                    Field54 = -forwardX;
+                }
+            }
             ViewMatrix = Matrix4.LookAt(Position, Target, camUp);
             TrueUp = camUp;
             // todo?: set transposes and stuff

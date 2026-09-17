@@ -15,14 +15,12 @@ namespace MphRead.Mods.Network
     /// </summary>
     public static class NetPlayerBridge
     {
-        /// <summary>
-        /// How long a form disagreement is tolerated before it is forced.
-        /// Longer than the morph animation, so a transition that is simply
-        /// playing out is never cut short -- that was what removed the
-        /// morph-in animation entirely.
-        /// </summary>
-        private const int FormGraceFrames = 90;
+        private const int FormMismatchFramesBeforeSwitch = 8;
+        private const int FormPostTransitionGraceFrames = 30;
+        private const int FormSwitchStartFramesBeforeForce = 12;
         private static readonly int[] _formMismatch = new int[PlayerEntity.SlotCapacity];
+        private static readonly bool[] _formWasTransitioning = new bool[PlayerEntity.SlotCapacity];
+        private static readonly int[] _formPostTransitionGrace = new int[PlayerEntity.SlotCapacity];
 
         /// <summary>
         /// Whether the last snapshot had each slot standing on the map, so the
@@ -971,54 +969,95 @@ namespace MphRead.Mods.Network
         }
 
         /// <summary>
-        /// Keep a remote player's form in step with the authority's, without
-        /// stepping on the transition.
-        ///
-        /// The owner's relayed input drives the morph on every machine, so
-        /// this is only a safety net for a transition that never happened at
-        /// all -- a lost press, or a puppet that somehow stalled.
-        ///
-        /// It deliberately does nothing for a long while. A puppet acts on
-        /// the press the moment it arrives, whereas the snapshot confirming
-        /// it cannot come back until the authority has seen the press and
-        /// published: for that round trip the puppet is *ahead* of the
-        /// snapshot, not wrong. Treating that as a disagreement and
-        /// "correcting" it made the puppet morph, unmorph and morph again on
-        /// every single transition.
+        /// Let animations finish, tolerate briefly stale snapshots after a normal
+        /// transition, then try the real engine switch before forcing a stuck form.
         /// </summary>
         private static void ApplyForm(PlayerEntity player, bool altForm)
         {
-            int slot = player.SlotIndex;
+            FormCorrection correction = ReconcileForm(player.SlotIndex, player.IsAltForm,
+                altForm, player.ModFormTransitionActive);
+            if (correction == FormCorrection.Switch)
+            {
+                // The real transition creates hunter-specific entities (Weavel's
+                // halfturret). Even a refused switch gets a bounded wait first.
+                player.ModStartFormSwitch();
+            }
+            else if (correction == FormCorrection.Force)
+            {
+                player.ModForceForm(altForm);
+            }
+        }
+
+        internal enum FormCorrection { None, Switch, Force }
+
+        // Separate the decision from engine side effects so the exact frame
+        // boundaries can be checked without loading models or a room.
+        internal static FormCorrection ReconcileForm(int slot, bool currentAltForm,
+            bool altForm, bool transitioning)
+        {
             if (slot < 0 || slot >= _formMismatch.Length)
             {
-                return;
+                return FormCorrection.None;
             }
-            if (player.IsAltForm == altForm)
+            if (transitioning)
             {
+                _formWasTransitioning[slot] = true;
                 _formMismatch[slot] = 0;
-                _formAttempts[slot] = 0;
-                return;
+                return FormCorrection.None;
+            }
+            if (currentAltForm == altForm)
+            {
+                ResetForm(slot);
+                return FormCorrection.None;
+            }
+            if (_formWasTransitioning[slot])
+            {
+                _formWasTransitioning[slot] = false;
+                if (_formAttempts[slot] != 0)
+                {
+                    ResetForm(slot);
+                    return FormCorrection.Force;
+                }
+                _formPostTransitionGrace[slot] = FormPostTransitionGraceFrames;
+            }
+            if (_formPostTransitionGrace[slot] > 0)
+            {
+                _formPostTransitionGrace[slot]--;
+                return FormCorrection.None;
             }
             _formMismatch[slot]++;
-            if (_formMismatch[slot] <= FormGraceFrames)
-            {
-                return;
-            }
-            _formMismatch[slot] = 0;
-            // First the real transition, because that is what creates the
-            // parts of a form that are separate entities -- Weavel's
-            // halfturret exists only because EnterAltForm adds it, so a
-            // client that skipped straight to the flag showed a Weavel in alt
-            // form with no turret. Only if that does not take does the flag
-            // get forced.
             if (_formAttempts[slot] == 0)
             {
+                if (_formMismatch[slot] < FormMismatchFramesBeforeSwitch)
+                {
+                    return FormCorrection.None;
+                }
+                _formMismatch[slot] = 0;
                 _formAttempts[slot] = 1;
-                player.ModStartFormSwitch();
-                return;
+                return FormCorrection.Switch;
             }
+            if (_formMismatch[slot] < FormSwitchStartFramesBeforeForce)
+            {
+                return FormCorrection.None;
+            }
+            ResetForm(slot);
+            return FormCorrection.Force;
+        }
+
+        private static void ResetForm(int slot)
+        {
+            _formMismatch[slot] = 0;
             _formAttempts[slot] = 0;
-            player.ModForceForm(altForm);
+            _formWasTransitioning[slot] = false;
+            _formPostTransitionGrace[slot] = 0;
+        }
+
+        private static void ResetForms()
+        {
+            Array.Clear(_formMismatch);
+            Array.Clear(_formAttempts);
+            Array.Clear(_formWasTransitioning);
+            Array.Clear(_formPostTransitionGrace);
         }
 
         private static readonly int[] _divergedFrames = new int[PlayerEntity.SlotCapacity];
@@ -1081,6 +1120,7 @@ namespace MphRead.Mods.Network
         /// </summary>
         public static void NoteRoomChanged()
         {
+            ResetForms();
             Array.Clear(_authoritySpawned);
             Array.Clear(_reportSeen);
             Array.Clear(_divergedFrames);
@@ -1093,7 +1133,7 @@ namespace MphRead.Mods.Network
 
         public static void Reset()
         {
-            Array.Clear(_formMismatch);
+            ResetForms();
             Snaps = 0;
             WorstSnap = 0;
             NodeLookupsUnresolved = 0;
@@ -1102,7 +1142,6 @@ namespace MphRead.Mods.Network
             WorstSpawnFacing = 0;
             StaleDeathsIgnored = 0;
             Array.Clear(_formSaid);
-            Array.Clear(_formAttempts);
             Array.Clear(_lastPressFrame);
             Array.Clear(_pressSeen);
             Array.Clear(ShootPressAge);
@@ -1149,8 +1188,7 @@ namespace MphRead.Mods.Network
             {
                 return;
             }
-            _formMismatch[slot] = 0;
-            _formAttempts[slot] = 0;
+            ResetForm(slot);
             _lastPressFrame[slot] = 0;
             _pressSeen[slot] = false;
             ShootPressAge[slot] = 0;

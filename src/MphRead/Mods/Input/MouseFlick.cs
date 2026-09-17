@@ -3,7 +3,8 @@ using System;
 namespace MphRead.Mods.Input
 {
     /// <summary>
-    /// The morph ball's boost, asked for by whipping the mouse.
+    /// An alt-form gesture, asked for by whipping the mouse. The shared
+    /// player consumer maps it to Samus's boost or Spire's alt attack.
     ///
     /// The gesture already exists on the touch head -- a flick on the aim
     /// side boosts, the way a flick of the stylus did on the DS -- and the
@@ -49,8 +50,8 @@ namespace MphRead.Mods.Input
     /// means nothing.
     ///
     /// No setting, by design: there is nothing to turn off. The gesture is
-    /// only ever looked for inside the ball, with the boost bind not held,
-    /// and it takes no input away from anything.
+    /// only looked for in supported alt forms; holding Samus's boost bind
+    /// suppresses it so a flick cannot prematurely release a charge.
     /// </summary>
     public static class MouseFlick
     {

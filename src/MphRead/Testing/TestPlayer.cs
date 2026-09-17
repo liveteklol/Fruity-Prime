@@ -3,7 +3,7 @@ using MphRead.Utility;
 
 namespace MphRead.Testing
 {
-    public static class TestPlayer
+    public static partial class TestPlayer
     {
         public readonly struct ButtonControl
         {

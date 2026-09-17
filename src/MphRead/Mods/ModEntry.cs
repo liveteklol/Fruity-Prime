@@ -33,6 +33,12 @@ namespace MphRead.Mods
         /// </summary>
         public static bool TryHandleHeadless(string[] args)
         {
+            if (HasFlag(args, "altformcheck"))
+            {
+                Environment.ExitCode = Testing.TestPlayer.CheckAltForms();
+                return true;
+            }
+
             // Keys and mouse feel, before anything creates a player. Called
             // here because this runs for every invocation, launcher or not.
             InputSettings.Load();

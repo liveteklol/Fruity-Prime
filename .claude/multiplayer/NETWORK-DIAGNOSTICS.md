@@ -319,7 +319,7 @@ knows better is the owner's, and nothing was asking: `IntentButtons.AltFormState
 has always been in the packet, and was used only to convert the reported
 position between forms.
 
-`ApplyIntent` now feeds it to `ApplyForm` -- the same grace period, the same
+`ApplyIntent` now feeds it to `ApplyForm` -- the same transition-aware recovery, the same
 attempt-then-force -- but **only on the authority**. A client that also acted on
 it would be taking form corrections from two sources at once, its owner's
 intent and the authority's snapshot, and the two disagree for exactly as long
@@ -856,3 +856,37 @@ and needs no game state, so there is nothing for it to wait for a frame for.
 
 Measured on loopback, where the true round trip is nil: **8-11 ms before,
 1 ms after.**
+
+## Alt-form basis, flicks, and reconciliation
+
+`CameraInfo.Reset()` initializes the horizontal movement basis to -Z. Updates
+commit all four basis fields together only when the squared horizontal facing
+is finite and greater than `(1 / 4096)^2`; invalid/vertical geometry preserves
+the previous basis. Camera placement, roll traction and form position conversion
+are unchanged.
+
+Desktop mouse flicks and Android swipes populate `AltFlickRequested/X/Y`.
+The shared player consumer clears each event once: Samus keeps the aimed
+full-charge boost; Spire generates `Controls.AltAttack.IsPressed` and marks
+input active. Other hunters, bipeds, frozen/dead players and morph transitions
+discard the event. Holding Boost suppresses mouse flicks only for a hunter with
+the Boost ability. Spire uses its existing attack block and existing AltAttack
+press history, with no new packet fields or protocol version. Spire's edge is
+prepared in the hardware input pass, before `NetHooks.AfterInput` records press
+history. Creating it in `ProcessAlt` is too late: the next input pass clears it
+before the network can see it. Samus still consumes its aimed boost in simulation.
+
+`NetPlayerBridge.ApplyForm` observes active morph/unmorph animations without
+correcting them. A completed ordinary transition gets 30 simulation frames of
+stale-snapshot grace. A stable mismatch outside that grace requests the real
+engine switch after 8 frames, preserving transition-created state such as
+Weavel's halfturret. If no animation starts, 12 further stable mismatch frames
+trigger the force fallback. A corrective animation that completes in the wrong
+form falls back immediately, with no second grace. Matching stable state,
+session reset, room change and slot reuse clear all four history fields.
+
+`-altformcheck` runs deterministic camera, gesture, packet/press-history and
+reconciliation checks without game assets. It checks actual shared routing and
+wire serialization, but does not simulate attack animation, damage or Internet
+latency. Use two `-netcheck` clients and a dedicated authority with extracted
+assets for those checks, including `-netlag 100`/`-netlag 250` and `-netloss 5`.

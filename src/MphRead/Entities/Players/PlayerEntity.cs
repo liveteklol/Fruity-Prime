@@ -264,10 +264,9 @@ namespace MphRead.Entities
         private ushort _bombOveruse = 0;
         private ushort _boostCharge = 0;
         private ushort _boostDamage = 0;
-        // Set by a touch platform's swipe gesture, and consumed as a forced
-        // full charge by the boost handling below -- see the "touch boost"
-        // note there.
-        public bool SwipeBoostRequested { get; set; }
+        // Mouse/touch gesture consumed once by the shared alt-form ability path.
+        // Samus aims a boost; Spire requests the normal alt-attack press.
+        public bool AltFlickRequested { get; set; }
         /// <summary>
         /// Which way that flick went, as the screen saw it: X to the right,
         /// Y downwards, unit length. The boost goes where the thumb went
@@ -275,8 +274,8 @@ namespace MphRead.Entities
         /// turned into a world direction against the same camera-relative
         /// basis the ball rolls with. Zero means "wherever it is heading".
         /// </summary>
-        public float SwipeBoostX { get; set; }
-        public float SwipeBoostY { get; set; }
+        public float AltFlickX { get; set; }
+        public float AltFlickY { get; set; }
         /// <summary>
         /// Frames of committed travel left on a boost a flick aimed, during
         /// which the roll binds do not steer.
