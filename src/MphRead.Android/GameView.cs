@@ -1148,6 +1148,9 @@ namespace MphRead.Droid
                 // Start, on a pad, is the MENU button. Same call, same
                 // reason it is a request rather than a call: the menu is a
                 // view swap on the UI thread and this is the GL one.
+                if (MphRead.Mods.Chat.ChatBox.Composing && MphRead.Mods.Input.GamepadInput.TakePress(
+                    MphRead.Mods.Input.GamepadButtons.B | MphRead.Mods.Input.GamepadButtons.Start))
+                    MphRead.Mods.Chat.ChatBox.Cancel();
                 if (MphRead.Mods.Input.GamepadInput.TakeMenuPress())
                 {
                     _onPauseMenu();

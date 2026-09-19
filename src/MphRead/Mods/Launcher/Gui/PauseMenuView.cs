@@ -51,6 +51,9 @@ namespace MphRead.Mods.Launcher.Gui
         public event EventHandler? VoteMapRequested;
 
         private readonly DeckButton _resume;
+        private readonly DeckButton _voteYes;
+        private readonly DeckButton _voteNo;
+        private readonly StackPanel _menu;
 
         /// <param name="offerWindowMode">
         /// Show the fullscreen/windowed entry. False on a phone, which has one
@@ -65,12 +68,20 @@ namespace MphRead.Mods.Launcher.Gui
             // carries its own edge, and fourteen points between two objects
             // that already have a bottom lip is a gap.
             var menu = new StackPanel { Spacing = 6, Width = 230 };
+            _menu = menu;
             // Titles only. Every entry here used to say what it did twice --
             // "Quit", "Close FruityPrime" -- and the second saying is what
             // made a seven-line menu tall enough to be cut off by the window
             // it is drawn over.
             _resume = Add(menu, "Resume", () => Resumed?.Invoke(this, EventArgs.Empty),
                 Deck.Face.Moss);
+            _voteYes = Add(menu, "Accept map vote", () => AnswerVote(true), Deck.Face.Moss);
+            _voteNo = Add(menu, "Deny map vote", () => AnswerVote(false), Deck.Face.Rust);
+            RefreshVote();
+            var voteTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(200) };
+            voteTimer.Tick += (_, _) => RefreshVote();
+            AttachedToVisualTree += (_, _) => voteTimer.Start();
+            DetachedFromVisualTree += (_, _) => voteTimer.Stop();
             if (!DemoPlayback.IsActive && NetSession.Active)
             {
                 // Offered whenever there is a server to ask, rather than only
@@ -157,8 +168,36 @@ namespace MphRead.Mods.Launcher.Gui
         /// What the column needs at full size: eight words, their spacing, and
         /// the corner it is anchored in.
         /// </summary>
-        private const double NeededHeight = 8 * 26 + 7 * 14
-            + UiLayout.WellTop + UiLayout.WellBottom + 70;
+        private double NeededHeight
+        {
+            get
+            {
+                int count = 0;
+                foreach (Control child in _menu.Children)
+                {
+                    if (child.IsVisible) count++;
+                }
+                return count * 26 + Math.Max(0, count - 1) * 6
+                    + UiLayout.WellTop + UiLayout.WellBottom + 70;
+            }
+        }
+
+        internal void RefreshVote()
+        {
+            bool visible = MapVote.Active && !MapVote.Answered && !DemoPlayback.IsActive;
+            if (_voteYes.IsVisible == visible && _voteNo.IsVisible == visible) return;
+            bool refocus = !visible && (_voteYes.IsFocused || _voteNo.IsFocused);
+            _voteYes.IsVisible = _voteNo.IsVisible = visible;
+            if (refocus) _resume.Focus();
+            FitToHost(Bounds.Height);
+        }
+
+        private void AnswerVote(bool yes)
+        {
+            MapVote.Cast(yes);
+            RefreshVote();
+            Resumed?.Invoke(this, EventArgs.Empty);
+        }
 
         /// <summary>
         /// Fit the column to the height it has been given, down to half size.
@@ -187,6 +226,17 @@ namespace MphRead.Mods.Launcher.Gui
         public void FocusResume()
         {
             Dispatcher.UIThread.Post(() => _resume.Focus(), DispatcherPriority.Background);
+        }
+
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            if (e.Key == Key.Escape)
+            {
+                Resumed?.Invoke(this, EventArgs.Empty);
+                e.Handled = true;
+                return;
+            }
+            base.OnKeyDown(e);
         }
 
         private static string WindowLabel()

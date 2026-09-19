@@ -120,6 +120,25 @@ namespace MphRead.Mods
             Switch(next);
         }
 
+        /// <summary>Move to the previous active player when driven by a controller.</summary>
+        public static void CyclePrevious()
+        {
+            if (!IsSpectating)
+            {
+                return;
+            }
+            int previous = FindPreviousActiveSlot(PlayerEntity.MainPlayerIndex);
+            if (previous == -1)
+            {
+                return;
+            }
+            if (FreeCamera)
+            {
+                _cameraRequest = false;
+            }
+            Switch(previous);
+        }
+
         /// <summary>
         /// Space, while spectating: the map, or the player you were watching.
         ///
@@ -248,6 +267,27 @@ namespace MphRead.Mods
             FreeCamera = false;
             ShowScoreboard = false;
             _cameraRequest = null;
+        }
+
+        private static int FindPreviousActiveSlot(int fromSlot)
+        {
+            int localSlot = Network.NetHooks.LocalSlot;
+            IReadOnlyList<PlayerEntity> players = PlayerEntity.Players;
+            for (int offset = 1; offset <= players.Count; offset++)
+            {
+                int index = (fromSlot - offset + players.Count) % players.Count;
+                if (index == localSlot)
+                {
+                    continue;
+                }
+                PlayerEntity candidate = players[index];
+                if (candidate.LoadFlags.TestFlag(LoadFlags.Active)
+                    && candidate.LoadFlags.TestFlag(LoadFlags.Spawned) && candidate.Health > 0)
+                {
+                    return index;
+                }
+            }
+            return -1;
         }
 
         private static int FindNextActiveSlot(int fromSlot)

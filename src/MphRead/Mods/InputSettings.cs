@@ -112,27 +112,27 @@ namespace MphRead.Mods
         /// </summary>
         public static float GamepadDeadZone
         {
-            get => _gamepadDeadZone;
-            set => _gamepadDeadZone = Math.Clamp(value, 0, 0.9f);
+            get => Input.GamepadOptions.LeftInner;
+            set => Input.GamepadOptions.LeftInner = Input.GamepadOptions.RightInner = Input.GamepadAnalog.Finite(value, 0, 0.9f);
         }
 
-        private static float _gamepadDeadZone = 0.2f;
+
 
         /// <summary>Multiplier on the right stick's turn rate. 1.0 is 210 degrees a second.</summary>
         public static float GamepadLookSensitivity
         {
-            get => _gamepadLook;
-            set => _gamepadLook = Math.Clamp(value, 0.1f, 5f);
+            get => Input.GamepadOptions.LookX;
+            set => Input.GamepadOptions.LookX = Input.GamepadOptions.LookY = Input.GamepadAnalog.Finite(value, 0.1f, 5);
         }
 
-        private static float _gamepadLook = 1f;
+
 
         /// <summary>
         /// Invert the right stick's vertical aim. Its own setting rather than
         /// sharing the mouse's, because a great many people invert one and not
         /// the other, and there is no third thing they would rather set.
         /// </summary>
-        public static bool GamepadInvertY { get; set; }
+        public static bool GamepadInvertY { get => Input.GamepadOptions.InvertY; set => Input.GamepadOptions.InvertY = value; }
 
         private static bool _creating;
         private static PlayerControls? _current;
@@ -332,13 +332,17 @@ namespace MphRead.Mods
 
         public static void Load()
         {
+            Input.GamepadProfiles.Initialize();
             if (!File.Exists(Path))
             {
                 return;
             }
             try
             {
-                foreach (string raw in File.ReadAllLines(Path))
+                bool? stylusMode = null;
+                bool? legacyGuard = null;
+                string[] savedLines = File.ReadAllLines(Path);
+                foreach (string raw in savedLines)
                 {
                     string line = raw.Trim();
                     int split = line.IndexOf('=');
@@ -369,7 +373,12 @@ namespace MphRead.Mods
                     }
                     if (key == "pointer_jump_guard" && Boolean.TryParse(value, out bool guardJumps))
                     {
+                        legacyGuard = guardJumps;
                         Input.PointerInput.GuardJumps = guardJumps;
+                    }
+                    if (key == "stylus_mode" && Boolean.TryParse(value, out bool mode))
+                    {
+                        stylusMode = mode;
                     }
                     if (key == "stylus_zone" && Boolean.TryParse(value, out bool stylusZone))
                     {
@@ -481,6 +490,15 @@ namespace MphRead.Mods
                         ParseBind(property, value);
                     }
                 }
+                // Old files used pointer_jump_guard as the stylus master. Explicit
+                // new settings win regardless of line order.
+                Input.PointerInput.StylusMode = !OperatingSystem.IsAndroid()
+                    && (stylusMode ?? legacyGuard ?? false);
+                Input.GamepadOptions.Load(savedLines);
+                Input.PadBindings.LoadSlots(savedLines);
+                string? preset = savedLines.LastOrDefault(l => l.StartsWith("gamepad_preset=", StringComparison.Ordinal));
+                if (preset != null && new[] { "Default", "Bumper Jumper", "Southpaw", "Classic", "Custom" }.Contains(preset[15..]))
+                    Input.PadBindings.Preset = preset[15..];
             }
             catch (Exception)
             {
@@ -526,6 +544,7 @@ namespace MphRead.Mods
                     $"invert_y={InvertMouseY.ToString().ToLowerInvariant()}",
                     $"invert_x={InvertMouseX.ToString().ToLowerInvariant()}",
                     $"scroll_all_weapons={ScrollAllWeapons.ToString().ToLowerInvariant()}",
+                    $"stylus_mode={Input.PointerInput.StylusMode.ToString().ToLowerInvariant()}",
                     $"pointer_jump_guard={Input.PointerInput.GuardJumps.ToString().ToLowerInvariant()}",
                     // What was asked for, not what is in force: the zone's
                     // switch survives stylus mode being turned off and on.
@@ -543,11 +562,7 @@ namespace MphRead.Mods
                     "gamepad_look=" + GamepadLookSensitivity.ToString(CultureInfo.InvariantCulture),
                     $"gamepad_invert_y={GamepadInvertY.ToString().ToLowerInvariant()}"
                 };
-                foreach (Input.PadAction action in Input.PadBindings.Actions)
-                {
-                    lines.Add($"{Input.PadBindings.SettingKey(action)}="
-                        + Input.PadBindings.Get(action));
-                }
+                Input.PadBindings.Write(lines);
                 Input.TouchSettings.WriteSettings(lines);
                 foreach (PropertyInfo property in Bindings)
                 {
@@ -560,6 +575,16 @@ namespace MphRead.Mods
                         _ => $"Key:{bind.Key}"
                     };
                     lines.Add($"{property.Name}={value}");
+                }
+                Input.GamepadOptions.Write(lines);
+                lines.Add("gamepad_preset=" + Input.PadBindings.Preset);
+                // Retain keys from newer versions and extensions when updating known settings.
+                var keys = new HashSet<string>(lines.Where(l => l.Contains('='))
+                    .Select(l => l[..l.IndexOf('=')].Trim()), StringComparer.Ordinal);
+                if (File.Exists(Path)) foreach (string original in File.ReadAllLines(Path))
+                {
+                    int split = original.IndexOf('=');
+                    if (split > 0 && !keys.Contains(original[..split].Trim())) lines.Add(original);
                 }
                 File.WriteAllLines(Path, lines);
             }
@@ -587,6 +612,11 @@ namespace MphRead.Mods
             Network.DemoClip.Seconds = 10;
             Input.PadBindings.Reset();
             Input.TouchSettings.Reset();
+            Input.PointerInput.StylusMode = false;
+            Input.PointerInput.GuardJumps = true;
+            Input.StylusZone.Enabled = false;
+            Input.PointerDevice.Reset();
+            Input.GamepadOptions.Reset();
             GamepadDeadZone = 0.2f;
             GamepadLookSensitivity = 1f;
             GamepadInvertY = false;

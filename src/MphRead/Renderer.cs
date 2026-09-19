@@ -965,6 +965,18 @@ namespace MphRead
                 if (mesh.ListId != 0)
                 {
                     continue;
+                    if (Mods.SpectatorMode.IsSpectating && !Mods.PauseMenu.Open)
+                    {
+                        var spectator = Mods.Input.SpectatorInput.ReadController();
+                        spectator.ApplyView();
+                        Mods.SpectatorMode.NoteScoreboard(_keyboardState.IsKeyDown(Keys.Tab) || spectator.Scoreboard);
+                        if (_freeCam)
+                        {
+                            _cameraPosition += _cameraFacing * spectator.MoveY * .15f + _cameraRight * spectator.MoveX * .15f;
+                            _cameraPosition.Y += (spectator.Ascend - spectator.Descend) * .15f;
+                            UpdateCameraRotation(MathHelper.DegreesToRadians(spectator.LookX), MathHelper.DegreesToRadians(spectator.LookY));
+                        }
+                    }
                 }
                 if (!tempListIds.TryGetValue(mesh.DlistId, out int listId))
                 {
@@ -1586,7 +1598,25 @@ namespace MphRead
                 // the things that suppress a keyboard, and by spectating,
                 // where PlayerEntity.Main is somebody else's hunter.
                 Mods.Input.GamepadDesktop.Poll();
+                Mods.Input.GamepadContexts.Current = Mods.Input.GamepadContexts.Resolve(
+                    Mods.Chat.ChatBox.Composing, Mods.EndScreen.Available);
                 Mods.Input.GamepadInput.BeginFrame();
+                if (Mods.SpectatorMode.IsSpectating && !Mods.PauseMenu.Open)
+                {
+                    var spectator = Mods.Input.SpectatorInput.ReadController();
+                    spectator.ApplyView();
+                    Mods.SpectatorMode.NoteScoreboard(
+                        _keyboardState.IsKeyDown(Keys.Tab) || spectator.Scoreboard);
+                    if (_freeCam)
+                    {
+                        _cameraPosition += _cameraFacing * spectator.MoveY * .15f
+                            + _cameraRight * spectator.MoveX * .15f;
+                        _cameraPosition.Y += (spectator.Ascend - spectator.Descend) * .15f;
+                        UpdateCameraRotation(
+                            MathHelper.DegreesToRadians(spectator.LookX),
+                            MathHelper.DegreesToRadians(spectator.LookY));
+                    }
+                }
                 // Straight after the edges are worked out and before anything
                 // consumes them. A pad has no key events to hook, so the
                 // results screen's picker has to be polled, and it takes the
@@ -2620,6 +2650,7 @@ namespace MphRead
                 // the camera is not a player's.
                 PlayerEntity.Main.DrawHudObjects();
             }
+            Mods.Input.AimAssist.AimAssistDebug.Draw(this);
             if (_movieFrameIndex != -1)
             {
                 DrawMovieFrame();
@@ -7219,6 +7250,7 @@ namespace MphRead
 
         protected override void OnLoad()
         {
+            Mods.Input.WindowsPenInput.Attach(this);
             // Not in the shell, which opens with no match in it: the scene is
             // loaded by LoadScene when one is started. The guard also covers
             // the ordinary path twice over, since a caller that has already
@@ -7285,6 +7317,7 @@ namespace MphRead
                 // The launcher, with no match behind it. The pointer is the
                 // system's -- there is nobody to aim.
                 CursorState = CursorState.Normal;
+                Mods.Input.PointerDevice.Reset();
                 Mods.Render.UiOverlay.DrawAlone(this, FramebufferSize.X, FramebufferSize.Y);
                 // Before the swap: the back buffer holds this frame and
                 // nothing else does. Only -shellshot asks.
@@ -7313,7 +7346,7 @@ namespace MphRead
             // the same reason the results screen is.
             CursorState = (Scene.CameraMode == CameraMode.Player || Scene.IsFreeCam) && !Scene.FrameAdvance
                 && !Mods.PauseMenu.Open && !Mods.EndScreen.Available
-                && !Mods.Input.StylusZone.Enabled && !Mods.Input.StylusZone.Placing
+                && !Mods.Input.PointerInput.StylusMode && !Mods.Input.StylusZone.Placing
                 && !Scene.ShowCursor && !GameState.DialogPause && !GameState.MenuPause
                 ? CursorState.Grabbed
                 : CursorState.Normal;
@@ -7328,10 +7361,11 @@ namespace MphRead
             // The DS bottom screen, if the player has marked one out. The
             // window's shape goes with it: the zone is given as a fraction of
             // the width and has to come out the DS's shape on screen.
-            Mods.Input.StylusZone.AspectCorrection = ClientSize.Y > 0
-                ? ClientSize.X / (float)ClientSize.Y : 16f / 9f;
-            Mods.Input.StylusZone.Update(pointerX, pointerY,
-                MouseState.IsButtonDown(MouseButton.Left));
+            var pointer = Mods.Input.WindowsPenInput.Read(MouseState, ClientSize.X, ClientSize.Y,
+                out bool independentPrimary);
+            Mods.Input.PointerDevice.Update(pointer, ClientSize.X, ClientSize.Y, independentPrimary,
+                acceptsInput: IsFocused && !Mods.PauseMenu.Open && !Mods.Chat.ChatBox.Composing
+                    && !GameState.MenuPause && !GameState.DialogPause && !Mods.EndScreen.Available);
             if (Mods.Input.StylusZone.Placing)
             {
                 Mods.Input.StylusZone.PlacementDrag(pointerX, pointerY);
@@ -7365,6 +7399,9 @@ namespace MphRead
             // scene because opening the menu is a window operation and the
             // window is this class -- the same reason the keyboard's Escape
             // is handled in OnKeyDown and not in the entity.
+            if (Mods.Chat.ChatBox.Composing && Mods.Input.GamepadInput.TakePress(
+                Mods.Input.GamepadButtons.B | Mods.Input.GamepadButtons.Start))
+                Mods.Chat.ChatBox.Cancel();
             if (Mods.Input.GamepadInput.TakeMenuPress()
                 && (Scene.CameraMode == CameraMode.Player || Scene.IsFreeCam))
             {
@@ -7525,8 +7562,26 @@ namespace MphRead
             }
         }
 
+        protected override void OnJoystickConnected(JoystickEventArgs e)
+        {
+            Mods.Input.GamepadDesktop.DeviceChanged(e.JoystickId);
+            base.OnJoystickConnected(e);
+        }
+
+        protected override void OnFocusedChanged(FocusedChangedEventArgs e)
+        {
+            Mods.Input.GamepadContexts.Focused = e.IsFocused;
+            if (!e.IsFocused)
+            {
+                Mods.Input.GamepadManager.ClearAll();
+                Mods.Input.GamepadHaptics.Stop();
+            }
+            base.OnFocusedChanged(e);
+        }
+
         protected override void OnMouseDown(MouseButtonEventArgs e)
         {
+            Mods.Input.InputSourceTracker.Note(Mods.Input.InputSource.KeyboardMouse);
 #if MPHREAD_SHELL
             // A screen is up in this window -- the launcher, the pause menu,
             // the settings. It gets the whole of the input while it is, the
@@ -7614,6 +7669,8 @@ namespace MphRead
 
         protected override void OnMouseMove(MouseMoveEventArgs e)
         {
+            if (Math.Abs(e.DeltaX) + Math.Abs(e.DeltaY) > 2)
+                Mods.Input.InputSourceTracker.Note(Mods.Input.InputSource.KeyboardMouse);
 #if MPHREAD_SHELL
             // A screen is up in this window -- the launcher, the pause menu,
             // the settings. It gets the whole of the input while it is, the
@@ -7629,8 +7686,9 @@ namespace MphRead
 #endif
             // Filtered for the same reason the player's aim is: the free
             // camera is reached from a match, with the same pointer.
-            Scene.OnMouseMove(Mods.Input.PointerInput.Filter(e.DeltaX),
-                Mods.Input.PointerInput.Filter(e.DeltaY));
+            (float deltaX, float deltaY) = Scene.IsFreeCam
+                ? Mods.Input.PointerInput.Filter(e.DeltaX, e.DeltaY) : (e.DeltaX, e.DeltaY);
+            Scene.OnMouseMove(deltaX, deltaY);
             base.OnMouseMove(e);
         }
 
@@ -7716,6 +7774,7 @@ namespace MphRead
 
         protected override void OnKeyDown(KeyboardKeyEventArgs e)
         {
+            Mods.Input.InputSourceTracker.Note(Mods.Input.InputSource.KeyboardMouse);
 #if MPHREAD_SHELL
             // F11 and Alt+Enter first, screen or no screen.
             //

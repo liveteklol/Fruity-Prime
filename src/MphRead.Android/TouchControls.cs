@@ -794,6 +794,7 @@ namespace MphRead.Droid
                 float y = _aimDeltaY;
                 _aimDeltaX = 0;
                 _aimDeltaY = 0;
+                Mods.Input.AimInputSourceTracker.Pointer(x, y, true, System.Environment.TickCount64);
                 return (x / Density, y / Density);
             }
         }

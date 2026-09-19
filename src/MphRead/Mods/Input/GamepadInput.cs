@@ -22,14 +22,25 @@ namespace MphRead.Mods.Input
     ///
     /// Where the state comes from is the platform's business:
     /// <see cref="GamepadDesktop"/> polls GLFW, and the Android head adds up
-    /// the events its window receives. Both write <see cref="State"/>.
+    /// the events its window receives. Both publish independent devices through <see cref="GamepadManager"/>.
     /// </summary>
     public static class GamepadInput
     {
         /// <summary>The pad as of this frame.</summary>
-        public static GamepadState State;
+        public static GamepadState State => GamepadManager.ActiveState;
+        private static GamepadState _frame;
+        internal static GamepadSnapshot FrameSnapshot { get; private set; }
+        private static readonly GamepadEdges Edges = new();
+        private static GamepadContext _context;
+        private static GamepadButtons _blocked;
+        private static long _revision = -1, _contextRevision = -1;
+        private static readonly GamepadActions Actions = new();
+        private static long _bindingsRevision = -1;
+        public static bool WheelHeld => _context == GamepadContext.Gameplay && Actions.WheelOpen;
+        public static (float X, float Y) AimStick => GamepadOptions.Southpaw
+            ? GamepadAnalog.ApplyRadialDeadZone(_frame.LeftX, _frame.LeftY, GamepadOptions.LeftInner, GamepadOptions.LeftOuter)
+            : GamepadAnalog.ApplyRadialDeadZone(_frame.RightX, _frame.RightY, GamepadOptions.RightInner, GamepadOptions.RightOuter);
 
-        private static GamepadButtons _previous;
 
         /// <summary>Buttons that went down this frame, for the one-shot actions.</summary>
         private static GamepadButtons _pressed;
@@ -61,19 +72,11 @@ namespace MphRead.Mods.Input
         {
             get
             {
-                if (!Active)
-                {
-                    return false;
-                }
-                if (State.Buttons != GamepadButtons.None)
-                {
-                    return true;
-                }
-                (float leftX, float leftY) = ApplyDeadZone(State.LeftX, State.LeftY);
-                (float rightX, float rightY) = ApplyDeadZone(State.RightX, State.RightY);
-                return leftX != 0 || leftY != 0 || rightX != 0 || rightY != 0
-                    || State.LeftTrigger > TriggerThreshold
-                    || State.RightTrigger > TriggerThreshold;
+                var state = State;
+                if (!state.Connected) return false;
+                var left = GamepadAnalog.ApplyRadialDeadZone(state.LeftX, state.LeftY, GamepadOptions.LeftInner, GamepadOptions.LeftOuter);
+                var right = GamepadAnalog.ApplyRadialDeadZone(state.RightX, state.RightY, GamepadOptions.RightInner, GamepadOptions.RightOuter);
+                return state.Buttons != 0 || left != (0, 0) || right != (0, 0);
             }
         }
 
@@ -93,14 +96,6 @@ namespace MphRead.Mods.Input
         private const float TurnRate = 3.5f;
 
         /// <summary>
-        /// How hard a trigger has to be pulled to count as a press. Two
-        /// thirds rather than a hair off zero: a trigger resting under a
-        /// finger is not a request to fire, and every pad's resting value
-        /// drifts.
-        /// </summary>
-        private const float TriggerThreshold = 0.65f;
-
-        /// <summary>
         /// How far a stick has to go before it counts as movement. The walk
         /// keys are on or off, so this is where a stick becomes a direction.
         /// Larger than the aim dead zone below it, because a thumb resting on
@@ -114,51 +109,36 @@ namespace MphRead.Mods.Input
         /// </summary>
         public static void BeginFrame()
         {
-            if (!Active)
+            var snapshot = GamepadManager.Snapshot;
+            FrameSnapshot = snapshot;
+            GamepadRuntimeConfig.Frame = snapshot.Runtime;
+            _frame = snapshot.State;
+            var context = GamepadContexts.Current;
+            _pressed = Edges.Update(snapshot);
+            long contextRevision = GamepadContexts.Revision;
+            if (_context != context || _revision != snapshot.Revision || _contextRevision != contextRevision || _bindingsRevision != PadBindings.Revision)
             {
-                _pressed = GamepadButtons.None;
-                _previous = GamepadButtons.None;
-                AimDeltaX = 0;
-                AimDeltaY = 0;
-                return;
+                Actions.Reset();
+                _bindingsRevision = PadBindings.Revision;
+                _blocked = _frame.Buttons;
+                _pressed = 0;
             }
-            _pressed = State.Buttons & ~_previous;
-            _previous = State.Buttons;
-            (float x, float y) = ApplyDeadZone(State.RightX, State.RightY);
-            // Squared response, keeping the sign: the useful half of a stick's
-            // travel is the first half, where a shooter wants to make small
-            // corrections. Linear, the same stick has to do both the flick and
-            // the nudge and is bad at the nudge.
-            float sensitivity = InputSettings.GamepadLookSensitivity;
-            AimDeltaX = -x * MathF.Abs(x) * TurnRate * sensitivity;
-            AimDeltaY = y * MathF.Abs(y) * TurnRate * sensitivity
-                * (InputSettings.GamepadInvertY ? -1 : 1);
-        }
-
-        /// <summary>
-        /// A radial dead zone, applied to the pair rather than to each axis.
-        ///
-        /// Per-axis is the common mistake and it is visible: the neutral area
-        /// comes out a square, so a stick pushed diagonally starts to move
-        /// before one pushed straight, and slow circles turn into slow
-        /// octagons. Rescaled past the edge, so the first movement past the
-        /// dead zone is the smallest movement rather than a jump to the dead
-        /// zone's own size.
-        /// </summary>
-        private static (float X, float Y) ApplyDeadZone(float x, float y)
-        {
-            float dead = InputSettings.GamepadDeadZone;
-            float length = MathF.Sqrt(x * x + y * y);
-            if (length <= dead)
-            {
-                return (0, 0);
-            }
-            if (length == 0)
-            {
-                return (0, 0);
-            }
-            float scaled = MathF.Min((length - dead) / (1 - dead), 1);
-            return (x / length * scaled, y / length * scaled);
+            _context = context; _revision = snapshot.Revision; _contextRevision = contextRevision;
+            _blocked &= _frame.Buttons;
+            _frame.Buttons &= ~_blocked;
+            AimDeltaX = AimDeltaY = 0;
+            if (context != GamepadContext.Gameplay || !GamepadContexts.Focused || !_frame.Connected
+                || (PlayerEntity.MainPlayerIndex >= 0 && PlayerEntity.MainPlayerIndex < PlayerEntity.Players.Count
+                    && PlayerEntity.Players[PlayerEntity.MainPlayerIndex] is { Health: 0 })) AimInputSourceTracker.Reset();
+            if (!GamepadContexts.Focused) { _frame = default; _pressed = 0; return; }
+            if (!_frame.Connected) { Actions.Reset(); return; }
+            Actions.Update(_frame.Buttons);
+            if (context != GamepadContext.Gameplay || WheelHeld) return;
+            var (x, y) = AimStick;
+            AimDeltaX = -GamepadAnalog.ApplyResponseCurve(x, GamepadOptions.Curve) * TurnRate * GamepadOptions.LookX
+                * (GamepadOptions.InvertX ? -1 : 1);
+            AimDeltaY = GamepadAnalog.ApplyResponseCurve(y, GamepadOptions.Curve) * TurnRate * GamepadOptions.LookY
+                * (GamepadOptions.InvertY ? -1 : 1);
         }
 
         /// <summary>
@@ -173,15 +153,9 @@ namespace MphRead.Mods.Input
         /// </summary>
         public static bool TakeMenuPress()
         {
-            GamepadButtons menu = PadBindings.Get(PadAction.Menu);
-            if (menu == GamepadButtons.None || (_pressed & menu) == 0)
-            {
-                return false;
-            }
-            // Cleared so a frame that is drawn twice, or a caller that asks
-            // twice, cannot open the menu and close it again in one press.
-            _pressed &= ~menu;
-            return true;
+            if (_context != GamepadContext.Gameplay && _context != GamepadContext.Results) return false;
+            return Actions.Take(PadAction.Menu)
+                || (_context == GamepadContext.Results && TakePress(GamepadButtons.B));
         }
 
         /// <summary>
@@ -193,13 +167,8 @@ namespace MphRead.Mods.Input
         /// </summary>
         public static bool TakeChatPress()
         {
-            GamepadButtons chat = PadBindings.Get(PadAction.Chat);
-            if (chat == GamepadButtons.None || (_pressed & chat) == 0)
-            {
-                return false;
-            }
-            _pressed &= ~chat;
-            return true;
+            if (_context != GamepadContext.Gameplay) return false;
+            return Actions.Take(PadAction.Chat);
         }
 
         /// <summary>
@@ -232,13 +201,17 @@ namespace MphRead.Mods.Input
         /// </summary>
         public static void Apply(PlayerEntity? player)
         {
-            if (player == null || !Active || player.IsBot
+            if (!GamepadContexts.Focused || _context != GamepadContext.Gameplay || player == null || !Active || player.IsBot
                 || !player.LoadFlags.TestFlag(LoadFlags.Active))
             {
                 return;
             }
+            if (player.Health == 0 || player.IsAltForm) Actions.CloseWheel();
             PlayerControls controls = player.Controls;
-            (float moveX, float moveY) = ApplyDeadZone(State.LeftX, State.LeftY);
+            var move = GamepadOptions.Southpaw
+                ? GamepadAnalog.ApplyRadialDeadZone(_frame.RightX, _frame.RightY, GamepadOptions.RightInner, GamepadOptions.RightOuter)
+                : GamepadAnalog.ApplyRadialDeadZone(_frame.LeftX, _frame.LeftY, GamepadOptions.LeftInner, GamepadOptions.LeftOuter);
+            (int moveX, int moveY) = GamepadAnalog.QuantizeMovement(move.X, move.Y);
             // Both sets, as the touch controls do: walking reads Move and the
             // morph ball reads Roll, and a player who has bound them to
             // different keys expects the stick to drive whichever form they
@@ -260,33 +233,12 @@ namespace MphRead.Mods.Input
             // had one attack button, and the game's own defaults still bind
             // the gun and the alt form's attack to the same one), and JUMP is
             // also the ball's boost.
-            GamepadButtons shoot = PadBindings.Get(PadAction.Shoot);
-            Hold(controls.Shoot, shoot);
-            Hold(controls.AltAttack, shoot);
-            Hold(controls.Zoom, PadBindings.Get(PadAction.Zoom));
-            GamepadButtons jump = PadBindings.Get(PadAction.Jump);
-            Hold(controls.Jump, jump);
-            Hold(controls.Boost, jump);
-            Hold(controls.Morph, PadBindings.Get(PadAction.Morph));
-            Hold(controls.Scan, PadBindings.Get(PadAction.Scan));
-            Hold(controls.ScanVisor, PadBindings.Get(PadAction.ScanVisor));
-            // No weapon wheel on a pad, deliberately: PlayerHud's weapon
-            // select reads the *absolute* pointer position, because on the DS
-            // it was a touch screen and the slot under the stylus is the one
-            // that gets picked. A stick has no position, so driving it would
-            // mean warping the mouse cursor about to fake one -- which fights
-            // whoever also has a hand on the mouse, and is a surprising thing
-            // for a controller to do to a desktop. The bumpers and the d-pad
-            // below reach every weapon without it.
-            //
-            // The scoreboard is the DS's own pause button, which is what Back
-            // is shaped like on every pad.
-            Hold(controls.Pause, PadBindings.Get(PadAction.Scoreboard));
-
-            Hold(controls.NextWeapon, PadBindings.Get(PadAction.NextWeapon));
-            Hold(controls.PrevWeapon, PadBindings.Get(PadAction.PrevWeapon));
-            Hold(controls.Missile, PadBindings.Get(PadAction.Missile));
-            Hold(controls.PowerBeam, PadBindings.Get(PadAction.PowerBeam));
+            ApplyBindings(controls);
+            if (Actions.WasPressed(PadAction.LastWeapon) && player.PreviousWeapon != player.CurrentWeapon)
+            {
+                var last = GamepadActions.WeaponBind(controls, player.PreviousWeapon);
+                if (last is not null) Hold(last, true, true);
+            }
 
             // And say that somebody is playing. The binds above are ored on
             // after the pass that answers that question for the keyboard, so
@@ -299,11 +251,21 @@ namespace MphRead.Mods.Input
             }
         }
 
-        private static void Hold(Keybind bind, GamepadButtons buttons)
+        internal static void ApplyBindings(PlayerControls controls)
         {
-            // An unbound action is None, and None & anything is None, so this
-            // needs no case of its own: it simply never holds anything down.
-            Hold(bind, (State.Buttons & buttons) != 0, (_pressed & buttons) != 0);
+            void Bind(Keybind bind, PadAction action) => Hold(bind, Actions.Down(action), Actions.WasPressed(action));
+            Bind(controls.Shoot, PadAction.Shoot); Bind(controls.AltAttack, PadAction.Shoot);
+            Bind(controls.Jump, PadAction.Jump); Bind(controls.Boost, PadAction.Jump);
+            Bind(controls.Zoom, PadAction.Zoom); Bind(controls.Morph, PadAction.Morph);
+            Bind(controls.Scan, PadAction.Scan); Bind(controls.ScanVisor, PadAction.ScanVisor);
+            Hold(controls.WeaponMenu, WheelHeld, Actions.WasPressed(PadAction.WeaponWheel));
+            Bind(controls.Pause, PadAction.Scoreboard);
+            Bind(controls.NextWeapon, PadAction.NextWeapon); Bind(controls.PrevWeapon, PadAction.PrevWeapon);
+            Bind(controls.Missile, PadAction.Missile); Bind(controls.PowerBeam, PadAction.PowerBeam);
+            Bind(controls.VoltDriver, PadAction.VoltDriver); Bind(controls.Battlehammer, PadAction.Battlehammer);
+            Bind(controls.Imperialist, PadAction.Imperialist); Bind(controls.Judicator, PadAction.Judicator);
+            Bind(controls.Magmaul, PadAction.Magmaul); Bind(controls.ShockCoil, PadAction.ShockCoil);
+            Bind(controls.OmegaCannon, PadAction.OmegaCannon); Bind(controls.AffinitySlot, PadAction.AffinitySlot);
         }
 
         private static void Hold(Keybind bind, bool down)
@@ -321,11 +283,14 @@ namespace MphRead.Mods.Input
         /// instead of adding would release a key somebody is holding every
         /// frame it did not have that button pressed.
         /// </summary>
-        private static void Hold(Keybind bind, bool down, bool pressed)
+        internal static void Hold(Keybind bind, bool down, bool pressed)
         {
             if (down)
             {
                 bind.IsDown = true;
+                // Keyboard processing sees the previous combined state. A held pad
+                // must cancel the provisional release caused by an idle keyboard.
+                bind.IsReleased = false;
             }
             if (pressed)
             {

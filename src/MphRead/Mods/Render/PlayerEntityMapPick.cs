@@ -142,6 +142,8 @@ namespace MphRead.Entities
             // reads as "click a map and it happens", which is what it does
             // with nobody else in the room and not what it does with seven.
             string title = MapPick.Eligible > 1 ? "VOTE NEXT MAP  MOST WINS" : "VOTE NEXT MAP";
+            if (Mods.Input.InputSourceTracker.Current == Mods.Input.InputSource.Gamepad)
+                title = Mods.Input.GamepadGlyphs.Resolve(Mods.Input.GamepadButtons.RightBumper).ToUpperInvariant() + " VOTE  UP/DOWN SELECT";
             DrawText2D(centre, top + 1.5f * scale, Align.Center, palette: 0, title,
                 color: _pickDim, fontSpacing: 8, scale: 0.42f * scale);
             int picked = MapPick.PickedIndex;

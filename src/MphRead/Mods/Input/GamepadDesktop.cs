@@ -1,56 +1,30 @@
 using System;
+using System.Linq;
 using OpenTK.Windowing.GraphicsLibraryFramework;
 
 namespace MphRead.Mods.Input
 {
-    /// <summary>
-    /// The desktop's pad, read from GLFW.
-    ///
-    /// <c>glfwGetGamepadState</c> where it can be: GLFW carries SDL's
-    /// controller database, so a DualShock, a Switch Pro pad, an eight-bit-do
-    /// and an Xbox pad all arrive already remapped onto one layout, over USB
-    /// or over Bluetooth alike -- the operating system has already decided
-    /// which of those it is by the time a pad reaches here, and Bluetooth is
-    /// not a different kind of device to it.
-    ///
-    /// And the raw joystick API where it cannot. That database is a snapshot,
-    /// frozen at whichever GLFW the OpenTK redist ships, so "GLFW has never
-    /// heard of this pad" is not a rare case -- it is every pad released since
-    /// that snapshot and every one too obscure to have been in it. Such a pad
-    /// used to be skipped in silence, which is indistinguishable from nothing
-    /// being plugged in and is most of what "my controller does nothing"
-    /// means. Three things now happen before that conclusion is reached:
-    /// <see cref="GamepadMappings"/> offers GLFW whatever mapping files this
-    /// machine has, the scan below falls back to reading the pad raw through
-    /// <see cref="GamepadLayout"/>'s guess, and <c>-gamepad</c> prints the
-    /// mapping line that would replace the guess.
-    ///
-    /// Polled rather than evented, because that is the only shape GLFW offers
-    /// for pads and because the game is a frame loop anyway. Sixteen slots is
-    /// GLFW's own maximum; the first one that answers wins, since nothing here
-    /// has a second player to give the second pad to -- and a mapped pad wins
-    /// over an unmapped one wherever both are plugged in, since the mapped one
-    /// is the one whose buttons are known rather than assumed.
-    /// </summary>
     internal static class GamepadDesktop
     {
-        private static int _slot = -1;
-        private static int _rescanCountdown;
-
-        /// <summary>
-        /// Whether the pad in <see cref="_slot"/> is being read raw. Kept so
-        /// the per-frame read goes back to the same API that found it, and so
-        /// a rescan can still prefer a mapped pad that appears later.
-        /// </summary>
-        private static bool _rawSlot;
-
-        /// <summary>
-        /// Frames between hunts for a pad when none is connected. Once a
-        /// second: <c>glfwGetGamepadState</c> on sixteen empty slots is cheap
-        /// but not free, and a pad switched on mid-match should be usable
-        /// without restarting anything.
-        /// </summary>
-        private const int RescanFrames = 60;
+        private sealed class Slot
+        {
+            public string? Id;
+            public int Generation;
+            public float LeftFloor, RightFloor;
+            public string Name = "gamepad", Mapping = "";
+            public bool Mapped, XInput;
+            public GamepadFamily Family;
+            public GamepadLayout Layout;
+            public GamepadCapabilities Capabilities;
+        }
+        private static readonly Slot[] Slots = CreateSlots();
+        private static bool _unavailable;
+        private static Slot[] CreateSlots()
+        {
+            var slots = new Slot[16];
+            for (int i = 0; i < slots.Length; i++) slots[i] = new Slot();
+            return slots;
+        }
 
         // GLFW's own gamepad indices. Written out rather than taken from an
         // enum because OpenTK 4.9 binds `glfwGetGamepadState` without binding
@@ -79,51 +53,13 @@ namespace MphRead.Mods.Input
         private const int AxisLeftTrigger = 4;
         private const int AxisRightTrigger = 5;
 
-        /// <summary>
-        /// Whether GLFW has been stood up from here. Only ever set true; the
-        /// game's own window may own the library by then and terminating it
-        /// would take the window with it.
-        /// </summary>
-        private static bool _initialised;
-
-        /// <summary>
-        /// Poll for a settings screen rather than for a frame.
-        ///
-        /// Two things the game loop does for free and a menu does not. GLFW
-        /// only refreshes joystick state inside an event poll, and a launcher
-        /// shown before any match has no window pumping one; and the library
-        /// may not have been initialised at all yet, since OpenTK does that
-        /// when it creates the game's window. Both are cheap to ask for again
-        /// and neither is an error when it has already happened.
-        ///
-        /// Called only while a <c>PadRow</c> is listening for a button, so
-        /// nothing here runs for a settings screen nobody is rebinding on.
-        /// </summary>
-        public static void PollForMenu()
+        // OpenTK forwards lifecycle events without replacing GLFW's window-owned callback.
+        public static void DeviceChanged(int index)
         {
-            if (OperatingSystem.IsAndroid())
-            {
-                // Evented there: the activity puts pad presses into the state
-                // whether or not a match is running. See GamepadBridge.
-                return;
-            }
-            try
-            {
-                if (!_initialised)
-                {
-                    Render.DesktopGlContext.PreserveWorkingDirectory();
-                    GLFW.Init();
-                    _initialised = true;
-                }
-                GLFW.PollEvents();
-            }
-            catch (Exception ex) when (ex is DllNotFoundException
-                || ex is EntryPointNotFoundException || ex is BadImageFormatException)
-            {
-                _slot = -2;
-                return;
-            }
-            Poll();
+            if ((uint)index >= Slots.Length) return;
+            var slot = Slots[index];
+            if (slot.Id != null) { GamepadHaptics.Unregister(slot.Id); GamepadManager.RemoveDevice(slot.Id); }
+            slot.Id = null;
         }
 
         public static void Poll()
@@ -145,57 +81,59 @@ namespace MphRead.Mods.Input
                 // No GLFW in this process: the dedicated server, the map
                 // audit, anything headless. Not an error -- there is no window
                 // and there is nobody holding a pad.
-                GamepadInput.State = default;
-                _slot = -2;
+                foreach (var slot in Slots) if (slot.Id != null) GamepadManager.RemoveDevice(slot.Id);
+                _unavailable = true;
             }
         }
 
         private static void PollUnsafe()
         {
-            if (_slot == -2)
+            if (_unavailable) return;
+            if (GamepadMappings.ReloadRequested)
             {
-                return;
+                GamepadMappings.ReloadRequested = false;
+                for (int slot = 0; slot < Slots.Length; slot++) DeviceChanged(slot);
             }
             GamepadMappings.EnsureLoaded();
-            if (_slot >= 0 && (_rawSlot ? TryReadRaw(_slot) : TryRead(_slot)))
+            for (int i = 0; i < Slots.Length; i++)
             {
-                return;
-            }
-            _slot = -1;
-            GamepadInput.State = default;
-            if (_rescanCountdown-- > 0)
-            {
-                return;
-            }
-            _rescanCountdown = RescanFrames;
-            // Mapped pads first, all sixteen slots of them, before any
-            // unmapped one is considered: a pad SDL's database knows has its
-            // buttons where it says they are, and one read raw has them where
-            // GamepadLayout guesses. Somebody with both plugged in should be
-            // playing on the one that is right.
-            for (int i = 0; i < 16; i++)
-            {
-                if (TryRead(i))
+                Slot slot = Slots[i];
+                if (!GLFW.JoystickPresent(i))
                 {
-                    _slot = i;
-                    _rawSlot = false;
-                    Console.WriteLine($"[input] gamepad: {GamepadInput.State.Name}");
-                    return;
+                    if (slot.Id != null) GamepadManager.RemoveDevice(slot.Id);
+                    slot.Id = null;
+                    continue;
+                }
+                if (slot.Id == null)
+                {
+                    slot.Generation++;
+                    string guid = GLFW.GetJoystickGUID(i);
+                    slot.XInput = guid.StartsWith("78696e707574", StringComparison.OrdinalIgnoreCase);
+                    slot.Id = $"glfw:{guid}:{i}:{slot.Generation}";
+                    bool compatible = GamepadMappings.TryMapMacXbox(i);
+                    slot.Mapped = GLFW.JoystickIsGamepad(i);
+                    slot.Mapping = compatible ? "Xbox Bluetooth compatibility" : slot.Mapped ? "GLFW mapping" : "Unmapped fallback";
+                    slot.Name = (slot.Mapped ? GLFW.GetGamepadName(i) : GLFW.GetJoystickName(i)) ?? "gamepad";
+                    if (!slot.Mapped) slot.Name += " (unmapped)";
+                    slot.Family = GamepadGlyphs.Detect(slot.Name, guid);
+                    slot.Layout = GamepadLayout.For(i);
+                    slot.Capabilities = GamepadMappings.Capabilities(guid, slot.Layout.Capabilities(GLFW.GetJoystickAxes(i).Length));
+                    slot.LeftFloor = slot.RightFloor = 0;
+                }
+                if (GamepadMappingWizard.RequestedDevice == slot.Id)
+                    GamepadMappingWizard.Latest = new(slot.Id, GLFW.GetJoystickGUID(i), slot.Name,
+                        GLFW.GetJoystickAxes(i).ToArray(), GLFW.GetJoystickButtons(i).ToArray().Select(b => b == JoystickInputAction.Press).ToArray(),
+                        GLFW.GetJoystickHats(i).ToArray().Select(h => (byte)h).ToArray());
+                if (!(slot.Mapped ? TryRead(i) : TryReadRaw(i)))
+                {
+                    GamepadManager.RemoveDevice(slot.Id);
+                    slot.Id = null;
                 }
             }
-            for (int i = 0; i < 16; i++)
-            {
-                if (TryReadRaw(i))
-                {
-                    _slot = i;
-                    _rawSlot = true;
-                    Console.WriteLine($"[input] gamepad: {GamepadInput.State.Name}"
-                        + " -- no mapping for this device, reading it raw."
-                        + " Run -gamepad to check the buttons, and rebind in"
-                        + " Settings, Controls if any are in the wrong place.");
-                    return;
-                }
-            }
+            string? uniqueId = null;
+            int xinputCount = 0;
+            foreach (var slot in Slots) if (slot.Id != null && slot.XInput) { uniqueId = slot.Id; xinputCount++; }
+            WindowsGamepadHaptics.Synchronize(xinputCount == 1 ? uniqueId : null);
         }
 
         private static unsafe bool TryRead(int slot)
@@ -209,7 +147,7 @@ namespace MphRead.Mods.Input
             var state = new Mods.Input.GamepadState
             {
                 Connected = true,
-                Name = GLFW.GetGamepadName(slot) ?? "gamepad",
+                Name = Slots[slot].Name,
                 LeftX = raw.Axes[AxisLeftX],
                 // Negated: GLFW reports a stick pushed forward as -1 and every
                 // caller above wants forward to be positive. See GamepadState.
@@ -236,42 +174,22 @@ namespace MphRead.Mods.Input
             Add(ref buttons, raw.Buttons, ButtonDpadRight, GamepadButtons.DpadRight);
             Add(ref buttons, raw.Buttons, ButtonDpadDown, GamepadButtons.DpadDown);
             Add(ref buttons, raw.Buttons, ButtonDpadLeft, GamepadButtons.DpadLeft);
-            if (state.LeftTrigger > TriggerPress)
-            {
-                buttons |= GamepadButtons.LeftTrigger;
-            }
-            if (state.RightTrigger > TriggerPress)
-            {
-                buttons |= GamepadButtons.RightTrigger;
-            }
             state.Buttons = buttons;
-            GamepadInput.State = state;
+            GamepadManager.UpdateDevice(Slots[slot].Id!, state, Slots[slot].Mapped, Slots[slot].Family,
+                capabilities: Slots[slot].Capabilities
+                    | (GamepadHaptics.Available(Slots[slot].Id!) ? GamepadCapabilities.Rumble : 0),
+                mapping: Slots[slot].Mapping);
             return true;
         }
 
-        /// <summary>
-        /// A pad GLFW has no mapping for, read through the raw joystick API
-        /// and <see cref="GamepadLayout"/>'s guess at what its numbers mean.
-        ///
-        /// Only reached once every slot has been offered to
-        /// <see cref="TryRead"/>, so a pad that is properly mapped never comes
-        /// through here. What arrives above this file is the same
-        /// <see cref="GamepadState"/> either way: nothing downstream knows or
-        /// cares which of the two read it, which is what keeps the guess in
-        /// one place.
-        ///
-        /// The name says so, because the settings screen shows it and "why is
-        /// my B button jumping" deserves an answer in the one place somebody
-        /// will look.
-        /// </summary>
         private static bool TryReadRaw(int slot)
         {
             if (!GLFW.JoystickPresent(slot) || GLFW.JoystickIsGamepad(slot))
             {
                 return false;
             }
-            float[] axes = GLFW.GetJoystickAxes(slot).ToArray();
-            JoystickInputAction[] buttons = GLFW.GetJoystickButtons(slot).ToArray();
+            ReadOnlySpan<float> axes = GLFW.GetJoystickAxes(slot);
+            ReadOnlySpan<JoystickInputAction> buttons = GLFW.GetJoystickButtons(slot);
             // A device with no axes and no buttons is not something anybody is
             // playing with -- and GLFW counts things that are not pads at all
             // as joysticks, from steering wheels to the accelerometer in a
@@ -280,129 +198,15 @@ namespace MphRead.Mods.Input
             {
                 return false;
             }
-            if (_floorSlot != slot)
-            {
-                _floorSlot = slot;
-                _leftFloor = 0;
-                _rightFloor = 0;
-            }
-            GamepadLayout layout = GamepadLayout.For(slot);
-            var state = new Mods.Input.GamepadState
-            {
-                Connected = true,
-                Name = (GLFW.GetJoystickName(slot) ?? "gamepad") + " (unmapped)",
-                LeftX = Axis(axes, layout.AxisLeftX),
-                LeftY = -Axis(axes, layout.AxisLeftY),
-                RightX = Axis(axes, layout.AxisRightX),
-                RightY = -Axis(axes, layout.AxisRightY),
-                LeftTrigger = Trigger(axes, layout.AxisLeftTrigger, ref _leftFloor),
-                RightTrigger = Trigger(axes, layout.AxisRightTrigger, ref _rightFloor)
-            };
-            GamepadButtons flags = GamepadButtons.None;
-            AddRaw(ref flags, buttons, layout.ButtonA, GamepadButtons.A);
-            AddRaw(ref flags, buttons, layout.ButtonB, GamepadButtons.B);
-            AddRaw(ref flags, buttons, layout.ButtonX, GamepadButtons.X);
-            AddRaw(ref flags, buttons, layout.ButtonY, GamepadButtons.Y);
-            AddRaw(ref flags, buttons, layout.ButtonLeftBumper, GamepadButtons.LeftBumper);
-            AddRaw(ref flags, buttons, layout.ButtonRightBumper, GamepadButtons.RightBumper);
-            AddRaw(ref flags, buttons, layout.ButtonBack, GamepadButtons.Back);
-            AddRaw(ref flags, buttons, layout.ButtonStart, GamepadButtons.Start);
-            AddRaw(ref flags, buttons, layout.ButtonLeftThumb, GamepadButtons.LeftThumb);
-            AddRaw(ref flags, buttons, layout.ButtonRightThumb, GamepadButtons.RightThumb);
-            // On a pad whose triggers are plain buttons they are still the
-            // trigger flags, not two more face buttons: FIRE is on the right
-            // trigger by default and should be wherever the player's finger
-            // already is.
-            AddRaw(ref flags, buttons, layout.ButtonLeftTrigger, GamepadButtons.LeftTrigger);
-            AddRaw(ref flags, buttons, layout.ButtonRightTrigger, GamepadButtons.RightTrigger);
-            // The d-pad is the one part of an unmapped pad that is not a
-            // guess: GLFW reports hats separately, in one shape, on every
-            // device that has one.
-            JoystickHats[] hats = GLFW.GetJoystickHats(slot).ToArray();
-            if (hats.Length > 0)
-            {
-                JoystickHats hat = hats[0];
-                AddHat(ref flags, hat, JoystickHats.Up, GamepadButtons.DpadUp);
-                AddHat(ref flags, hat, JoystickHats.Right, GamepadButtons.DpadRight);
-                AddHat(ref flags, hat, JoystickHats.Down, GamepadButtons.DpadDown);
-                AddHat(ref flags, hat, JoystickHats.Left, GamepadButtons.DpadLeft);
-            }
-            if (state.LeftTrigger > TriggerPress)
-            {
-                flags |= GamepadButtons.LeftTrigger;
-            }
-            if (state.RightTrigger > TriggerPress)
-            {
-                flags |= GamepadButtons.RightTrigger;
-            }
-            state.Buttons = flags;
-            GamepadInput.State = state;
+            var state = Slots[slot].Layout.Read(axes, buttons, GLFW.GetJoystickHats(slot),
+                ref Slots[slot].LeftFloor, ref Slots[slot].RightFloor);
+            state.Name = Slots[slot].Name;
+            GamepadManager.UpdateDevice(Slots[slot].Id!, state, Slots[slot].Mapped, Slots[slot].Family,
+                capabilities: Slots[slot].Layout.Capabilities(axes.Length)
+                    | (GamepadHaptics.Available(Slots[slot].Id!) ? GamepadCapabilities.Rumble : 0),
+                mapping: Slots[slot].Mapping);
             return true;
         }
-
-        /// <summary>
-        /// The lowest each trigger axis has been seen at, and which slot they
-        /// were measured on.
-        ///
-        /// An analogue trigger rests at -1 and pulls to 1 on most pads, and
-        /// rests at 0 on some. Both conventions exist, nothing in the raw API
-        /// says which one a device follows, and reading a 0-resting trigger as
-        /// though it rested at -1 leaves it reporting itself half pulled while
-        /// nobody is touching it. Watching where it actually sits costs two
-        /// floats and covers both.
-        /// </summary>
-        private static int _floorSlot = -1;
-        private static float _leftFloor;
-        private static float _rightFloor;
-
-        private static float Axis(float[] axes, int index)
-        {
-            return index >= 0 && index < axes.Length ? axes[index] : 0;
-        }
-
-        private static float Trigger(float[] axes, int index, ref float floor)
-        {
-            if (index < 0 || index >= axes.Length)
-            {
-                return 0;
-            }
-            float value = axes[index];
-            if (value < floor)
-            {
-                floor = value;
-            }
-            float span = 1 - floor;
-            return span <= 0 ? 0 : Math.Clamp((value - floor) / span, 0, 1);
-        }
-
-        private static void AddRaw(ref GamepadButtons into, JoystickInputAction[] buttons,
-            int index, GamepadButtons flag)
-        {
-            if (index >= 0 && index < buttons.Length
-                && buttons[index] == JoystickInputAction.Press)
-            {
-                into |= flag;
-            }
-        }
-
-        private static void AddHat(ref GamepadButtons into, JoystickHats hat,
-            JoystickHats match, GamepadButtons flag)
-        {
-            // Flags, not values: a hat pushed diagonally reports Up and Right
-            // at once as RightUp, and both directions should reach the game.
-            if ((hat & match) != 0)
-            {
-                into |= flag;
-            }
-        }
-
-        /// <summary>
-        /// Matches <c>GamepadInput</c>'s own threshold: the Android head sets
-        /// the same two flags from its own trigger axes, so the number has to
-        /// be the same on both or the same pull fires on one platform and not
-        /// the other.
-        /// </summary>
-        private const float TriggerPress = 0.65f;
 
         private static unsafe void Add(ref GamepadButtons into,
             byte* buttons, int index, GamepadButtons flag)

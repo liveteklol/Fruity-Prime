@@ -248,6 +248,10 @@
     <ProjectReference Include="..\NcsfPlay\NcsfPlay.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Update="gamecontrollerdb.txt;gamecontrollerdb.LICENSE" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <!-- The native packages ship their own debug symbols, and since SkiaSharp 3
        (which Avalonia 12 binds) publish copies them: libSkiaSharp.pdb is 80 MB
        and libHarfBuzzSharp.pdb another 20, on a download that is otherwise

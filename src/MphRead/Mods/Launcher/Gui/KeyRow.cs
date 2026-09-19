@@ -1,9 +1,12 @@
 using System;
 using System.Reflection;
+using System.Linq;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
+using Avalonia.VisualTree;
+using MphRead.Mods.Input;
 using MphRead.Entities;
 using MphRead.Mods;
 using GlfwKeys = OpenTK.Windowing.GraphicsLibraryFramework.Keys;
@@ -24,6 +27,8 @@ namespace MphRead.Mods.Launcher.Gui
     /// </summary>
     internal sealed class KeyRow : Control
     {
+        static KeyRow() => AffectsRender<KeyRow>(IsFocusedProperty, IsEnabledProperty);
+
         private readonly PropertyInfo? _property;
         private readonly double _labelWidth;
 
@@ -40,6 +45,10 @@ namespace MphRead.Mods.Launcher.Gui
         private readonly Func<GlfwKeys>? _get;
         private readonly Action<GlfwKeys>? _set;
         private bool _listening;
+        private readonly GamepadEdges _padEdges = new();
+        private string? _controllerHint;
+        internal bool Listening => _listening;
+        internal string? BindingName => _property?.Name ?? _label;
         private bool _hot;
         private readonly Tap _tap = new();
 
@@ -218,6 +227,44 @@ namespace MphRead.Mods.Launcher.Gui
             }
             _listening = value;
             AnyListening = value;
+            if (value)
+            {
+                _controllerHint = null;
+                _padEdges.Update(GamepadManager.Snapshot);
+            }
+        }
+
+        internal GamepadButtons ControllerPress(GamepadSnapshot snapshot) => _padEdges.Update(snapshot);
+
+        // Controller presses bind game actions, never synthetic keyboard Enter/arrow keys.
+        internal void OpenControllerBinding(GamepadButtons pressed = 0)
+        {
+            PadAction? action = BindingName switch
+            {
+                "Shoot" or "AltAttack" => PadAction.Shoot, "Jump" or "Boost" => PadAction.Jump,
+                "Zoom" => PadAction.Zoom, "Morph" => PadAction.Morph, "Scan" => PadAction.Scan,
+                "ScanVisor" => PadAction.ScanVisor, "WeaponMenu" => PadAction.WeaponWheel,
+                "Pause" => PadAction.Scoreboard, "NextWeapon" => PadAction.NextWeapon,
+                "PrevWeapon" => PadAction.PrevWeapon, "Missile" => PadAction.Missile,
+                "PowerBeam" => PadAction.PowerBeam, "Chat" => PadAction.Chat,
+                "VoltDriver" => PadAction.VoltDriver, "Battlehammer" => PadAction.Battlehammer,
+                "Imperialist" => PadAction.Imperialist, "Judicator" => PadAction.Judicator,
+                "Magmaul" => PadAction.Magmaul, "ShockCoil" => PadAction.ShockCoil,
+                "OmegaCannon" => PadAction.OmegaCannon, "AffinitySlot" => PadAction.AffinitySlot, _ => null
+            };
+            var settings = this.GetVisualAncestors().OfType<SettingsView>().FirstOrDefault();
+            SetListening(false);
+            if (action.HasValue && settings != null)
+            {
+                settings.ShowSection("Controls", 1);
+                TopLevel.GetTopLevel(settings)?.UpdateLayout();
+                var row = settings.GetVisualDescendants().OfType<PadRow>().First(r => r.Action == action.Value);
+                FocusNavigator.Focus(row);
+                row.Capture(pressed);
+                return;
+            }
+            _controllerHint = "Keyboard only; configure sticks under Gamepad";
+            InvalidateVisual();
         }
 
         private void Done()
@@ -230,6 +277,7 @@ namespace MphRead.Mods.Launcher.Gui
         protected override void OnLostFocus(FocusChangedEventArgs e)
         {
             SetListening(false);
+            _controllerHint = null;
             InvalidateVisual();
             base.OnLostFocus(e);
         }
@@ -328,9 +376,9 @@ namespace MphRead.Mods.Launcher.Gui
 
             string text = _listening
                 ? (_get != null ? "press a key" : "press a key, a mouse button or the wheel")
-                : _get != null
+                : _controllerHint ?? (_get != null
                     ? (_get() == GlfwKeys.Unknown ? "none" : InputSettings.KeyName(_get()))
-                    : InputSettings.Describe(InputSettings.Bind(_property!));
+                    : InputSettings.Describe(InputSettings.Bind(_property!)));
             FormattedText value = TrackedText.Make(text, 12, bold: true,
                 new SolidColorBrush(_listening ? GuiTheme.Warm : GuiTheme.Text));
             // Never wider than the box: a binding nobody has heard of should

@@ -50,6 +50,7 @@ namespace MphRead.Mods.Launcher.Gui
         private readonly Panel _root;
         private readonly Control[] _ground;
         private readonly Border _dark;
+        private string _controllerPrompt = "";
 
         private bool _finished;
         private bool _updatable;
@@ -220,6 +221,12 @@ namespace MphRead.Mods.Launcher.Gui
                 Margin = new Thickness(0, 18, 24, 0),
                 Child = _version
             };
+            _versionBox.Focusable = true;
+            _versionBox.KeyDown += (_, e) =>
+            {
+                if ((e.Key == Key.Enter || e.Key == Key.Space) && _updatable)
+                { e.Handled = true; UpdateNow(); }
+            };
             _versionBox.PointerPressed += (_, e) =>
             {
                 if (_updatable)
@@ -229,10 +236,33 @@ namespace MphRead.Mods.Launcher.Gui
                 }
             };
             root.Children.Add(_versionBox);
+            var help = new TextBlock { Foreground = GuiTheme.TextDimBrush, FontSize = 12,
+                Margin = new Thickness(20, 0, 0, 3), VerticalAlignment = VerticalAlignment.Bottom,
+                HorizontalAlignment = HorizontalAlignment.Left, IsHitTestVisible = false };
+
+            var hints = new DispatcherTimer(TimeSpan.FromMilliseconds(250), DispatcherPriority.Background, (_, _) =>
+            {
+                string prompt = Mods.Input.InputSourceTracker.Current == Mods.Input.InputSource.Gamepad
+                    ? $"{Mods.Input.InputPrompt.For(Mods.Input.UiAction.Accept).Glyph} Select   "
+                        + $"{Mods.Input.InputPrompt.For(Mods.Input.UiAction.Back).Glyph} Back   "
+                        + $"{Mods.Input.InputPrompt.For(Mods.Input.UiAction.PreviousTab).Glyph}/{Mods.Input.InputPrompt.For(Mods.Input.UiAction.NextTab).Glyph} Tabs"
+                    : "Enter Select   Esc Back";
+                if (prompt != _controllerPrompt) { help.Text = prompt; _controllerPrompt = prompt; }
+            });
+            AttachedToVisualTree += (_, _) => hints.Start();
+            DetachedFromVisualTree += (_, _) => hints.Stop();
 
             _overlay = new Panel { Background = Brushes.Transparent, IsVisible = false };
             root.Children.Add(_overlay);
+            root.Children.Add(help);
             Content = root;
+#if ANDROID
+            var navigation = new GamepadNavigation();
+            var timer = new DispatcherTimer(TimeSpan.FromMilliseconds(16), DispatcherPriority.Input,
+                (_, _) => { if (Mods.Input.GamepadContexts.MenuVisible) navigation.Update(this); });
+            AttachedToVisualTree += (_, _) => timer.Start();
+            DetachedFromVisualTree += (_, _) => timer.Stop();
+#endif
 
             if (LauncherPrefs.AutoUpdate)
             {

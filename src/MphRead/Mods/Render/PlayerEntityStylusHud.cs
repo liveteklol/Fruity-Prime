@@ -104,7 +104,13 @@ namespace MphRead.Entities
                 Vector2 home = _weaponSelectHome[i];
                 float x = home.X;
                 float y = home.Y;
-                if (StylusZone.Enabled)
+                if (GamepadInput.WheelHeld)
+                {
+                    float angle = (i + .5f) * MathF.PI / 3;
+                    x = .5f + MathF.Sin(angle) * .23f * _scene.Size.Y / Math.Max(1, _scene.Size.X);
+                    y = .5f - MathF.Cos(angle) * .23f;
+                }
+                else if (StylusZone.Enabled)
                 {
                     x = StylusZone.Left + home.X * StylusZone.Width;
                     y = StylusZone.Top + home.Y * StylusZone.Height;
@@ -114,7 +120,7 @@ namespace MphRead.Entities
                 _selectBoxInsts[i].PositionX = x;
                 _selectBoxInsts[i].PositionY = y;
             }
-            return StylusZone.Enabled ? StylusZone.Height : 1;
+            return StylusZone.Enabled && !GamepadInput.WheelHeld ? StylusZone.Height : 1;
         }
 
         /// <summary>

@@ -379,37 +379,30 @@ namespace MphRead.Mods
         /// The same from a pad's d-pad, taken once a frame rather than from an
         /// event: GLFW reports a pad by polling, so there is no press to hook.
         /// </summary>
+        private static readonly Input.GamepadUiRouter ResultPad = CreateResultPad();
+        private static Input.GamepadUiRouter CreateResultPad()
+        {
+            var router = new Input.GamepadUiRouter();
+            router.Action += action =>
+            {
+                switch (action)
+                {
+                    case Input.UiAction.Left: Step(-1, 0); break;
+                    case Input.UiAction.Right: Step(1, 0); break;
+                    case Input.UiAction.Up: StepList(-1); break;
+                    case Input.UiAction.Down: StepList(1); break;
+                    case Input.UiAction.Accept: ToggleReady(); break;
+                    case Input.UiAction.NextTab: if (MapPick.Available) MapPick.ChooseCursor(); break;
+                }
+            };
+            return router;
+        }
         public static void PollGamepad()
         {
-            if (!Available)
-            {
-                return;
-            }
-            if (Input.GamepadInput.TakePress(Input.GamepadButtons.DpadLeft))
-            {
-                Step(-1, 0);
-            }
-            if (Input.GamepadInput.TakePress(Input.GamepadButtons.DpadRight))
-            {
-                Step(1, 0);
-            }
-            if (Input.GamepadInput.TakePress(Input.GamepadButtons.DpadUp))
-            {
-                StepList(-1);
-            }
-            if (Input.GamepadInput.TakePress(Input.GamepadButtons.X) && MapPick.Available)
-            {
-                MapPick.ChooseCursor();
-            }
-            // A is the results screen's confirm, which is what Ready is.
-            if (Input.GamepadInput.TakePress(Input.GamepadButtons.A))
-            {
-                ToggleReady();
-            }
-            if (Input.GamepadInput.TakePress(Input.GamepadButtons.DpadDown))
-            {
-                StepList(1);
-            }
+            ResultPad.Update(Input.GamepadManager.Snapshot, Available && Input.GamepadContexts.Focused
+                && Input.GamepadContexts.Current == Input.GamepadContext.Results
+                ? Input.GamepadContext.Results : Input.GamepadContext.Gameplay,
+                Environment.TickCount64);
         }
 
         /// <summary>

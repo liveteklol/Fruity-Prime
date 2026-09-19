@@ -20,7 +20,7 @@ namespace MphRead.Mods.Input
     /// </summary>
     internal static class GamepadProbe
     {
-        public static int Run(double seconds)
+        public static int Run(double seconds, bool verbose = false)
         {
             Render.DesktopGlContext.PreserveWorkingDirectory();
             if (!GLFW.Init())
@@ -30,7 +30,7 @@ namespace MphRead.Mods.Input
             }
             try
             {
-                return Watch(seconds);
+                return Watch(seconds, verbose);
             }
             finally
             {
@@ -38,7 +38,7 @@ namespace MphRead.Mods.Input
             }
         }
 
-        private static int Watch(double seconds)
+        private static int Watch(double seconds, bool verbose)
         {
             Console.WriteLine($"[gamepad] watching for {seconds:0} s. "
                 + $"dead zone {InputSettings.GamepadDeadZone:0.00}, "
@@ -62,6 +62,22 @@ namespace MphRead.Mods.Input
                 GamepadState state = GamepadInput.State;
                 everConnected |= state.Connected;
                 string line = Describe(state);
+                if (verbose) foreach (var device in GamepadManager.Devices)
+                {
+                    var left = GamepadAnalog.ApplyRadialDeadZone(device.State.LeftX, device.State.LeftY,
+                        GamepadOptions.LeftInner, GamepadOptions.LeftOuter);
+                    var right = GamepadAnalog.ApplyRadialDeadZone(device.State.RightX, device.State.RightY,
+                        GamepadOptions.RightInner, GamepadOptions.RightOuter);
+                    line += $"\n    {device.DeviceId} {device.Family} mapped={device.IsMapped} active={device == GamepadManager.ActiveDevice}"
+                        + $" mapping={device.Mapping} capabilities={device.Capabilities} {Describe(device.State)} processed L{left} R{right}";
+                }
+                if (verbose) for (int slot = 0; slot < 16; slot++)
+                {
+                    if (!GLFW.JoystickPresent(slot)) continue;
+                    line += $"\n    raw slot {slot} axes=[{string.Join(",", GLFW.GetJoystickAxes(slot).ToArray())}]"
+                        + $" buttons=[{string.Join(",", GLFW.GetJoystickButtons(slot).ToArray())}]"
+                        + $" hats=[{string.Join(",", GLFW.GetJoystickHats(slot).ToArray())}]";
+                }
                 if (line != last)
                 {
                     last = line;
@@ -163,23 +179,13 @@ namespace MphRead.Mods.Input
         /// do is read it out of that method, since the mapping is a run of
         /// calls rather than a table, so the two are kept side by side.
         /// </summary>
-        private static string Actions(GamepadButtons buttons)
+        internal static string Actions(GamepadButtons buttons)
         {
             var text = new StringBuilder();
-            Name(text, buttons, GamepadButtons.RightTrigger, "shoot/alt-attack");
-            Name(text, buttons, GamepadButtons.LeftTrigger, "zoom");
-            Name(text, buttons, GamepadButtons.A, "jump/boost");
-            Name(text, buttons, GamepadButtons.B, "morph");
-            Name(text, buttons, GamepadButtons.X, "scan");
-            Name(text, buttons, GamepadButtons.Y, "scan visor");
-            Name(text, buttons, GamepadButtons.Back, "scoreboard");
-            Name(text, buttons, GamepadButtons.RightBumper | GamepadButtons.DpadRight,
-                "next weapon");
-            Name(text, buttons, GamepadButtons.LeftBumper | GamepadButtons.DpadLeft,
-                "previous weapon");
-            Name(text, buttons, GamepadButtons.DpadUp, "missile");
-            Name(text, buttons, GamepadButtons.DpadDown, "power beam");
-            Name(text, buttons, GamepadButtons.Start, "pause menu");
+            ulong active = PadBindings.Evaluate(buttons);
+            foreach (PadAction action in PadBindings.Actions)
+                if ((active & (1UL << (int)action)) != 0)
+                { if (text.Length > 0) text.Append(", "); text.Append(PadBindings.Name(action)); }
             return text.Length == 0 ? "(nothing bound)" : text.ToString();
         }
 

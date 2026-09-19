@@ -935,7 +935,8 @@ namespace MphRead.Entities
 
         private void UpdateWeaponSelect()
         {
-            int selection = Mods.Input.WeaponWheel.Absolute
+            int selection = Mods.Input.GamepadInput.WheelHeld ? ModControllerWeaponSelection()
+                : Mods.Input.WeaponWheel.Absolute
                 ? UpdateWeaponArc()
                 : UpdateWeaponDrag();
             for (int i = 0; i < 6; i++)
@@ -991,8 +992,8 @@ namespace MphRead.Entities
         private int UpdateWeaponArc()
         {
             int selection = -1;
-            float x = Input.MouseState?.X ?? 0;
-            float y = Input.MouseState?.Y ?? 0;
+            float x = Input.PointerX;
+            float y = Input.PointerY;
             float ratioX = _scene.Size.X / 256f;
             float ratioY = _scene.Size.Y / 192f;
             float originX = 0;
@@ -1019,52 +1020,9 @@ namespace MphRead.Entities
             float distY = y - (originY + 38 * ratioY);
             if (distX > 0 && distY > 0 && distX * distX + distY * distY > 20 * ratioY * 20 * ratioY)
             {
-                float div = distX / distY;
-                if (div >= Fixed.ToFloat(1060) * ratioX / (Fixed.ToFloat(3956) * ratioY))
-                {
-                    if (div >= Fixed.ToFloat(2048) * ratioX / (Fixed.ToFloat(3547) * ratioY))
-                    {
-                        if (div >= Fixed.ToFloat(2896) * ratioX / (Fixed.ToFloat(2896) * ratioY))
-                        {
-                            if (div >= Fixed.ToFloat(3547) * ratioX / (Fixed.ToFloat(2048) * ratioY))
-                            {
-                                if (div >= Fixed.ToFloat(3956) * ratioX / (Fixed.ToFloat(1060) * ratioY))
-                                {
-                                    if (_availableWeapons[BeamType.ShockCoil])
-                                    {
-                                        selection = 5;
-                                        WeaponSelection = BeamType.ShockCoil;
-                                    }
-                                }
-                                else if (_availableWeapons[BeamType.Magmaul])
-                                {
-                                    selection = 4;
-                                    WeaponSelection = BeamType.Magmaul;
-                                }
-                            }
-                            else if (_availableWeapons[BeamType.Judicator])
-                            {
-                                selection = 3;
-                                WeaponSelection = BeamType.Judicator;
-                            }
-                        }
-                        else if (_availableWeapons[BeamType.Imperialist])
-                        {
-                            selection = 2;
-                            WeaponSelection = BeamType.Imperialist;
-                        }
-                    }
-                    else if (_availableWeapons[BeamType.Battlehammer])
-                    {
-                        selection = 1;
-                        WeaponSelection = BeamType.Battlehammer;
-                    }
-                }
-                else if (_availableWeapons[BeamType.VoltDriver])
-                {
-                    selection = 0;
-                    WeaponSelection = BeamType.VoltDriver;
-                }
+                float angleX = distX / ratioX;
+                float angleY = distY / ratioY;
+                selection = ModResolveWeaponSlot(Mods.Input.WeaponSelectionDirection.Resolve(angleX, angleY));
             }
             return selection;
         }

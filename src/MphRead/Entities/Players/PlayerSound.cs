@@ -325,6 +325,7 @@ namespace MphRead.Entities
 
         private void PlayLandingSfx()
         {
+            if (_timeBeforeLanding > 30) ModControllerFeedback(Mods.Input.GamepadFeedback.Landing);
             int sfxId = Metadata.TerrainSfx[(int)_standTerrain, (int)TerrainSfx.Land];
             float amountA = 0xFFFF * _timeBeforeLanding / (90f * 2); // todo: FPS stuff
             _soundSource.PlaySfx(sfxId, amountA: amountA);

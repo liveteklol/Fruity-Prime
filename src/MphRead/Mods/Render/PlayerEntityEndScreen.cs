@@ -270,7 +270,8 @@ namespace MphRead.Entities
             // characters and at the larger size it ran out of both ends of its
             // own box.
             DrawText2D(centre, top + 3.5f * EndScale, Align.Center, palette: 0,
-                on ? "WAITING FOR OTHERS" : "READY",
+                on ? "WAITING FOR OTHERS" : Mods.Input.InputSourceTracker.Current == Mods.Input.InputSource.Gamepad
+                    ? Mods.Input.GamepadGlyphs.Resolve(Mods.Input.GamepadButtons.A).ToUpperInvariant() + " READY" : "READY",
                 color: on ? _endReadyInk : _endArrow, fontSpacing: 8, scale: 0.42f * EndScale);
             return ModHudHit(left, top, right, bottom);
         }

@@ -98,11 +98,13 @@ namespace MphRead.Mods.Launcher.Gui
         /// </summary>
         private double _raster = 1;
         private Control? _view;
+        private readonly GamepadNavigation _gamepad = new();
         private Point _pointer;
         private RawInputModifiers _modifiers;
 
         private UiSurface()
         {
+            _gamepad.Changed += () => Invalidate();
             // Stretched, and the screen inside it is given no size of its own.
             // LayoutTransformControl measures its child through the inverse of
             // its own transform, so a host that fills the window measures the
@@ -202,6 +204,7 @@ namespace MphRead.Mods.Launcher.Gui
         {
             Invalidate();
             _view = view;
+            Mods.Input.GamepadContexts.MenuVisible = true;
             // Whatever the screen thinks its size is, the window's is the one
             // that counts: the host stretches and measures it through the
             // scale, so a stale Width or Height on the view would be the one
@@ -259,6 +262,7 @@ namespace MphRead.Mods.Launcher.Gui
         public void Hide()
         {
             _view = null;
+            Mods.Input.GamepadContexts.MenuVisible = false;
             _host.Child = null;
             UiOverlay.Visible = false;
             // Anything the screen posted -- a closing animation, a preview
@@ -668,6 +672,8 @@ namespace MphRead.Mods.Launcher.Gui
                 UiOverlay.Visible = false;
                 return;
             }
+            Mods.Input.GamepadDesktop.Poll();
+            _gamepad.Update(_view);
             RunPending();
             ApplyScale();
             // Always running, not only while the debug log is: the calibration

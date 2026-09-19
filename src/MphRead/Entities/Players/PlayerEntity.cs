@@ -1883,6 +1883,8 @@ namespace MphRead.Entities
             // Mods.Network.NetHitPrediction.
             Mods.Network.NetHitPrediction.NoteHit(this, attacker, flags, ref damage,
                 beam?.Beam ?? BeamType.None, beam?.ModLaunchFrame ?? 0, beam?.Age ?? 0);
+            if (attacker != this)
+                Mods.Input.AimAssist.AimAssistTelemetry.Hit(attacker, beam?.Beam ?? BeamType.None, damage);
             bool dead = false;
             if (IsBot && GameState.SinglePlayer && AiData.Flags1 && _health <= AiData.HealthThreshold)
             {
@@ -1906,6 +1908,10 @@ namespace MphRead.Entities
                     _hidingTimer = 0;
                 }
             }
+            if (damage > 0 || dead)
+                ModControllerFeedback(dead ? Mods.Input.GamepadFeedback.Death
+                    : bomb != null || beam?.Beam == BeamType.Missile || beam?.Beam == BeamType.Magmaul ? Mods.Input.GamepadFeedback.Explosion
+                    : Mods.Input.GamepadFeedback.Damage);
             if (dead)
             {
                 // todo?: the game encodes the beam in the damage flags for wifi stuff

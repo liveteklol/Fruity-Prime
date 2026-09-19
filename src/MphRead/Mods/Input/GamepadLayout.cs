@@ -3,39 +3,8 @@ using OpenTK.Windowing.GraphicsLibraryFramework;
 
 namespace MphRead.Mods.Input
 {
-    /// <summary>
-    /// Which axis and which button is which, on a pad nobody has a mapping
-    /// for.
-    ///
-    /// The second answer to an unmapped pad, after <see cref="GamepadMappings"/>
-    /// -- and the one that needs nothing of the player. GLFW's raw joystick API
-    /// hands over a bag of numbered axes and numbered buttons with no idea what
-    /// any of them are for, which is exactly why <c>glfwJoystickIsGamepad</c>
-    /// exists and why an unmapped pad was ignored. But the bag is not
-    /// arbitrary: the two shapes below cover nearly every pad that reaches a PC,
-    /// and picking between them by counting axes gets an unknown pad playing
-    /// the game instead of doing nothing at all.
-    ///
-    /// <b>Six or more axes</b> -- an Xbox-shaped pad with analogue triggers,
-    /// the layout Linux's own driver reports and the one SDL's database gives
-    /// nearly every such device: sticks on 0/1 and 3/4, triggers on 2 and 5,
-    /// buttons A B X Y LB RB Back Start Guide L3 R3 in that order.
-    ///
-    /// <b>Four or five axes</b> -- the flat "USB gamepad" shape, where the
-    /// shoulders and triggers are all four plain buttons: sticks on 0/1 and
-    /// 2/3, then four face buttons, two shoulders, two triggers, select, start,
-    /// and the two stick clicks.
-    ///
-    /// Both are guesses, and a guess is allowed here because of what it is
-    /// weighed against. Every action but the two sticks is rebindable in
-    /// Settings -> Controls, so a player whose face buttons come out shuffled
-    /// can put them right in a minute; a player whose pad is ignored has
-    /// nothing to put right. <c>-gamepad</c> prints what each button reached
-    /// and offers the mapping line that would make the guess unnecessary.
-    ///
-    /// The d-pad is not guessed at: GLFW reports hats separately from buttons
-    /// and every pad that has one reports it the same way.
-    /// </summary>
+    // Raw profiles are platform/device-specific. Axis count alone cannot distinguish
+    // Linux's interleaved Xbox axes from the macOS Bluetooth HID layout.
     internal readonly struct GamepadLayout
     {
         public readonly int AxisLeftX;
@@ -59,6 +28,13 @@ namespace MphRead.Mods.Input
         public readonly int ButtonLeftThumb;
         public readonly int ButtonRightThumb;
 
+        internal GamepadCapabilities Capabilities(int axes)
+        {
+            bool Has(int axis) => axis >= 0 && axis < axes;
+            return (Has(AxisLeftX) && Has(AxisLeftY) ? GamepadCapabilities.AnalogLeftStick : 0)
+                | (Has(AxisRightX) && Has(AxisRightY) ? GamepadCapabilities.AnalogRightStick : 0)
+                | (Has(AxisLeftTrigger) && Has(AxisRightTrigger) ? GamepadCapabilities.AnalogTriggers : 0);
+        }
         private GamepadLayout(int axisLeftX, int axisLeftY, int axisRightX, int axisRightY,
             int axisLeftTrigger, int axisRightTrigger, int buttonA, int buttonB, int buttonX,
             int buttonY, int buttonLeftBumper, int buttonRightBumper, int buttonLeftTrigger,
@@ -103,25 +79,73 @@ namespace MphRead.Mods.Input
             buttonLeftTrigger: 6, buttonRightTrigger: 7,
             buttonBack: 8, buttonStart: 9, buttonLeftThumb: 10, buttonRightThumb: 11);
 
-        /// <summary>
-        /// Which of the two shapes this joystick is, by counting its axes.
-        ///
-        /// Six is the number that separates them, and it is not a coincidence:
-        /// an analogue trigger costs an axis each, so a pad with two of them
-        /// has at least six and a pad without has four.
-        /// </summary>
+        // SDL_GameControllerDB's macOS Series/updated Xbox Bluetooth HID profile.
+        // Firmware changes alter the GUID without changing this physical layout.
+        private static readonly GamepadLayout MacXboxBluetooth = new GamepadLayout(
+            axisLeftX: 0, axisLeftY: 1, axisRightX: 2, axisRightY: 3,
+            axisLeftTrigger: 5, axisRightTrigger: 4,
+            buttonA: 0, buttonB: 1, buttonX: 3, buttonY: 4,
+            buttonLeftBumper: 6, buttonRightBumper: 7,
+            buttonLeftTrigger: -1, buttonRightTrigger: -1,
+            buttonBack: 10, buttonStart: 11, buttonLeftThumb: 13, buttonRightThumb: 14);
+
+        internal static bool IsMacXboxBluetooth(string guid, int axes, int buttons, int hats, bool macOS)
+            => macOS && axes == 6 && buttons >= 15 && hats == 1 && guid.Length == 32
+                && guid.AsSpan(0, 8).Equals("03000000", StringComparison.OrdinalIgnoreCase)
+                && guid.AsSpan(8, 8).Equals("5e040000", StringComparison.OrdinalIgnoreCase)
+                && (guid.AsSpan(16, 8).Equals("130b0000", StringComparison.OrdinalIgnoreCase)
+                    || guid.AsSpan(16, 8).Equals("200b0000", StringComparison.OrdinalIgnoreCase));
+
+        internal static GamepadLayout Select(string guid, int axes, int buttons, int hats, bool macOS)
+            => IsMacXboxBluetooth(guid, axes, buttons, hats, macOS) ? MacXboxBluetooth
+                : axes >= 6 ? Triggers : Buttons;
+
         public static GamepadLayout For(int slot)
+            => Select(GLFW.GetJoystickGUID(slot) ?? "", GLFW.GetJoystickAxes(slot).Length,
+                GLFW.GetJoystickButtons(slot).Length, GLFW.GetJoystickHats(slot).Length, OperatingSystem.IsMacOS());
+
+        internal GamepadState Read(ReadOnlySpan<float> axes, ReadOnlySpan<JoystickInputAction> buttons,
+            ReadOnlySpan<JoystickHats> hats, ref float leftFloor, ref float rightFloor)
         {
-            float[]? axes = null;
-            try
+            var state = new GamepadState
             {
-                axes = GLFW.GetJoystickAxes(slot).ToArray();
-            }
-            catch (Exception ex) when (ex is DllNotFoundException
-                || ex is EntryPointNotFoundException || ex is BadImageFormatException)
+                Connected = true,
+                LeftX = Axis(axes, AxisLeftX), LeftY = -Axis(axes, AxisLeftY),
+                RightX = Axis(axes, AxisRightX), RightY = -Axis(axes, AxisRightY),
+                LeftTrigger = Trigger(axes, AxisLeftTrigger, ref leftFloor),
+                RightTrigger = Trigger(axes, AxisRightTrigger, ref rightFloor)
+            };
+            GamepadButtons flags = 0;
+            Add(ref flags, buttons, ButtonA, GamepadButtons.A); Add(ref flags, buttons, ButtonB, GamepadButtons.B);
+            Add(ref flags, buttons, ButtonX, GamepadButtons.X); Add(ref flags, buttons, ButtonY, GamepadButtons.Y);
+            Add(ref flags, buttons, ButtonLeftBumper, GamepadButtons.LeftBumper);
+            Add(ref flags, buttons, ButtonRightBumper, GamepadButtons.RightBumper);
+            Add(ref flags, buttons, ButtonBack, GamepadButtons.Back); Add(ref flags, buttons, ButtonStart, GamepadButtons.Start);
+            Add(ref flags, buttons, ButtonLeftThumb, GamepadButtons.LeftThumb); Add(ref flags, buttons, ButtonRightThumb, GamepadButtons.RightThumb);
+            Add(ref flags, buttons, ButtonLeftTrigger, GamepadButtons.LeftTrigger);
+            Add(ref flags, buttons, ButtonRightTrigger, GamepadButtons.RightTrigger);
+            if (hats.Length > 0)
             {
+                if ((hats[0] & JoystickHats.Up) != 0) flags |= GamepadButtons.DpadUp;
+                if ((hats[0] & JoystickHats.Down) != 0) flags |= GamepadButtons.DpadDown;
+                if ((hats[0] & JoystickHats.Left) != 0) flags |= GamepadButtons.DpadLeft;
+                if ((hats[0] & JoystickHats.Right) != 0) flags |= GamepadButtons.DpadRight;
             }
-            return axes != null && axes.Length >= 6 ? Triggers : Buttons;
+            state.Buttons = flags;
+            return state;
+        }
+        private static float Axis(ReadOnlySpan<float> axes, int index)
+            => index >= 0 && index < axes.Length ? GamepadAnalog.Finite(axes[index]) : 0;
+        private static float Trigger(ReadOnlySpan<float> axes, int index, ref float floor)
+        {
+            if (index < 0 || index >= axes.Length) return 0;
+            float value = GamepadAnalog.Finite(axes[index]);
+            floor = Math.Min(floor, value);
+            return Math.Clamp((value - floor) / (1 - floor), 0, 1);
+        }
+        private static void Add(ref GamepadButtons flags, ReadOnlySpan<JoystickInputAction> buttons, int index, GamepadButtons flag)
+        {
+            if (index >= 0 && index < buttons.Length && buttons[index] == JoystickInputAction.Press) flags |= flag;
         }
     }
 }

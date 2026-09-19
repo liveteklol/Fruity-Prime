@@ -1413,10 +1413,13 @@ namespace MphRead.Entities
                 || Mods.SpectatorMode.IsSpectating
                 || Flags1.TestFlag(PlayerFlags1.NoAimInput))
             {
+                _controllerAssist.Reset();
                 return;
             }
-            float x = Mods.Input.GamepadInput.AimDeltaX;
-            float y = Mods.Input.GamepadInput.AimDeltaY;
+            float x = Mods.Input.GamepadInput.AimDeltaX * (EquipInfo.Zoomed ? Mods.Input.GamepadOptions.ScopedX : 1);
+            float y = Mods.Input.GamepadInput.AimDeltaY * (EquipInfo.Zoomed ? Mods.Input.GamepadOptions.ScopedY : 1);
+            var assisted = ApplyControllerAssist(x, y);
+            x = assisted.X; y = assisted.Y;
             if (x == 0 && y == 0)
             {
                 return;

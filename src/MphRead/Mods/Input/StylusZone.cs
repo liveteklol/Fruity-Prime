@@ -56,7 +56,7 @@ namespace MphRead.Mods.Input
     /// nothing else (<see cref="Aiming"/>) -- not the pointer's raw movement,
     /// which for a tablet is the distance the hand travelled to reach the
     /// weapon it was going for. And the tip never fires
-    /// (<see cref="Capturing"/>): the DS put the trigger on a shoulder button,
+    /// (<see cref="CapturingPrimaryButton"/>): the DS put the trigger on a shoulder button,
     /// this screen has no trigger on it, and here the tip arrives as the left
     /// mouse button, which is the fire bind. A touch that begins *outside* the
     /// zone is an ordinary click and is left alone, which is what a tablet
@@ -371,18 +371,37 @@ namespace MphRead.Mods.Input
             && Held == StylusRegion.WeaponSelect;
 
         /// <summary>
-        /// The pointer belongs to the pen rather than to the game: nothing
-        /// here may fire the gun or turn the view by raw movement.
-        ///
-        /// True for the whole of a touch that began inside the zone, wherever
-        /// the pen has been dragged since, and for the whole of a placement. A
-        /// touch that began outside the zone is an ordinary click and is left
-        /// alone -- which is how a tablet player fires at all, the DS having
-        /// put its trigger on a shoulder button that this screen does not
-        /// have.
+        /// The zone owns the pointer gesture, including placement. Independent
+        /// keyboard, controller and mouse-button input remains available.
+        /// A contact that begins outside the zone remains an ordinary click.
         /// </summary>
-        public static bool Capturing => Placing
-            || (Enabled && Contact && Held != StylusRegion.None);
+        public static bool CapturingPointer => Placing || CapturingPrimaryButton;
+
+        /// <summary>Only the tip's primary button is consumed, never an independent action.</summary>
+        public static bool CapturingPrimaryButton =>
+            Enabled && Contact && Held != StylusRegion.None;
+
+        private static bool _loggedContact;
+        private static bool _loggedCapture;
+
+        private static void LogTransitions()
+        {
+            if (DebugLog.Active)
+            {
+                if (Contact != _loggedContact)
+                {
+                    DebugLog.Line("input", Contact ? $"stylus contact began region={Region}" : "stylus contact ended");
+                }
+                if (CapturingPointer != _loggedCapture)
+                {
+                    DebugLog.Line("input", $"stylus primary button captured={CapturingPrimaryButton} "
+                        + $"pointer={CapturingPointer} contact={Contact} region={Region} held={Held} "
+                        + $"aiming={Aiming} jumps={PointerInput.JumpsIgnored}");
+                }
+            }
+            _loggedContact = Contact;
+            _loggedCapture = CapturingPointer;
+        }
 
         private static bool _lastContact;
         private static bool _aimReady;
@@ -402,6 +421,7 @@ namespace MphRead.Mods.Input
                 Contact = contact;
                 _lastContact = contact;
                 _aimReady = false;
+                LogTransitions();
                 return;
             }
             if (!Enabled)
@@ -412,6 +432,7 @@ namespace MphRead.Mods.Input
                 Contact = false;
                 _lastContact = false;
                 _aimReady = false;
+                LogTransitions();
                 return;
             }
             StylusRegion under = RegionAt(x, y);
@@ -455,6 +476,7 @@ namespace MphRead.Mods.Input
             Region = contact ? Held : under;
             Contact = contact;
             _lastContact = contact;
+            LogTransitions();
         }
 
         /// <summary>Which part of the zone a window position falls in.</summary>
@@ -491,6 +513,8 @@ namespace MphRead.Mods.Input
             _aimReady = false;
             Placing = false;
             _placeAnchored = false;
+            _loggedContact = false;
+            _loggedCapture = false;
         }
     }
 }

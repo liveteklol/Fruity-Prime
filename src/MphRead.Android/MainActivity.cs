@@ -93,6 +93,8 @@ namespace MphRead.Droid
         {
             Instance = this;
             base.OnCreate(savedInstanceState);
+            GamepadBridge.Start(this);
+            MphRead.Mods.Input.GamepadContexts.MenuVisible = true;
             // The desktop builds missing map binaries from ModEntry.TryHandle;
             // this head has no Main for that to live in. Off the UI thread:
             // it reads the extracted game files and writes three binaries per
@@ -417,6 +419,13 @@ namespace MphRead.Droid
         /// controls away for it would be taking them away from a phone with a
         /// pad in a drawer. See <c>GamepadInput.InUse</c>.
         /// </summary>
+        public override bool DispatchTouchEvent(MotionEvent? e)
+        {
+            if (e?.ActionMasked == MotionEventActions.Down)
+                MphRead.Mods.Input.InputSourceTracker.Note(MphRead.Mods.Input.InputSource.Touch);
+            return base.DispatchTouchEvent(e);
+        }
+
         public override bool DispatchGenericMotionEvent(MotionEvent? e)
         {
             if (GamepadBridge.HandleMotion(e))
@@ -442,6 +451,8 @@ namespace MphRead.Droid
         public override void OnWindowFocusChanged(bool hasFocus)
         {
             base.OnWindowFocusChanged(hasFocus);
+            MphRead.Mods.Input.GamepadContexts.Focused = hasFocus;
+            if (!hasFocus) GamepadBridge.Clear();
             if (hasFocus)
             {
                 GoImmersive(true);
@@ -465,6 +476,7 @@ namespace MphRead.Droid
             // to shut itself down on its own thread, which is what
             // Scene.DoCleanup does at the end of the loop.
             _gameView?.Stop();
+            GamepadBridge.Stop();
             base.OnDestroy();
         }
 
@@ -713,6 +725,7 @@ namespace MphRead.Droid
             if (_launcherView != null)
             {
                 _launcherView.Visibility = ViewStates.Visible;
+                MphRead.Mods.Input.GamepadContexts.MenuVisible = true;
             }
             MphRead.Mods.Launcher.Gui.Deck.Asleep = false;
             AndroidApp.Home?.Reset();
@@ -734,6 +747,7 @@ namespace MphRead.Droid
             if (_launcherView != null)
             {
                 _launcherView.Visibility = ViewStates.Gone;
+                MphRead.Mods.Input.GamepadContexts.MenuVisible = false;
             }
             // An Android view going away is not a detach, so the front
             // screen's moving layer would go on filling a noise field and
@@ -1021,6 +1035,7 @@ namespace MphRead.Droid
             if (_launcherView != null)
             {
                 _launcherView.Visibility = ViewStates.Visible;
+                MphRead.Mods.Input.GamepadContexts.MenuVisible = true;
             }
             MphRead.Mods.Launcher.Gui.Deck.Asleep = false;
             GoImmersive(true);
@@ -1037,6 +1052,7 @@ namespace MphRead.Droid
             if (_launcherView != null)
             {
                 _launcherView.Visibility = ViewStates.Gone;
+                MphRead.Mods.Input.GamepadContexts.MenuVisible = false;
             }
             MphRead.Mods.Launcher.Gui.Deck.Asleep = true;
             if (_gameView != null)
@@ -1093,6 +1109,7 @@ namespace MphRead.Droid
             if (_launcherView != null)
             {
                 _launcherView.Visibility = ViewStates.Visible;
+                MphRead.Mods.Input.GamepadContexts.MenuVisible = true;
             }
             MphRead.Mods.Launcher.Gui.Deck.Asleep = false;
             // The front screen is on the glass again, so its ground may move

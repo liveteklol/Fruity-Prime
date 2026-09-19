@@ -27,6 +27,8 @@ namespace MphRead.Mods.Launcher.Gui
         public ConfirmScreen(string question, string yes = "yes", string no = "no",
             bool overGame = false)
         {
+            this.SetValue(ControllerNav.NavScopeProperty, "confirmation");
+            this.SetValue(ControllerNav.ModalProperty, true);
             Background = Brushes.Transparent;
             Focusable = true;
 
@@ -42,6 +44,7 @@ namespace MphRead.Mods.Launcher.Gui
             };
 
             _no = new UiMark(UiMark.Shape.Cancel, no);
+            ControllerNav.Identify(_no, "confirmation.cancel", initial: true);
             _no.Click += (_, _) => Answered?.Invoke(this, false);
             var ok = new UiMark(UiMark.Shape.Accept, yes);
             ok.Click += (_, _) => Answered?.Invoke(this, true);

@@ -97,6 +97,11 @@ namespace MphRead.Entities
             float aspect = HudAspectFix;
             string prompt = MapVote.PromptLine();
             string tally = MapVote.TallyLine();
+            if (!MapVote.Answered && Mods.Input.InputSourceTracker.Current == Mods.Input.InputSource.Gamepad)
+            {
+                tally = tally.Replace("F1 YES / F2 NO",
+                    Mods.Input.PadBindings.Describe(Mods.Input.PadBindings.Get(Mods.Input.PadAction.Menu)).ToUpperInvariant() + " MENU TO VOTE");
+            }
             bool buttons = VoteByTouch && !MapVote.Answered;
             float height = VoteLineHeight * 2 + 4
                 + (buttons ? VoteButtonHeight + VoteButtonGap : 0);

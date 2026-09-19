@@ -28,12 +28,12 @@ namespace MphRead.Mods.Input
     /// Three sources, in the order they are read, later ones winning:
     ///
     /// <list type="bullet">
-    /// <item><c>gamecontrollerdb.txt</c> beside the executable -- what a
-    /// release would ship if one were ever bundled, and where a player who
+    /// <item><c>gamecontrollerdb.txt</c> in application resources (beside the executable
+    /// for portable builds, Contents/Resources for a macOS app) -- what a
+    /// release ships, and where a player who
     /// unzipped the game will naturally drop a file.</item>
     /// <item><c>gamecontrollerdb.txt</c> in the settings directory, beside
-    /// <c>controls.txt</c> -- the one that survives reinstalling, and on
-    /// Android the only one the app can read at all.</item>
+    /// <c>controls.txt</c> -- the one that survives reinstalling.</item>
     /// <item><c>SDL_GAMECONTROLLERCONFIG</c>, SDL's own environment variable,
     /// because somebody who has already made their pad work in another game
     /// most likely did it there.</item>
@@ -46,9 +46,64 @@ namespace MphRead.Mods.Input
     /// </summary>
     internal static class GamepadMappings
     {
+        private static readonly System.Collections.Generic.Dictionary<string, GamepadCapabilities> MappingCapabilities = new(StringComparer.OrdinalIgnoreCase);
+        internal static GamepadCapabilities Capabilities(string guid, GamepadCapabilities fallback)
+            => MappingCapabilities.TryGetValue(guid, out var value) ? value : fallback;
+        internal static GamepadCapabilities ParseCapabilities(string line)
+        {
+            bool lx = false, ly = false, rx = false, ry = false, lt = false, rt = false;
+            foreach (string part in line.Split(','))
+            {
+                int split = part.IndexOf(':'); if (split < 0) continue;
+                string axis = part[(split + 1)..].TrimStart('+', '-');
+                if (!axis.StartsWith('a')) continue;
+                switch (part[..split]) { case "leftx": lx = true; break; case "lefty": ly = true; break;
+                    case "rightx": rx = true; break; case "righty": ry = true; break;
+                    case "lefttrigger": lt = true; break; case "righttrigger": rt = true; break; }
+            }
+            return (lx && ly ? GamepadCapabilities.AnalogLeftStick : 0) | (rx && ry ? GamepadCapabilities.AnalogRightStick : 0)
+                | (lt && rt ? GamepadCapabilities.AnalogTriggers : 0);
+        }
         public const string FileName = "gamecontrollerdb.txt";
 
         private static bool _loaded;
+        internal static bool ReloadRequested;
+        public static void SaveOverride(string mapping)
+        {
+            // The wizard constructs one bounded mapping, while the next host poll applies it.
+            if (mapping.Length > 4096 || mapping.Contains('\n') || mapping.Contains('\r'))
+                throw new ArgumentException("Invalid controller mapping.");
+            string path = Path.Combine(Launcher.LauncherPrefs.Directory, FileName);
+            string existing = File.Exists(path) ? File.ReadAllText(path) : "";
+            Directory.CreateDirectory(Launcher.LauncherPrefs.Directory);
+            GamepadProfiles.WriteAtomic(path, ReplaceOverride(existing, mapping));
+            _loaded = false; ReloadRequested = true;
+        }
+
+        internal static string ReplaceOverride(string existing, string mapping)
+        {
+            static string Key(string line)
+            {
+                var parts = line.Split(',');
+                if (parts.Length < 3 || parts[0].Length != 32) return "";
+                string platform = "";
+                foreach (string part in parts) if (part.StartsWith("platform:", StringComparison.Ordinal)) platform = part;
+                return parts[0].ToLowerInvariant() + ":" + platform;
+            }
+            string key = Key(mapping);
+            if (key.Length == 0) throw new ArgumentException("Invalid controller mapping GUID.");
+            var output = new System.Text.StringBuilder();
+            foreach (string line in existing.Replace("\r", "").Split('\n'))
+                if (line.Length != 0 && Key(line) != key) output.AppendLine(line);
+            output.AppendLine(mapping);
+            return output.ToString();
+        }
+        public static void ResetOverrides()
+        {
+            string path = Path.Combine(Launcher.LauncherPrefs.Directory, FileName);
+            if (File.Exists(path)) GamepadProfiles.WriteAtomic(path, "# Custom controller mappings reset.\n");
+            _loaded = false; ReloadRequested = true;
+        }
 
         /// <summary>What was read, for <c>-gamepad</c> to print.</summary>
         public static string Summary { get; private set; } = "no extra mappings loaded";
@@ -68,6 +123,7 @@ namespace MphRead.Mods.Input
                 return;
             }
             _loaded = true;
+            MappingCapabilities.Clear();
             int files = 0;
             int lines = 0;
             foreach (string path in Paths())
@@ -99,13 +155,13 @@ namespace MphRead.Mods.Input
 
         /// <summary>
         /// Where a mapping file may sit. The settings directory is second so
-        /// that it wins: it is the copy a player edited, and the one beside
-        /// the executable is whatever the download came with.
+        /// that it wins: it is the copy a player edited, and application
+        /// resources contain whatever the download came with.
         /// </summary>
-        private static string[] Paths()
+        internal static string[] Paths(string? resourceDirectory = null, string? settingsDirectory = null)
         {
-            string beside = Path.Combine(Mods.Platform.AppPaths.ExecutableDirectory, FileName);
-            string settings = Path.Combine(Launcher.LauncherPrefs.Directory, FileName);
+            string beside = Path.Combine(resourceDirectory ?? Mods.Platform.AppPaths.ResourceDirectory, FileName);
+            string settings = Path.Combine(settingsDirectory ?? Launcher.LauncherPrefs.Directory, FileName);
             return beside == settings
                 ? new string[] { beside }
                 : new string[] { beside, settings };
@@ -134,7 +190,16 @@ namespace MphRead.Mods.Input
                 // string of newline-separated lines and skips comments itself,
                 // so there is nothing to parse here. It returns false only if
                 // it could not parse *any* of it.
-                return GLFW.UpdateGamepadMappings(text);
+                bool applied = GLFW.UpdateGamepadMappings(text);
+                if (applied) foreach (string line in text.Split('\n'))
+                {
+                    var parts = line.Trim().Split(',');
+                    if (parts.Length < 3 || parts[0].Length != 32) continue;
+                    bool compatible = true;
+                    foreach (string part in parts) if (part.StartsWith("platform:", StringComparison.Ordinal) && part != "platform:" + Platform()) compatible = false;
+                    if (compatible) MappingCapabilities[parts[0]] = ParseCapabilities(line);
+                }
+                return applied;
             }
             catch (Exception ex) when (ex is DllNotFoundException
                 || ex is EntryPointNotFoundException || ex is BadImageFormatException)
@@ -174,6 +239,29 @@ namespace MphRead.Mods.Input
             string guid = GLFW.GetJoystickGUID(slot) ?? "00000000000000000000000000000000";
             string name = (GLFW.GetJoystickName(slot) ?? "gamepad").Replace(',', ' ');
             GamepadLayout layout = GamepadLayout.For(slot);
+            return DescribeLayout(guid, name, layout, Platform());
+        }
+
+        // Apply only when GLFW has no mapping. Exact bundled/user/environment mappings
+        // keep priority. Limit firmware compatibility to the known macOS Series HID shape.
+        internal static string? CompatibleMacXboxMapping(string guid, string name, int axes, int buttons, int hats, bool macOS)
+        {
+            if (!GamepadLayout.IsMacXboxBluetooth(guid, axes, buttons, hats, macOS)) return null;
+            return DescribeLayout(guid, name.Replace(',', ' '),
+                GamepadLayout.Select(guid, axes, buttons, hats, macOS), "Mac OS X");
+        }
+
+        internal static bool TryMapMacXbox(int slot)
+        {
+            if (!OperatingSystem.IsMacOS() || GLFW.JoystickIsGamepad(slot)) return false;
+            string? mapping = CompatibleMacXboxMapping(GLFW.GetJoystickGUID(slot) ?? "",
+                GLFW.GetJoystickName(slot) ?? "Xbox controller", GLFW.GetJoystickAxes(slot).Length,
+                GLFW.GetJoystickButtons(slot).Length, GLFW.GetJoystickHats(slot).Length, macOS: true);
+            return mapping != null && Apply(mapping) && GLFW.JoystickIsGamepad(slot);
+        }
+
+        private static string DescribeLayout(string guid, string name, GamepadLayout layout, string platform)
+        {
             var text = new System.Text.StringBuilder();
             text.Append(guid).Append(',').Append(name).Append(',');
             text.Append($"a:b{layout.ButtonA},b:b{layout.ButtonB},");
@@ -192,7 +280,7 @@ namespace MphRead.Mods.Input
                 ? $"righttrigger:a{layout.AxisRightTrigger},"
                 : $"righttrigger:b{layout.ButtonRightTrigger},");
             text.Append("dpup:h0.1,dpright:h0.2,dpdown:h0.4,dpleft:h0.8,");
-            text.Append("platform:").Append(Platform()).Append(',');
+            text.Append("platform:").Append(platform).Append(',');
             return text.ToString();
         }
 

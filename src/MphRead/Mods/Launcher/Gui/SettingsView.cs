@@ -136,9 +136,11 @@ namespace MphRead.Mods.Launcher.Gui
         private ToggleRow _invertX = null!;
         private ToggleRow _penTablet = null!;
         private ToggleRow _scrollAllWeapons = null!;
-        private SliderRow _gamepadLook = null!;
-        private SliderRow _gamepadDeadZone = null!;
-        private ToggleRow _gamepadInvertY = null!;
+        private GamepadSettingsPanel _gamepadSettings = null!;
+        private ToggleRow? _repositionFilter;
+        private StackPanel? _stylusAdvanced;
+        private DeckButton? _stylusAdvancedButton;
+        private bool _stylusAdvancedOpen;
         private FieldRow _playerName = null!;
         private ChoiceRow _hunterRow = null!;
         private ChoiceRow _colorRow = null!;
@@ -280,10 +282,10 @@ namespace MphRead.Mods.Launcher.Gui
                 {
                     _tabs.Index = i;
                     ShowPage(i);
-                    if (sub != 0 && _controlTabs != null
+                    if (_controlTabs != null
                         && String.Equals(name, "Controls", StringComparison.OrdinalIgnoreCase))
                     {
-                        _controlTabs.Index = sub;
+                        _controlTabs.Index = Math.Clamp(sub, 0, 2);
                     }
                     return;
                 }
@@ -316,6 +318,21 @@ namespace MphRead.Mods.Launcher.Gui
         {
             page.Children.Add(control);
             return control;
+        }
+
+        private static DeckButton AddAdvancedToggle(StackPanel page, StackPanel advanced, string navId)
+        {
+            var button = new DeckButton("Advanced", Deck.Face.Slate,
+                sizeEms: .9, padXEms: .8, padYEms: .38, lip: 3)
+            {
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Margin = new Thickness(0, 8, 0, 4)
+            };
+            ControllerNav.Identify(button, navId);
+            button.Click += (_, _) => advanced.IsVisible = !advanced.IsVisible;
+            page.Children.Add(button);
+            page.Children.Add(advanced);
+            return button;
         }
 
         /// <summary>
@@ -575,47 +592,23 @@ namespace MphRead.Mods.Launcher.Gui
         private void BuildKeyboard(StackPanel page)
         {
             Heading(page, "Mouse");
-            // A slider over an index (0-100 mapped across a range) could only
-            // ever land on steps of that range divided by 100 -- 0.0299x for
-            // the old 0.1-3.0 span. Sliding over the sensitivity itself, in
-            // hundredths, makes every reachable value an exact 0.01 step
-            // instead, on the keyboard and under the pointer alike.
             _sensitivity = Add(page, new SliderRow("Sensitivity",
                 SensitivityToSlider(InputSettings.MouseSensitivity),
                 v => $"{SliderToSensitivity(v).ToString("0.00", CultureInfo.InvariantCulture)}x",
                 min: 1, max: 300, keyStep: 1));
             _invertY = Add(page, new ToggleRow("Invert vertical aim", InputSettings.InvertMouseY));
             _invertX = Add(page, new ToggleRow("Invert horizontal aim", InputSettings.InvertMouseX));
-            _scrollAllWeapons = Add(page, new ToggleRow("Wheel cycles every weapon",
-                InputSettings.ScrollAllWeapons));
-            // Off by default: a fast flick with a high-DPI mouse at high
-            // sensitivity can clear the jump threshold too, which zeroed a
-            // real player's aim rather than protecting it. Turning it on is
-            // also the gate for everything below it -- the bottom-screen
-            // zone means nothing to a mouse. See Mods.Input.PointerInput.
-            BuildTouchControls(page);
 
-            // The keys, on the keyboard page.
-            //
-            // They were built inside BuildGamepad, under a "Keys" heading
-            // after the pad's own buttons, so the Keyboard tab offered four
-            // mouse rows and nothing else and every key in the game was two
-            // clicks away behind a tab called Gamepad. The reference has never
-            // had them anywhere but here: `Controls > Keyboard` is Mouse and
-            // then Keys, and `Controls > Gamepad` is Sticks and then Buttons.
+            var advanced = new StackPanel { Spacing = 2, IsVisible = false };
+            _scrollAllWeapons = Add(advanced, new ToggleRow("Wheel cycles every weapon",
+                InputSettings.ScrollAllWeapons));
+            BuildTouchControls(advanced);
+            AddAdvancedToggle(page, advanced, "keyboard.advanced");
+
             Heading(page, "Keys");
             var rows = new List<KeyRow>();
-            // Chat first, and by hand. It is the one key this project added
-            // rather than inherited, so it is not a Keybind on PlayerControls
-            // and the reflection below cannot find it -- which is why it was
-            // the one key in the game with no row, settable only by editing
-            // the file.
             rows.Add(Add(page, new KeyRow("Chat",
                 () => InputSettings.ChatKey, k => InputSettings.ChatKey = k)));
-            // The clip button and how much it saves, together: the length is
-            // the only thing anybody wants to know about that key, and putting
-            // it on the far side of the settings from the bind would make them
-            // two unrelated questions.
             rows.Add(Add(page, new KeyRow("Save clip",
                 () => InputSettings.ClipKey, k => InputSettings.ClipKey = k)));
             _clipSecondsRow = Add(page, new ChoiceRow("Clip length",
@@ -632,15 +625,11 @@ namespace MphRead.Mods.Launcher.Gui
         /// <summary>Every key row, so Reset can redraw them from whichever page it is on.</summary>
         private List<KeyRow> _keyRows = new();
 
-        /// <summary>The pen tablet's page: the guard, and the zone it gates.</summary>
+        /// <summary>The pen tablet page keeps common setup visible and hides tuning.</summary>
         private void BuildStylus(StackPanel page)
         {
             Heading(page, "Pen tablet");
-            // Off by default: a fast flick with a high-DPI mouse at high
-            // sensitivity can clear the jump threshold too, which zeroed a
-            // real player's aim rather than protecting it. Turning it on is
-            // also the gate for everything below it. See Mods.Input.PointerInput.
-            _penTablet = Add(page, new ToggleRow("Stylus mode", Mods.Input.PointerInput.GuardJumps));
+            _penTablet = Add(page, new ToggleRow("Stylus mode", Mods.Input.PointerInput.StylusMode));
             BuildStylusZone(page);
             _penTablet.Changed += (_, _) => ShowStylusRows();
             ShowStylusRows();
@@ -648,42 +637,31 @@ namespace MphRead.Mods.Launcher.Gui
 
         private void BuildGamepad(StackPanel page)
         {
-            // Its own page rather than more rows under "Mouse": a pad has
-            // its own sensitivity, and somebody who inverts one of the two
-            // very often does not invert the other.
-            Heading(page, "Gamepad");
-            // No "use a connected gamepad" toggle. A pad that is not being
-            // held changes nothing on its own -- see GamepadInput.Active --
-            // and on a phone the touch controls now step aside for a pad by
-            // themselves and come back at the first touch, so the one thing
-            // the toggle was ever asked to do is done without asking.
-            _gamepadLook = Add(page, new SliderRow("Look sensitivity",
-                LookToSlider(InputSettings.GamepadLookSensitivity),
-                v => $"{SliderToLook(v).ToString("0.00", CultureInfo.InvariantCulture)}x"));
-            _gamepadDeadZone = Add(page, new SliderRow("Stick dead zone",
-                DeadZoneToSlider(InputSettings.GamepadDeadZone),
-                v => $"{SliderToDeadZone(v).ToString("0.00", CultureInfo.InvariantCulture)}"));
-            _gamepadInvertY = Add(page, new ToggleRow("Invert vertical aim (stick)",
-                InputSettings.GamepadInvertY));
+            Heading(page, "Controller");
+            _gamepadSettings = Add(page, new GamepadSettingsPanel());
 
-            Heading(page, "Gamepad buttons");
+            Heading(page, "Controller buttons");
             var padRows = new List<PadRow>();
             foreach (Mods.Input.PadAction action in Mods.Input.PadBindings.Actions)
             {
                 padRows.Add(Add(page, new PadRow(action)));
             }
 
-            var reset = new UiWord("Reset to defaults", 15, colour: GuiTheme.Warm)
+            var reset = new DeckButton("Reset to defaults", Deck.Face.Brass,
+                sizeEms: .9, padXEms: .8, padYEms: .38, lip: 3)
             {
+                HorizontalAlignment = HorizontalAlignment.Left,
                 Margin = new Thickness(0, 10, 0, 0)
             };
+            ControllerNav.Identify(reset, "controller.reset");
             reset.Click += (_, _) =>
             {
                 InputSettings.Reset();
                 _sensitivity.Value = SensitivityToSlider(InputSettings.MouseSensitivity);
                 _invertY.On = InputSettings.InvertMouseY;
                 _invertX.On = InputSettings.InvertMouseX;
-                _penTablet.On = Mods.Input.PointerInput.GuardJumps;
+                _penTablet.On = Mods.Input.PointerInput.StylusMode;
+                if (_repositionFilter != null) _repositionFilter.On = Mods.Input.PointerInput.GuardJumps;
                 if (_stylusZone != null && _stylusOpacity != null)
                 {
                     _stylusZone.On = Mods.Input.StylusZone.Wanted;
@@ -691,27 +669,12 @@ namespace MphRead.Mods.Launcher.Gui
                 }
                 ShowStylusRows();
                 _scrollAllWeapons.On = InputSettings.ScrollAllWeapons;
-                _gamepadLook.Value = LookToSlider(InputSettings.GamepadLookSensitivity);
-                _gamepadDeadZone.Value = DeadZoneToSlider(InputSettings.GamepadDeadZone);
-                _gamepadInvertY.On = InputSettings.GamepadInvertY;
-                // InputSettings.Reset puts the pad's buttons back too, so
-                // these only have to be redrawn.
-                foreach (PadRow row in padRows)
-                {
-                    row.InvalidateVisual();
-                }
-                foreach (KeyRow row in _keyRows)
-                {
-                    row.InvalidateVisual();
-                }
-                if (_touchButtonsRow != null)
-                {
-                    _touchButtonsRow.On = Mods.Input.TouchSettings.ButtonsVisible;
-                }
+                _gamepadSettings.Reload();
+                foreach (PadRow row in padRows) row.InvalidateVisual();
+                foreach (KeyRow row in _keyRows) row.InvalidateVisual();
+                if (_touchButtonsRow != null) _touchButtonsRow.On = Mods.Input.TouchSettings.ButtonsVisible;
                 foreach ((Mods.Input.TouchControl control, ToggleRow row) in _touchRows)
-                {
                     row.On = Mods.Input.TouchSettings.IsEnabled(control);
-                }
             };
             page.Children.Add(reset);
         }
@@ -722,63 +685,30 @@ namespace MphRead.Mods.Launcher.Gui
 
         private ToggleRow? _stylusZone;
         private SliderRow? _stylusOpacity;
-
-        /// <summary>
-        /// Everything <see cref="BuildStylusZone"/> put on the page, shown
-        /// only while <see cref="_penTablet"/> ("Stylus mode") is on -- a
-        /// mouse player has no use for the bottom-screen zone, and a page
-        /// that asks about it regardless is a page that asks a mouse player
-        /// a question meant for somebody else's hardware.
-        /// </summary>
         private readonly List<Control> _stylusRows = new();
 
         private void ShowStylusRows()
         {
-            foreach (Control row in _stylusRows)
-            {
-                row.IsVisible = _penTablet.On;
-            }
+            bool enabled = _penTablet.On;
+            foreach (Control row in _stylusRows) row.IsVisible = enabled;
+            if (_stylusAdvanced != null)
+                _stylusAdvanced.IsVisible = enabled && _stylusAdvancedOpen;
         }
 
-        /// <summary>
-        /// The DS's bottom screen, for a tablet.
-        ///
-        /// One button, as asked: the rest of it is done on the screen itself.
-        /// Pressing it closes the settings, shows the rectangle over the
-        /// running match and lets the player drag out where the bottom screen
-        /// should be -- which is both the position and the size, and cannot
-        /// produce a shape the layout does not fit, since the height follows
-        /// the DS's. A pair of numbers in a settings screen could do neither
-        /// of those things.
-        /// </summary>
         private void BuildStylusZone(StackPanel page)
         {
-            // A pen tablet is a desktop device, and this is only ever driven
-            // from RenderWindow's frame -- nothing on the phone updates the
-            // zone, so every row here would be inert. The button is worse
-            // than inert: only the desktop's in-game menu answers
-            // StylusPlacementRequested (by closing itself, so the player can
-            // see what they are drawing on), so on a phone pressing it would
-            // start a placement that nothing gets out of the way for and that
-            // only Escape ends.
-            if (OperatingSystem.IsAndroid())
-            {
-                return;
-            }
-            _stylusZone = Add(page, new ToggleRow("DS bottom screen for a pen tablet",
-                Mods.Input.StylusZone.Wanted));
+            if (OperatingSystem.IsAndroid()) return;
+
+            _stylusZone = Add(page, new ToggleRow("DS touch-screen zone", Mods.Input.StylusZone.Wanted));
             _stylusRows.Add(_stylusZone);
-            // How faint. "Barely visible" is the design, but how faint that
-            // has to be to stay out of the way and still be findable depends
-            // on the screen and the eyes in front of it.
-            _stylusOpacity = Add(page, new SliderRow("Bottom screen opacity",
-                (int)MathF.Round(Mods.Input.StylusZone.Opacity * 100),
-                v => $"{v}%", min: 4, max: 60, keyStep: 2));
-            _stylusRows.Add(_stylusOpacity);
-            var place = new UiWord("Place the bottom screen", 15)
+
+            var place = new DeckButton("Configure stylus zone", Deck.Face.Slate,
+                sizeEms: .9, padXEms: .8, padYEms: .38, lip: 3)
             {
+                HorizontalAlignment = HorizontalAlignment.Left,
                 Margin = new Thickness(0, 8, 0, 0)
             };
+            ControllerNav.Identify(place, "stylus.configure_zone");
             place.Click += (_, _) =>
             {
                 Mods.Input.StylusZone.BeginPlacement();
@@ -786,12 +716,30 @@ namespace MphRead.Mods.Launcher.Gui
             };
             page.Children.Add(place);
             _stylusRows.Add(place);
-            var note = new Note(
-                "Drag a rectangle where the DS's touch screen should be, then map "
-                + "your tablet to it. Arrow keys move it, [ and ] resize it, Shift "
-                + "for finer steps, Enter keeps it and Escape leaves it as it was.");
-            page.Children.Add(note);
-            _stylusRows.Add(note);
+
+            _stylusAdvanced = new StackPanel { Spacing = 2, IsVisible = false };
+            _repositionFilter = Add(_stylusAdvanced,
+                new ToggleRow("Reposition filtering", Mods.Input.PointerInput.GuardJumps));
+            _stylusOpacity = Add(_stylusAdvanced, new SliderRow("Overlay opacity",
+                (int)MathF.Round(Mods.Input.StylusZone.Opacity * 100),
+                v => $"{v}%", min: 4, max: 60, keyStep: 2));
+            _stylusAdvanced.Children.Add(new Note(
+                "Reposition filtering ignores tablet jumps after lift/re-contact. The overlay opacity only affects the DS touch-screen guide."));
+            _stylusAdvancedButton = new DeckButton("Advanced", Deck.Face.Slate,
+                sizeEms: .9, padXEms: .8, padYEms: .38, lip: 3)
+            {
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Margin = new Thickness(0, 8, 0, 4)
+            };
+            ControllerNav.Identify(_stylusAdvancedButton, "stylus.advanced");
+            _stylusAdvancedButton.Click += (_, _) =>
+            {
+                _stylusAdvancedOpen = !_stylusAdvancedOpen;
+                ShowStylusRows();
+            };
+            page.Children.Add(_stylusAdvancedButton);
+            page.Children.Add(_stylusAdvanced);
+            _stylusRows.Add(_stylusAdvancedButton);
         }
 
         /// <summary>
@@ -1188,16 +1136,15 @@ namespace MphRead.Mods.Launcher.Gui
             InputSettings.MouseSensitivity = SliderToSensitivity(_sensitivity.Value);
             InputSettings.InvertMouseY = _invertY.On;
             InputSettings.InvertMouseX = _invertX.On;
-            Mods.Input.PointerInput.GuardJumps = _penTablet.On;
+            Mods.Input.PointerInput.StylusMode = _penTablet.On;
+            if (_repositionFilter != null)
+                Mods.Input.PointerInput.GuardJumps = _repositionFilter.On;
             if (_stylusZone != null && _stylusOpacity != null)
             {
                 Mods.Input.StylusZone.Enabled = _stylusZone.On;
                 Mods.Input.StylusZone.Opacity = Math.Clamp(_stylusOpacity.Value / 100f, 0.02f, 1f);
             }
             InputSettings.ScrollAllWeapons = _scrollAllWeapons.On;
-            InputSettings.GamepadLookSensitivity = SliderToLook(_gamepadLook.Value);
-            InputSettings.GamepadDeadZone = SliderToDeadZone(_gamepadDeadZone.Value);
-            InputSettings.GamepadInvertY = _gamepadInvertY.On;
             if (_touchButtonsRow != null)
             {
                 Mods.Input.TouchSettings.ButtonsVisible = _touchButtonsRow.On;
