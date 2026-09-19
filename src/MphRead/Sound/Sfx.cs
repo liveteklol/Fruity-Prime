@@ -279,9 +279,14 @@ namespace MphRead.Sound
             if (Instance != null)
             {
                 Instance.ShutDown();
+                ShutdownCompletion = Instance.ShutdownCompletion;
                 Instance = null!;
             }
         }
+
+        // The shell can start its next match while the old device closes. A
+        // one-shot diagnostic must wait before unloading the native runtime.
+        internal static Task ShutdownCompletion { get; private set; } = Task.CompletedTask;
     }
 
     public class SfxInstance : SfxInstanceBase
@@ -1546,7 +1551,7 @@ namespace MphRead.Sound
             }
             AL.SourceStop(_streamInstance);
             ALC.MakeContextCurrent(ALContext.Null);
-            Task.Run(() =>
+            _shutdownCompletion = Task.Run(() =>
             {
                 ALC.DestroyContext(_context);
                 ALC.CloseDevice(_device);
@@ -1555,10 +1560,14 @@ namespace MphRead.Sound
             });
             _scene = null;
         }
+
+        private Task _shutdownCompletion = Task.CompletedTask;
+        internal override Task ShutdownCompletion => _shutdownCompletion;
     }
 
     public class SfxInstanceBase
     {
+        internal virtual Task ShutdownCompletion => Task.CompletedTask;
         public virtual IReadOnlyList<Sound3dEntry> RangeData { get; } = new List<Sound3dEntry>();
 
         public virtual Vector3 GetListenerPosition()

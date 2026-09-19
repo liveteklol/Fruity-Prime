@@ -151,7 +151,7 @@ namespace MphRead.Mods
         {
             if (_resolutionScale >= 100)
             {
-                return pixels;
+                return Math.Max(1, pixels);
             }
             return Math.Max(1, pixels * _resolutionScale / 100);
         }

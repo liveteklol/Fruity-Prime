@@ -744,6 +744,26 @@ namespace MphRead.Mods.Render
             ES.GL.BlendFunc((ES.BlendingFactorSrc)(int)src, (ES.BlendingFactorDest)(int)dst);
         }
 
+        public static void BlendEquation(BlendEquationMode mode)
+        {
+            ES.GL.BlendEquation((ES.BlendEquationMode)(int)mode);
+        }
+
+        public static bool IsEnabled(EnableCap cap)
+        {
+            return ES.GL.IsEnabled((ES.EnableCap)(int)cap);
+        }
+
+        public static void GetUniform(int program, int location, out int value)
+        {
+            ES.GL.GetUniform(program, location, out value);
+        }
+
+        public static void GetInteger(GetPName pname, int[] values)
+        {
+            ES.GL.GetInteger((ES.GetPName)(int)pname, values);
+        }
+
         public static void StencilFunc(StencilFunction func, int reference, int mask)
         {
             ES.GL.StencilFunc((ES.StencilFunction)(int)func, reference, mask);

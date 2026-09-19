@@ -193,6 +193,10 @@ namespace MphRead.Entities
                         if (targetTeleporter != null)
                         {
                             targetTeleporter.SetTriggered();
+                            if (IsMainPlayer)
+                            {
+                                _scene.NoteRenderLifecycle("respawn requested");
+                            }
                             Spawn(targetTeleporter.Position, targetTeleporter.FacingVector,
                                 targetTeleporter.UpVector, targetTeleporter.NodeRef, respawn: true);
                             if (GameState.TransitionAltForm)
@@ -223,6 +227,10 @@ namespace MphRead.Entities
                             {
                                 Vector3 facing = targetDoor.FacingVector;
                                 Vector3 position = targetDoor.Position + facing * 2;
+                                if (IsMainPlayer)
+                                {
+                                    _scene.NoteRenderLifecycle("respawn requested");
+                                }
                                 Spawn(position, facing, targetDoor.UpVector, targetDoor.NodeRef, respawn: true);
                             }
                         }
@@ -257,6 +265,10 @@ namespace MphRead.Entities
                             if (respawn != null)
                             {
                                 Vector3 position = ForcedSpawnPos ?? respawn.Position;
+                                if (IsMainPlayer)
+                                {
+                                    _scene.NoteRenderLifecycle("respawn requested");
+                                }
                                 Spawn(position, respawn.FacingVector, respawn.UpVector, respawn.NodeRef, respawn: true);
                             }
                         }

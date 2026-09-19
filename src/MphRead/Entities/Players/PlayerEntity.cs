@@ -729,6 +729,10 @@ namespace MphRead.Entities
         public void Spawn(Vector3 pos, Vector3 facing, Vector3 up, NodeRef nodeRef, bool respawn)
         {
             Mods.Network.NetSession.ContinuousPhase.ResetSlot(SlotIndex);
+            if (IsMainPlayer)
+            {
+                _scene.NoteRenderLifecycle("spawn begin");
+            }
             // Before anything below reads Hunter: a player who asked to come
             // back as somebody else is changed here, so that the abilities,
             // the energy tank and the HUD this call sets up are the new
@@ -835,6 +839,10 @@ namespace MphRead.Entities
             _disruptedTimer = 0;
             _burnedBy = null;
             _burnTimer = 0;
+            if (IsMainPlayer)
+            {
+                ResetRespawnVisualState();
+            }
             _hSpeedCap = Fixed.ToFloat(Values.WalkSpeedCap); // todo: FPS stuff?
             Speed = Vector3.Zero;
             if (respawn)
@@ -1005,7 +1013,6 @@ namespace MphRead.Entities
             }
             if (IsMainPlayer)
             {
-                EndWhiteout();
                 if (IsAltForm || IsMorphing)
                 {
                     _healthbarYOffset = _hudObjects.HealthOffsetYAlt;
@@ -1016,6 +1023,7 @@ namespace MphRead.Entities
                     _healthbarYOffset = _hudObjects.HealthOffsetY;
                     _boostBombsYOffset = 208;
                 }
+                _scene.NoteRenderLifecycle("spawn complete");
             }
         }
 
@@ -2417,6 +2425,10 @@ namespace MphRead.Entities
                 }
                 WeaponSelection = CurrentWeapon;
                 Flags1 &= ~PlayerFlags1.WeaponMenuOpen;
+                if (IsMainPlayer)
+                {
+                    _scene.NoteRenderLifecycle("death");
+                }
             }
             else // not dead
             {

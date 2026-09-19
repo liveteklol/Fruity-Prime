@@ -169,13 +169,13 @@ would have been drawing the machine's own error, and now is not.
 
 ## On OpenGL ES
 
-`Renderer.DrawCelOutline` **detaches the depth texture for the length of the
-pass** and puts it back afterwards. Sampling a texture that is attached to the
-framebuffer being drawn into is undefined in ES whether or not anything writes
-to it -- desktop GL forgives the read-only case and ES does not -- and this
-reads the depth while drawing colour into the same target. Two calls a frame,
-and the depth is already in memory as a texture, so there is nothing extra for
-a tiler to resolve.
+`Renderer.DrawCelOutline` uses a separate color-only framebuffer pointing at
+the scene color texture. It samples the copied color and the scene depth;
+neither is attached to the framebuffer being drawn into. Keeping that depth
+attachment out of the draw target avoids texture feedback without detaching
+and reattaching it on every frame. The color-only target is validated when
+attached and after resizing. Explicit pass state and respawn checks are
+documented in `RENDER-STABILITY.md`.
 
 ## Testing it
 
