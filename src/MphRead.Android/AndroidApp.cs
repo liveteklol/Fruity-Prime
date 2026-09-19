@@ -119,6 +119,7 @@ namespace MphRead.Droid
                 }
                 MainActivity.Instance?.StartMatch(plan);
             };
+            home.MatchRequested += (_, plan) => MainActivity.Instance?.StartMatch(plan);
             return home;
         }
     }

@@ -26,7 +26,7 @@ namespace MphRead.Mods.Network
     ///
     /// Usage: -maptest "MP3 PROVING GROUND" [-players 8] [-seconds 10]
     /// </summary>
-    public sealed class MapAudit : GameWindow
+    public sealed partial class MapAudit : GameWindow
     {
         private readonly string _room;
         private readonly int _players;

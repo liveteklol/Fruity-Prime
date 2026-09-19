@@ -148,6 +148,19 @@ namespace MphRead.Mods
                 Console.WriteLine($"[net] -netloss {netLoss} is not a percentage");
                 return true;
             }
+            foreach (var option in new (string Name, Func<string?, bool> Configure)[]
+            {
+                ("netjitter", Network.NetLag.ConfigureJitter), ("netseed", Network.NetLag.ConfigureSeed),
+                ("netreorder", Network.NetLag.ConfigureReorder), ("netduplicate", Network.NetLag.ConfigureDuplicate)
+            })
+            {
+                string? value = ValueAfter(args, option.Name);
+                if (value != null && !option.Configure(value))
+                {
+                    Console.WriteLine($"[net] invalid -{option.Name} value: {value}");
+                    return true;
+                }
+            }
             if (Network.NetLag.Active)
             {
                 Console.WriteLine($"[net] simulating a bad line: {Network.NetLag.Describe()}");
@@ -265,17 +278,9 @@ namespace MphRead.Mods
             // is predicted whatever this says, and this does not turn it off:
             // there is nothing to disagree about when the source, the target
             // and the input are all on this machine.
-            if (HasFlag(args, "deathprediction"))
+            if (HasFlag(args, "deathprediction") || HasFlag(args, "nodeathprediction"))
             {
-                Network.NetHitPrediction.DeathEnabled = true;
-                Console.WriteLine("[net] death prediction on: a client's "
-                    + "kills land the frame it lands them");
-            }
-            if (HasFlag(args, "nodeathprediction"))
-            {
-                Network.NetHitPrediction.DeathEnabled = false;
-                Console.WriteLine("[net] death prediction off: a client's "
-                    + "kills land when the authority says so");
+                Console.WriteLine("[net] remote death waits for authority; self-death remains predicted");
             }
 
             // A client declaring which of its own shots landed, and the
@@ -1049,6 +1054,16 @@ namespace MphRead.Mods
 
             // The multiplayer room list, one per line, so a shell loop can
             // walk every map without hard-coding the names.
+            if (HasFlag(args, "resourceaudit"))
+            {
+                Environment.ExitCode = Multiplayer.ResourceAudit.Run();
+                return true;
+            }
+            if (ValueAfter(args, "healthsimtest") is string healthRoom)
+            {
+                Environment.ExitCode = HealthSimulationTest.Run(healthRoom);
+                return true;
+            }
             if (HasFlag(args, "rooms"))
             {
                 foreach (string room in ThumbnailGenerator.MultiplayerRooms())
@@ -1273,6 +1288,7 @@ namespace MphRead.Mods
                 // target every other capture reads, so seeing it needs a real
                 // window and a read from its buffer.
                 Network.MapAudit.ShowWindow = HasFlag(args, "hudshots");
+                Network.MapAudit.TeamProbe = HasFlag(args, "teamprobe");
                 // -hunter H puts that hunter in slot 0, whose HUD every
                 // capture is taken through. Each of the eight lays its
                 // readouts out differently, so a HUD picture with no hunter

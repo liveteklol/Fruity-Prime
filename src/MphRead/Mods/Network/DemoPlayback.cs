@@ -90,7 +90,11 @@ namespace MphRead.Mods.Network
             if (_reader.ProtocolVersion != NetConfig.ProtocolVersion)
             {
                 Console.WriteLine($"[demo] recorded with protocol {_reader.ProtocolVersion}, "
-                    + $"this build is {NetConfig.ProtocolVersion} -- it may not play back correctly");
+                    + $"this build requires protocol {NetConfig.ProtocolVersion}");
+                LastError = "This demo uses an incompatible network protocol.";
+                _reader.Dispose();
+                _reader = null;
+                return false;
             }
             NetSession.StartPlayback();
             IsActive = true;

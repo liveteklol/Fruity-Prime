@@ -1,3 +1,4 @@
+using MphRead.Mods.Multiplayer;
 using System;
 using System.Diagnostics;
 using MphRead.Effects;
@@ -182,7 +183,7 @@ namespace MphRead.Entities
                     float minDistSqr = 15 * 15;
                     foreach (PlayerEntity player in _scene.GetPlayerEntities())
                     {
-                        if (player == Owner || player.Health == 0 || player.TeamIndex == Owner.TeamIndex || player.CurAlpha < 6 / 31f)
+                        if (player == Owner || player.Health == 0 || TeamRules.AreAllies(player.TeamIndex, Owner.TeamIndex) || player.CurAlpha < 6 / 31f)
                         {
                             continue;
                         }

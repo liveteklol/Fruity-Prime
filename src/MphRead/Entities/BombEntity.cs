@@ -1,3 +1,4 @@
+using MphRead.Mods.Multiplayer;
 using System;
 using System.Buffers;
 using System.Diagnostics;
@@ -126,7 +127,7 @@ namespace MphRead.Entities
             {
                 foreach (PlayerEntity player in _scene.GetPlayerEntities())
                 {
-                    if (player == Owner || player.Health == 0 || player.TeamIndex == Owner.TeamIndex)
+                    if (player == Owner || player.Health == 0 || TeamRules.AreAllies(player.TeamIndex, Owner.TeamIndex))
                     {
                         // Counted apart from the other two refusals: a bomb
                         // that skips every player because it thinks they are

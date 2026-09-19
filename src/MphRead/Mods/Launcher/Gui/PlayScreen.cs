@@ -126,6 +126,7 @@ namespace MphRead.Mods.Launcher.Gui
         private readonly Note _note = new("");
         private readonly UiMark _go;
         private readonly UiMark _back;
+        private readonly UiMark _createLobby;
 
         private DispatcherTimer? _statusTimer;
         private CancellationTokenSource? _statusCancel;
@@ -379,6 +380,8 @@ namespace MphRead.Mods.Launcher.Gui
             _back.Click += (_, _) => Leave();
             _go = new UiMark(UiMark.Shape.Accept, "play");
             _go.Click += (_, _) => Go();
+            _createLobby = new UiMark(UiMark.Shape.Add, "create lobby") { IsVisible = face == Face.Online };
+            _createLobby.Click += (_, _) => CreateRequested?.Invoke(this, EventArgs.Empty);
             // One commit on the right, not two. The browser used to carry
             // both CREATE SERVER and JOIN down there, which is a foot offering
             // two acts of equal weight when only one of them is ever the one
@@ -394,7 +397,7 @@ namespace MphRead.Mods.Launcher.Gui
             }
             Panel page = UiLayout.Page(overGame, UiLayout.WellPlay,
                 face == Face.Vote ? "vote" : "play", _tabs, body, _back, _go,
-                note: _note);
+                extra: _createLobby, note: _note);
             // Over the sheet, not inside the panel: the reference's `.side` is
             // a sibling of the sheet and slides in past its right edge, which
             // is what makes it read as a drawer the panel opened rather than
@@ -736,7 +739,9 @@ namespace MphRead.Mods.Launcher.Gui
             {
                 return;
             }
-            _go.Label = _list.Selected is ServerRow ? "join" : "create server";
+            _go.Label = "join";
+            _go.IsEnabled = _list.Selected is ServerRow;
+            _createLobby.IsVisible = true;
         }
 
         /// <summary>
@@ -865,11 +870,13 @@ namespace MphRead.Mods.Launcher.Gui
                 // Nothing is picked yet on a browser that has just been
                 // rebuilt, so the word is the one for the act that needs no
                 // selection. Picking a row changes it -- see SelectServer.
-                Face.Online => "create server",
+                Face.Online => "join",
                 Face.Clips => "watch",
                 Face.Vote => "vote",
                 _ => "start"
             };
+            _go.IsEnabled = true;
+            _createLobby.IsVisible = Current == Face.Online;
             _options.Children.Clear();
             ClearFaceExtras();
             _note.Text = "";
@@ -1324,7 +1331,7 @@ namespace MphRead.Mods.Launcher.Gui
 
             // Joining blocks for up to eight seconds while it retries; on the
             // UI thread that is eight seconds of a screen that does not redraw.
-            bool joined = await Task.Run(() => NetLaunch.Join(host, port, name, hunter));
+            bool joined = await Task.Run(() => NetLaunch.Connect(host, port, name, hunter));
             _go.IsEnabled = true;
             _go.Label = "join";
             if (!joined)
@@ -1438,16 +1445,7 @@ namespace MphRead.Mods.Launcher.Gui
             }
             foreach (string room in _rooms)
             {
-                // `.tag`'s `<b>`: the archive code alone -- "mp3", not
-                // "MP3 PROVING GROUND". The key's first token is that code,
-                // and the whole key in a tag is a tag wider than the card.
-                string code = room.Split(' ', StringSplitOptions.RemoveEmptyEntries)
-                    is { Length: > 0 } parts ? parts[0] : room;
-                (RoomMetadata? meta, _) = Metadata.GetRoomByName(room);
-                var tile = new DeckTile(room, code)
-                {
-                    Blurb = meta?.InGameName ?? ""
-                };
+                DeckTile tile = MapCardFactory.Create(room);
                 tile.Chosen = room == _settings.RoomKey;
                 tile.Click += (_, _) =>
                 {
@@ -1642,6 +1640,14 @@ namespace MphRead.Mods.Launcher.Gui
         }
 
         /// <summary>Load a demo file and, if it reads, start playing it.</summary>
+        public void SessionEnded(string reason)
+        {
+            _finished = false;
+            _note.Text = reason;
+            _note.Foreground = GuiTheme.BadBrush;
+            StartPolling();
+        }
+
         private async Task Watch(string path)
         {
             // Joined here, not inside MatchStart: a failure has to land back on

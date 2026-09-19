@@ -25,6 +25,8 @@ namespace MphRead.Entities
         private readonly uint[] _networkPositionFrames = new uint[NetworkHistoryLength];
         private int _networkPositionHistoryCount;
 
+        internal void ModResetNetworkHistory() => _networkPositionHistoryCount = 0;
+
         internal void ModRecordNetworkPosition(uint frame)
         {
             int count = Math.Min(_networkPositionHistoryCount, NetworkHistoryLength - 1);
@@ -1320,7 +1322,7 @@ namespace MphRead.Entities
         /// </summary>
         internal void ModNetDie()
         {
-            TakeDamage(1, DamageFlags.Death | DamageFlags.NoDmgInvuln, null, null);
+            NetDamage.ReplayDeath(this);
         }
 
         /// <summary>

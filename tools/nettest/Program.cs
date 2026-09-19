@@ -26,6 +26,8 @@ namespace MphRead.NetTest
 
         private static int Main(string[] args)
         {
+            if (args.Length > 0 && args[0] == "--health-shots") return HealthShotTests.Run();
+            if (args.Length > 0 && args[0] == "--lifecycle") return LifecycleTests.Run();
             string host = args.Length > 0 ? args[0] : "127.0.0.1";
             int port = args.Length > 1 && Int32.TryParse(args[1], out int p)
                 ? p : NetConfig.DefaultPort;
@@ -92,6 +94,9 @@ namespace MphRead.NetTest
             public string[] RosterNames { get; } = new string[RosterPacket.MaxSlots];
             public bool[] RosterSlots { get; } = new bool[RosterPacket.MaxSlots];
 
+            private readonly ushort[] _generations = new ushort[RosterPacket.MaxSlots];
+            private readonly ushort[] _lives = new ushort[RosterPacket.MaxSlots];
+
             public void SendHello()
             {
                 Send(PacketType.Hello, new byte[] { NetConfig.ProtocolVersion });
@@ -114,8 +119,8 @@ namespace MphRead.NetTest
             }
 
             /// <summary>Positions last received per slot, and how many updates.</summary>
-            public Vector3[] SeenPositions { get; } = new Vector3[4];
-            public int[] SeenUpdates { get; } = new int[4];
+            public Vector3[] SeenPositions { get; } = new Vector3[RosterPacket.MaxSlots];
+            public int[] SeenUpdates { get; } = new int[RosterPacket.MaxSlots];
 
             /// <summary>
             /// Publish authoritative state, the way the authority client's
@@ -130,13 +135,17 @@ namespace MphRead.NetTest
                     Frame = frame,
                     Rng1 = 0,
                     Rng2 = 0,
-                    PlayerCount = 1
+                    PlayerCount = 1,
+                    MatchId = LastState?.MatchId ?? 0,
+                    AuthorityEpoch = LastState?.AuthorityEpoch ?? 0
                 };
                 header.Write(payload);
                 var state = new PlayerState
                 {
                     SlotIndex = (byte)slot,
-                    Flags = PlayerState.FlagActive,
+                    Flags = PlayerState.FlagActive | PlayerState.FlagSpawned,
+                    SlotGeneration = _generations[slot],
+                    LifeId = _lives[slot] == 0 ? (ushort)1 : _lives[slot],
                     Position = position,
                     Speed = Vector3.Zero,
                     Facing = new Vector3(0, 0, 1),
@@ -154,7 +163,10 @@ namespace MphRead.NetTest
             /// </summary>
             public void SendIntent(uint frame)
             {
-                var intent = new IntentPacket { Frame = frame, Buttons = IntentButtons.None };
+                var intent = new IntentPacket { Frame = frame, Buttons = IntentButtons.None,
+                    MatchId = LastState?.MatchId ?? 0, AuthorityEpoch = LastState?.AuthorityEpoch ?? 0,
+                    SlotGeneration = Slot < 0 ? (ushort)0 : _generations[Slot],
+                    LifeId = Slot < 0 ? (ushort)0 : _lives[Slot] };
                 byte[] payload = new byte[IntentPacket.Size];
                 intent.Write(payload);
                 Send(PacketType.Intent, payload);
@@ -219,6 +231,7 @@ namespace MphRead.NetTest
                                 if (state.SlotIndex < SeenPositions.Length)
                                 {
                                     SeenPositions[state.SlotIndex] = state.Position;
+                                    _lives[state.SlotIndex] = state.LifeId;
                                     SeenUpdates[state.SlotIndex]++;
                                 }
                             }
@@ -235,6 +248,7 @@ namespace MphRead.NetTest
                                 if (s >= 0 && s < RosterNames.Length)
                                 {
                                     RosterNames[s] = roster.Names[i];
+                                    _generations[s] = roster.Generations[i];
                                     RosterSlots[s] = true;
                                 }
                             }

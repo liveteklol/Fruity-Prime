@@ -1,4 +1,5 @@
 using System;
+using MphRead.Mods.Multiplayer;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Reflection;
@@ -19,19 +20,16 @@ namespace MphRead.Mods.Network
     /// </summary>
     public static class NetLaunch
     {
+        private static bool _terminalLobby;
+        private static string _terminalInput = "";
         /// <summary>
-        /// Join a server and wait for it to say what is running.
-        ///
-        /// Both halves matter. The room key is what makes joining mid-match
-        /// work -- the server owns the rotation, so loading whatever the menu
-        /// had selected would put this client in a different level from
-        /// everyone else. The slot matters because <see cref="BuildPlayers"/>
-        /// keys off it, and starting before the Welcome arrived left a second
-        /// client with no entity in its own slot.
+        /// Establish the persistent session. Welcome, session state and a
+        /// roster are required; a running map and a game scene are not.
         /// </summary>
-        public static bool Join(string address, int port, string playerName, Hunter hunter,
-            int timeoutMs = 8000, int color = -1)
+        public static bool Connect(string address, int port, string playerName, Hunter hunter,
+            int timeoutMs = 8000, int color = -1, Guid ownerToken = default, CancellationToken cancellationToken = default)
         {
+            if (cancellationToken.IsCancellationRequested) { LastJoinError = "Join cancelled."; return false; }
             NetSession.PlayerName = playerName;
             // Rolled here as well as in the launch plan, because joining
             // happens *before* the plan is built: the hunter announced in
@@ -48,7 +46,7 @@ namespace MphRead.Mods.Network
             // the server decides how many it admits, and every client has to
             // be able to hold that many slots for it to matter.
             PlayerEntity.MaxPlayers = PlayerEntity.SlotCapacity;
-            NetSession.StartClient(address, port);
+            NetSession.StartClient(address, port, ownerToken);
             if (!NetSession.Active)
             {
                 LastJoinError = $"Could not open a socket for {address}:{port}.";
@@ -58,6 +56,8 @@ namespace MphRead.Mods.Network
             int lastIdentify = 0;
             while (clock.ElapsedMilliseconds < timeoutMs)
             {
+                if (cancellationToken.IsCancellationRequested)
+                { NetSession.Stop(); LastJoinError = "Join cancelled."; return false; }
                 NetSession.Update(clock.Elapsed.TotalSeconds);
                 if (NetSession.Refused)
                 {
@@ -69,12 +69,10 @@ namespace MphRead.Mods.Network
                     Console.WriteLine($"[net] {LastJoinError}");
                     return false;
                 }
-                if (NetSession.LocalSlot >= 0 && NetSession.ServerMatch?.RoomKey.Length > 0)
+                if (NetSession.LocalSlot >= 0 && NetSession.ServerSession != null
+                    && NetSession.SlotOccupied[NetSession.LocalSlot])
                 {
-                    MatchStatePacket state = NetSession.ServerMatch.Value;
-                    Console.WriteLine($"[net] joining {state.RoomKey} ({(GameMode)state.Mode}), "
-                        + $"{state.TimeRemaining:0} s remaining, slot {NetSession.LocalSlot}");
-                    DisableCheatsForMatch();
+                    Console.WriteLine($"[net] connected in {NetSession.SessionPhase}, slot {NetSession.LocalSlot}");
                     return true;
                 }
                 // The name is what the roster keys off, and the first
@@ -88,9 +86,75 @@ namespace MphRead.Mods.Network
                 }
                 Thread.Sleep(20);
             }
+            if (cancellationToken.IsCancellationRequested)
+            { NetSession.Stop(); LastJoinError = "Join cancelled."; return false; }
             LastJoinError = DescribeJoinFailure(address, port);
             Console.WriteLine($"[net] {LastJoinError}");
             return false;
+        }
+
+        public static bool Join(string address, int port, string playerName, Hunter hunter,
+            int timeoutMs = 8000, int color = -1)
+        {
+            if (!Connect(address, port, playerName, hunter, timeoutMs, color)) return false;
+            _terminalLobby = NetSession.PersistentLobby;
+            if (!NetSession.ShouldLoadMatch)
+                Console.WriteLine("Connected to lobby. Waiting for the lobby owner to start... Commands: ready, start, leave.");
+            while (NetSession.Active && !NetSession.ShouldLoadMatch)
+            {
+                NetSession.Pump();
+                if (NetSession.Refused || NetSession.SessionTimedOut) { NetSession.Stop(); return false; }
+                PollTerminalInput();
+                Thread.Sleep(20);
+            }
+            DisableCheatsForMatch();
+            return NetSession.Active;
+        }
+
+        private static void PollTerminalInput()
+        {
+            if (Console.IsInputRedirected || !Console.KeyAvailable) return;
+            ConsoleKeyInfo key = Console.ReadKey(intercept: true);
+            if (key.Key == ConsoleKey.Enter)
+            {
+                string command = _terminalInput.Trim().ToLowerInvariant(); _terminalInput = "";
+                if (command == "leave") NetSession.Stop();
+                if (command == "ready") NetSession.SendLobbyCommand(LobbyCommandType.SetReady, ready: true);
+                if (command == "start") NetSession.SendLobbyCommand(LobbyCommandType.StartMatch);
+            }
+            else if (key.Key == ConsoleKey.Backspace && _terminalInput.Length > 0) _terminalInput = _terminalInput[..^1];
+            else if (!char.IsControl(key.KeyChar) && _terminalInput.Length < 16) _terminalInput += key.KeyChar;
+        }
+
+        /// <summary>The CLI keeps its window and socket, with the terminal as its lobby UI.</summary>
+        public static bool TickTerminalLobby(RenderWindow window)
+        {
+            if (!_terminalLobby) return false;
+            if (NetSession.PersistentLobby && NetSession.IsInLobby && window.HasScene)
+            {
+                window.EndScene(); NetSession.ResetMatchState();
+                Console.WriteLine("Returned to lobby. Commands: ready, start, leave.");
+            }
+            if (window.HasScene) return false;
+            NetSession.Pump(); PollTerminalInput();
+            if (!NetSession.Active || NetSession.Refused || NetSession.SessionTimedOut)
+            { _terminalLobby = false; NetSession.Stop(); window.Close(); return true; }
+            if (NetSession.ShouldLoadMatch && NetSession.ActiveMatchDefinition is { } match)
+            {
+                try
+                {
+                    if (!Launcher.MatchStart.Begin(window, GameState.LoadSettings(), new Launcher.LaunchPlan
+                    {
+                        Kind = Launcher.LaunchKind.Online, RoomKey = match.RoomKey, Mode = match.Mode,
+                        Hunter = NetSession.LocalHunter, PlayerName = NetSession.PlayerName
+                    })) throw new ProgramException("The map could not be loaded.");
+                }
+                catch (Exception ex)
+                {
+                    NetSession.ReportMatchLoadFailed(ex.Message); NetSession.Stop(); window.Close();
+                }
+            }
+            return !window.HasScene;
         }
 
         /// <summary>
@@ -184,6 +248,8 @@ namespace MphRead.Mods.Network
         /// </summary>
         public static (string RoomKey, GameMode Mode)? ServerRoom()
         {
+            if (NetSession.ActiveMatchDefinition is { } definition)
+                return (definition.RoomKey, definition.Mode);
             MatchStatePacket? state = NetSession.ServerMatch;
             if (state == null || state.Value.RoomKey.Length == 0)
             {
@@ -195,17 +261,10 @@ namespace MphRead.Mods.Network
             return (state.Value.RoomKey, mode);
         }
 
-        /// <summary>
-        /// Entity layer to load a networked room with.
-        ///
-        /// Fixed rather than derived from how many players happen to be
-        /// connected: SceneSetup picks the room's entity layout from the
-        /// player count, so a client that joined alone and one that joined
-        /// into a full match would lay out different spawn points, doors and
-        /// items for the same map. Everyone loads the two-player layout, so
-        /// everyone gets the same world.
-        /// </summary>
-        public const int RoomPlayerCount = 2;
+        // Frozen server configuration, including for reconnect and join-in-progress.
+        public static MatchWorldProfile WorldProfile => NetSession.ServerSession is { } state && state.WorldProfile.IsValid
+            ? state.WorldProfile : MatchWorldProfile.Resolve(2);
+        public static int RoomPlayerCount => WorldProfile.EntityLayerPlayers;
 
         /// <summary>
         /// Create one player entity per slot, before the room loads.
@@ -233,6 +292,7 @@ namespace MphRead.Mods.Network
         public static void BuildPlayers(Scene scene, Hunter localHunter, int localRecolor,
             bool teams = false, int? localSlot = null)
         {
+            GameState.TeamCount = teams && NetSession.ActiveMatchDefinition is { } match ? LobbyRules.TeamCount(match) : teams ? 2 : 0;
             int resolvedSlot = localSlot ?? Math.Max(NetSession.LocalSlot, 0);
             for (int slot = 0; slot < PlayerEntity.MaxPlayers; slot++)
             {
@@ -253,15 +313,10 @@ namespace MphRead.Mods.Network
                 {
                     PlayerColors.Choice[slot] = PlayerColors.Clamp(localRecolor);
                 }
-                // Odd slots against even ones, which is the rule
-                // NetSlotManager already uses for a slot that arrives with no
-                // team of its own -- and it has to be the same rule, because
-                // it is what makes every client agree about who is on whose
-                // side without the server having to say. This took a single
-                // team id for every slot, so a team match built here put all
-                // eight players on Orange and none on Green.
+                // Assignments come from the roster, including an owner override.
+                // Unoccupied placeholders use team zero until a roster activates them.
                 scene.AddPlayer(hunter, slot == resolvedSlot ? localRecolor : 0,
-                    teams ? slot % 2 : -1);
+                    teams ? Math.Max(0, (int)NetSession.SlotTeamIndex[slot]) : -1);
             }
             for (int slot = 0; slot < PlayerEntity.MaxPlayers; slot++)
             {

@@ -164,10 +164,15 @@ namespace MphRead.Mods.Network
 
         private static void ApplyRoster(int players)
         {
+            NetSession.ApplyMatchState(new MatchStatePacket { MatchId = 1, AuthorityEpoch = 1 }, false);
             RosterPacket roster = RosterPacket.Create();
+            roster.MatchId = 1;
+            roster.AuthorityEpoch = 1;
+            roster.Revision = 1;
             for (int i = 0; i < players && i < RosterPacket.MaxSlots; i++)
             {
                 roster.Slots[roster.Count] = (byte)i;
+                roster.Generations[roster.Count] = 1;
                 // A different hunter per slot, cycling: eight copies of Samus
                 // would measure one collision volume and one set of weapons.
                 roster.Hunters[roster.Count] = (byte)(i % 7);
@@ -224,6 +229,10 @@ namespace MphRead.Mods.Network
                     NetSession.AcceptSlotIntent(slot, new IntentPacket
                     {
                         Frame = frame,
+                        MatchId = NetSession.CurrentMatchId,
+                        AuthorityEpoch = NetSession.AuthorityEpoch,
+                        SlotGeneration = NetPlayerLifecycle.Generation(slot),
+                        LifeId = NetPlayerLifecycle.Get(slot),
                         Buttons = buttons,
                         Presses = new uint[IntentPacket.PressHistory],
                         Aim = aim,

@@ -54,6 +54,9 @@ namespace MphRead.Mods.Launcher
         public static void Reroll() => _rolled = Hunter.Random;
     }
 
+    /// <summary>Client-only identity carried through the persistent lobby; never serialized.</summary>
+    public sealed record LobbyContext(string ServerName, string Endpoint, bool CreatedLocally = false);
+
     public enum LaunchKind
     {
         None,
@@ -79,6 +82,7 @@ namespace MphRead.Mods.Launcher
     public readonly struct LaunchPlan
     {
         public LaunchKind Kind { get; init; }
+        public LobbyContext? Lobby { get; init; }
 
         /// <summary>
         /// The hunter to play, already rolled if the player asked for a random

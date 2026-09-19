@@ -1,5 +1,6 @@
 using System;
 using MphRead.Formats;
+using MphRead.Mods.Network;
 using OpenTK.Mathematics;
 using OpenTK.Windowing.GraphicsLibraryFramework;
 
@@ -1184,13 +1185,13 @@ namespace MphRead.Entities
             Mods.Network.NetUnlagged.BeginShot(this);
             BeamResultFlags result = BeamProjectileEntity.Spawn(this, EquipInfo, shotOrigin, shotVec, flags, NodeRef, _scene);
             Mods.Network.NetUnlagged.EndShot(this);
-            Mods.Network.NetDamage.NoteFired(this, shotVec, _gunVec1);
             if (result == BeamResultFlags.NoSpawn)
             {
                 EquipInfo.Weapon = curWeapon;
                 PlayBeamEmptySfx(EquipInfo.Weapon.Beam);
-                return false;
+                return NetShotDiagnostics.Finish(this, ShotAttemptResult.NoAmmo);
             }
+            NetShotDiagnostics.Finish(this, ShotAttemptResult.Spawned, shotVec, _gunVec1);
             // todo: update license stats
             _timeSinceShot = 0;
             if (IsMainPlayer)

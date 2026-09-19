@@ -1,4 +1,5 @@
 using System;
+using MphRead.Mods.Multiplayer;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Diagnostics;
@@ -835,7 +836,7 @@ namespace MphRead.Entities
 
         private void UpdateHealthbars()
         {
-            if (_health < 25)
+            if (ModHudHealth < 25)
             {
                 if (!_healthbarChangedColor)
                 {
@@ -1772,7 +1773,7 @@ namespace MphRead.Entities
             }
             if (GameState.Teams)
             {
-                available -= 2 * _scoreTeamLineSpace;
+                available -= GameState.TeamCount * _scoreTeamLineSpace;
             }
             return Math.Clamp(available / rows, _scoreMinPlayerSpace, _scorePlayerSpace);
         }
@@ -1814,6 +1815,11 @@ namespace MphRead.Entities
 
         private void DrawScoreboard()
         {
+            if (GameState.Teams)
+            {
+                ModDrawTeamScoreboard();
+                return;
+            }
             GameMode mode = GameState.Mode;
             float rowSpace = GetScoreboardRowSpace();
             float posY = 104 - GetScoreboardHeight() / 2;
@@ -1895,8 +1901,8 @@ namespace MphRead.Entities
                     curTeam = player.TeamIndex;
                     string teamValue1 = ChooseValue1(GameState.TeamTime[curTeam], GameState.TeamPoints[curTeam]);
                     string teamValue2 = ChooseValue2(GameState.TeamDeaths[curTeam], GameState.TeamKills[curTeam]);
-                    var teamColor = new ColorRgba(player.Team == Team.Orange ? 0x23Fu : 0x2BEAu);
-                    string teamName = $"{teamText} {player.TeamIndex + 1}";
+                    ColorRgba teamColor = TeamVisuals.Get(curTeam).Color;
+                    string teamName = TeamVisuals.Get(curTeam).Label;
                     DrawText2D(ModScoreNameColumn - 18, posY, Align.Center, 0, teamName,
                         teamColor, fontSpacing: 8);
                     DrawText2D(ModScoreColumn1, posY, Align.Center, 0, teamValue1, teamColor, fontSpacing: 8);
@@ -1948,17 +1954,19 @@ namespace MphRead.Entities
 
         private void DrawHealthbars()
         {
+            if (!ModHudHealthVisible) return;
+            int displayHealth = ModHudHealth;
             _healthbarMainMeter.TankAmount = Values.EnergyTank;
             _healthbarMainMeter.TankCount = _healthMax / Values.EnergyTank;
             DrawMeter(_hudObjects.HealthMainPosX + _objShiftX, _hudObjects.HealthMainPosY + _healthbarYOffset + _objShiftY,
-                Values.EnergyTank - 1, _health, _healthbarPalette, _healthbarMainMeter,
+                Values.EnergyTank - 1, displayHealth, _healthbarPalette, _healthbarMainMeter,
                 drawText: true, drawTanks: GameState.SinglePlayer, Features.HudOpacity);
             if (GameState.Multiplayer)
             {
                 int amount = 0;
-                if (_health >= Values.EnergyTank)
+                if (displayHealth >= Values.EnergyTank)
                 {
-                    amount = _health - Values.EnergyTank;
+                    amount = displayHealth - Values.EnergyTank;
                 }
                 _healthbarSubMeter.TankAmount = Values.EnergyTank;
                 _healthbarSubMeter.TankCount = _healthMax / Values.EnergyTank;
@@ -2442,7 +2450,8 @@ namespace MphRead.Entities
                 {
                     pos.Y += 0.75f;
                 }
-                AddLocatorInfo(pos, _playerLocator, new ColorRgb(31, 31, 31), alpha);
+                AddLocatorInfo(pos, _playerLocator, GameState.Teams
+                    ? TeamVisuals.Get(player.TeamIndex).RadarColor : new ColorRgb(31, 31, 31), alpha);
             }
             if (reveal == 1)
             {
@@ -2468,7 +2477,8 @@ namespace MphRead.Entities
                     var color = new ColorRgb(31, 31, 31);
                     if (flag.Carrier != null && (_scene.FrameCount & (4 * 2)) != 0) // todo: FPS stuff
                     {
-                        color = flag.Carrier.TeamIndex == TeamIndex ? goodColor : new ColorRgb(31, 0, 0);
+                        color = GameState.Teams ? TeamVisuals.Get(flag.Carrier.TeamIndex).ObjectiveColor
+                            : flag.Carrier == this ? goodColor : new ColorRgb(31, 0, 0);
                     }
                     AddLocatorInfo(flag.Position, _octolithLocator, color);
                 }
@@ -2485,7 +2495,8 @@ namespace MphRead.Entities
                     ColorRgb color = Metadata.TeamColors[flag.Data.TeamId];
                     if (flag.Carrier != null && (_scene.FrameCount & (4 * 2)) != 0) // todo: FPS stuff
                     {
-                        color = flag.Carrier.TeamIndex == TeamIndex ? goodColor : new ColorRgb(31, 0, 0);
+                        color = GameState.Teams ? TeamVisuals.Get(flag.Carrier.TeamIndex).ObjectiveColor
+                            : flag.Carrier == this ? goodColor : new ColorRgb(31, 0, 0);
                     }
                     AddLocatorInfo(flag.Position, _octolithLocator, color);
                     if (OctolithFlag != null && flag.Data.TeamId == TeamIndex)
@@ -2501,13 +2512,13 @@ namespace MphRead.Entities
             foreach (NodeDefenseEntity defense in _scene.GetNodeDefenseEntities())
             {
                 ColorRgb color;
-                if (defense.CurrentTeam == 4)
+                if (defense.CurrentTeam == NodeDefenseEntity.NoTeam)
                 {
                     color = new ColorRgb(31, 31, 31);
                 }
                 else if (GameState.Teams)
                 {
-                    Debug.Assert(defense.CurrentTeam == 0 || defense.CurrentTeam == 1);
+                    Debug.Assert((uint)defense.CurrentTeam < (uint)GameState.TeamCount);
                     color = Metadata.TeamColors[defense.CurrentTeam];
                 }
                 else if (defense.CurrentTeam == TeamIndex)
@@ -2524,7 +2535,7 @@ namespace MphRead.Entities
 
         private int _nodeBonusOpponent = -1;
         private bool _mainNodeBonus = false;
-        private readonly int[] _teamNodeCounts = new int[4];
+        private readonly int[] _teamNodeCounts = new int[SlotCapacity];
         public int _nodesHudState = 0;
         public int _nodesProgressAmount = 0;
 
@@ -2532,7 +2543,7 @@ namespace MphRead.Entities
         {
             _nodeBonusOpponent = -1;
             _mainNodeBonus = false;
-            for (int i = 0; i < 4; i++)
+            for (int i = 0; i < SlotCapacity; i++)
             {
                 _teamNodeCounts[i] = 0;
             }
@@ -2540,13 +2551,13 @@ namespace MphRead.Entities
             foreach (NodeDefenseEntity defense in _scene.GetNodeDefenseEntities())
             {
                 ColorRgb color;
-                if (defense.CurrentTeam == 4)
+                if (defense.CurrentTeam == NodeDefenseEntity.NoTeam)
                 {
                     if (defense.Blinking)
                     {
                         if (GameState.Teams)
                         {
-                            Debug.Assert(defense.OccupyingTeam == 0 || defense.OccupyingTeam == 1);
+                            Debug.Assert((uint)defense.OccupyingTeam < (uint)GameState.TeamCount);
                             color = Metadata.TeamColors[defense.OccupyingTeam];
                         }
                         else if (defense.OccupyingTeam == TeamIndex)
@@ -2590,7 +2601,7 @@ namespace MphRead.Entities
                     }
                 }
                 AddLocatorInfo(defense.Position, _nodeLocator, color);
-                if (defense.CurrentTeam != 4 && defense.OccupyingTeam == 4)
+                if (defense.CurrentTeam != NodeDefenseEntity.NoTeam && defense.OccupyingTeam == NodeDefenseEntity.NoTeam)
                 {
                     int count = _teamNodeCounts[defense.CurrentTeam] + 1;
                     _teamNodeCounts[defense.CurrentTeam] = count;
@@ -2866,6 +2877,19 @@ namespace MphRead.Entities
 
         private void DrawNodesBonuses()
         {
+            if (GameState.Teams)
+            {
+                float y = _hudObjects.NodeBonusPosY + _objShiftY;
+                for (int team = 0; team < GameState.TeamCount; team++)
+                {
+                    if (_teamNodeCounts[team] < 2) continue;
+                    TeamPresentation visual = TeamVisuals.Get(team);
+                    DrawText2D(_hudObjects.NodeBonusPosX + _objShiftX, y, Align.Left, 0,
+                        $"{visual.Label} x {_teamNodeCounts[team]}", visual.Color, scale: 0.8f);
+                    y += 10;
+                }
+                return;
+            }
             string message = Strings.GetHudMessage(210); // bonus
             if (_mainNodeBonus)
             {
@@ -2912,8 +2936,22 @@ namespace MphRead.Entities
             float posX = 0;
             foreach (NodeDefenseEntity defense in _scene.GetNodeDefenseEntities())
             {
+                if (GameState.Teams)
+                {
+                    int owner = defense.Blinking ? defense.OccupyingTeam : defense.CurrentTeam;
+                    TeamPresentation visual = TeamVisuals.Get(owner);
+                    float x = _hudObjects.NodeIconPosX + startX - posX + _objShiftX;
+                    float y = _hudObjects.NodeIconPosY - 8 + _objShiftY;
+                    _scene.DrawHudFlatBox(x, y, x + 12, y + 12,
+                        visual.ObjectiveColor.AsVector4() * new Vector4(255f / 31, 255f / 31, 255f / 31, 1));
+                    DrawText2D(x + 2, y + 2, Align.Left, 0,
+                        owner == NodeDefenseEntity.NoTeam ? "-" : ((char)('A' + owner)).ToString(),
+                        new ColorRgba(0, 0, 0, 255));
+                    posX += 16;
+                    continue;
+                }
                 int frame;
-                if (defense.CurrentTeam == 4)
+                if (defense.CurrentTeam == NodeDefenseEntity.NoTeam)
                 {
                     if (defense.Blinking)
                     {
@@ -3122,6 +3160,7 @@ namespace MphRead.Entities
             int current = 0;
             string? text = null;
             int lowHealth = 0;
+            bool showHealth = true;
             if (target.Type == EntityType.EnemyInstance)
             {
                 var enemy = (EnemyInstanceEntity)target;
@@ -3162,7 +3201,8 @@ namespace MphRead.Entities
             {
                 var player = (PlayerEntity)target;
                 max = player.HealthMax;
-                current = player.Health;
+                current = ModOpponentHudHealth(player);
+                showHealth = Mods.Network.NetHudHealth.Visible(player.SlotIndex);
                 text = _hunterNames[(int)player.Hunter];
                 lowHealth = 25;
             }
@@ -3171,14 +3211,15 @@ namespace MphRead.Entities
                 var turret = (HalfturretEntity)target;
                 max = turret.Owner.HealthMax / 2;
                 current = turret.Health;
+                showHealth = Mods.Network.NetHudHealth.Visible(turret.Owner.SlotIndex);
                 text = _altAttackNames[(int)Hunter.Weavel];
                 lowHealth = 25;
             }
-            int palette = current > lowHealth ? 0 : 2;
+            int palette = !showHealth || current > lowHealth ? 0 : 2;
             _enemyHealthMeter.TankAmount = max;
             _enemyHealthMeter.TankCount = 0;
             _enemyHealthMeter.Length = HudElements.SubHealthbars[0].Length; // should not vary with hunter values
-            DrawMeter(_hudObjects.EnemyHealthPosX + _objShiftX, _hudObjects.EnemyHealthPosY + _objShiftY, max, current,
+            if (showHealth) DrawMeter(_hudObjects.EnemyHealthPosX + _objShiftX, _hudObjects.EnemyHealthPosY + _objShiftY, max, current,
                 palette, _enemyHealthMeter, drawText: false, drawTanks: false);
             int scanId = target.GetScanId();
             if (scanId != 0 && GameState.SinglePlayer && !GameState.StorySave.CheckLogbook(scanId))
@@ -3233,7 +3274,9 @@ namespace MphRead.Entities
                 posY += _objShiftY;
             }
             string nickname = GameState.Nicknames[_opponentIndex];
-            DrawText2D(posX, posY, Align.Center, 0, nickname);
+            if (GameState.Teams) nickname = $"{TeamVisuals.Get(opponent.TeamIndex).Label}: {nickname}";
+            DrawText2D(posX, posY, Align.Center, 0, nickname,
+                GameState.Teams ? TeamVisuals.Get(opponent.TeamIndex).Color : null);
             HudObjectInstance portrait = _hunterInsts[(int)opponent.Hunter];
             // Mode 1, and the offset corrected across, so the portrait is 32
             // units square on any window.
@@ -3256,14 +3299,18 @@ namespace MphRead.Entities
             _scene.DrawHudObject(portrait, mode: 1);
             posX += 18;
             posY -= 26;
-            int remainingAmount = opponent.Health >= Values.EnergyTank ? opponent.Health - Values.EnergyTank : 0;
-            _enemyHealthMeter.TankAmount = Values.EnergyTank;
-            _enemyHealthMeter.TankCount = opponent.HealthMax / Values.EnergyTank;
-            _enemyHealthMeter.Length = 72;
-            DrawMeter(posX, posY, Values.EnergyTank - 1, opponent.Health, 0, _enemyHealthMeter,
-                drawText: false, drawTanks: false);
-            DrawMeter(posX, posY + 5, Values.EnergyTank - 1, remainingAmount, 0, _enemyHealthMeter,
-                drawText: false, drawTanks: false);
+            if (Mods.Network.NetHudHealth.Visible(opponent.SlotIndex))
+            {
+                int displayHealth = ModOpponentHudHealth(opponent);
+                int remainingAmount = displayHealth >= Values.EnergyTank ? displayHealth - Values.EnergyTank : 0;
+                _enemyHealthMeter.TankAmount = Values.EnergyTank;
+                _enemyHealthMeter.TankCount = opponent.HealthMax / Values.EnergyTank;
+                _enemyHealthMeter.Length = 72;
+                DrawMeter(posX, posY, Values.EnergyTank - 1, displayHealth, 0, _enemyHealthMeter,
+                    drawText: false, drawTanks: false);
+                DrawMeter(posX, posY + 5, Values.EnergyTank - 1, remainingAmount, 0, _enemyHealthMeter,
+                    drawText: false, drawTanks: false);
+            }
             string score = FormatModeScore(opponent.SlotIndex);
             DrawText2D(posX + 5, posY + 14, Align.Left, 0, score);
         }
@@ -3421,7 +3468,7 @@ namespace MphRead.Entities
         /// </summary>
         private void DrawRadar()
         {
-            if (!Mods.Render.Radar.Enabled)
+            if (!Mods.Render.Radar.Enabled || GameState.Teams && ShowScoreboard)
             {
                 return;
             }
@@ -3511,7 +3558,7 @@ namespace MphRead.Entities
 
             float worldToPixel = radius / Mods.Render.Radar.Range;
 
-            void PlaceBlip(Vector3 worldPos, bool isHunter, bool isWeapon)
+            void PlaceBlip(Vector3 worldPos, bool isHunter, bool isWeapon, int teamIndex = -1)
             {
                 float dx = worldPos.X - Position.X;
                 float dz = worldPos.Z - Position.Z;
@@ -3541,7 +3588,8 @@ namespace MphRead.Entities
                     // perspective camera live; called from here, in the flat
                     // 2D HUD pass, it picks up the wrong projection and blows
                     // up to fill the screen. Left as a ring.
-                    _scene.DrawFlatRing(posX, posY, local, 0.59f * blipGrow * u, 0.2f * blipGrow * u, pal.Hunter);
+                    _scene.DrawFlatRing(posX, posY, local, 0.59f * blipGrow * u, 0.2f * blipGrow * u, GameState.Teams
+                        ? TeamVisuals.Get(teamIndex).RadarColor.AsVector4() * new Vector4(255f / 31, 255f / 31, 255f / 31, 1) : pal.Hunter);
                 }
                 else if (isWeapon)
                 {
@@ -3566,7 +3614,7 @@ namespace MphRead.Entities
                 {
                     continue;
                 }
-                PlaceBlip(other.Position, isHunter: true, isWeapon: false);
+                PlaceBlip(other.Position, isHunter: true, isWeapon: false, teamIndex: other.TeamIndex);
             }
             foreach (ItemInstanceEntity item in _scene.GetItemInstanceEntities())
             {

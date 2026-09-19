@@ -1,5 +1,4 @@
 using System;
-using System.Diagnostics;
 using System.Globalization;
 
 namespace MphRead.Mods.Network
@@ -42,33 +41,46 @@ namespace MphRead.Mods.Network
         /// <summary>Datagrams thrown away, as a percentage, each way.</summary>
         public static double LossPercent { get; private set; }
 
-        public static bool Active => RoundTripMs > 0 || LossPercent > 0;
+        public static double ReorderRate { get; private set; }
+        public static double DuplicateRate { get; private set; }
+        public static int Seed { get; private set; } = 1;
+        public static bool Active => RoundTripMs > 0 || JitterMs > 0 || LossPercent > 0 || ReorderRate > 0 || DuplicateRate > 0;
+        public static NetFaultQueue<T> CreateQueue<T>(bool outbound) => new NetFaultQueue<T>(
+            unchecked(Seed + (outbound ? 1 : 0)), RoundTripMs / 2.0, JitterMs,
+            LossPercent / 100, ReorderRate, DuplicateRate);
 
-        /// <summary>Half the round trip, in stopwatch ticks, plus this call's jitter.</summary>
-        internal static long HoldTicks()
+        public static bool ConfigureSeed(string? value)
         {
-            if (RoundTripMs <= 0 && JitterMs <= 0)
-            {
-                return 0;
-            }
-            double ms = RoundTripMs / 2.0;
-            if (JitterMs > 0)
-            {
-                ms += _random.NextDouble() * JitterMs;
-            }
-            return (long)(ms * Stopwatch.Frequency / 1000.0);
+            if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int seed)) return false;
+            Seed = seed;
+            return true;
         }
-
-        /// <summary>Whether this datagram is one of the ones the line eats.</summary>
-        internal static bool Drops()
+        public static bool ConfigureJitter(string? value)
         {
-            return LossPercent > 0 && _random.NextDouble() * 100 < LossPercent;
+            if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int jitter) || jitter < 0 || jitter > 5000) return false;
+            JitterMs = jitter;
+            return true;
         }
-
-        // Not Rng: that one is the game's own LCG, its state is replicated
-        // between machines, and drawing from it here would make a simulated
-        // dropped packet change what every player's weapon does.
-        private static readonly Random _random = new Random();
+        public static bool ConfigureReorder(string? value)
+        {
+            if (!Rate(value, out double rate)) return false;
+            ReorderRate = rate;
+            return true;
+        }
+        public static bool ConfigureDuplicate(string? value)
+        {
+            if (!Rate(value, out double rate)) return false;
+            DuplicateRate = rate;
+            return true;
+        }
+        private static bool Rate(string? value, out double rate)
+        {
+            bool percent = value?.EndsWith('%') == true;
+            if (!double.TryParse(value?.TrimEnd('%'), NumberStyles.Float, CultureInfo.InvariantCulture, out rate)
+                || !double.IsFinite(rate) || rate < 0 || rate > 100) return false;
+            if (percent || rate > 1) rate /= 100;
+            return true;
+        }
 
         /// <summary>
         /// "200", or "200:40" for two hundred milliseconds give or take
@@ -82,6 +94,7 @@ namespace MphRead.Mods.Network
                 return false;
             }
             string[] parts = value.Split(':', ',');
+            if (parts.Length > 2) return false;
             if (!Int32.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture,
                 out int rtt) || rtt < 0 || rtt > 10000)
             {
@@ -100,12 +113,8 @@ namespace MphRead.Mods.Network
 
         public static bool ConfigureLoss(string? value)
         {
-            if (!Double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture,
-                out double percent) || percent < 0 || percent > 100)
-            {
-                return false;
-            }
-            LossPercent = percent;
+            if (!Rate(value, out double rate)) return false;
+            LossPercent = rate * 100;
             return true;
         }
 
@@ -127,7 +136,7 @@ namespace MphRead.Mods.Network
             {
                 text += $", {LossPercent:0.##}% packet loss each way";
             }
-            return text;
+            return text + $", reorder {ReorderRate:P1}, duplicate {DuplicateRate:P1}, seed {Seed}";
         }
     }
 }

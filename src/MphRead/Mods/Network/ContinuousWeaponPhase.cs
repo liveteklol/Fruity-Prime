@@ -18,6 +18,16 @@ namespace MphRead.Mods.Network
 
         internal ContinuousWeaponPhase(int slots) => _clocks = new Clock[slots];
 
+        // DS fixed-point cadence: ammo rounds strictly above the boundary,
+        // damage includes it. Both use the same logical firing phase.
+        internal static int Amount(int amount, ulong phase, bool damage)
+        {
+            if (phase % 2 != 0) return 0;
+            ulong bits = (ulong)(amount & 31);
+            ulong fraction = (bits * (phase / 2)) & 31;
+            return amount / 32 + (bits != 0 && (damage ? fraction >= 32 - bits : fraction > 32 - bits) ? 1 : 0);
+        }
+
         internal void Reset() => Array.Clear(_clocks);
 
         internal void ResetSlot(int slot)

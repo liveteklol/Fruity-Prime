@@ -191,6 +191,22 @@ namespace MphRead.Mods.Network
         // The ring: one stamp per frame covers every slot, because a snapshot
         // carries all of them at once. The same shape NetUnlagged's history
         // has, and for the same reason.
+        private static readonly ushort[,] _life = new ushort[Slots, HistoryFrames];
+        private static readonly ushort[,] _generation = new ushort[Slots, HistoryFrames];
+
+        public static void ResetSlot(int slot)
+        {
+            if (slot < 0 || slot >= Slots) return;
+            for (int i = 0; i < HistoryFrames; i++)
+            {
+                _live[slot, i] = false;
+                _life[slot, i] = 0;
+                _generation[slot, i] = 0;
+            }
+            _sampledSeen[slot] = false;
+            _stallRun[slot] = 0;
+        }
+
         private static readonly Vector3[,] _position = new Vector3[Slots, HistoryFrames];
         private static readonly bool[,] _altForm = new bool[Slots, HistoryFrames];
         private static readonly bool[,] _live = new bool[Slots, HistoryFrames];
@@ -223,25 +239,8 @@ namespace MphRead.Mods.Network
             {
                 return;
             }
-            if (_running && frame <= _newest)
-            {
-                if (_newest - frame < HistoryFrames)
-                {
-                    // A straggler. The ordering guard upstream normally
-                    // catches these; one written into the ring is a puppet
-                    // interpolating backwards.
-                    return;
-                }
-                // Not a straggler -- a counter that has restarted, which
-                // happens when a client rejoins and when the snapshot stream
-                // re-bases on a new authority. Keeping the old `_newest` here
-                // is not a stale reading, it is a **dead clock**: the read
-                // point chases a target that will never arrive again, every
-                // lookup past it is refused, and the interpolation silently
-                // stops for the rest of the match while the fallback quietly
-                // does what protocol 6 did. Start again on the new numbering.
-                Restart(frame);
-            }
+            // Only an explicit stream change resets this clock.
+            if (_running && !NetLifecycleTracker.Newer(frame, _newest)) return;
             int index = (int)(frame % HistoryFrames);
             _stamp[index] = frame;
             for (int i = 0; i < Slots; i++)
@@ -258,6 +257,8 @@ namespace MphRead.Mods.Network
                 bool inPlay = (states[i].Flags & PlayerState.FlagActive) != 0
                     && (states[i].Flags & PlayerState.FlagSpawned) != 0
                     && states[i].Health > 0;
+                _life[slot, index] = states[i].LifeId;
+                _generation[slot, index] = states[i].SlotGeneration;
                 _live[slot, index] = inPlay;
                 _position[slot, index] = states[i].Position;
                 _altForm[slot, index] = (states[i].Flags & PlayerState.FlagAltForm) != 0;
@@ -311,6 +312,7 @@ namespace MphRead.Mods.Network
                 // to look at than one jump.
                 _readFrame = target;
                 Snaps++;
+                NetTimingDiagnostics.Correction();
             }
             else
             {
@@ -418,7 +420,8 @@ namespace MphRead.Mods.Network
                 return false;
             }
             int index = (int)(frame % HistoryFrames);
-            if (_stamp[index] != frame || !_live[slot, index])
+            if (_stamp[index] != frame || !_live[slot, index]
+                || !NetPlayerLifecycle.Matches(slot, _generation[slot, index], _life[slot, index]))
             {
                 return false;
             }

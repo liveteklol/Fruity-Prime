@@ -58,14 +58,17 @@ namespace MphRead.Entities
         private void DrawProHud()
         {
             float aspect = HudAspectFix;
-            Vector4 health = ProHealthColor();
-            // The left foot of the screen, under the weapon list and the same
-            // width as it: score, weapons and energy then read as one column
-            // top to bottom, which is one place to look instead of three
-            // corners.
-            _scene.DrawHudFlatBox(2 * aspect, 170, 46 * aspect, 190, ProHudPanel);
-            ProNumber(6 * aspect, 172, Align.Left, _health.ToString(), ProInk(health), 1.5f);
-            ProBar(4 * aspect, 186, 40, 3, ProHealthFraction(), health);
+            if (ModHudHealthVisible)
+            {
+                Vector4 health = ProHealthColor();
+                // The left foot of the screen, under the weapon list and the same
+                // width as it: score, weapons and energy then read as one column
+                // top to bottom, which is one place to look instead of three
+                // corners.
+                _scene.DrawHudFlatBox(2 * aspect, 170, 46 * aspect, 190, ProHudPanel);
+                ProNumber(6 * aspect, 172, Align.Left, ModHudHealth.ToString(), ProInk(health), 1.5f);
+                ProBar(4 * aspect, 186, 40, 3, ProHealthFraction(), health);
+            }
             DrawProAmmo();
             ProScore(4 * aspect, 12, Align.Left, 1.1f);
         }
@@ -166,7 +169,7 @@ namespace MphRead.Entities
         /// </summary>
         private float ProHealthFraction()
         {
-            return Math.Clamp(_health / (float)ProHealthSpan(), 0, 1);
+            return Math.Clamp(ModHudHealth / (float)ProHealthSpan(), 0, 1);
         }
 
         private int ProHealthSpan()

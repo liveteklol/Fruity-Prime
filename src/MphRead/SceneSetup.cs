@@ -384,7 +384,11 @@ namespace MphRead
                 collision.Active = false;
             }
             room.Setup(metadata.Name, metadata, collision, nodeLayerMask, metadata.Id);
-            IReadOnlyList<EntityBase> entities = LoadEntities(metadata, entityLayerId, scene);
+            Mods.Network.NetHealthSync.BeginRoom();
+            var resources = mode == GameMode.SinglePlayer ? Mods.Multiplayer.ResourceSpawnProfile.Low
+                : Mods.Network.NetSession.Active ? Mods.Network.NetLaunch.WorldProfile.Resources
+                : Mods.Multiplayer.MatchWorldProfile.Resolve(playerCount).Resources;
+            IReadOnlyList<EntityBase> entities = LoadEntities(metadata, entityLayerId, scene, resources);
             entities = GetExtraEntities(room.RoomId, entities, scene);
             return (collision, entities);
         }
@@ -418,7 +422,8 @@ namespace MphRead
             return nodeLayerMask;
         }
 
-        private static IReadOnlyList<EntityBase> LoadEntities(RoomMetadata metadata, int layerId, Scene scene)
+        private static IReadOnlyList<EntityBase> LoadEntities(RoomMetadata metadata, int layerId, Scene scene,
+            Mods.Multiplayer.ResourceSpawnProfile resources)
         {
             var results = new List<EntityBase>();
             if (metadata.EntityPath == null)
@@ -427,6 +432,7 @@ namespace MphRead
             }
             // only FirstHunt is passed here, not Hybrid -- model/anim/col should be loaded from FH, and ent/node from MPH
             IReadOnlyList<Entity> entities = Read.GetEntities(metadata.EntityPath, layerId, metadata.FirstHunt, allowHook: true);
+            entities = Mods.Multiplayer.MapResourceRules.Resolve(metadata, resources, entities);
             foreach (Entity entity in entities)
             {
                 string nodeName = entity.NodeName;
@@ -456,7 +462,9 @@ namespace MphRead
                 }
                 else if (entity.Type == EntityType.ItemSpawn)
                 {
-                    results.Add(new ItemSpawnEntity(((Entity<ItemSpawnEntityData>)entity).Data, nodeName, scene));
+                    var data = Mods.Multiplayer.MapResourceRules.ResolveData(metadata, resources,
+                        ((Entity<ItemSpawnEntityData>)entity).Data);
+                    results.Add(new ItemSpawnEntity(data, nodeName, scene));
                 }
                 else if (entity.Type == EntityType.FhItemSpawn)
                 {

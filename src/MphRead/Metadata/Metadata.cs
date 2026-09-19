@@ -442,7 +442,7 @@ namespace MphRead
             {
                 return list[0];
             }
-            return list[playerCount == 3 ? 1 : (playerCount == 4 ? 2 : 0)];
+            return list[playerCount >= 4 ? 2 : playerCount == 3 ? 1 : 0];
         }
 
         public static string GetLayerName(int layerId, bool multiplayer)
@@ -528,10 +528,12 @@ namespace MphRead
         public static readonly Vector3 EmissionOrange = GetColor(0x14F0);
         public static readonly Vector3 EmissionGreen = GetColor(0x1565);
         public static readonly Vector3 EmissionGray = GetColor(0x35AD);
-        public static readonly ColorRgb[] TeamColors = new ColorRgb[2]
+        public static readonly ColorRgb[] TeamColors = new ColorRgb[4]
         {
             new ColorRgb(31, 19, 0), // orange
-            new ColorRgb(0, 31, 0)   // green
+            new ColorRgb(0, 31, 0),  // green
+            new ColorRgb(5, 19, 31), // blue
+            new ColorRgb(27, 8, 31)  // violet
         };
 
         public static readonly Vector3 OctolithLight1Vector = new Vector3(0, 0.3005371f, -0.5f);

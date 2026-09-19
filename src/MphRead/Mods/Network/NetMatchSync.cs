@@ -49,7 +49,17 @@ namespace MphRead.Mods.Network
             // disagreed about it would stop playing at different moments.
             // Applied whether or not the clock is, because the results
             // sequence below is exactly when the clock must be left alone.
-            if (state.PointGoal > 0 && GameState.PointGoal != state.PointGoal)
+            GameMode mode = Enum.IsDefined(typeof(GameMode), state.Mode)
+                ? (GameMode)state.Mode
+                : GameState.Mode;
+            if (MatchGoalRules.UsesTimeTarget(mode))
+            {
+                if (GameState.TimeGoal != state.PointGoal)
+                {
+                    GameState.TimeGoal = state.PointGoal;
+                }
+            }
+            else if (GameState.PointGoal != state.PointGoal)
             {
                 GameState.PointGoal = state.PointGoal;
             }
@@ -90,8 +100,13 @@ namespace MphRead.Mods.Network
                 _lastRoom = state.RoomKey;
                 return;
             }
-            // A time limit of zero means the server runs without one; leave
-            // the local clock alone rather than freezing it at zero.
+            // Negative is the engine/HUD's no-timer sentinel. Infinity cannot
+            // be converted to TimeSpan by the music and HUD timer paths.
+            if (NetSession.ActiveMatchDefinition is { TimeLimitSeconds: 0 } && !state.Ending)
+            {
+                GameState.MatchTime = -1;
+                return;
+            }
             if (state.TimeRemaining <= 0 && state.TimeElapsed <= 0)
             {
                 return;

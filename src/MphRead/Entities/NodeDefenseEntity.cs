@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -15,8 +16,9 @@ namespace MphRead.Entities
         public CollisionVolume Volume => _volume;
         private readonly bool _defender = false;
 
-        private int _currentTeam = 4;
-        private int _occupyingTeam = 4;
+        public const int NoTeam = -1;
+        private int _currentTeam = NoTeam;
+        private int _occupyingTeam = NoTeam;
         private readonly bool[] _occupiedBy = new bool[PlayerEntity.SlotCapacity];
         private float _blinkTimer = 0;
         private PlayerEntity? _capturedPlayer = null;
@@ -34,7 +36,7 @@ namespace MphRead.Entities
         public int OccupyingTeam => _occupyingTeam;
         public bool Blinking => _blinkTimer > 0;
         public IReadOnlyList<bool> OccupiedBy => _occupiedBy;
-        public bool IsOccupied => _occupiedBy[0] || _occupiedBy[1] || _occupiedBy[2] || _occupiedBy[3];
+        public bool IsOccupied => Array.IndexOf(_occupiedBy, true) >= 0;
         public float Progress => _progress;
 
         private readonly Material _terminalMat = null!;
@@ -81,13 +83,15 @@ namespace MphRead.Entities
 
         private void ProcessDefender()
         {
-            int team = 4;
+            int team = NoTeam;
             _contested = false;
             foreach (PlayerEntity player in _scene.GetPlayerEntities())
             {
-                if (player.Health > 0 && _volume.TestPoint(player.Volume.SpherePosition))
+                if (player.LoadFlags.TestFlag(LoadFlags.Active) && player.Health > 0
+                    && (uint)player.TeamIndex < (uint)(GameState.Teams ? GameState.TeamCount : PlayerEntity.SlotCapacity)
+                    && _volume.TestPoint(player.Volume.SpherePosition))
                 {
-                    if (team == 4)
+                    if (team == NoTeam)
                     {
                         team = player.TeamIndex;
                     }
@@ -99,11 +103,11 @@ namespace MphRead.Entities
             }
             if (_contested)
             {
-                team = 4;
+                team = NoTeam;
             }
             float speed;
             float rotation;
-            if (team == 4)
+            if (team == NoTeam)
             {
                 (speed, rotation) = ConstantAcceleration(-0.25f, _spinSpeed, minVelocity: 0);
             }
@@ -125,8 +129,8 @@ namespace MphRead.Entities
         {
             int value1 = 0;
             int value2 = 0;
-            bool[] prevOccupiedBy = new bool[PlayerEntity.SlotCapacity];
-            for (int i = 0; i < 4; i++)
+            Span<bool> prevOccupiedBy = stackalloc bool[PlayerEntity.SlotCapacity];
+            for (int i = 0; i < PlayerEntity.SlotCapacity; i++)
             {
                 prevOccupiedBy[i] = _occupiedBy[i];
                 _occupiedBy[i] = false;
@@ -137,7 +141,9 @@ namespace MphRead.Entities
             _soundSource.Update(Position, rangeIndex: 17);
             foreach (PlayerEntity player in _scene.GetPlayerEntities())
             {
-                if (player.Health > 0 && _volume.TestPoint(player.Volume.SpherePosition))
+                if (player.LoadFlags.TestFlag(LoadFlags.Active) && player.Health > 0
+                    && (uint)player.TeamIndex < (uint)(GameState.Teams ? GameState.TeamCount : PlayerEntity.SlotCapacity)
+                    && _volume.TestPoint(player.Volume.SpherePosition))
                 {
                     if (_occupyingTeam == player.TeamIndex)
                     {
@@ -145,7 +151,7 @@ namespace MphRead.Entities
                         occupiedByAny = true;
                         slot = player.SlotIndex;
                     }
-                    else if (_occupyingTeam == 4 && _currentTeam != player.TeamIndex)
+                    else if (_occupyingTeam == NoTeam && _currentTeam != player.TeamIndex)
                     {
                         _occupiedBy[player.SlotIndex] = true;
                         occupiedByAny = true;
@@ -203,7 +209,7 @@ namespace MphRead.Entities
                         value1 = 3;
                     }
                 }
-                _occupyingTeam = 4;
+                _occupyingTeam = NoTeam;
                 _progress = 0;
                 _inProgress = false;
                 (_spinSpeed, rotation) = ConstantAcceleration(-0.15f, _spinSpeed, minVelocity: 0);
@@ -211,15 +217,15 @@ namespace MphRead.Entities
             int nodeCount = 0;
             int team = _currentTeam;
             float scoreThreshold = 150 / 30f;
-            if (team == 4)
+            if (team == NoTeam)
             {
                 team = _occupyingTeam;
             }
-            if (team != 4)
+            if (team != NoTeam)
             {
                 foreach (NodeDefenseEntity node in _scene.GetNodeDefenseEntities())
                 {
-                    if (node._currentTeam == team && node._occupyingTeam == 4)
+                    if (node._currentTeam == team && node._occupyingTeam == NoTeam)
                     {
                         nodeCount++;
                         if (nodeCount > 1)
@@ -229,7 +235,7 @@ namespace MphRead.Entities
                     }
                 }
             }
-            if (_currentTeam != 4 && !occupiedByAny)
+            if (_currentTeam != NoTeam && !occupiedByAny)
             {
                 _scoreTimer += _scene.FrameTime;
                 if (_scoreTimer >= scoreThreshold)
@@ -308,7 +314,7 @@ namespace MphRead.Entities
                 string msg = Text.Strings.GetHudMessage(211); // node stolen
                 PlayerEntity.Main.QueueHudMessage(128, 133, Align.Center, 256, 8, new ColorRgba(31), 1, 90 / 30f, 17, msg);
             }
-            for (int i = 0; i < 4; i++)
+            for (int i = 0; i < PlayerEntity.SlotCapacity; i++)
             {
                 PlayerEntity player = PlayerEntity.Players[i];
                 if (_occupiedBy[i])
@@ -332,7 +338,7 @@ namespace MphRead.Entities
             _currentTeam = _occupyingTeam;
             _progress = 0;
             _inProgress = false;
-            _occupyingTeam = 4;
+            _occupyingTeam = NoTeam;
             _scoreTimer = 150 / 30f;
             if (_currentTeam == PlayerEntity.Main.TeamIndex)
             {
@@ -355,7 +361,7 @@ namespace MphRead.Entities
         {
             bool blinking = _blinkTimer > 0;
             ColorRgb color = _neutralColor;
-            if (_currentTeam == 4)
+            if (_currentTeam == NoTeam)
             {
                 if (blinking)
                 {

@@ -57,6 +57,10 @@ namespace MphRead.Mods.Launcher.Gui
 
         /// <summary>Raised once, when the screen is done with.</summary>
         public event EventHandler<LaunchPlan>? Done;
+        public event EventHandler<LaunchPlan>? MatchRequested;
+        private LobbyScreen? _lobby;
+        public void ResumeLobby() => _lobby?.Resume();
+        public void SuspendLobby() => _lobby?.Suspend();
 
         public StartScreen(MenuSettings settings, IReadOnlyList<string> rooms)
         {
@@ -418,6 +422,8 @@ namespace MphRead.Mods.Launcher.Gui
         /// </summary>
         public void Reset()
         {
+            _lobby?.Suspend();
+            _lobby = null;
             _finished = false;
             Plan = default;
             while (_stack.Count > 0)
@@ -447,7 +453,8 @@ namespace MphRead.Mods.Launcher.Gui
             {
                 return false;
             }
-            Pop();
+            if (_stack[^1] is LobbyScreen lobby) lobby.Leave("");
+            else Pop();
             return true;
         }
 
@@ -508,7 +515,7 @@ namespace MphRead.Mods.Launcher.Gui
             }
             var view = new PlayScreen(_settings, _rooms);
             view.Closed += (_, _) => Pop();
-            view.Launched += (_, plan) => Finish(plan);
+            view.Launched += (_, plan) => ConnectedOrFinished(plan);
             view.CreateRequested += (_, _) => OpenCreateServer();
             Push(view);
             return Task.CompletedTask;
@@ -523,8 +530,24 @@ namespace MphRead.Mods.Launcher.Gui
         {
             var view = new CreateServerScreen(_rooms, _settings.RoomKey);
             view.Closed += (_, _) => Pop();
-            view.Launched += (_, plan) => Finish(plan);
+            view.Launched += (_, plan) => { Pop(); ConnectedOrFinished(plan); };
             Push(view);
+        }
+
+        private void ConnectedOrFinished(LaunchPlan plan)
+        {
+            if (NetSession.Active && NetSession.PersistentLobby)
+            {
+                _lobby = new LobbyScreen(_rooms, plan.Lobby);
+                _lobby.MatchRequested += (_, match) => MatchRequested?.Invoke(this, match);
+                _lobby.Closed += (_, reason) =>
+                {
+                    _lobby = null; Pop();
+                    if (_stack.Count > 0 && _stack[^1] is PlayScreen play) play.SessionEnded(reason);
+                };
+                Push(_lobby);
+            }
+            else Finish(plan);
         }
 
         private Task OpenSettings()

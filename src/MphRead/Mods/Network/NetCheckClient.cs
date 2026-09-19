@@ -671,6 +671,8 @@ namespace MphRead.Mods.Network
             // Only the authority rewinds anything, so on every other client
             // this line reads "nothing to compensate" and says so honestly
             // rather than looking like a zero.
+            Console.WriteLine(NetShotDiagnostics.Describe());
+            Console.WriteLine(NetTimingDiagnostics.Describe());
             Console.WriteLine($"  {NetUnlagged.Describe()}");
             Console.WriteLine($"  {NetUnlagged.DescribeDepths()}");
             Console.WriteLine($"  {NetHitPrediction.Describe()}");

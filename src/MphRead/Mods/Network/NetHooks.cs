@@ -185,7 +185,7 @@ namespace MphRead.Mods.Network
 
         public static void AfterRemoteMovement(PlayerEntity player)
         {
-            if (!NetSession.Active || NetRoomChange.Settling
+            if (!NetSession.Active || !NetRoomChange.GameplayReady
                 || player.SlotIndex == NetSession.LocalSlot)
             {
                 return;
@@ -210,6 +210,7 @@ namespace MphRead.Mods.Network
             {
                 if (NetSession.RemoteStateValid[slot])
                 {
+                    NetTimingDiagnostics.Position(slot, snapshot: true);
                     NetPlayerBridge.RestoreSnapshotPosition(player, NetSession.RemoteStates[slot]);
                 }
                 return;
@@ -222,6 +223,7 @@ namespace MphRead.Mods.Network
             {
                 return;
             }
+            if (!NetSession.IsHost && !NetSession.IsAuthority) NetTimingDiagnostics.Position(slot, snapshot: false);
             NetPlayerBridge.RestoreReportedPosition(player, NetSession.RemoteIntents[slot]);
         }
 
@@ -289,7 +291,7 @@ namespace MphRead.Mods.Network
             // cannot disagree, and the restore afterwards is still needed
             // because the engine's own movement step runs in between.
             if (player.LoadFlags.TestFlag(LoadFlags.Spawned) && player.Health > 0
-                && !NetRoomChange.Settling && SnapshotPositions
+                && NetRoomChange.GameplayReady && SnapshotPositions
                 && NetSession.RemoteStateValid[slot])
             {
                 NetPlayerBridge.RestoreSnapshotPosition(player, NetSession.RemoteStates[slot]);
@@ -297,7 +299,7 @@ namespace MphRead.Mods.Network
             if (player.LoadFlags.TestFlag(LoadFlags.Active) && NetSession.RemoteIntentValid[slot])
             {
                 if (player.LoadFlags.TestFlag(LoadFlags.Spawned) && player.Health > 0
-                    && !NetRoomChange.Settling
+                    && NetRoomChange.GameplayReady
                     // Not from the relayed intent while the snapshot owns this
                     // puppet: the whole point is that the position it is drawn
                     // at and the position it is shot at are the same one, and
@@ -319,13 +321,8 @@ namespace MphRead.Mods.Network
                     // together. Applying the position after the scene step
                     // left projectile collision testing on the old hitbox.
                     //
-                    // Except for the second after a room change, when some
-                    // peers are still standing in the room this client has
-                    // left and their coordinates mean nothing here. That
-                    // guard existed, was attached to the loop this call
-                    // replaced, and went with it -- leaving NetRoomChange.
-                    // Settling with no callers at all and every rotation
-                    // back to being a burst of teleports.
+                    // Match/life identity and room readiness exclude reports
+                    // captured in the previous room.
                     NetPlayerBridge.ApplyReportedPosition(player, NetSession.RemoteIntents[slot]);
                 }
                 NetPlayerBridge.ApplyIntent(player, NetSession.RemoteIntents[slot]);
@@ -390,6 +387,7 @@ namespace MphRead.Mods.Network
             // Before the rotation is acted on: a match that has just been won
             // has to be reported before the server can be expected to have
             // rotated because of it.
+            NetTimingDiagnostics.Simulation();
             NetMatchEnd.Sync();
             // Before anything else this frame: if the server has rotated, the
             // slots and the room this code is about to reason over are the
@@ -405,6 +403,9 @@ namespace MphRead.Mods.Network
             // Peers join and leave mid-match; bring the scene's active slots
             // in line with the server's roster every frame.
             NetSlotManager.Sync();
+            // Apply an allocated life before input is stamped or simulation
+            // can hit a body still belonging to the previous life.
+            if (NetSession.IsClient && !NetSession.IsAuthority && NetRoomChange.GameplayReady) ApplyRemoteStates();
             // After the slots, because it reads which hunter each of them is
             // playing: a player who changed hunter between lives has changed
             // who they might collide with. See PlayerColors.
@@ -414,7 +415,7 @@ namespace MphRead.Mods.Network
             {
                 ApplyRemoteStates();
             }
-            if (NetSession.LocalSlot < 0 || !NetSession.IsClient)
+            if (NetSession.LocalSlot < 0 || !NetSession.IsClient || !NetRoomChange.GameplayReady)
             {
                 return;
             }
@@ -485,7 +486,7 @@ namespace MphRead.Mods.Network
         /// </summary>
         public static void AfterSimulation()
         {
-            if (!NetSession.Active)
+            if (!NetSession.Active || !NetRoomChange.GameplayReady)
             {
                 return;
             }
@@ -532,6 +533,7 @@ namespace MphRead.Mods.Network
         /// </summary>
         private static void ApplyRemoteStates()
         {
+            if (!NetRoomChange.GameplayReady) return;
             for (int i = 0; i < PlayerEntity.Players.Count; i++)
             {
                 if (!NetSession.RemoteStateValid[i])

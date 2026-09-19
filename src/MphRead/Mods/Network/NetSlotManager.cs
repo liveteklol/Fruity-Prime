@@ -59,6 +59,10 @@ namespace MphRead.Mods.Network
                 bool occupied = slot == NetSession.LocalSlot
                     || (slot < NetSession.SlotOccupied.Length && NetSession.SlotOccupied[slot]);
 
+                // The final team roster can arrive after the match starts.
+                // Correct active players as well as newly activated slots.
+                if (occupied && _activated[slot]) SyncTeam(player, slot);
+
                 if (occupied && !_activated[slot])
                 {
                     // Weapons.Current is populated by SceneSetup when the room
@@ -96,21 +100,6 @@ namespace MphRead.Mods.Network
         private static void Activate(PlayerEntity player, int slot)
         {
             _activated[slot] = true;
-            // Whoever is arriving is not whoever left. Every per-slot record
-            // the net code keeps -- reported positions and frame numbers,
-            // spawn barriers, divergence and staleness counters, the damage
-            // sequence, and the score -- describes the previous occupant, and
-            // inheriting it is what makes a rejoining player behave like a
-            // stale one, or arrive holding somebody else's kills. See
-            // NetPlayerBridge.ForgetSlot and NetScoreboard.ForgetSlot.
-            NetPlayerBridge.ForgetSlot(slot);
-            NetDamage.ForgetSlot(slot);
-            NetSession.ForgetSlot(slot);
-            NetScoreboard.ForgetSlot(slot);
-            NetHitPrediction.ForgetSlot(slot);
-            NetHitClaims.ForgetSlot(slot);
-            // The same flags Scene.AddPlayer sets, minus the bot marking:
-            // a networked player is driven by relayed intent, not by AI.
             player.LoadFlags |= LoadFlags.SlotActive;
             player.LoadFlags |= LoadFlags.Active;
             player.LoadFlags |= LoadFlags.Initial;
@@ -135,16 +124,7 @@ namespace MphRead.Mods.Network
             // MatchStart), and a rule that only spoke up when the value was
             // out of range had nothing to say about eight players all
             // correctly holding zero.
-            int wanted = GameState.Teams ? slot % 2 : slot;
-            if (player.TeamIndex != wanted
-                && (GameState.Teams
-                    ? player.TeamIndex < 0 || player.TeamIndex > 1
-                    : player.TeamIndex < 0 || player.TeamIndex >= PlayerEntity.MaxPlayers
-                        || TeamIndexTaken(player.TeamIndex, slot)))
-            {
-                player.TeamIndex = wanted;
-                player.Team = player.TeamIndex % 2 == 0 ? Team.Orange : Team.Green;
-            }
+            SyncTeam(player, slot);
             // The hunter comes from the server's roster, not from this
             // machine's menu: a client that used its own choice for every
             // slot drew the other player with the right name at the right
@@ -165,6 +145,16 @@ namespace MphRead.Mods.Network
                 + $"({GameState.Nicknames[slot]}) -- {PlayerEntity.PlayerCount} player(s) in scene");
             NetLog.Event($"slot {slot} activated ({GameState.Nicknames[slot]}), "
                 + $"{PlayerEntity.PlayerCount} player(s) in scene");
+        }
+
+        private static void SyncTeam(PlayerEntity player, int slot)
+        {
+            int wanted = GameState.Teams ? NetSession.SlotTeamIndex[slot] : slot;
+            if (wanted < 0 || (GameState.Teams && wanted >= GameState.TeamCount)
+                || player.TeamIndex == wanted) return;
+            player.TeamIndex = wanted;
+            if (GameState.Teams) MphRead.Mods.Multiplayer.TeamVisuals.Apply(player);
+            else player.Team = Team.None;
         }
 
         /// <summary>
@@ -234,11 +224,7 @@ namespace MphRead.Mods.Network
             // On the way out as well as the way in: a slot can be filled again
             // before this machine has run a frame with it empty, and the
             // clearing has to happen either way round.
-            NetPlayerBridge.ForgetSlot(slot);
-            NetDamage.ForgetSlot(slot);
-            NetSession.ForgetSlot(slot);
-            NetHitPrediction.ForgetSlot(slot);
-            NetHitClaims.ForgetSlot(slot);
+            NetPlayerLifecycle.OnSlotChanged(slot);
             // The score goes when they go, not only when somebody takes the
             // slot: a player who left is not on the board, and the board is
             // drawn from these while the slot stands empty.

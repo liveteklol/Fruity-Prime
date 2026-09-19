@@ -6,18 +6,22 @@ using MphRead.Hud;
 namespace MphRead.Entities
 {
     /// <summary>
-    /// The scoreboard's ping column.
+    /// Network-specific HUD helpers.
     ///
-    /// A partial of PlayerEntity for the same reason the aim injection is:
-    /// the HUD's text drawing is private, and reaching it from here costs
-    /// upstream two call sites instead of opening up the whole HUD.
-    ///
-    /// The numbers come from the server, which is the only party that can
-    /// measure them for everybody -- clients never exchange packets with each
-    /// other -- and travel in the roster it already sends every second.
+    /// Kept on a PlayerEntity partial because the stock HUD drawing methods
+    /// are private. This keeps network presentation policy out of the core
+    /// player simulation while still letting the HUD consume authoritative
+    /// state where prediction would otherwise be misleading.
     /// </summary>
     public partial class PlayerEntity
     {
+        /// <summary>
+        /// Server-owned match rule. Null/offline sessions preserve the stock
+        /// behaviour and show opponent health.
+        /// </summary>
+        private static bool ModHideOpponentHealth =>
+            NetSession.ActiveMatchDefinition?.HideOpponentHealth == true;
+
         /// <summary>
         /// Column centres in the HUD's 256-wide space. The stock two sit at
         /// 160 and 215, which leaves no room for a third: "deaths" is six
@@ -25,6 +29,11 @@ namespace MphRead.Entities
         /// match the two of them move left to make room, and offline nothing
         /// moves at all.
         /// </summary>
+        private static int ModOpponentHudHealth(PlayerEntity opponent) => NetHudHealth.Sample(opponent).Health;
+        private bool ModHudHealthVisible => NetHudHealth.Visible(SlotIndex);
+        private int ModHudHealth => !NetSession.Active || SlotIndex == NetSession.LocalSlot
+            ? Health : ModOpponentHudHealth(this);
+
         private const float _scoreColumn1Net = 145;
         private const float _scoreColumn2Net = 193;
         private const float _scoreColumn1Solo = 160;

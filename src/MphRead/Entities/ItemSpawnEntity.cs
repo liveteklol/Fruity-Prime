@@ -61,8 +61,12 @@ namespace MphRead.Entities
         public override void Initialize()
         {
             base.Initialize();
+            Mods.Network.NetHealthSync.Register(this);
             _scene.TryGetEntity(_data.NotifyEntityId, out _pickupNotifyEntity);
         }
+
+        public Mods.Network.HealthSpawnState ModHealthState => new(
+            Item != null && Item.DespawnTimer != 0, Active, _spawnCooldown, _spawnCount);
 
         public override bool Process()
         {
@@ -81,6 +85,22 @@ namespace MphRead.Entities
             if (_linkDone && _parent != null)
             {
                 Position = Matrix.Vec3MultMtx4(_invPos, _parent.CollisionTransform);
+            }
+            if (Mods.Network.NetHealthSync.IsReplica && Mods.Multiplayer.MapResourceRules.IsHealth(_data.ItemType))
+            {
+                if (Mods.Network.NetHealthSync.TryGet((short)Id, out var state))
+                {
+                    Active = state.Active;
+                    _spawnCooldown = state.Cooldown;
+                    _spawnCount = state.SpawnCount;
+                    if (!state.Available && Item != null) Item.DespawnTimer = 0;
+                    else if (state.Available && Item == null)
+                    {
+                        Item = SpawnItem(_data.ItemType, Position.AddY(0.65f), NodeRef, _scene);
+                        if (Item != null) { Item.Owner = this; Item.ParentId = _data.ParentId; }
+                    }
+                }
+                return base.Process();
             }
             if (!Active)
             {

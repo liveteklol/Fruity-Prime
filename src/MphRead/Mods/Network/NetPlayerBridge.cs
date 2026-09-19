@@ -18,53 +18,12 @@ namespace MphRead.Mods.Network
         private static readonly FormReconciliation[] _formReconciliation =
             new FormReconciliation[PlayerEntity.SlotCapacity];
 
-        /// <summary>
-        /// Whether the last snapshot had each slot standing on the map, so the
-        /// frame the authority places somebody can be told from the thousands
-        /// of frames afterwards on which it merely still has them placed.
-        /// </summary>
-        private static readonly bool[] _authoritySpawned = new bool[PlayerEntity.SlotCapacity];
-
-        /// <summary>
-        /// Placements refused because they did not belong to this room. Zero
-        /// on a healthy session; any number at all means a rotation where one
-        /// machine was still loading, which is worth seeing in the netdbg
-        /// line rather than inferring from a player's account of falling out
-        /// of the world.
-        /// </summary>
+        // Retained for older diagnostic consumers. Lifecycle drop counters now
+        // live in NetPlayerLifecycle; clients no longer choose spawn points.
         public static int PlacementsRefused;
-
-        /// <summary>
-        /// Respawns where this machine's own player was turned to face the
-        /// spawn point the authority had actually put them on, and the
-        /// largest correction any of them needed.
-        ///
-        /// Both are expected to be non-zero in a real match: the two machines
-        /// choose spawn points independently, so most respawns land on a
-        /// point this client did not pick. A worst of ~180 degrees is a
-        /// respawn that used to leave the player looking backwards, which is
-        /// what the measurement is for -- the netdbg line carries it so the
-        /// fix can be seen working rather than taken on trust.
-        /// </summary>
         public static int SpawnFacingsTurned;
         public static float WorstSpawnFacing;
-
-        /// <summary>
-        /// Snapshots ignored because they still described the life this
-        /// machine's own player had already left. Zero on a match nobody
-        /// respawned early in; a handful on any other.
-        /// </summary>
         public static int StaleDeathsIgnored;
-
-        /// <summary>
-        /// How long this machine has been waiting for the authority to
-        /// acknowledge a respawn it performed locally, in snapshots, and
-        /// whether its own player was standing in the map when the previous
-        /// one was applied. Together they find the moment the two machines
-        /// disagree about which life is being described.
-        /// </summary>
-        private static readonly int[] _localSpawnUnacked = new int[PlayerEntity.SlotCapacity];
-        private static readonly bool[] _prevInPlay = new bool[PlayerEntity.SlotCapacity];
 
         /// <summary>
         /// What the last snapshot said each slot's form was, so the netdbg
@@ -72,8 +31,6 @@ namespace MphRead.Mods.Network
         /// said, 1 biped, 2 alt.
         /// </summary>
         private static readonly byte[] _formSaid = new byte[PlayerEntity.SlotCapacity];
-        private static readonly byte[] _lastSaidSpawned = new byte[PlayerEntity.SlotCapacity];
-        private static readonly ushort[] _lastSaidHealth = new ushort[PlayerEntity.SlotCapacity];
 
         public static string FormSaidByAuthority()
         {
@@ -222,6 +179,12 @@ namespace MphRead.Mods.Network
         /// </summary>
         public static void RecordPresses(PlayerEntity player)
         {
+            if (!player.ModIsInPlay)
+            {
+                Array.Clear(_pressHistory);
+                _hasLatch = false;
+                return;
+            }
             PlayerControls c = player.Controls;
             IntentButtons pressed = IntentButtons.None;
             if (c.MoveLeft.IsPressed) pressed |= IntentButtons.MoveLeft;
@@ -387,6 +350,9 @@ namespace MphRead.Mods.Network
             // which is what lets a puppet's charge climb with its owner's while
             // the trigger is held.
             _hasLatch = false;
+            if (NetLog.Enabled && (intent.Buttons.HasFlag(IntentButtons.Shoot) || player.Controls.Shoot.IsReleased))
+                NetShotDiagnostics.Trace("input", ShotKey.For(player.SlotIndex, intent.AckFrame), player.CurrentWeapon,
+                    $"intentFrame={intent.Frame} intentLife={intent.LifeId} inPlay={intent.Buttons.HasFlag(IntentButtons.InPlayState)} shoot={player.Controls.Shoot.IsDown} press={player.Controls.Shoot.IsPressed}");
             return intent;
         }
 
@@ -434,10 +400,15 @@ namespace MphRead.Mods.Network
         /// reaches the simulation by this same route and carries the same
         /// error.
         /// </summary>
+        private static readonly bool[] _respawnRequested = new bool[PlayerEntity.SlotCapacity];
+        public static bool RespawnRequested(int slot) => NetSession.Active && slot != NetSession.LocalSlot
+            && slot >= 0 && slot < _respawnRequested.Length && _respawnRequested[slot];
+
         public static readonly int[] ShootPressAge = new int[PlayerEntity.SlotCapacity];
 
         public static void ApplyIntent(PlayerEntity player, in IntentPacket intent)
         {
+            if (intent.LifeId == 0 || !NetPlayerLifecycle.Matches(player.SlotIndex, intent.SlotGeneration, intent.LifeId)) return;
             if (!Sane(intent.Aim))
             {
                 RejectedUpdates++;
@@ -449,6 +420,17 @@ namespace MphRead.Mods.Network
             if (player.SlotIndex >= 0 && player.SlotIndex < ShootPressAge.Length)
             {
                 ShootPressAge[player.SlotIndex] = shootAge;
+            }
+            _respawnRequested[player.SlotIndex] = !intent.Buttons.HasFlag(IntentButtons.InPlayState)
+                && intent.Buttons.HasFlag(IntentButtons.Shoot);
+            if (!intent.Buttons.HasFlag(IntentButtons.InPlayState))
+            {
+                // Consume history, but never turn a dead player's respawn button into
+                // a weapon press (or a charged-shot release) on an ahead-of-owner puppet.
+                c.ClearAll();
+                ShootPressAge[player.SlotIndex] = 0;
+                player.ModSetSpectating(intent.Buttons.HasFlag(IntentButtons.SpectatingState));
+                return;
             }
             Set(c.MoveLeft, intent.Buttons.HasFlag(IntentButtons.MoveLeft), missed.HasFlag(IntentButtons.MoveLeft));
             Set(c.MoveRight, intent.Buttons.HasFlag(IntentButtons.MoveRight), missed.HasFlag(IntentButtons.MoveRight));
@@ -643,320 +625,90 @@ namespace MphRead.Mods.Network
         /// own position -- see the isLocal branch, and
         /// <see cref="DesyncDistance"/> for the one case that overrides it.
         /// </summary>
+        private static readonly ushort[] _appliedLifeId = new ushort[PlayerEntity.SlotCapacity];
+        private static readonly bool[] _lifeApplied = new bool[PlayerEntity.SlotCapacity];
+
+        private static void BeginRemoteLife(PlayerEntity player, in PlayerState state)
+        {
+            int slot = player.SlotIndex;
+            ForgetSlot(slot);
+            _appliedLifeId[slot] = state.LifeId;
+            _lifeApplied[slot] = true;
+            NetHitPrediction.NoteRespawn(slot);
+            NetDamage.BeginLife(slot, state);
+            NetHitClaims.ForgetSlot(slot);
+            NetUnlagged.ResetSlot(slot);
+            player.ModResetNetworkHistory();
+            player.Controls?.ClearAll();
+            player.ModSetFrozen(false);
+            player.ModSetBurning(false);
+            player.ModSetDisrupted(false);
+            if (state.LifeId != 0)
+            {
+                NetPlayerLifecycle.ApplyingSpawn = true;
+                try { player.ModNetSpawn(state.Position, state.Facing); }
+                finally { NetPlayerLifecycle.ApplyingSpawn = false; }
+                Move(player, state.Position);
+                player.ModSetSpawnFacing(state.Facing);
+                if (state.Health == 0) player.ModNetDie();
+            }
+            player.Health = state.Health;
+        }
+
         public static void ApplyState(PlayerEntity player, in PlayerState state, bool isLocal)
         {
+            int slot = player.SlotIndex;
+            // Validate before scores, damage, position, or presentation can change.
+            if (slot != state.SlotIndex || !NetPlayerLifecycle.Matches(slot, state.SlotGeneration, state.LifeId)) return;
             if (!Sane(state.Position) || !Sane(state.Speed) || !Sane(state.Facing))
             {
                 RejectedUpdates++;
-                NetLog.Event($"slot {player.SlotIndex} snapshot rejected: "
-                    + $"pos={state.Position} speed={state.Speed} facing={state.Facing}");
                 return;
             }
-            bool spawned = (state.Flags & PlayerState.FlagSpawned) != 0;
-            bool wasInPlay = player.LoadFlags.TestFlag(LoadFlags.Spawned) && player.Health > 0;
-            int slot = player.SlotIndex;
-            // Every change in what the authority says about a player being on
-            // the map, and how much health they have. A predicted kill that is
-            // counted undone is a statement about this stream and nothing
-            // else, and it cannot be read from the outside: the report says
-            // the prediction expired, not what the authority was saying while
-            // it did.
-            if (NetLog.Enabled && slot >= 0 && slot < _lastSaidSpawned.Length
-                && (_lastSaidSpawned[slot] != (spawned ? 1 : 0)
-                    || _lastSaidHealth[slot] != state.Health))
-            {
-                NetLog.Event($"[state] slot {slot}: authority says spawned={spawned} "
-                    + $"health={state.Health} (was spawned={_lastSaidSpawned[slot] == 1} "
-                    + $"health={_lastSaidHealth[slot]}); here spawned="
-                    + $"{player.LoadFlags.TestFlag(LoadFlags.Spawned)} health={player.Health}");
-                _lastSaidSpawned[slot] = (byte)(spawned ? 1 : 0);
-                _lastSaidHealth[slot] = state.Health;
-            }
-            if (slot >= 0 && slot < _formSaid.Length)
-            {
-                _formSaid[slot] = (byte)((state.Flags & PlayerState.FlagAltForm) != 0 ? 2 : 1);
-            }
-            // The frame the authority put this player back on the map.
-            bool justPlaced = spawned && slot >= 0 && slot < _authoritySpawned.Length
-                && !_authoritySpawned[slot];
-            if (slot >= 0 && slot < _authoritySpawned.Length)
-            {
-                _authoritySpawned[slot] = spawned;
-            }
-            // The authority keeps the score for everybody, including for this
-            // client's own player. Counting locally worked only for whoever
-            // had been present since the first kill.
-            //
-            // Not for the second after a rotation, for the same reason peer
-            // positions are ignored then: the two machines do not change room
-            // on the same frame, so a client that finished loading first is
-            // still being sent the finished match's snapshots -- and those
-            // carry the winning score. Applying it to the fresh match put the
-            // point goal back on the board on the frame it started, which
-            // ended the new match instantly. Scores begin a match at zero on
-            // every machine, so there is nothing to learn from the authority
-            // during that second anyway.
-            if (slot >= 0 && slot < GameState.Points.Length && !NetRoomChange.Settling)
-            {
-                GameState.Points[slot] = state.Points;
-                GameState.Kills[slot] = state.Kills;
-                GameState.Deaths[slot] = state.Deaths;
-            }
-            // Everything below this line reads the snapshot as a statement
-            // about the life this player is living now. When it is a
-            // statement about the one they have just left, none of it may be
-            // acted on -- see DescribesTheLifeBefore.
-            bool stale = DescribesTheLifeBefore(spawned, wasInPlay, isLocal, slot);
-            if (stale)
-            {
-                StaleDeathsIgnored++;
-                return;
-            }
-            // Before health is reconciled, because the engine's damage
-            // feedback is produced by the hit rather than by the number: a
-            // client that only assigned the new health showed a bar dropping
-            // in silence, with no indicator, no animation and no kill banner.
+            bool fresh = !_lifeApplied[slot] || _appliedLifeId[slot] != state.LifeId;
+            if (fresh) BeginRemoteLife(player, state);
+            bool spawned = (state.Flags & PlayerState.FlagSpawned) != 0 && state.Health > 0;
+            _formSaid[slot] = (byte)((state.Flags & PlayerState.FlagAltForm) != 0 ? 2 : 1);
+            GameState.Points[slot] = state.Points;
+            GameState.Kills[slot] = state.Kills;
+            GameState.Deaths[slot] = state.Deaths;
             NetDamage.Replay(player, state);
             if (!spawned)
             {
-                // Waiting to be placed, or just killed. Health is the whole
-                // point of this branch: it is how a client learns that it
-                // died, and skipping it left a player who had been killed on
-                // every other screen still walking around on its own.
-                if (wasInPlay && state.Health == 0 && player.Health > 0)
-                {
-                    // Killed by something that leaves no damage record: a
-                    // fall, a kill plane, the match ending them. Assigning
-                    // zero health would look right and count nothing, so the
-                    // scoreboards drifted apart by exactly those deaths.
-                    player.ModNetDie();
-                }
+                if (state.Health == 0 && player.Health > 0) player.ModNetDie();
                 player.Health = state.Health;
-                if (state.Health == 0)
-                {
-                    // The authority agrees this player is down, so whatever
-                    // this machine predicted about the life that just ended is
-                    // answered. Left standing, a predicted self-kill would go
-                    // on refusing the respawn that follows it a moment later.
-                    // NetHitPrediction.NoteDeath.
-                    NetHitPrediction.NoteDeath(slot);
-                }
+                if (state.Health == 0) NetHitPrediction.NoteDeath(slot);
+                player.ModSetSpectating((state.Flags & PlayerState.FlagSpectating) != 0);
                 return;
             }
-            if (!wasInPlay)
+            // A deterministic self-death may precede its snapshot. Only a NEW
+            // authority-allocated life can stand that player back up.
+            if (!fresh && player.Health <= 0) return;
+            if (!isLocal)
             {
-                if (NetHitPrediction.HeldDead(slot))
-                {
-                    // Killed here a moment ago and the authority has not
-                    // caught up. Its copy of this player is a round trip
-                    // behind and still walking about, so spawning them from
-                    // this snapshot would stand the corpse back up for one
-                    // snapshot and then kill it again when the confirmation
-                    // arrives. Left down until the kill is confirmed, or until
-                    // the hold expires and the next snapshot spawns them the
-                    // way it always did. NetHitPrediction.HeldDead.
-                    return;
-                }
-                // A life is ending here as far as the prediction is
-                // concerned: anything still outstanding for this slot is about
-                // the body, not about whoever is standing up. It also counts
-                // the kill if this machine showed one the authority never
-                // confirmed. For the local slot too, where what is outstanding
-                // is this player's own splash on themselves -- a debit from
-                // the last life must not come off the health of the new one.
-                NetHitPrediction.NoteRespawn(slot);
-                // The authority has this player on the map and this machine
-                // does not. Spawn() rather than a position write: it is what
-                // clears HideModel, so a player that skipped it tracked
-                // perfectly while drawing nothing at all.
-                player.ModNetSpawn(state.Position, state.Facing);
+                Move(player, InForm(player, state.Position, (state.Flags & PlayerState.FlagAltForm) != 0));
+                player.Speed = state.Speed;
+                player.Health = NetHitPrediction.HealthFor(slot, state.Health);
+                player.ModSetFacing(state.Facing);
+                player.ModSetWeapon((BeamType)state.CurrentWeapon);
+                player.EquipInfo.Zoomed = (state.Flags & PlayerState.FlagZoomed) != 0;
+                ApplyForm(player, (state.Flags & PlayerState.FlagAltForm) != 0);
+                player.ModSetSpectating((state.Flags & PlayerState.FlagSpectating) != 0);
             }
-            if (isLocal)
+            else
             {
-                // Position and speed stay with the machine playing this
-                // character; only the match -- health, score, spawn, death --
-                // comes from the authority.
-                //
-                // Taking them from the snapshot closes a loop with no way
-                // out. The authority does not simulate a remote player's
-                // movement: it puts the puppet wherever the owner's last
-                // intent said. So the position it publishes for this client
-                // *is* this client's own report from a round trip ago, and
-                // writing it back here means the next intent carries it
-                // again unchanged. The two values agree forever, the
-                // character is pinned to the spot the loop closed on, and
-                // every frame of local movement is computed and thrown away
-                // before it is ever published. That froze every client except
-                // the authority -- 0 units travelled in seventy seconds, on
-                // loopback as much as over the wire.
-                //
-                // A respawn or a death does not come through here: those are
-                // the !wasInPlay and !spawned branches above. What is left is
-                // a divergence no latency can explain, and only that is
-                // taken.
-                if (NetRoomChange.Settling)
+                if (!fresh && NetRoomChange.GameplayReady && Diverged(player, state, slot))
                 {
-                    // Nothing about position means anything for the second
-                    // after a room change: this client has loaded the new
-                    // room and the authority may not have, so its snapshot is
-                    // still describing where everybody stood in the old one.
-                    // Taking it drags this player to whatever those
-                    // coordinates land on here, the local simulation walks
-                    // back, and the two alternate -- measured at a six-player
-                    // rotation, twenty-six corrections in four seconds
-                    // between two fixed points a room apart.
-                    //
-                    // NoteRoomChanged has cleared the placement record, so
-                    // the first snapshot after this window that says this
-                    // player is spawned counts as a fresh placement and puts
-                    // it where the authority wants it.
-                }
-                else if (justPlaced)
-                {
-                    // Except at a respawn, which is the one moment the
-                    // authority owns this player's position outright.
-                    //
-                    // `GetRespawnPoint` chooses from the spawn points that are
-                    // free of living players *on the machine running it*, and
-                    // rotates its choice with the frame counter, so two
-                    // machines running it a few frames apart do not pick the
-                    // same one. The local player also respawns early by
-                    // holding fire, so it makes that choice well before the
-                    // authority makes its own. Both then believe they know
-                    // where this player is standing, half a level apart, and
-                    // nothing brings them back together: the client publishes
-                    // its own spot in every intent and the authority replies
-                    // with the other one, for the rest of the life.
-                    //
-                    // Fifty-five of these in a hundred seconds, at up to 175
-                    // units. The old code hid it -- it overwrote this
-                    // player's position from every snapshot, which froze it
-                    // solid but did make the two agree.
-                    //
-                    // Spawning locally first is kept: it is what makes a
-                    // respawn feel immediate rather than arrive a round trip
-                    // later, and it is what still works if snapshots stall.
-                    // Only the placement is handed over -- and only when it
-                    // is a placement this room could have made.
-                    //
-                    // The settling window above covers a client that loaded
-                    // faster than the authority, but only for a second, and
-                    // loading a room is not a bounded thing: on a phone, or
-                    // off a slow disk, the authority can still be in the map
-                    // before the rotation long after that. Its snapshot then
-                    // places this player at coordinates that meant a spawn
-                    // point *there*, and here they are somewhere outside the
-                    // level -- which is the report about spawning into a
-                    // black world and falling out of it. See
-                    // ModPlacementBelongsHere.
-                    if (player.ModPlacementBelongsHere(state.Position))
-                    {
-                        Move(player, state.Position);
-                        // And turned to face the way that point faces. The
-                        // position was never the whole of a spawn: a player
-                        // put on the authority's point while still looking
-                        // down the one this machine had chosen is standing
-                        // correctly and facing a wall, which is the report
-                        // about the facing being wrong after a respawn. Only
-                        // here -- everywhere else the aim is this machine's
-                        // to decide, and taking it from a snapshot would put
-                        // the mouse a round trip behind.
-                        Vector3? facing = player.ModSpawnFacingAt(state.Position);
-                        if (facing.HasValue)
-                        {
-                            float was = Vector3.Dot(player.ModGunVector.Normalized(),
-                                facing.Value.Normalized());
-                            SpawnFacingsTurned++;
-                            float degrees = MathHelper.RadiansToDegrees(
-                                MathF.Acos(Math.Clamp(was, -1, 1)));
-                            if (degrees > WorstSpawnFacing)
-                            {
-                                WorstSpawnFacing = degrees;
-                            }
-                            player.ModSetSpawnFacing(facing.Value);
-                            NetLog.Event($"slot {player.SlotIndex} turned to its spawn "
-                                + $"point's facing, {degrees:0.#} degrees from where it "
-                                + "was looking");
-                        }
-                    }
-                    else
-                    {
-                        PlacementsRefused++;
-                        NetLog.Event($"slot {player.SlotIndex} kept its own spawn: the "
-                            + $"authority placed it at {state.Position}, which is not "
-                            + "near any spawn point in this room");
-                        // Keep the local spawn and let the next divergence
-                        // check settle the two, which it will as soon as the
-                        // authority is describing this room.
-                        _authoritySpawned[slot] = false;
-                    }
-                    // Not the authority's speed: a player that has just been
-                    // put on a spawn point is standing still, and whatever the
-                    // snapshot carries here was derived across the teleport
-                    // that put it there.
-                    player.Speed = Vector3.Zero;
-                }
-                else if (Diverged(player, state, slot))
-                {
-                    NetLog.Event($"slot {player.SlotIndex} pulled back to the authority "
-                        + $"from {player.Position} to {state.Position}");
                     Move(player, state.Position);
                     player.Speed = state.Speed;
                     _divergedFrames[slot] = 0;
                 }
-                // Plus whatever this machine's own beam has drained out of
-                // somebody since the authority last spoke. Everything else
-                // about this number is the authority's, including every point
-                // of damage taken: the credit is added to what it says rather
-                // than replacing it, so a rocket that lands while the Shock
-                // Coil is running still shows up the moment it is reported.
-                // NetHitPrediction.LocalHealthFor.
                 player.Health = NetHitPrediction.LocalHealthFor(player, state.Health);
-                // Including for this machine's own player: being frozen is
-                // part of the match, like health and the score, and a victim
-                // who kept walking about while the authority held them still
-                // was the whole of the "frozen players who keep moving" bug.
-                player.ModSetFrozen((state.Flags & PlayerState.FlagFrozen) != 0);
-                ApplyAfflictions(player, state);
-                return;
             }
-            // Converted for the same reason the reported position is: the
-            // authority published this while its own copy was in whatever
-            // form FlagAltForm says, and this copy may not be in that form
-            // yet.
-            Move(player, InForm(player, state.Position,
-                (state.Flags & PlayerState.FlagAltForm) != 0));
-            player.Speed = state.Speed;
-            // Less whatever this machine has already landed on them and not
-            // yet had confirmed. The authority's health is correct and a round
-            // trip old, and assigning it raw is what made a predicted hit last
-            // exactly one frame: the victim flinched instantly and their bar
-            // sprang straight back up. NetHitPrediction.HealthFor.
-            player.Health = NetHitPrediction.HealthFor(slot, state.Health);
-            player.ModSetFacing(state.Facing);
-            player.ModSetWeapon((BeamType)state.CurrentWeapon);
-            player.EquipInfo.Zoomed = (state.Flags & PlayerState.FlagZoomed) != 0;
-            ApplyForm(player, (state.Flags & PlayerState.FlagAltForm) != 0);
-            // Hidden and non-solid on this machine too, not just the one
-            // whose input is frozen -- Quake 3's spectator, not a player who
-            // merely stopped moving.
-            player.ModSetSpectating((state.Flags & PlayerState.FlagSpectating) != 0);
             player.ModSetFrozen((state.Flags & PlayerState.FlagFrozen) != 0);
             ApplyAfflictions(player, state);
         }
 
-        /// <summary>
-        /// The two afflictions that are shown rather than simulated: the Volt
-        /// Driver's disruption and the Magmaul's fire.
-        ///
-        /// Both are applied by <c>TakeDamage</c> from the beam entity that
-        /// landed the hit, and a beam only ever exists on the machine that
-        /// resolved it -- so before this, neither reached the victim on their
-        /// own screen, or anybody watching. Carried as state for the same
-        /// reason the freeze is, and applied to this machine's own player as
-        /// well as to the puppets: being disrupted is something you are, not
-        /// something the person who shot you can see.
-        /// </summary>
         private static void ApplyAfflictions(PlayerEntity player, PlayerState state)
         {
             player.ModSetDisrupted((state.Flags & PlayerState.FlagDisrupted) != 0);
@@ -978,7 +730,7 @@ namespace MphRead.Mods.Network
             {
                 return;
             }
-            FormCorrection correction = _formReconciliation[slot].Step(NetSession.NetFrame,
+            FormCorrection correction = ReconcileForm(slot, NetSession.NetFrame,
                 altForm, player.IsAltForm, player.IsMorphing, player.IsUnmorphing,
                 NetSession.SlotPing[slot]);
             // First the real transition, because that is what creates the
@@ -996,6 +748,11 @@ namespace MphRead.Mods.Network
                 player.ModForceForm(altForm);
             }
         }
+
+        internal static FormCorrection ReconcileForm(int slot, uint frame, bool desiredAlt,
+            bool actualAlt, bool morphing, bool unmorphing, int ping)
+            => slot < 0 || slot >= _formReconciliation.Length ? FormCorrection.None
+                : _formReconciliation[slot].Step(frame, desiredAlt, actualAlt, morphing, unmorphing, ping);
 
         private static readonly int[] _divergedFrames = new int[PlayerEntity.SlotCapacity];
 
@@ -1058,19 +815,16 @@ namespace MphRead.Mods.Network
         public static void NoteRoomChanged()
         {
             Array.Clear(_formReconciliation);
-            Array.Clear(_authoritySpawned);
+            Array.Clear(_lifeApplied);
             Array.Clear(_reportSeen);
             Array.Clear(_divergedFrames);
-            Array.Clear(_spawnIntentFrame);
-            Array.Clear(_wasInPlay);
-            Array.Clear(_localSpawnUnacked);
-            Array.Clear(_prevInPlay);
-            Array.Clear(_staleFrames);
         }
 
         public static void Reset()
         {
             Array.Clear(_formReconciliation);
+            Array.Clear(_appliedLifeId);
+            Array.Clear(_lifeApplied);
             Snaps = 0;
             WorstSnap = 0;
             NodeLookupsUnresolved = 0;
@@ -1083,13 +837,8 @@ namespace MphRead.Mods.Network
             Array.Clear(_pressSeen);
             Array.Clear(ShootPressAge);
             Array.Clear(_pressHistory);
-            Array.Clear(_authoritySpawned);
+            _hasLatch = false;
             Array.Clear(_divergedFrames);
-            Array.Clear(_spawnIntentFrame);
-            Array.Clear(_wasInPlay);
-            Array.Clear(_localSpawnUnacked);
-            Array.Clear(_prevInPlay);
-            Array.Clear(_staleFrames);
             Array.Clear(_lastReportPosition);
             Array.Clear(_lastReportFrame);
             Array.Clear(_reportSeen);
@@ -1126,17 +875,19 @@ namespace MphRead.Mods.Network
                 return;
             }
             _formReconciliation[slot].Reset();
+            _lifeApplied[slot] = false;
+            _appliedLifeId[slot] = 0;
             _lastPressFrame[slot] = 0;
             _pressSeen[slot] = false;
             ShootPressAge[slot] = 0;
-            _pressHistory[slot] = 0;
-            _authoritySpawned[slot] = false;
+            _respawnRequested[slot] = false;
+            if (slot == NetSession.LocalSlot)
+            {
+                Array.Clear(_pressHistory);
+                _hasLatch = false;
+                _latchedCharge = _latchedBoostDamage = 0;
+            }
             _divergedFrames[slot] = 0;
-            _spawnIntentFrame[slot] = 0;
-            _wasInPlay[slot] = false;
-            _localSpawnUnacked[slot] = 0;
-            _prevInPlay[slot] = false;
-            _staleFrames[slot] = 0;
             _lastReportPosition[slot] = Vector3.Zero;
             _lastReportFrame[slot] = 0;
             _reportSeen[slot] = false;
@@ -1250,181 +1001,9 @@ namespace MphRead.Mods.Network
                 intent.Buttons.HasFlag(IntentButtons.AltFormState)));
         }
 
-        private static readonly uint[] _spawnIntentFrame = new uint[PlayerEntity.SlotCapacity];
-        private static readonly bool[] _wasInPlay = new bool[PlayerEntity.SlotCapacity];
-        private static readonly int[] _staleFrames = new int[PlayerEntity.SlotCapacity];
-
-        /// <summary>
-        /// The longest a puppet's position may be held back while its owner is
-        /// still reporting frames from before it respawned. One round trip is
-        /// thirty frames at 250 ms; this is four times that and then the guard
-        /// gives up rather than waiting on a number that may never arrive.
-        /// </summary>
-        private const int StaleAfterSpawnFrames = 120;
-
-        /// <summary>
-        /// Whether this intent describes where a player stood before it was
-        /// put back on the map, and so must not be acted on.
-        ///
-        /// This is the respawn glitch. A player dies; its owner keeps sending
-        /// intents carrying the position it died at. The authority puts the
-        /// puppet on a spawn point -- and on the very next frame this method
-        /// moves it straight back to the death position, because that is what
-        /// the newest intent from a round trip ago still says. It then
-        /// publishes that as the authoritative position of a player it has
-        /// flagged as spawned, for as long as the round trip lasts.
-        ///
-        /// What the owner does with that snapshot is the visible half: the
-        /// first one it receives saying "you are spawned" is the one it takes
-        /// its placement from, so it respawns correctly and is then teleported
-        /// into wherever it had died -- through the floor as often as not, so
-        /// its own screen goes black and everyone else sees a shadow and no
-        /// model. Reported from play on the Pi after two or three respawns in
-        /// one match, at fifteen milliseconds: it does not need latency, only
-        /// a round trip.
-        ///
-        /// The barrier is the intent frame that was current when the puppet
-        /// was placed. Anything up to and including it was composed before the
-        /// spawn and describes a dead player; the first intent after it is the
-        /// owner reporting where it actually is now.
-        /// </summary>
-        private static bool StaleSinceSpawn(PlayerEntity player, in IntentPacket intent)
-        {
-            int slot = player.SlotIndex;
-            if (slot < 0 || slot >= _spawnIntentFrame.Length)
-            {
-                return false;
-            }
-            bool inPlay = player.LoadFlags.TestFlag(LoadFlags.Spawned) && player.Health > 0;
-            if (inPlay && !_wasInPlay[slot])
-            {
-                _spawnIntentFrame[slot] = intent.Frame;
-                _staleFrames[slot] = 0;
-            }
-            _wasInPlay[slot] = inPlay;
-            if (!inPlay)
-            {
-                _staleFrames[slot] = 0;
-                return false;
-            }
-            // The owner still says it is down, so what it is sending is where
-            // its body is lying, not where it is. This is the test that
-            // works: the frame number does not, because a dead player's
-            // counter keeps rising and clears the barrier within two frames
-            // while the position it carries stays on the corpse.
-            if (!intent.Buttons.HasFlag(IntentButtons.InPlayState))
-            {
-                return true;
-            }
-            if (intent.Frame > _spawnIntentFrame[slot])
-            {
-                _staleFrames[slot] = 0;
-                return false;
-            }
-            // Bounded, and that is the whole point of the counter. What this
-            // has to cover is one round trip -- thirty frames at 250 ms -- and
-            // a guard that waits for a frame number to grow can wait forever
-            // if it never does: a peer that reconnects restarts its counter at
-            // zero, and a slot that changes hands inherits the barrier of
-            // whoever held it. Blocking a puppet's position for good would
-            // leave its hitbox at the spawn point and its derived speed at
-            // zero, which is a player nobody can hit and who slides without
-            // ever taking a step -- and nothing would have said so.
-            if (++_staleFrames[slot] <= StaleAfterSpawnFrames)
-            {
-                return true;
-            }
-            NetLog.Event($"slot {slot} still reporting pre-spawn frames after "
-                + $"{_staleFrames[slot]} of them; following it anyway");
-            _spawnIntentFrame[slot] = intent.Frame;
-            _staleFrames[slot] = 0;
-            return false;
-        }
-
-        /// <summary>
-        /// Whether this snapshot is describing the life this machine's own
-        /// player has already left, and so must not be acted on.
-        ///
-        /// The mirror image of <see cref="StaleSinceSpawn"/>, which is the
-        /// same round trip seen from the authority. A client respawns itself
-        /// the moment the player holds fire -- that is what makes a respawn
-        /// feel immediate rather than arrive a round trip later -- and the
-        /// authority does not hear about it for half a trip. Every snapshot
-        /// in between is composed, correctly, of a dead player, and they
-        /// arrive in order: nothing about them is late or out of sequence,
-        /// they are simply answers to a question that has since changed.
-        ///
-        /// Applied to the new life they read as a death. Two separate paths
-        /// deliver it:
-        ///
-        /// * the "killed by something that leaves no damage record" branch
-        ///   below, which sees health zero against a player who is standing
-        ///   up and calls <c>ModNetDie</c>, and
-        /// * <see cref="NetDamage.Replay"/>, where a killing blow from the
-        ///   previous life that this client had not seen yet replays with
-        ///   <c>DamageFlags.Death</c> onto a player at full health.
-        ///
-        /// Both run the engine's death sequence, and its multiplayer branch
-        /// plays <c>HunterSfx.Death</c> -- the hunter's own death cry, on the
-        /// frame the player respawns. That is the report. It is "sometimes"
-        /// because it needs a snapshot of the old life to arrive *after* the
-        /// local respawn: hold fire the instant you die on a slow line and it
-        /// happens, wait out the timer and the authority has already spawned
-        /// you and there is nothing stale left to arrive.
-        ///
-        /// The moment to find is the rising edge -- this player back in play
-        /// here while the authority still has them down. The first snapshot
-        /// of the real death does not qualify: they were in play on the
-        /// previous one too, so there is no edge, and the death lands as it
-        /// always did.
-        ///
-        /// Bounded, for the reason <see cref="StaleSinceSpawn"/> is bounded:
-        /// a guard that waits for the authority to agree can wait forever if
-        /// it never does, and a client that ignored its own death for the
-        /// rest of a match would be a player nobody can kill. Past the
-        /// ceiling the snapshot is believed and the death applied.
-        /// </summary>
-        private static bool DescribesTheLifeBefore(bool spawned, bool inPlayHere,
-            bool isLocal, int slot)
-        {
-            if (!isLocal || slot < 0 || slot >= _localSpawnUnacked.Length)
-            {
-                return false;
-            }
-            bool wasInPlayHere = _prevInPlay[slot];
-            _prevInPlay[slot] = inPlayHere;
-            if (spawned)
-            {
-                // The authority has caught up; whatever it says next is about
-                // the life this player is living now.
-                _localSpawnUnacked[slot] = 0;
-                return false;
-            }
-            if (!inPlayHere)
-            {
-                // Down on both machines, which is the ordinary wait for a
-                // spawn point and nothing to guard against.
-                _localSpawnUnacked[slot] = 0;
-                return false;
-            }
-            if (_localSpawnUnacked[slot] == 0 && wasInPlayHere)
-            {
-                // In play here and in play when the last snapshot was applied
-                // -- no local respawn has happened, so this is the authority
-                // reporting a death that has genuinely just occurred.
-                return false;
-            }
-            if (++_localSpawnUnacked[slot] > StaleAfterSpawnFrames)
-            {
-                NetLog.Event($"slot {slot} has been standing up for "
-                    + $"{_localSpawnUnacked[slot]} snapshots the authority still calls "
-                    + "dead; believing it");
-                _localSpawnUnacked[slot] = 0;
-                _prevInPlay[slot] = inPlayHere;
-                return false;
-            }
-            return true;
-        }
+        private static bool StaleSinceSpawn(PlayerEntity player, in IntentPacket intent) =>
+            !NetPlayerLifecycle.Matches(player.SlotIndex, intent.SlotGeneration, intent.LifeId)
+            || !intent.Buttons.HasFlag(IntentButtons.InPlayState);
 
         private static readonly Vector3[] _lastReportPosition = new Vector3[PlayerEntity.SlotCapacity];
         private static readonly uint[] _lastReportFrame = new uint[PlayerEntity.SlotCapacity];

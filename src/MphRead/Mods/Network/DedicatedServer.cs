@@ -1,6 +1,8 @@
 using System;
+using MphRead.Entities;
 using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net;
 using System.Threading;
 
@@ -31,7 +33,7 @@ namespace MphRead.Mods.Network
     /// simulate because they live in a process that already has a simulation
     /// or is about to have several. See <see cref="RunsTheMatch"/>.
     /// </summary>
-    public sealed class DedicatedServer
+    public sealed partial class DedicatedServer
     {
         private sealed class Peer
         {
@@ -66,7 +68,11 @@ namespace MphRead.Mods.Network
             /// Cleared when a new match starts, so it always describes the
             /// match that is ending and not the one before it.
             /// </summary>
-            public bool Ready;
+            public bool PostMatchReady;
+            public bool LobbyReady;
+            public sbyte TeamIndex = -1;
+            public readonly Dictionary<uint, LobbyCommandResultPacket> Commands = new();
+            public readonly Queue<uint> CommandOrder = new();
             /// <summary>
             /// How this player answered the vote on the table: 0 not yet,
             /// 1 yes, 2 no. Cleared when a vote resolves rather than when one
@@ -198,6 +204,12 @@ namespace MphRead.Mods.Network
         /// map name cannot do when the rotation is one map long.
         /// </summary>
         private ushort _matchId = 1;
+        private ulong _authorityEpoch = (ulong)DateTime.UtcNow.Ticks;
+        private uint _rosterRevision;
+        private readonly ushort[] _slotGenerations = new ushort[PlayerEntity.SlotCapacity];
+        private readonly ushort[] _slotLives = new ushort[PlayerEntity.SlotCapacity];
+        private uint _snapshotFrame;
+        private bool _snapshotSeen;
 
         /// <summary>
         /// How long the results are left on screen before the map changes.
@@ -243,7 +255,7 @@ namespace MphRead.Mods.Network
             for (int i = 0; i < _peers.Count; i++)
             {
                 counted++;
-                if (!_peers[i].Ready)
+                if (!_peers[i].PostMatchReady)
                 {
                     all = false;
                     break;
@@ -362,7 +374,7 @@ namespace MphRead.Mods.Network
         /// player owns the session; simulating here would have
         /// <c>ServerSim.Start</c> call <c>NetSession.StartServerAuthority</c>
         /// on top of the player who started it.</item>
-        /// <item><see cref="MasterServer"/> -- "Host: online". The directory runs
+        /// <item><see cref="NetMaster"/> -- "Host: online". The directory runs
         /// one of these per hosted match, several at a time, in one
         /// process.</item>
         /// </list>
@@ -410,7 +422,9 @@ namespace MphRead.Mods.Network
             _transport = new NetTransport(_port);
             _running = true;
             Log($"listening on UDP {_transport.LocalPort}, up to {_maxPlayers} players");
-            StartSimulation();
+            _lobbyMatch = DefinitionFor(_rotation.Current);
+            _phase = SessionPolicy == ServerSessionPolicy.Lobby ? SessionPhase.Lobby : SessionPhase.InMatch;
+            if (_phase == SessionPhase.InMatch) StartSimulation();
             Log(Simulating
                 ? "this server runs the match itself"
                 : "hosted game: the first client to connect runs the match");
@@ -440,21 +454,23 @@ namespace MphRead.Mods.Network
                     // world: the intents that arrived this pass are the input
                     // to the steps this pass owes, exactly as a client applies
                     // what arrived before it steps.
-                    _sim?.Advance(now);
+                    CheckLoadBarrier(now);
+                    if (_phase is SessionPhase.InMatch or SessionPhase.PostMatch) _sim?.Advance(now);
 
                     // The server owns the match clock, not the authority client:
                     // that is what lets a joiner adopt a running match's timer
                     // instead of starting its own, and what keeps the rotation
                     // advancing even while players come and go.
-                    float limit = _rotation.Current.TimeLimit;
-                    if (_matchEndedAt < 0 && limit > 0 && _peers.Count > 0
+                    float limit = CurrentDefinition.TimeLimitSeconds;
+                    if (_phase == SessionPhase.InMatch && _matchEndedAt < 0 && limit > 0 && _peers.Count > 0
                         && now - _matchStarted >= limit)
                     {
                         EndMatch(now, "time limit");
                     }
                     else if (_matchEndedAt >= 0 && now - _matchEndedAt >= EndSequenceFor())
                     {
-                        AdvanceMap(now);
+                        if (SessionPolicy == ServerSessionPolicy.Lobby) ReturnToLobby();
+                        else AdvanceMap(now);
                     }
                     // Repeated rather than sent once: UDP drops, and a client that
                     // missed the state packet would otherwise sit on a stale map.
@@ -464,7 +480,8 @@ namespace MphRead.Mods.Network
                         // Order matters only in that the roster carries the last
                         // measurement: ping first, publish second.
                         PingPeers(now);
-                        BroadcastMatchState(now);
+                        BroadcastSessionState();
+                        if (_phase is SessionPhase.InMatch or SessionPhase.PostMatch) BroadcastMatchState(now);
                         BroadcastRoster();
                         // A vote nobody finishes answering has to time out,
                         // and a client that missed a VoteState packet has to
@@ -479,13 +496,13 @@ namespace MphRead.Mods.Network
                         {
                             BroadcastMapChoices();
                         }
-                        if (_authority != null && !Simulating)
+                        if (_authority != null && !RunsTheMatch)
                         {
                             NotifyAuthority(_authority);
                         }
                         Reporter?.Beat(now, ServerName, listenPort,
                             (byte)_peers.Count, (byte)_maxPlayers,
-                            (byte)_rotation.Current.Mode, _rotation.Current.RoomKey);
+                            (byte)CurrentDefinition.Mode, CurrentDefinition.RoomKey);
                     }
                     // The games this server is running for other people,
                     // reaped here rather than on their own threads: a match
@@ -514,7 +531,7 @@ namespace MphRead.Mods.Network
                             + (Simulating ? ", authority = this server"
                                 : _authority != null ? $", authority = slot {_authority.SlotIndex}"
                                 : ", no authority")
-                            + $", map {_rotation.Current.RoomKey}"
+                            + $", map {CurrentDefinition.RoomKey}"
                             + (limit > 0 ? $", {Math.Max(0, limit - (now - _matchStarted)):0} s left" : "")
                             + (_transport is { PacketsDropped: > 0 }
                                 ? $", {_transport.PacketsDropped} packet(s) dropped" : ""));
@@ -608,15 +625,17 @@ namespace MphRead.Mods.Network
         /// </summary>
         private void EndMatch(double now, string reason)
         {
-            if (_matchEndedAt >= 0)
+            if (_matchEndedAt >= 0 || _phase != SessionPhase.InMatch)
             {
                 return;
             }
             _matchEndedAt = now;
+            foreach (Peer peer in _peers) peer.PostMatchReady = false;
+            SetPhase(SessionPhase.PostMatch);
             // Before the state goes out, so the first results screen anybody
             // draws can already be scrolled.
             OpenBallot();
-            Log($"match over on {_rotation.Current.RoomKey} ({reason}); "
+            Log($"match over on {CurrentDefinition.RoomKey} ({reason}); "
                 + $"{_rotation.Next.RoomKey} in {EndSequenceFor():0} s"
                 + (_ballotOpen ? "; ballot open" : ""));
             BroadcastMatchState(now);
@@ -626,9 +645,15 @@ namespace MphRead.Mods.Network
         private void AdvanceMap(double now)
         {
             RotationEntry entry = _rotation.Advance();
+            _phase = SessionPhase.InMatch;
+            NormalizeTeams();
             _matchStarted = now;
             _matchEndedAt = -1;
-            _matchId++;
+            _matchId = NetLifecycleTracker.Next(_matchId);
+            _snapshotSeen = false;
+            Array.Clear(_slotLives);
+            foreach (Peer connected in _peers) connected.LastIntentFrame = 0;
+            TouchLobbyRevision("rotation advanced");
             // A vote about which map to play next has been answered by the
             // match ending, whatever the room was going to say.
             if (_voteRunning)
@@ -645,7 +670,7 @@ namespace MphRead.Mods.Network
             // one it would rotate the following map the moment it finished.
             for (int i = 0; i < _peers.Count; i++)
             {
-                _peers[i].Ready = false;
+                _peers[i].PostMatchReady = false;
             }
             // The ballot has been acted on; there is no next map to choose
             // again until this one is over. Closed *after* Advance has taken
@@ -674,23 +699,24 @@ namespace MphRead.Mods.Network
 
         private MatchStatePacket BuildState(double now)
         {
-            RotationEntry entry = _rotation.Current;
-            float elapsed = (float)(now - _matchStarted);
+            MatchDefinition entry = CurrentDefinition;
+            float elapsed = _phase is SessionPhase.Lobby or SessionPhase.Starting ? 0 : (float)(now - _matchStarted);
             bool ending = _matchEndedAt >= 0;
             return new MatchStatePacket
             {
                 Mode = (byte)entry.Mode,
-                TimeRemaining = ending || entry.TimeLimit <= 0
+                TimeRemaining = ending || entry.TimeLimitSeconds <= 0
                     ? 0
-                    : Math.Max(0, entry.TimeLimit - elapsed),
+                    : Math.Max(0, entry.TimeLimitSeconds - elapsed),
                 TimeElapsed = elapsed,
                 PlayerCount = (byte)_peers.Count,
                 Flags = (byte)((ending ? MatchStatePacket.FlagEnding : MatchStatePacket.FlagInProgress)
-                    | (FriendlyFire ? MatchStatePacket.FlagFriendlyFire : 0)
-                    | (ShadowFreeze ? 0 : MatchStatePacket.FlagNoShadowFreeze)
-                    | MatchStatePacket.RuleFlags(DamageLevel, AffinityWeapons)),
-                PointGoal = (ushort)Math.Clamp(entry.PointGoal, 0, UInt16.MaxValue),
+                    | (entry.FriendlyFire ? MatchStatePacket.FlagFriendlyFire : 0)
+                    | (entry.ShadowFreeze ? 0 : MatchStatePacket.FlagNoShadowFreeze)
+                    | MatchStatePacket.RuleFlags(DamageLevel, entry.AffinityWeapons)),
+                PointGoal = entry.PointGoal,
                 MatchId = _matchId,
+                AuthorityEpoch = _authorityEpoch,
                 RoomKey = entry.RoomKey,
                 NextRoomKey = _rotation.Next.RoomKey
             };
@@ -698,6 +724,7 @@ namespace MphRead.Mods.Network
 
         private void BroadcastMatchState(double now)
         {
+            if (_sim != null) NetSession.ApplySessionState(BuildSessionState());
             MatchStatePacket state = BuildState(now);
             // The simulation follows the clock, the mode and the map exactly
             // as a client does -- including the flag that says the match is
@@ -754,9 +781,9 @@ namespace MphRead.Mods.Network
                 throw new ProgramException($"the server cannot run the match: {why}");
             }
             var sim = new ServerSim();
-            RotationEntry entry = _rotation.Current;
+            MatchDefinition entry = CurrentDefinition;
             if (!sim.Start(entry.RoomKey, entry.Mode, _maxPlayers, SendSnapshot,
-                () => EndMatch(_now, "score")))
+                () => EndMatch(_now, "score"), BuildRoster(), BuildSessionState()))
             {
                 Log($"cannot run the match: the room \"{entry.RoomKey}\" would not load");
                 throw new ProgramException($"the server could not load \"{entry.RoomKey}\"");
@@ -802,8 +829,9 @@ namespace MphRead.Mods.Network
             {
                 return;
             }
-            NetSession.ApplyRoster(BuildRoster());
+            NetSession.ApplySessionState(BuildSessionState());
             NetSession.ApplyMatchState(BuildState(now), rotated: false);
+            NetSession.ApplyRoster(BuildRoster());
         }
 
         public void Stop() => _running = false;
@@ -812,6 +840,9 @@ namespace MphRead.Mods.Network
         {
             switch (packet.Type)
             {
+                case PacketType.LobbyCommand: HandleLobbyCommand(packet, now); break;
+                case PacketType.MatchLoaded: HandleMatchLoaded(packet, now); break;
+                case PacketType.MatchLoadFailed: HandleMatchLoadFailed(packet); break;
                 case PacketType.Hello:
                     HandleHello(packet, now);
                     break;
@@ -875,6 +906,7 @@ namespace MphRead.Mods.Network
         /// </summary>
         private void HandleHitClaim(ReceivedPacket packet, double now)
         {
+            if (_phase != SessionPhase.InMatch) return;
             Peer? peer = Find(packet.Sender);
             if (peer == null || peer.SlotIndex < 0 || !Simulating)
             {
@@ -900,9 +932,10 @@ namespace MphRead.Mods.Network
                 {
                     continue;
                 }
-                HitVerdictPacket.Write(_scratch, verdicts);
+                HitVerdictPacket.Write(_scratch, verdicts, NetSession.CurrentMatchId, NetSession.AuthorityEpoch,
+                    NetPlayerLifecycle.Generation(slot), NetPlayerLifecycle.Get(slot));
                 _transport.Send(_peers[i].EndPoint, PacketType.HitVerdict,
-                    _scratch.AsSpan(0, 1 + verdicts.Length * HitVerdictPacket.EntrySize));
+                    _scratch.AsSpan(0, HitVerdictPacket.HeaderSize + verdicts.Length * HitVerdictPacket.EntrySize));
                 return;
             }
         }
@@ -1015,7 +1048,7 @@ namespace MphRead.Mods.Network
             if (key.Length > 0)
             {
                 string? resolved = ResolveRoomKey(key);
-                if (resolved == null || String.Equals(resolved, _rotation.Current.RoomKey,
+                if (resolved == null || String.Equals(resolved, CurrentDefinition.RoomKey,
                     StringComparison.OrdinalIgnoreCase))
                 {
                     // No map, or the one they are standing in. Answered
@@ -1197,6 +1230,7 @@ namespace MphRead.Mods.Network
         /// </summary>
         private void StartVote(Peer peer, string roomKey, double now)
         {
+            if (_phase != SessionPhase.InMatch) return;
             if (_voteRunning)
             {
                 Tell(peer, "a vote is already running");
@@ -1230,7 +1264,7 @@ namespace MphRead.Mods.Network
                 Tell(peer, $"no map called \"{roomKey}\"");
                 return;
             }
-            if (String.Equals(resolved, _rotation.Current.RoomKey, StringComparison.OrdinalIgnoreCase))
+            if (String.Equals(resolved, CurrentDefinition.RoomKey, StringComparison.OrdinalIgnoreCase))
             {
                 Tell(peer, "that is the map you are on");
                 return;
@@ -1330,11 +1364,12 @@ namespace MphRead.Mods.Network
                 Announce($"vote passed ({count}) -- changing to {room}");
                 Log($"vote passed ({count}) for {room}");
                 _rotation.PlayNext(room, mode);
-                AdvanceMap(now);
+                if (SessionPolicy == ServerSessionPolicy.Lobby) EndMatch(now, "map vote passed");
+                else AdvanceMap(now);
             }
             else
             {
-                Announce($"vote failed ({count}) -- staying on {_rotation.Current.RoomKey}");
+                Announce($"vote failed ({count}) -- staying on {CurrentDefinition.RoomKey}");
                 Log($"vote failed ({count}) for {room}");
             }
             BroadcastVoteState(now);
@@ -1396,7 +1431,7 @@ namespace MphRead.Mods.Network
                     return entry.Mode;
                 }
             }
-            return _rotation.Current.Mode;
+            return CurrentDefinition.Mode;
         }
 
         /// <summary>The vote as it stands, to everybody.</summary>
@@ -1516,14 +1551,12 @@ namespace MphRead.Mods.Network
             peer.ChatDropped = 0;
             chat.Slot = (byte)peer.SlotIndex;
             chat.Name = peer.Name.Length > 0 ? peer.Name : $"Player{peer.SlotIndex}";
-            // Team chat has no teams behind it yet: relaying it as a team line
-            // would deliver it to everybody while telling the reader it went
-            // to one side, which is worse than not having the channel.
-            chat.Kind = ChatPacket.KindSay;
+            bool teamOnly = chat.Kind == ChatPacket.KindTeam && GameState.IsTeamMode(CurrentDefinition.Mode) && peer.TeamIndex >= 0;
+            chat.Kind = teamOnly ? ChatPacket.KindTeam : ChatPacket.KindSay;
             chat.Write(_scratch);
             for (int i = 0; i < _peers.Count; i++)
             {
-                if (_peers[i] != peer)
+                if (_peers[i] != peer && (!teamOnly || _peers[i].TeamIndex == peer.TeamIndex))
                 {
                     _transport?.Send(_peers[i].EndPoint, PacketType.Chat,
                         _scratch.AsSpan(0, ChatPacket.Size));
@@ -1573,7 +1606,8 @@ namespace MphRead.Mods.Network
         {
             var status = new ServerStatusPacket
             {
-                Match = BuildState(now),
+                Match = BuildState(now), Phase = _phase, Format = CurrentDefinition.Format,
+                LobbyEnabled = SessionPolicy == ServerSessionPolicy.Lobby, AllowJoinInProgress = AllowJoinInProgress,
                 MaxPlayers = (byte)_maxPlayers,
                 Protocol = NetConfig.ProtocolVersion,
                 ServerName = ServerName,
@@ -1644,6 +1678,11 @@ namespace MphRead.Mods.Network
                 ? BinaryPrimitives.ReadUInt32LittleEndian(packet.Payload.Slice(2, 4))
                 : 0;
             Peer? peer = Find(packet.Sender);
+            if (peer != null && peer.ClientId != clientId)
+            {
+                Remove(peer, "replaced connection");
+                peer = null;
+            }
             if (peer == null && clientId != 0)
             {
                 // The same player, from an address this server has not seen.
@@ -1693,7 +1732,7 @@ namespace MphRead.Mods.Network
                     SendRefusal(packet.Sender, RefusedPacket.ReasonFull);
                     return;
                 }
-                if (_peers.Count == 0)
+                if (_peers.Count == 0 && SessionPolicy == ServerSessionPolicy.Continuous)
                 {
                     // Restart the match clock for the first arrival. The clock
                     // runs whether or not anybody is connected, so a server
@@ -1705,9 +1744,21 @@ namespace MphRead.Mods.Network
                     // was running when the last player left has nobody to show
                     // it to.
                     _matchEndedAt = -1;
-                    _matchId++;
+                    _phase = SessionPhase.InMatch;
+                    CloseBallot();
+                    _matchId = NetLifecycleTracker.Next(_matchId);
+                    _snapshotSeen = false;
+                    _lastSnapshot = null;
+                    Array.Clear(_slotLives);
                 }
-                peer = new Peer { EndPoint = packet.Sender, SlotIndex = slot };
+                if (_phase == SessionPhase.InMatch && !AllowJoinInProgress)
+                { SendRefusal(packet.Sender, RefusedPacket.ReasonInMatch); return; }
+                sbyte team = ChooseTeam(CurrentDefinition);
+                if (LobbyRules.TeamCount(CurrentDefinition) > 0 && team < 0)
+                { SendRefusal(packet.Sender, RefusedPacket.ReasonFull); return; }
+                _slotGenerations[slot] = NetLifecycleTracker.Next(_slotGenerations[slot]);
+                _slotLives[slot] = 0;
+                peer = new Peer { EndPoint = packet.Sender, SlotIndex = slot, ClientId = clientId, TeamIndex = team };
                 _peers.Add(peer);
                 EverOccupied = true;
                 // Slot 0 is the authority's slot, matching what a listen host
@@ -1720,9 +1771,11 @@ namespace MphRead.Mods.Network
                 // sending it is the whole of the change on the wire: an older
                 // client joining a simulating server behaves correctly without
                 // knowing anything has moved.
-                if (_authority == null && !Simulating)
+                if (_authority == null && !RunsTheMatch)
                 {
                     _authority = peer;
+                    _authorityEpoch++;
+                    _snapshotSeen = false;
                     Log($"{packet.Sender} joined as slot {slot} (authority)");
                     NotifyAuthority(peer);
                 }
@@ -1740,10 +1793,15 @@ namespace MphRead.Mods.Network
                 }
             }
             peer.ClientId = clientId;
+            ClaimOwner(peer, packet.Payload);
             peer.LastSeen = now;
             // Re-answered on every Hello; the first Welcome may have been lost.
             _scratch[0] = (byte)peer.SlotIndex;
-            _transport?.Send(peer.EndPoint, PacketType.Welcome, _scratch.AsSpan(0, 1));
+            BinaryPrimitives.WriteUInt32LittleEndian(_scratch.AsSpan(1), clientId);
+            BinaryPrimitives.WriteUInt16LittleEndian(_scratch.AsSpan(5), _matchId);
+            BinaryPrimitives.WriteUInt64LittleEndian(_scratch.AsSpan(7), _authorityEpoch);
+            BinaryPrimitives.WriteUInt16LittleEndian(_scratch.AsSpan(15), _slotGenerations[peer.SlotIndex]);
+            _transport?.Send(peer.EndPoint, PacketType.Welcome, _scratch.AsSpan(0, 17));
             // Immediately follow with the running match, so a client that
             // arrives mid-round loads the right map and adopts the server's
             // clock rather than starting a fresh one of its own.
@@ -1751,7 +1809,7 @@ namespace MphRead.Mods.Network
             state.Write(_scratch);
             _transport?.Send(peer.EndPoint, PacketType.MatchState,
                 _scratch.AsSpan(0, MatchStatePacket.Size));
-            BroadcastRoster();
+            TouchLobbyRevision($"peer slot {peer.SlotIndex} connected");
         }
 
         /// <summary>
@@ -1785,6 +1843,9 @@ namespace MphRead.Mods.Network
             {
                 return;
             }
+            if (packet.Payload.Length != 10
+                || BinaryPrimitives.ReadUInt16LittleEndian(packet.Payload) != _matchId
+                || BinaryPrimitives.ReadUInt64LittleEndian(packet.Payload[2..]) != _authorityEpoch) return;
             EndMatch(now, "a player reached the goal");
         }
 
@@ -1826,8 +1887,10 @@ namespace MphRead.Mods.Network
             {
                 return;
             }
+            if (_phase == SessionPhase.Starting && (_expectedLoadedSlots & (1 << peer.SlotIndex)) != 0) return;
             byte hunter = packet.Payload[0];
             byte color = packet.Payload[1];
+            if (hunter >= Launcher.Hunters.Playable || color > 3) return;
             string name = System.Text.Encoding.ASCII
                 .GetString(packet.Payload[2..])
                 .TrimEnd('\0')
@@ -1845,6 +1908,7 @@ namespace MphRead.Mods.Network
                 return;
             }
             bool firstName = peer.Name.Length == 0;
+            if (peer.Hunter != hunter || peer.Color != color) peer.LobbyReady = false;
             peer.Name = name;
             peer.Hunter = hunter;
             peer.Color = color;
@@ -1859,9 +1923,7 @@ namespace MphRead.Mods.Network
                 // chat, which otherwise looks exactly like nobody talking.
                 Announce($"{name} joined");
             }
-            // Membership changed in a way clients care about, so tell
-            // everyone rather than waiting for the periodic broadcast.
-            BroadcastRoster();
+            TouchLobbyRevision($"slot {peer.SlotIndex} identity changed");
         }
 
         /// <summary>
@@ -1876,23 +1938,33 @@ namespace MphRead.Mods.Network
         /// </summary>
         private void NotifyAuthority(Peer peer)
         {
+            MatchStatePacket match = BuildState(_now);
+            match.Write(_scratch);
+            _transport?.Send(peer.EndPoint, PacketType.MatchState, _scratch.AsSpan(0, MatchStatePacket.Size));
+            RosterPacket roster = BuildRoster();
+            roster.Write(_scratch);
+            _transport?.Send(peer.EndPoint, PacketType.Roster, _scratch.AsSpan(0, RosterPacket.Size));
             if (_lastSnapshot != null)
             {
-                _transport?.Send(peer.EndPoint, PacketType.Snapshot, _lastSnapshot);
+                SnapshotHeader header = SnapshotHeader.Read(_lastSnapshot);
+                if (header.MatchId == _matchId)
+                {
+                    // Seed the successor from the last world, in its new stream.
+                    // Frame zero cannot block its own local simulation clock.
+                    byte[] seed = (byte[])_lastSnapshot.Clone();
+                    header.AuthorityEpoch = _authorityEpoch;
+                    header.Frame = 0;
+                    header.Write(seed);
+                    _transport?.Send(peer.EndPoint, PacketType.Snapshot, seed);
+                }
             }
-            _scratch[0] = 1;
-            _transport?.Send(peer.EndPoint, PacketType.Authority, _scratch.AsSpan(0, 1));
+            _scratch[0] = (byte)peer.SlotIndex;
+            BinaryPrimitives.WriteUInt16LittleEndian(_scratch.AsSpan(1), _matchId);
+            BinaryPrimitives.WriteUInt64LittleEndian(_scratch.AsSpan(3), _authorityEpoch);
+            BinaryPrimitives.WriteUInt16LittleEndian(_scratch.AsSpan(11), _slotGenerations[peer.SlotIndex]);
+            _transport?.Send(peer.EndPoint, PacketType.Authority, _scratch.AsSpan(0, 13));
         }
 
-        /// <summary>
-        /// Ask every peer how far away it is.
-        ///
-        /// The server is the only party that can answer that for everybody:
-        /// clients never exchange packets with each other, so a client can
-        /// time its own round trip and nobody else's. One ping per peer per
-        /// second is enough for a number on a scoreboard and is lost in the
-        /// noise next to sixty snapshots a second.
-        /// </summary>
         private void PingPeers(double now)
         {
             for (int i = 0; i < _peers.Count; i++)
@@ -1938,9 +2010,16 @@ namespace MphRead.Mods.Network
         private RosterPacket BuildRoster()
         {
             RosterPacket roster = RosterPacket.Create();
+            roster.MatchId = _matchId;
+            roster.AuthorityEpoch = _authorityEpoch;
+            roster.Revision = ++_rosterRevision;
+            roster.SessionRevision = _sessionRevision;
             for (int i = 0; i < _peers.Count && i < RosterPacket.MaxSlots; i++)
             {
                 roster.Slots[roster.Count] = (byte)_peers[i].SlotIndex;
+                roster.Generations[roster.Count] = _slotGenerations[_peers[i].SlotIndex];
+                roster.Teams[roster.Count] = _peers[i].TeamIndex;
+                roster.LobbyReady[roster.Count] = _peers[i].LobbyReady;
                 roster.Hunters[roster.Count] = _peers[i].Hunter;
                 roster.Colors[roster.Count] = _peers[i].Color;
                 roster.Pings[roster.Count] = (ushort)Math.Clamp(_peers[i].Ping, 0, 9999);
@@ -1961,6 +2040,7 @@ namespace MphRead.Mods.Network
             // longer there.
             if (_sim != null)
             {
+                NetSession.ApplyMatchState(BuildState(_now), rotated: false);
                 NetSession.ApplyRoster(roster);
             }
             if (_peers.Count == 0)
@@ -1979,10 +2059,10 @@ namespace MphRead.Mods.Network
         /// How far behind a peer's newest intent frame a packet may be and
         /// still be a reordered straggler rather than a restarted counter.
         /// </summary>
-        private const uint IntentResetGap = 600;
 
         private void HandleIntent(ReceivedPacket packet, double now)
         {
+            if (_phase is SessionPhase.Lobby or SessionPhase.Starting) return;
             Peer? peer = Find(packet.Sender);
             // No authority and not simulating means nobody would act on this.
             // When this server is the authority there is no client to wait
@@ -1991,10 +2071,14 @@ namespace MphRead.Mods.Network
             {
                 return;
             }
+            if (packet.Payload.Length < IntentPacket.Size || packet.Payload.Length > IntentPacket.FullSize) return;
             peer.LastSeen = now;
             if (packet.Payload.Length >= IntentPacket.Size)
             {
                 IntentPacket intent = IntentPacket.Read(packet.Payload);
+                ushort life = _sim != null ? NetPlayerLifecycle.Get(peer.SlotIndex) : _slotLives[peer.SlotIndex];
+                if (intent.MatchId != _matchId || intent.AuthorityEpoch != _authorityEpoch
+                    || intent.SlotGeneration != _slotGenerations[peer.SlotIndex] || intent.LifeId != life) return;
                 if (_sim != null)
                 {
                     // Straight into the simulation, one hop earlier than a
@@ -2018,8 +2102,7 @@ namespace MphRead.Mods.Network
                 // noticed it had gone -- would otherwise have every packet of
                 // its new session refused until the counter climbed back past
                 // the old one. Same ten seconds NetSession allows.
-                if (peer.LastIntentFrame != 0 && intent.Frame <= peer.LastIntentFrame
-                    && peer.LastIntentFrame - intent.Frame < IntentResetGap)
+                if (peer.LastIntentFrame != 0 && !NetLifecycleTracker.Newer(intent.Frame, peer.LastIntentFrame))
                 {
                     return;
                 }
@@ -2027,7 +2110,7 @@ namespace MphRead.Mods.Network
                 // Only meaningful between the end of one match and the start
                 // of the next; read unconditionally because it costs nothing
                 // and a client that sets it early is simply ready early.
-                peer.Ready = intent.Buttons.HasFlag(IntentButtons.ReadyState);
+                peer.PostMatchReady = intent.Buttons.HasFlag(IntentButtons.ReadyState);
             }
             // Tag with the sender's slot. A receiver is a client with no peer
             // list, so it cannot work out who an endpoint belongs to; without
@@ -2054,6 +2137,7 @@ namespace MphRead.Mods.Network
 
         private void HandleSnapshot(ReceivedPacket packet, double now)
         {
+            if (_phase is SessionPhase.Lobby or SessionPhase.Starting) return;
             Peer? peer = Find(packet.Sender);
             if (peer == null)
             {
@@ -2070,6 +2154,33 @@ namespace MphRead.Mods.Network
             {
                 return;
             }
+            if (packet.Payload.Length < SnapshotHeader.Size) return;
+            SnapshotHeader header = SnapshotHeader.Read(packet.Payload);
+            int timeOffset = SnapshotHeader.Size + header.PlayerCount * PlayerState.Size;
+            int healthOffset = timeOffset + NetMatchTimeSync.Size;
+            if (header.MatchId != _matchId || header.AuthorityEpoch != _authorityEpoch
+                || header.PlayerCount > PlayerEntity.SlotCapacity
+                || healthOffset > packet.Payload.Length
+                || !NetMatchTimeSync.Validate(packet.Payload.Slice(timeOffset, NetMatchTimeSync.Size))
+                || !NetHealthSync.Validate(packet.Payload[healthOffset..])
+                || BinaryPrimitives.ReadUInt16LittleEndian(packet.Payload[healthOffset..]) != _matchId
+                || (_snapshotSeen && !NetLifecycleTracker.Newer(header.Frame, _snapshotFrame))) return;
+            int occupied = 0;
+            for (int i = 0; i < header.PlayerCount; i++)
+            {
+                PlayerState state = PlayerState.Read(packet.Payload[(SnapshotHeader.Size + i * PlayerState.Size)..]);
+                if (state.SlotIndex >= _slotLives.Length || (occupied & (1 << state.SlotIndex)) != 0
+                    || state.SlotGeneration != _slotGenerations[state.SlotIndex]) return;
+                occupied |= 1 << state.SlotIndex;
+            }
+            // Commit only after the entire packet has passed validation.
+            for (int i = 0; i < header.PlayerCount; i++)
+            {
+                PlayerState state = PlayerState.Read(packet.Payload[(SnapshotHeader.Size + i * PlayerState.Size)..]);
+                _slotLives[state.SlotIndex] = state.LifeId;
+            }
+            _snapshotSeen = true;
+            _snapshotFrame = header.Frame;
             _lastSnapshot = packet.Payload.ToArray();
             for (int i = 0; i < _peers.Count; i++)
             {
@@ -2103,6 +2214,7 @@ namespace MphRead.Mods.Network
         private void Remove(Peer peer, string reason)
         {
             _peers.Remove(peer);
+            LobbyPeerRemoved(peer);
             BroadcastRoster();
             // A vote is counted against everybody connected, so somebody
             // leaving can decide one that nobody has voted in since. The
@@ -2115,13 +2227,17 @@ namespace MphRead.Mods.Network
             {
                 Announce($"{peer.Name} {reason}");
             }
-            if (Simulating || _authority != peer)
+            if (RunsTheMatch || _authority != peer)
             {
                 return;
             }
             // Promote rather than end the session: the remaining players keep
             // playing, and the new authority's snapshots simply take over.
             _authority = _peers.Count > 0 ? _peers[0] : null;
+            _authorityEpoch++;
+            _snapshotSeen = false;
+            BroadcastMatchState(_now);
+            BroadcastRoster();
             Log(_authority != null
                 ? $"authority moved to slot {_authority.SlotIndex}"
                 : "no peers left; waiting for a new authority");

@@ -257,7 +257,7 @@ namespace MphRead
 
         public LinkedListIteratorSpecialized<FlagBaseEntity> GetFlagBaseEntities()
         {
-            return new LinkedListIteratorSpecialized<FlagBaseEntity>(_entityNodesByType[EntityType.FhBomb]);
+            return new LinkedListIteratorSpecialized<FlagBaseEntity>(_entityNodesByType[EntityType.FlagBase]);
         }
 
         public LinkedListIteratorSpecialized<TeleporterEntity> GetTeleporterEntities()

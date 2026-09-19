@@ -733,6 +733,7 @@ namespace MphRead.Droid
                 {
                     Scene = _build(_input, _size);
                     Scene.OnLoad();
+                    MphRead.Mods.Network.NetSession.MarkMatchLoaded();
                 }
                 catch (Exception ex)
                 {
@@ -741,6 +742,7 @@ namespace MphRead.Droid
                     // match with what went wrong on screen, rather than taking
                     // the process down from a thread nobody is watching.
                     Console.WriteLine($"[android] the match could not start: {ex}");
+                    MphRead.Mods.Network.NetSession.ReportMatchLoadFailed(ex.Message);
                     Scene = null;
                     _ended = true;
                     _onError(ex.Message);
@@ -782,6 +784,13 @@ namespace MphRead.Droid
                 {
                     ApplyInput();
                     scene.OnSimulationFrame();
+                    if (MphRead.Mods.Network.NetSession.Refused || MphRead.Mods.Network.NetSession.SessionTimedOut)
+                    { End(scene); return false; }
+                    if (MphRead.Mods.Network.NetSession.PersistentLobby && MphRead.Mods.Network.NetSession.IsInLobby)
+                    {
+                        End(scene, keepSession: true);
+                        return false;
+                    }
                 }
                 RequestFrameRate();
                 scene.OnDrawFrame();
@@ -851,7 +860,7 @@ namespace MphRead.Droid
                 }
             }
 
-            private void End(Scene scene)
+            private void End(Scene scene, bool keepSession = false)
             {
                 _ended = true;
                 scene.DoCleanup();
@@ -871,7 +880,8 @@ namespace MphRead.Droid
                     // the player on a dead view.
                     Console.WriteLine($"[android] the save could not be written: {ex}");
                 }
-                _onEnd();
+                if (keepSession) MainActivity.Instance?.RunOnUiThread(() => MainActivity.Instance?.EndMatchToLobby());
+                else _onEnd();
             }
 
             /// <summary>

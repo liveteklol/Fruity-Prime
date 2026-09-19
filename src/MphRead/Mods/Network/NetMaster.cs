@@ -565,11 +565,13 @@ namespace MphRead.Mods.Network
                 ? MapRotation.FromList(request.Rotation, request.TimeLimit, request.PointGoal)
                 : MapRotation.SingleMatch(request.RoomKey, mode,
                     request.TimeLimit, request.PointGoal);
+            Guid ownerToken = request.Policy == ServerSessionPolicy.Lobby ? new Guid(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16)) : Guid.Empty;
             var server = new DedicatedServer(port,
                 Math.Clamp((int)request.MaxPlayers, 2, MphRead.Entities.PlayerEntity.SlotCapacity),
                 rotation)
             {
                 ServerName = name,
+                SessionPolicy = request.Policy, Format = request.Format, OwnerToken = ownerToken,
                 // It lists itself the way any other server does, over the
                 // loopback -- which is exactly the case SetPublicAddress
                 // exists for.
@@ -580,6 +582,7 @@ namespace MphRead.Mods.Network
                 // hosted game runs it. See DedicatedServer.RunsTheMatch.
                 RunsTheMatch = false
             };
+            server.SetSessionOptions(request.RequireReady, request.AllowJoinInProgress);
             var cancel = new CancellationTokenSource();
             var entry = new Hosted
             {
@@ -623,7 +626,7 @@ namespace MphRead.Mods.Network
             _hosted.Add(entry);
             Log($"started \"{name}\" on port {port} for {asker.Address} "
                 + $"({request.RoomKey}, {mode}, {rotation.Entries.Count} map(s))");
-            return new HostReplyPacket { Started = true, Port = (ushort)port, Reason = "" };
+            return new HostReplyPacket { Started = true, Port = (ushort)port, Reason = "", OwnerToken = ownerToken };
         }
 
         private int FreeHostPort(double now)
@@ -911,6 +914,7 @@ namespace MphRead.Mods.Network
     /// <summary>What came back from asking the directory to start a game.</summary>
     public readonly struct HostedGame
     {
+        public Guid OwnerToken { get; init; }
         private readonly string? _host;
         private readonly string? _reason;
 
@@ -1231,7 +1235,8 @@ namespace MphRead.Mods.Network
         public static HostedGame RequestGame(string masterHost, int masterPort,
             string roomKey, GameMode mode, float timeLimit, int pointGoal,
             int maxPlayers, string serverName, int timeoutMs = 6000,
-            IReadOnlyList<(string RoomKey, GameMode Mode)>? rotation = null)
+            IReadOnlyList<(string RoomKey, GameMode Mode)>? rotation = null,
+            ServerSessionPolicy policy = ServerSessionPolicy.Continuous)
         {
             IPEndPoint endPoint;
             try
@@ -1263,6 +1268,7 @@ namespace MphRead.Mods.Network
                     PointGoal = (ushort)Math.Clamp(pointGoal, 0, UInt16.MaxValue),
                     RoomKey = roomKey,
                     ServerName = serverName,
+                    Policy = policy, AllowJoinInProgress = true, RequireReady = true,
                     Rotation = rotation
                 };
                 var datagram = new byte[1 + request.Length];
@@ -1275,7 +1281,7 @@ namespace MphRead.Mods.Network
                 {
                     byte[] reply = socket.Receive(ref from);
                     if (reply.Length < 1 + HostReplyPacket.Size
-                        || reply[0] != (byte)PacketType.HostReply)
+                        || reply[0] != (byte)PacketType.HostReply || !from.Equals(endPoint))
                     {
                         continue;
                     }
@@ -1283,6 +1289,7 @@ namespace MphRead.Mods.Network
                     return new HostedGame
                     {
                         Started = answer.Started,
+                        OwnerToken = answer.OwnerToken,
                         Host = masterHost,
                         Port = answer.Port,
                         Reason = answer.Reason

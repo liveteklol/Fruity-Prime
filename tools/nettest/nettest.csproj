@@ -7,11 +7,6 @@
     <RootNamespace>MphRead.NetTest</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="../../src/MphRead/Mods/Network/NetProtocol.cs" />
-    <Compile Include="../../src/MphRead/Mods/Network/NetTransport.cs" />
-    <Compile Include="../../src/MphRead/Mods/Network/NetProbe.cs" />
-  </ItemGroup>
-  <ItemGroup>
-    <PackageReference Include="OpenTK" Version="4.9.4" />
+    <ProjectReference Include="../../src/MphRead/MphRead.csproj" />
   </ItemGroup>
 </Project>

@@ -55,6 +55,7 @@ namespace MphRead.Mods.Network
             _lastReport = time;
 
             var line = new StringBuilder();
+            line.Append(NetPlayerLifecycle.Describe()).Append(" | ");
             line.Append("[netdbg] role=").Append(NetSession.Role);
             line.Append(" slot=").Append(NetSession.LocalSlot);
 

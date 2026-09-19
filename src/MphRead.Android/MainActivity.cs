@@ -492,6 +492,7 @@ namespace MphRead.Droid
         /// <summary>Load what the plan asks for and hand the screen to it.</summary>
         internal void StartMatch(LaunchPlan plan)
         {
+            AndroidApp.Home?.SuspendLobby();
             if (_content == null || InMatch)
             {
                 return;
@@ -925,7 +926,9 @@ namespace MphRead.Droid
         }
 
         /// <summary>Back to the front screen.</summary>
-        internal void EndMatch()
+        internal void EndMatch() => EndMatchCore(false);
+        internal void EndMatchToLobby() => EndMatchCore(true);
+        private void EndMatchCore(bool keepSession)
         {
             if (_content == null)
             {
@@ -965,9 +968,16 @@ namespace MphRead.Droid
             // The desktop builds a fresh front screen each time round its loop;
             // this one is the same object across a match, so it is told the
             // match is over rather than left believing it already answered.
-            AndroidApp.Home?.Reset();
-            NetSession.Stop();
-            NetHostSession.Stop();
+            if (keepSession)
+            {
+                NetSession.ResetMatchState();
+                AndroidApp.Home?.ResumeLobby();
+            }
+            else
+            {
+                NetSession.Stop(); NetHostSession.Stop();
+                AndroidApp.Home?.Reset();
+            }
             // A demo feeds NetSession from a file rather than a socket, so
             // stopping the session is not what closes it.
             DemoPlayback.Stop();

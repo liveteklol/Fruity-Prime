@@ -456,7 +456,7 @@ namespace MphRead
                     player.LoadFlags |= LoadFlags.Initial;
                     if (team != -1)
                     {
-                        Debug.Assert(team == 0 || team == 1);
+                        Debug.Assert((uint)team < 4);
                         player.TeamIndex = team;
                     }
                     player.IsBot = PlayerEntity.PlayerCount >= 1;
@@ -1508,6 +1508,12 @@ namespace MphRead
         /// </summary>
         public void OnSimulationFrame()
         {
+            if (Mods.Network.NetSession.FreezeGameplay)
+            {
+                if (Mods.Network.NetSession.IsStarting) Mods.Network.NetSession.MarkMatchLoaded();
+                Mods.Network.NetSession.Pump();
+                return;
+            }
             // The effect clock, before anything can spawn an effect. See
             // _effectFrame: it has to be the same value for the spawn and for
             // the ProcessEffects call that belongs to this step, and the
@@ -1543,6 +1549,7 @@ namespace MphRead
                 }
                 Mods.Network.DemoPlayback.PumpFrame();
                 Mods.Network.NetSession.Update(_globalElapsedTime);
+                if (Mods.Network.NetSession.FreezeGameplay) return;
                 if (Mods.Network.DemoPlayback.IsActive && !Mods.SpectatorMode.IsSpectating)
                 {
                     // No local player to spawn as during playback -- watch
@@ -7241,6 +7248,13 @@ namespace MphRead
         protected override void OnRenderFrame(FrameEventArgs args)
         {
             ApplyFrameRateSettings();
+            if (Mods.Network.NetLaunch.TickTerminalLobby(this))
+            {
+                GL.Clear(ClearBufferMask.ColorBufferBit);
+                SwapBuffers();
+                base.OnRenderFrame(args);
+                return;
+            }
 #if MPHREAD_SHELL
             // The launcher and the in-game menus, which are screens in this
             // window rather than windows of their own: the shell starts and

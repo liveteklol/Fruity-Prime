@@ -318,7 +318,10 @@ namespace MphRead.Mods.Chat
         /// </summary>
         public static void Send(string text)
         {
-            Add(NetSession.Active ? NetSession.PlayerName : "You", text, ChatPacket.KindSay);
+            bool prefix = text.StartsWith("/team ", StringComparison.OrdinalIgnoreCase);
+            bool team = prefix && GameState.IsTeamMode(NetSession.ActiveMatchDefinition?.Mode ?? GameState.Mode);
+            Add(NetSession.Active ? NetSession.PlayerName : "You", prefix ? text[6..].Trim() : text,
+                team ? ChatPacket.KindTeam : ChatPacket.KindSay);
             if (NetSession.Active)
             {
                 NetSession.SendChat(text);

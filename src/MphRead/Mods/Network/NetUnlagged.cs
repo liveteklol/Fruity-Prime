@@ -292,6 +292,21 @@ namespace MphRead.Mods.Network
         // The ring. All slots are written in one pass, so one frame stamp per
         // cell covers the lot: a stamp that does not match the frame being
         // asked for means the cell has been overwritten by a later one.
+        private static readonly ushort[,] _life = new ushort[Slots, HistoryFrames];
+        private static readonly ushort[,] _generation = new ushort[Slots, HistoryFrames];
+
+        public static void ResetSlot(int slot)
+        {
+            if (slot < 0 || slot >= Slots) return;
+            for (int i = 0; i < HistoryFrames; i++)
+            {
+                _inPlay[slot, i] = false;
+                _life[slot, i] = 0;
+                _generation[slot, i] = 0;
+            }
+            _moved[slot] = false;
+        }
+
         private static readonly Vector3[,] _position = new Vector3[Slots, HistoryFrames];
         private static readonly bool[,] _altForm = new bool[Slots, HistoryFrames];
         private static readonly bool[,] _inPlay = new bool[Slots, HistoryFrames];
@@ -403,6 +418,8 @@ namespace MphRead.Mods.Network
                 }
                 PlayerEntity player = PlayerEntity.Players[i];
                 bool active = player.LoadFlags.TestFlag(LoadFlags.Active) && player.ModIsInPlay;
+                _life[i, index] = NetPlayerLifecycle.Get(i);
+                _generation[i, index] = NetPlayerLifecycle.Generation(i);
                 _inPlay[i, index] = active;
                 if (active)
                 {
@@ -422,7 +439,7 @@ namespace MphRead.Mods.Network
         /// of impact is nowhere near the body this returns. Read-only -- it
         /// moves nobody, unlike <see cref="Reconcile"/>.
         /// </summary>
-        public static bool PositionAt(int slot, uint frame, out Vector3 position)
+        public static bool PositionAt(int slot, uint frame, ushort expectedGeneration, ushort expectedLife, out Vector3 position)
         {
             position = Vector3.Zero;
             if (slot < 0 || slot >= Slots || frame == 0)
@@ -430,7 +447,8 @@ namespace MphRead.Mods.Network
                 return false;
             }
             int index = (int)(frame % HistoryFrames);
-            if (_stamp[index] != frame || !_inPlay[slot, index])
+            if (_stamp[index] != frame || !_inPlay[slot, index]
+                || _life[slot, index] != expectedLife || _generation[slot, index] != expectedGeneration)
             {
                 return false;
             }
@@ -540,17 +558,6 @@ namespace MphRead.Mods.Network
             }
             _shooter = null;
             _rewind = 0;
-            // Stamp every shot with the world it was aimed in, on every
-            // machine, whether or not this one rewinds anything.
-            //
-            // It is what lets a hit claim and the authority's own resolution
-            // of the *same* shot be paired later without guessing at a time
-            // window -- and a window cannot do it, because the gap between the
-            // two is a round trip *plus* however far the two copies of a
-            // projectile drift apart over a long flight. Both machines name
-            // the same instant here: the authority the frame it rewound to,
-            // the shooter the point its own playout clock was reading.
-            StampLaunch(shooter);
             if (!Enabled || !Simulating || shooter.IsBot)
             {
                 return;
@@ -566,6 +573,10 @@ namespace MphRead.Mods.Network
                 WorstRequested = requested;
             }
             int served = (int)Math.Round(rewind);
+            int weapon = NetShotDiagnostics.Bucket(shooter.CurrentWeapon);
+            NetShotDiagnostics.RewindSamples[weapon]++;
+            NetShotDiagnostics.RewindFrames[weapon] += served;
+            if (requested > served) NetShotDiagnostics.RewindClamps[weapon]++;
             if (requested > served)
             {
                 // The shooter asked to be taken back further than the ceiling
@@ -609,35 +620,6 @@ namespace MphRead.Mods.Network
         }
 
         /// <summary>
-        /// Which of the shooter's beam pool entries were alive before the shot,
-        /// so the ones it is about to spawn can be told apart. Separate from
-        /// <see cref="_beamsBefore"/>, which only exists while a rewind is in
-        /// progress; this one runs on every machine and every shot.
-        /// </summary>
-        private static bool[] _stampBefore = new bool[16];
-        private static PlayerEntity? _stampShooter;
-        private static uint _stampFrame;
-
-        /// <summary>
-        /// Note the pool and the world-frame this shot is aimed in.
-        /// <see cref="FinishLaunch"/> puts the number on whatever appeared.
-        /// </summary>
-        private static void StampLaunch(PlayerEntity shooter)
-        {
-            _stampShooter = shooter;
-            _stampFrame = LaunchFrameFor(shooter);
-            BeamProjectileEntity[] beams = shooter.EquipInfo.Beams;
-            if (_stampBefore.Length < beams.Length)
-            {
-                _stampBefore = new bool[beams.Length];
-            }
-            for (int i = 0; i < beams.Length; i++)
-            {
-                _stampBefore[i] = beams[i].Lifespan > 0;
-            }
-        }
-
-        /// <summary>
         /// The world-frame this shot is aimed in.
         ///
         /// On the machine running the match, for somebody else's shot, that is
@@ -646,7 +628,7 @@ namespace MphRead.Mods.Network
         /// playout clock is reading, which is the same quantity its intent
         /// acks. A bot, or a shot with neither, gets the present.
         /// </summary>
-        private static uint LaunchFrameFor(PlayerEntity shooter)
+        internal static uint LaunchFrameFor(PlayerEntity shooter)
         {
             int slot = shooter.SlotIndex;
             if (Simulating && slot != NetSession.LocalSlot && !shooter.IsBot
@@ -665,29 +647,6 @@ namespace MphRead.Mods.Network
             return NetSession.AppliedSnapshotFrame != 0
                 ? NetSession.AppliedSnapshotFrame
                 : NetSession.NetFrame;
-        }
-
-        /// <summary>
-        /// Put the launch frame on every beam that appeared since
-        /// <see cref="StampLaunch"/>. Called from the same place
-        /// <see cref="EndShot"/> is, on every machine.
-        /// </summary>
-        public static void FinishLaunch(PlayerEntity shooter)
-        {
-            if (_stampShooter != shooter)
-            {
-                _stampShooter = null;
-                return;
-            }
-            _stampShooter = null;
-            BeamProjectileEntity[] beams = shooter.EquipInfo.Beams;
-            for (int i = 0; i < beams.Length && i < _stampBefore.Length; i++)
-            {
-                if (!_stampBefore[i] && beams[i].Lifespan > 0)
-                {
-                    beams[i].ModLaunchFrame = _stampFrame;
-                }
-            }
         }
 
         /// <summary>
@@ -771,7 +730,8 @@ namespace MphRead.Mods.Network
             Restore();
             for (int i = 0; i < Slots && i < PlayerEntity.Players.Count; i++)
             {
-                if (i == exceptSlot || !_inPlay[i, index])
+                if (i == exceptSlot || !_inPlay[i, index]
+                    || !NetPlayerLifecycle.Matches(i, _generation[i, index], _life[i, index]))
                 {
                     continue;
                 }
@@ -792,7 +752,8 @@ namespace MphRead.Mods.Network
                 // respawn or a teleporter between them is a jump to blend
                 // across, not a step. NetSmoothing does the same three checks
                 // at the other end, which is what makes the two agree.
-                if (haveNext && _inPlay[i, next] && _altForm[i, next] == _altForm[i, index])
+                if (haveNext && _inPlay[i, next] && _altForm[i, next] == _altForm[i, index]
+                    && _life[i, next] == _life[i, index] && _generation[i, next] == _generation[i, index])
                 {
                     Vector3 then = _position[i, next];
                     Vector3 travel = then - was;
@@ -863,10 +824,6 @@ namespace MphRead.Mods.Network
         /// </summary>
         public static void EndShot(PlayerEntity shooter)
         {
-            // Before anything else, and whether or not this machine rewound:
-            // the stamp is what pairs this shot with the other machine's copy
-            // of it later.
-            FinishLaunch(shooter);
             if (_shooter != shooter || _rewind <= 0)
             {
                 Restore();
