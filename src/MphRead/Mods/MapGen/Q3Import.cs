@@ -128,6 +128,7 @@ namespace MphRead.Mods.MapGen
                     if (sky)
                     {
                         ProjectSky(built, width * SkyTiles / Math.Max(1f, skySpan));
+                        built.Sky = true;
                     }
                     map.Faces.Add(built);
                     if (patch)
@@ -329,25 +330,81 @@ namespace MphRead.Mods.MapGen
             {
                 var points = new Vector3[3];
                 var uvs = new Vector2[3];
-                var normal = Vector3.Zero;
+                var vertexNormal = Vector3.Zero;
                 float shade = 0;
                 for (int j = 0; j < 3; j++)
                 {
                     Q3Vertex vertex = bsp.Vertices[face.Vertex + bsp.MeshVerts[face.MeshVert + i + j]];
                     points[j] = ToWorld(vertex.Position, unit);
                     uvs[j] = new Vector2(vertex.Surface[0] * width, vertex.Surface[1] * height);
-                    normal += ToDirection(vertex.Normal);
+                    vertexNormal += ToDirection(vertex.Normal);
                     // the lightmap is gone, but the vertex colour the
                     // compiler baked is a usable stand-in for it
                     shade += (vertex.Color[0] + vertex.Color[1] + vertex.Color[2]) / (3f * 255f);
                 }
-                if (normal.LengthSquared < 0.0001f)
-                {
-                    normal = ToDirection(face.Normal);
-                }
-                normal = normal.Normalized();
-                yield return MakeFace(points, uvs, normal, material, Shade(shade / 3, sky));
+                yield return MakeFace(points, uvs,
+                    TriangleNormal(points, vertexNormal, ToDirection(face.Normal)),
+                    material, Shade(shade / 3, sky));
             }
+        }
+
+        /// <summary>
+        /// Which way a drawn triangle faces.
+        ///
+        /// Its own plane, not the average of its vertices' normals, and that
+        /// is the whole point. A level compiled from brushes gives every
+        /// vertex of a surface the surface's own normal, so the two answers
+        /// agree and the average looks safe. A level whose geometry came in as
+        /// a model -- a <c>misc_model</c>, an ASE out of 3DS Max, which is how
+        /// a great many custom maps are built -- welds its vertices across the
+        /// whole mesh and hands each one a *smoothed* normal that belongs to
+        /// no single triangle. On MK_BlockFort every one of the arena's outer
+        /// walls is a box corner's worth of normals averaged together: the two
+        /// triangles of the north wall averaged out to (-1, 0, 0) and
+        /// (1, 0, 0), both perpendicular to the wall they describe, and 214 of
+        /// that level's 1,706 triangles carry an average more than 20 degrees
+        /// off their own plane.
+        ///
+        /// That matters because <see cref="MakeFace"/> settles the winding by
+        /// asking which side of the triangle the normal is on, and a
+        /// perpendicular normal makes that a coin toss. On that map the toss
+        /// happens to land right -- a 0.0015 tilt in the averaged normal
+        /// decides both halves of the north wall correctly, and switching to
+        /// the plane changes not one winding in the level and not one pixel of
+        /// the picture. It is still not a rule; a level a hair the other way
+        /// would have had that wall drawn only from outside the arena, which
+        /// looks like a hole you cannot walk through. And the same number is
+        /// the normal written into the model, and -- for a tessellated Bezier
+        /// patch, whose triangles are collision as well as geometry -- the
+        /// plane a shot is tested against.
+        ///
+        /// The plane is recovered from the points instead. Quake winds a front
+        /// face clockwise, so the cross product points *away* from the facing
+        /// and is negated. The vertex normals are still worth having as a
+        /// tie-break: if they say the level was wound the other way round --
+        /// which no id-format compiler does, but a converter might -- they
+        /// win. A degenerate triangle has no plane of its own and falls back
+        /// to them, and then to the lump's own face normal, which is zero for
+        /// a triangle soup and meaningful only for a planar surface.
+        /// </summary>
+        private static Vector3 TriangleNormal(Vector3[] points, Vector3 vertexNormal, Vector3 faceNormal)
+        {
+            Vector3 geometric = Vector3.Cross(points[1] - points[0], points[2] - points[0]);
+            if (geometric.LengthSquared >= 1e-10f)
+            {
+                geometric = -geometric.Normalized();
+                if (vertexNormal.LengthSquared >= 0.0001f
+                    && Vector3.Dot(geometric, vertexNormal.Normalized()) < -0.2f)
+                {
+                    geometric = -geometric;
+                }
+                return geometric;
+            }
+            if (vertexNormal.LengthSquared >= 0.0001f)
+            {
+                return vertexNormal.Normalized();
+            }
+            return faceNormal.LengthSquared >= 0.0001f ? faceNormal.Normalized() : Vector3.UnitY;
         }
 
         /// <summary>
@@ -448,6 +505,20 @@ namespace MphRead.Mods.MapGen
             var texcoords = new[] { uvs[p0.A, p0.B], uvs[p1.A, p1.B], uvs[p2.A, p2.B] };
             Vector3 normal = normals[p0.A, p0.B] + normals[p1.A, p1.B] + normals[p2.A, p2.B];
             normal = normal.LengthSquared < 0.0001f ? Vector3.UnitY : normal.Normalized();
+            // The cell's own plane, pointed the way the interpolated normals
+            // say -- a patch's control-point normals are real surface normals,
+            // so they settle the side, but the plane of the flat triangle the
+            // curve was cut into is the one a shot and a foot are tested
+            // against, since a tessellated patch is collision as well as
+            // geometry. Which way round the two triangles of a cell come out
+            // is this method's own loop order and not Quake's winding, so
+            // unlike a drawn triangle it cannot simply be negated.
+            Vector3 plane = Vector3.Cross(corners[1] - corners[0], corners[2] - corners[0]);
+            if (plane.LengthSquared >= 1e-10f)
+            {
+                plane = plane.Normalized();
+                normal = Vector3.Dot(plane, normal) < 0 ? -plane : plane;
+            }
             float shade = (shades[p0.A, p0.B] + shades[p1.A, p1.B] + shades[p2.A, p2.B]) / 3;
             return MakeFace(corners, texcoords, normal, material, Shade(shade, sky));
         }
@@ -804,7 +875,27 @@ namespace MphRead.Mods.MapGen
             };
         }
 
-        /// <summary>Keeps the part of the polygon on the inside of the plane.</summary>
+        /// <summary>
+        /// Keeps the part of the polygon on the inside of the plane.
+        ///
+        /// The clamp on <c>t</c> is what stops this producing a polygon that
+        /// crosses itself. A point is kept when it is inside the plane *or
+        /// within epsilon of it*, and the crossing between two points is
+        /// solved for where the plane is, not for where epsilon is -- so a
+        /// pair straddling that gap (one a hair past epsilon on the outside,
+        /// the next just inside it) counts as a crossing and solves to a
+        /// <c>t</c> outside 0..1. Unclamped, that puts the new point beyond
+        /// the far end of the edge, and since these sheets start 131,072
+        /// units across, "beyond the far end" is thousands of units away.
+        ///
+        /// The polygon then has a vertex out of order and reads as a bowtie.
+        /// A run-time face test walks the edges in order and rejects anything
+        /// outside any of them, so a bowtie rejects most of its own interior:
+        /// on MK_BlockFort this was the ramp up to each fort's middle floor
+        /// and the middle floor's own corner, five faces of about 30 square
+        /// units that a player walked and shot straight through. 19 of the
+        /// level's brush sides came out this way.
+        /// </summary>
         private static List<Vector3> Clip(List<Vector3> points, Vector3 normal, float distance)
         {
             const float epsilon = 0.01f;
@@ -821,19 +912,62 @@ namespace MphRead.Mods.MapGen
                 }
                 if (distCurrent > epsilon != distNext > epsilon && MathF.Abs(distCurrent - distNext) > 1e-6f)
                 {
-                    result.Add(current + (next - current) * (distCurrent / (distCurrent - distNext)));
+                    float t = Math.Clamp(distCurrent / (distCurrent - distNext), 0f, 1f);
+                    result.Add(current + (next - current) * t);
                 }
             }
             return result;
         }
 
-        /// <summary>Drops points the clipping left within a hair of each other.</summary>
+        /// <summary>
+        /// Drops points the clipping left within a hair of each other.
+        ///
+        /// The hair has to be measured against the polygon, not against a
+        /// constant, and getting that wrong is what put a hole in every
+        /// outside wall of MK_BlockFort. <see cref="MakeSheet"/> starts each
+        /// side as a square 131,072 units across and <see cref="Clip"/> trims
+        /// it down; at that magnitude a float carries about 0.008 of a unit,
+        /// and half a dozen clips compound it, so a corner two clips arrive at
+        /// separately lands twice, some 0.08 of a unit apart. The old fixed
+        /// tolerance was 0.02 -- four times too small to see it -- and the
+        /// pair survived into the collision file as an edge one thousandth of
+        /// a unit long.
+        ///
+        /// A run-time face test does not know that edge is an accident. It
+        /// walks the polygon, crosses each edge's direction with the face
+        /// normal and rejects anything on the outside of the result, and the
+        /// direction of a thousandth-of-a-unit edge is whichever way the
+        /// rounding fell. On the arena's east wall it fell along the wall, so
+        /// the face -- the lower half of an 82 x 9 unit wall -- rejected every
+        /// point more than 0.03 units below its top edge, which is all of it.
+        /// The other half of the wall is a second face with its own accident,
+        /// and half of every wall in the level had no collision at all: you
+        /// walked out through it and fell to the kill plane. 113 of the
+        /// level's collision edges were shorter than a unit, the shortest 0.02
+        /// and most of them around 0.08; 12 survive this, all of them real.
+        ///
+        /// So the tolerance scales with the polygon. A thousandth of its own
+        /// extent is far above the clipping error at any size and far below
+        /// anything a level author drew: on the wall's own face it is 6.7
+        /// units against a 0.08-unit accident and a 739-unit shortest real
+        /// edge. The old constant stays as the floor, for a polygon small
+        /// enough that a thousandth of it means nothing.
+        /// </summary>
         private static List<Vector3> Weld(List<Vector3> points)
         {
+            var min = new Vector3(Single.MaxValue);
+            var max = new Vector3(Single.MinValue);
+            foreach (Vector3 point in points)
+            {
+                min = Vector3.ComponentMin(min, point);
+                max = Vector3.ComponentMax(max, point);
+            }
+            float tolerance = MathF.Max(0.02f, (max - min).Length * 0.001f);
+            float square = tolerance * tolerance;
             var result = new List<Vector3>();
             foreach (Vector3 point in points)
             {
-                if (!result.Any(p => (p - point).LengthSquared < 0.0004f))
+                if (!result.Any(p => (p - point).LengthSquared < square))
                 {
                     result.Add(point);
                 }
@@ -911,27 +1045,86 @@ namespace MphRead.Mods.MapGen
                     });
                     pads++;
                 }
-                else if (entity.TryGetValue("origin", out string? itemOrigin))
+            }
+            // The level's own pickups, after the loop rather than inside it,
+            // because whether they are wanted at all is one question about the
+            // level and not a question about each entity.
+            List<Q3Pickup> pickups = Pickups(bsp, import.UnitsPerUnit).ToList();
+            if (import.KeepItems)
+            {
+                foreach (Q3Pickup pickup in pickups)
                 {
-                    ItemType type = MapItemType(classname);
-                    if (type == ItemType.None)
-                    {
-                        continue;
-                    }
-                    Vector3 position = ToWorld(ParseVector(itemOrigin), import.UnitsPerUnit);
                     def.Items.Add(new MapItem()
                     {
-                        Position = new[] { position.X, position.Y, position.Z },
-                        Type = type.ToString()
+                        Position = new[] { pickup.Position.X, pickup.Position.Y, pickup.Position.Z },
+                        Type = pickup.Type.ToString()
                     });
                     items++;
                 }
             }
             if (verbose)
             {
-                Console.WriteLine($"  {def.Spawns.Count} spawns, {pads} jump pads, {items} items");
+                string note = import.KeepItems
+                    ? (items > 0 ? $" ({items} of them the level's own)" : "")
+                    : (pickups.Count > 0 ? $", the level's {pickups.Count} ignored" : "");
+                Console.WriteLine($"  {def.Spawns.Count} spawns, {pads} jump pads,"
+                    + $" {def.Items.Count} items{note}");
             }
             MapBuilder.AddEntities(map, def);
+        }
+
+        /// <summary>
+        /// One of the level's pickups: what it is in Quake, what this game has
+        /// in its place, and where that lands in world units.
+        /// </summary>
+        public readonly struct Q3Pickup
+        {
+            public Q3Pickup(string classname, ItemType type, Vector3 position, string? targetName)
+            {
+                Classname = classname;
+                Type = type;
+                Position = position;
+                TargetName = targetName;
+            }
+
+            public string Classname { get; }
+            public ItemType Type { get; }
+            public Vector3 Position { get; }
+
+            /// <summary>
+            /// Set when the level's own scripts name this entity: a
+            /// `target_give` hands it out rather than the player walking over
+            /// it, and a mapper usually puts one of those in a closet nobody
+            /// can reach. It is still an item standing in the world, so
+            /// nothing is dropped on account of it -- but it is the one an
+            /// author most often wants to delete, so it is reported.
+            /// </summary>
+            public string? TargetName { get; }
+        }
+
+        /// <summary>
+        /// The level's pickups, in world units. One definition of what counts
+        /// as one and where it is, read by the importer, by the converter
+        /// writing a recipe, and by `-mapitems` printing one to paste.
+        /// </summary>
+        public static IEnumerable<Q3Pickup> Pickups(Q3Bsp bsp, float unitsPerUnit)
+        {
+            foreach (Dictionary<string, string> entity in bsp.Entities)
+            {
+                if (!entity.TryGetValue("classname", out string? classname)
+                    || !entity.TryGetValue("origin", out string? origin))
+                {
+                    continue;
+                }
+                ItemType type = MapItemType(classname);
+                if (type == ItemType.None)
+                {
+                    continue;
+                }
+                entity.TryGetValue("targetname", out string? targetName);
+                yield return new Q3Pickup(classname, type,
+                    ToWorld(ParseVector(origin), unitsPerUnit), targetName);
+            }
         }
 
         /// <summary>

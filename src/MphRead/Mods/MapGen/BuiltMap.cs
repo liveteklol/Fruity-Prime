@@ -41,6 +41,25 @@ namespace MphRead.Mods.MapGen
         public bool Damaging { get; set; }
         public Terrain Terrain { get; set; } = Terrain.Metal;
 
+        // The rest of what the collision format holds per face. Nothing in the
+        // importers sets these -- a converted level says nothing about them --
+        // but a hand-edited OBJ does, and CollisionObj is where they come
+        // from. IgnoreBeams is the one that earns its keep: a Quake
+        // player-clip brush is a wall that shots are meant to fly through,
+        // and without it every clip in a converted level stops bullets.
+        /// <summary>
+        /// Drawn sky, which is never collision -- so the check that every
+        /// drawn surface has something solid behind it has to know to skip it,
+        /// or a level with a sky shell reports a hole the size of the sky.
+        /// </summary>
+        public bool Sky { get; set; }
+
+        public int Slipperiness { get; set; }
+        public bool ReflectBeams { get; set; }
+        public bool IgnorePlayers { get; set; }
+        public bool IgnoreBeams { get; set; }
+        public bool IgnoreScan { get; set; }
+
         public BuiltFace(Vector3[] points, Vector2[] texcoords, Vector3 normal, int material, float shade)
         {
             Points = points;

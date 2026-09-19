@@ -353,6 +353,15 @@ maps/*.pk3
 maps/*.bsp
 maps/*.tex
 
+# A map's collision mesh, which is the one thing under maps/ that is source
+# rather than derived: the room cannot be generated without it, and what it
+# holds -- which faces exist and which way each one points -- is somebody's
+# work in a 3D tool and is in no other file. The Visual Studio block above
+# ignores *.obj because that is what a C compiler calls an object file;
+# a Wavefront mesh shares the extension and nothing else.
+!maps/**/*.obj
+!maps/**/*.mtl
+
 # Texture packs baked from a custom map's level. Derived, like the room
 # binaries: the game bakes one when the map file names it and it is not there,
 # so what belongs in git is the level and the recipe, not this.

@@ -89,7 +89,7 @@ line option, and the test harness, are in [`CLAUDE.md`](CLAUDE.md).
 
 Fruity Prime is Livetek's fork of [MphRead](https://github.com/NoneGiven/MphRead) by **NoneGiven** —
 the model viewer, the renderer, the format parsers and the recreation of the game itself are theirs.
-That work is in turn built on **dsgraph**, [Chemical](https://gitlab.com/ch-mcl/metroid-prime-hunters-file-document),
+That work is in turn built on **dsgraph**, [chmcl95](https://gitlab.com/ch-mcl/metroid-prime-hunters-file-document),
 [McKay42](https://github.com/McKay42), [Barubary](https://github.com/Barubary/dsdecmp),
 [loveemu](https://github.com/loveemu/loveemu-lab), **Gericom**,
 [CharlesVanEeckhout](https://github.com/CharlesVanEeckhout/actimagine),

@@ -101,12 +101,27 @@ namespace MphRead.Mods.MapGen
             // A copy, because what goes in the bundle names what is in the
             // bundle: the source is the level beside it, not the pk3 it came
             // out of, which the player will not have.
+            // A hand-edited collision mesh is the map, not a working file: the
+            // room it produces cannot be built without it, so it travels with
+            // the recipe the way the level and the baked textures do.
+            string? collisionPath = null;
+            if (definition.Collision != null && definition.Collision.Source.Length > 0)
+            {
+                collisionPath = definition.Collision.Resolve()
+                    ?? throw new ProgramException($"{definition.Name}: its collision mesh "
+                        + $"{definition.Collision.Source} is not beside its recipe, and a bundle "
+                        + "without it is a map that cannot be generated.");
+            }
             MapDefinition inside = MapDefinition.Load(recipePath);
             if (inside.Import != null)
             {
                 inside.Import.Source = $"{LevelDirectory}{mapName}.bsp";
                 inside.Import.MapName = mapName;
                 inside.Import.Textures = textureName;
+            }
+            if (inside.Collision != null && collisionPath != null)
+            {
+                inside.Collision.Source = Path.GetFileName(collisionPath);
             }
             string temporary = path + ".tmp";
             using (var file = File.Create(temporary))
@@ -117,6 +132,10 @@ namespace MphRead.Mods.MapGen
                 if (texturePath != null)
                 {
                     Write(archive, textureName, File.ReadAllBytes(texturePath));
+                }
+                if (collisionPath != null)
+                {
+                    Write(archive, Path.GetFileName(collisionPath), File.ReadAllBytes(collisionPath));
                 }
             }
             File.Move(temporary, path, overwrite: true);

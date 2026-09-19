@@ -17,12 +17,18 @@ namespace MphRead.Mods.MapGen
     /// so converting somebody else's level is a command rather than an
     /// afternoon.
     ///
-    /// What it deliberately does not do is place weapons and powerups. Where
+    /// What it deliberately does not do is *place* weapons and powerups. Where
     /// those go is a judgement about how the map plays -- which routes meet,
     /// what is worth contesting -- and a generator that scattered them evenly
-    /// would produce a map that is worse than one with none at all. It writes
-    /// the spawns it can find and leaves `items` empty for a person, or an
-    /// assistant, to fill in.
+    /// would produce a map that is worse than one with none at all.
+    ///
+    /// It does write down the ones the level's own author placed, which is a
+    /// different thing: those were being imported from the .bsp on every
+    /// generation anyway, invisibly, so an author who wanted one moved or gone
+    /// had nowhere to say so. Listing them under `items` and turning
+    /// `keepItems` off makes the recipe the only answer to what the map holds
+    /// -- which is the point of there being a recipe. `-noitems` writes none
+    /// and still turns it off, for a level whose pickups are nothing you want.
     /// </summary>
     public static class Q3Convert
     {
@@ -49,7 +55,7 @@ namespace MphRead.Mods.MapGen
         public const float TargetExtent = 130f;
 
         public static int Run(string source, string? mapName, string? roomName, string? outputDir,
-            bool dropClip, float? forcedScale, int textureSize)
+            bool dropClip, bool dropItems, float? forcedScale, int textureSize)
         {
             if (!File.Exists(source))
             {
@@ -79,7 +85,7 @@ namespace MphRead.Mods.MapGen
                 return 1;
             }
             float widest = Math.Max(max[0] - min[0], Math.Max(max[1] - min[1], max[2] - min[2]));
-            float unit = forcedScale ?? MathF.Round(Math.Max(35f, widest / TargetExtent));
+            float unit = forcedScale ?? AutoScale(widest);
             // The sky shell sits outside the architecture, and with it drawn
             // its corners are the furthest vertices in the file. The size of
             // the map is decided by the part people walk on; what has to fit
@@ -131,6 +137,7 @@ namespace MphRead.Mods.MapGen
                 (bsp.Textures[b.Texture].Contents & Q3Bsp.ContentsSolid) == 0
                 && (bsp.Textures[b.Texture].Contents & Q3Bsp.ContentsPlayerClip) != 0);
             AddSpawns(definition, bsp, unit);
+            AddItems(definition, bsp, unit, dropItems);
 
             string path = Path.Combine(directory, $"{prefix}.json");
             definition.Save(path);
@@ -147,11 +154,87 @@ namespace MphRead.Mods.MapGen
                 Console.WriteLine($"  {clipBrushes} player-clip brushes kept. They are the level's invisible"
                     + " walls; on a race map they fence the route. -noclip converts without them.");
             }
-            Console.WriteLine("  no weapons or powerups were placed: where those go decides how the map"
-                + " plays. Add them under \"items\", from:");
+            List<Q3Import.Q3Pickup> pickups = Q3Import.Pickups(bsp, unit).ToList();
+            if (dropItems)
+            {
+                Console.WriteLine($"  -noitems: the level's {pickups.Count} pickups were left out, and"
+                    + " \"keepItems\" turned off so they stay out. Add your own under \"items\", from:");
+            }
+            else if (definition.Items.Count > 0)
+            {
+                Console.WriteLine($"  {definition.Items.Count} of the level's own pickups written under"
+                    + " \"items\", and \"keepItems\" turned off so the recipe is the only place they"
+                    + " live. Move them, drop them, or change what they are, from:");
+            }
+            else
+            {
+                Console.WriteLine("  no pickups: this level holds none this game has an answer for."
+                    + " Where weapons and powerups go decides how the map plays, so none were"
+                    + " invented. Add them under \"items\", from:");
+            }
             Console.WriteLine($"  {String.Join(", ", MapBuilder.MultiplayerItems)}");
+            int scripted = dropItems ? 0 : pickups.Count(p => p.TargetName != null);
+            if (scripted > 0)
+            {
+                Console.WriteLine($"  {scripted} of them are handed out by the level's own scripts"
+                    + " rather than walked over, and are usually stood in a closet nobody can reach."
+                    + $" FruityPrime -mapitems \"{room}\" says which.");
+            }
             Console.WriteLine($"  then: FruityPrime -mapgen \"{room}\"");
             return 0;
+        }
+
+        /// <summary>
+        /// The scale a conversion picks for a level of this size, in Quake
+        /// units per world unit. See <see cref="TargetExtent"/>; 35 is the
+        /// floor because below it the level's own architecture stops fitting
+        /// its own player.
+        /// </summary>
+        public static float AutoScale(float widestExtent)
+        {
+            return MathF.Round(Math.Max(35f, widestExtent / TargetExtent));
+        }
+
+        /// <summary>The widest the level's drawn geometry gets, in Quake units.</summary>
+        public static float WidestExtent(Q3Bsp bsp)
+        {
+            Bounds(bsp, out float[] min, out float[] max, sky: false);
+            if (min[0] > max[0])
+            {
+                return 0;
+            }
+            return Math.Max(max[0] - min[0], Math.Max(max[1] - min[1], max[2] - min[2]));
+        }
+
+        /// <summary>
+        /// The level's own pickups, written into the recipe rather than left
+        /// to be read out of the .bsp on every generation.
+        ///
+        /// Nothing is invented here -- this transcribes what the level's
+        /// author already decided, and the reason to do it is that the recipe
+        /// is the file an author can edit and the .bsp is not.
+        /// </summary>
+        private static void AddItems(MapDefinition definition, Q3Bsp bsp, float unit, bool dropItems)
+        {
+            // Either way, the recipe is now the only source. With the level's
+            // pickups listed here, importing them as well would double every
+            // one of them.
+            definition.Import!.KeepItems = false;
+            if (dropItems)
+            {
+                return;
+            }
+            foreach (Q3Import.Q3Pickup pickup in Q3Import.Pickups(bsp, unit))
+            {
+                definition.Items.Add(new MapItem()
+                {
+                    Position = new[]
+                    {
+                        Round(pickup.Position.X), Round(pickup.Position.Y), Round(pickup.Position.Z)
+                    },
+                    Type = pickup.Type.ToString()
+                });
+            }
         }
 
         /// <summary>The extent of what is drawn, optionally counting the sky shell.</summary>

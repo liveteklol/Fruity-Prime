@@ -74,7 +74,7 @@ namespace MphRead.Mods
                 "https://github.com/NoneGiven/MphRead"),
             new Entry("dsgraph", "the original MPH model viewer, on which all "
                 + "other projects are built", ""),
-            new Entry("Chemical", "documentation of the model format",
+            new Entry("chmcl95", "documentation of the model format",
                 "https://gitlab.com/ch-mcl/metroid-prime-hunters-file-document"),
             new Entry("McKay42", "COLLADA export method (mph-model-viewer) and "
                 + "ARC file format information (mph-arc-extractor)",

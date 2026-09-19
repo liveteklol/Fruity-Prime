@@ -236,6 +236,44 @@ both at once: a doorway with a hole where its arch should be, that you could
 also walk through. `patchLevel` (default 3) is how many quads along each side
 of each biquadratic piece.
 
+**A collision polygon is only as good as its worst edge, and the run-time face
+test never says so.** `CheckSphereBetweenPoints` walks a face's points in
+order, crosses each edge's direction with the face normal and rejects the
+contact if it is outside any of them. That is a correct test for a convex
+polygon whose edges all have a meaningful direction, and it fails **silently
+and catastrophically** for one that does not: a face with a bad edge does not
+misbehave near that edge, it rejects most of its own interior and the surface
+is simply not there. `MK_BlockFort` -- geometry from 3DS Max, clipped with
+`s_common/modelclip` -- arrived with both ways of getting it wrong at once,
+and the report was "you walk through the outside wall and fall out of the
+map". Two fixes, both in `Q3Import`:
+
+- **`Clip` clamps the crossing parameter to 0..1.** A point is kept when it is
+  inside the plane *or within epsilon of it*, while the crossing between two
+  points is solved for where the plane is rather than for where epsilon is, so
+  a pair straddling that gap solves to a `t` outside 0..1 -- and the sheet
+  being clipped starts 131,072 units across, so "just past the end of the
+  edge" is thousands of units away. The polygon comes out with a vertex out of
+  order, i.e. a bowtie. 19 of that level's brush sides, among them every
+  fort's ramp and its middle floor's corner.
+- **`Weld`'s tolerance scales with the polygon.** The clipping runs at a
+  magnitude where a float carries about 0.008 of a unit and half a dozen clips
+  compound it, so a corner two clips arrive at separately lands twice, some
+  0.08 of a unit apart -- four times the old fixed tolerance of 0.02. The pair
+  survives into the collision file as an edge a thousandth of a unit long
+  whose direction is whichever way the rounding fell, and on the arena's east
+  wall it fell along the wall: the lower half of an 82 x 9 unit wall rejected
+  everything more than 0.03 units below its top edge, so **half of every one
+  of that level's four outside walls had no collision at all**. 113 of its
+  collision edges were shorter than a unit; 12 survive this, all of them real.
+  A thousandth of the polygon's own extent is far above the clipping error at
+  any size and far below anything an author drew.
+
+The check that finds this is cheap and worth reaching for whenever a surface
+"is not there": take the generated `_Collision.bin`, sample each face's own
+interior, and run the engine's edge test against the face the points came
+from. A face that rejects its own middle is broken. Both maps now read zero.
+
 **Buried brush sides are dropped**, and that is what makes a real level fit.
 A level's walls are stacks of brushes, so most brush sides face into another
 brush and nothing outside the solid can ever touch them -- on df_dust2, 6,119
@@ -256,6 +294,49 @@ the places its author wanted people to appear. It is wrong for anything else:
 a race level has one start, often on a ledge sealed off from the course, and a
 player who spawns there is stuck. Turn it off and the map file's spawns are
 the only ones.
+
+`keepItems` (default true) says whether to take the level's own pickups --
+health, armour, ammo, weapons -- on top of the recipe's own `items`.
+
+**The default is true because that is what every map did before there was a
+choice**, and an existing recipe has to keep generating the room it was
+generating. It is the wrong answer for a map anybody is working on, and the
+reason is that the level's pickups were arriving *invisibly*: they are read
+out of the `.bsp` on every generation, so a recipe listing three items could
+produce a room holding thirty, and an author who wanted one of the level's own
+moved or gone had nowhere to say so. `-mapitems` writes them out, `keepItems:
+false` stops them arriving twice, and the recipe is then the only answer to
+what the map holds -- which is the point of there being a recipe.
+
+`-q3convert` now does both halves itself: it transcribes what it finds into
+`items` and sets `keepItems` to false, so a freshly converted map is already
+in that state. `-noitems` writes none and still sets it false.
+
+### What a level already holds
+
+```bash
+FruityPrime -mapitems "ROOM"                       # from the recipe
+FruityPrime -mapitems level.pk3 -map NAME [-scale N]   # before there is one
+```
+
+Prints the level's pickups as the `items` block a recipe would carry -- one
+line each, in world units, with the Quake classname each came from and what
+this game puts in its place. Given a room name it reads that map's recipe, so
+the scale is the one the room is actually built at and the count it prints is
+the count the room actually has.
+
+**It writes nothing.** A recipe is allowed `//` comments -- every one in the
+repository opens with a line saying where to get the level -- and serializing
+one back over itself would throw those away along with whatever the author had
+laid out by hand. So the block is printed to paste and the file stays theirs.
+
+It also says which pickups carry a `targetname`. Those are handed out by the
+level's own scripts (`target_give`) rather than walked over, and a mapper
+usually stands them in a closet nobody can reach: df_dust2's rocket launcher
+and its ammo are one of these, 0.6 units apart behind the architecture. They
+are still items standing in the world, so nothing is dropped on their account
+-- but they are the ones an author most often wants to delete, so they are
+marked.
 
 ### Verified against a real level
 
@@ -287,19 +368,26 @@ available.
 ## Converting a level, in one command
 
 ```bash
-FruityPrime -q3convert path/to/level.pk3 -map LEVELNAME -name ROOM [-noclip]
+FruityPrime -q3convert path/to/level.pk3 -map LEVELNAME -name ROOM [-noclip] [-noitems]
 ```
 
 Bakes the textures, picks the scale, the extents, the kill height and the
-vertex precision from the level's own geometry, writes the spawns from its
-entities, copies the `.pk3` in beside the result, and leaves a
+vertex precision from the level's own geometry, writes the spawns and the
+pickups from its entities, copies the `.pk3` in beside the result, and leaves a
 `maps/<room>/<room>.json` that `-mapgen` can build. `-scale N` overrides the
 scale, `-texsize N` the texture size, `-out DIR` where it lands.
 
-It does **not** place weapons or powerups. Where those go is a judgement about
-how the map plays -- which routes meet, what is worth contesting -- and a
-generator that scattered them evenly would produce a map worse than one with
-none. It prints the list of pickups a custom map may use and stops there.
+It does **not** *place* weapons or powerups. Where those go is a judgement
+about how the map plays -- which routes meet, what is worth contesting -- and
+a generator that scattered them evenly would produce a map worse than one with
+none. It prints the list of pickups a custom map may use, and leaves choosing
+to a person.
+
+It does write down the ones the level's own author placed, which is a
+different thing. Those were being read out of the `.bsp` on every generation
+anyway; listing them under `items` and setting `keepItems` to false only moves
+them somewhere an author can edit them. `-noitems` writes none and still sets
+the flag, for a level whose pickups are nothing you want.
 
 The texture baking is in `MapTextureBake.cs` now, not only in
 `tools/bake-textures.py`: the archive is a zip, the decoder is the one the
@@ -316,6 +404,140 @@ guide: df_dust2's crates are 128 and 192 units, which are de_dust2's 64 and 96
 *doubled*, so that level is built at twice the scale of the map it copies. 130
 was arrived at by measuring the crates. It puts the small one at 1.56 units
 against Samus's 1.6 -- waist-high, which is what a crate is.
+
+## Collision a person edits: the OBJ round trip
+
+```bash
+python tools/collision-to-obj.py dust2 --files FILES --group terrain   # out
+# edit dust2_Collision.obj in Blender
+FruityPrime -mapcheck "DUST2"      # what it will be
+FruityPrime -mapgen "DUST2"        # in
+```
+
+with, in the recipe:
+
+```jsonc
+"collision": { "source": "dust2_collision.obj", "zUp": false }
+```
+
+**It replaces the collision the geometry makes, rather than adding to it**,
+and that is the point rather than a limitation. The reason to reach for this
+is that a converted level's collision is a by-product of somebody else's
+level: every brush side survives, including the ones nobody can ever touch,
+because the buried-face test only drops a side that is *inside another brush*,
+not one that is merely somewhere no player can go. On df_dust2 that is **372
+faces and 20,359 square units -- about a quarter of the room's collision area
+and a seventh of its grid references** -- and no importer can fix it, because
+the faces really are in the source. Which of them are worth keeping is a
+judgement about the map. Adding could never delete one.
+
+`map.Solid` and `map.Faces` are separate lists, so a map is still *drawn* from
+the converted level; only what stops you comes from the mesh. `MapNodePacker`
+reads the same list, so the bots' waypoints follow an edit with nothing else
+to do.
+
+**Winding is the whole contract.** A collision face is one-sided --
+`CheckSphereBetweenPoints` refuses a contact that starts behind the plane -- so
+the polygon's own normal is the side it blocks from, and a face flipped in
+Blender is a face you walk through. The exporter winds every face to agree with
+its stored plane, and `CollisionObj` derives the plane from the winding by the
+same Newell sum. `vn` is read by neither: a tool that writes a normal
+disagreeing with its own winding would otherwise get to decide which side of a
+wall you can walk through.
+
+### The material name is the whole per-face vocabulary
+
+`<terrain>[_attribute...]`, because a material name is the only per-face
+channel an OBJ has and everything the collision format holds per face fits in
+one:
+
+| | |
+|---|---|
+| terrain | `metal` `orangeholo` `greenholo` `blueholo` `ice` `snow` `sand` `rock` `lava` `acid` `gorea` |
+| attributes | `slip0`-`slip3`, `damaging`, `reflect`, `noplayers`, `nobeams`, `noscan` |
+
+So `sand`, `rock_slip1`, `lava_damaging`, `metal_nobeams`. Terrain decides the
+footstep, landing and sliding sounds (`Metadata.TerrainSfx`), the footstep
+effects, the beam impact splats, and the debug view's colours; `Lava` is
+behaviour -- `PlayerFlags1.OnLava`, and the AI avoids it. **`nobeams` is the
+one that earns its keep on a converted level**: a Quake player-clip brush is a
+wall shots are meant to fly through, and without it every clip in the level
+stops bullets. The cartridge's own MP3 PROVING GROUND uses it on four faces.
+
+A face with **no material at all is plain metal**, no attributes -- which is
+what an ordinary OBJ out of a tool nobody asked to write materials means, and
+is also what every converted map is today, since nothing in the importer has
+ever set a terrain. A name that is *not* one of these is **refused**, never
+ignored: a misspelt `damaging` would silently be an ordinary floor, and a
+misspelt anything on a lava face is a floor that kills without saying so.
+Blender's `.001` suffix on a renamed material is stripped.
+
+### Numbers, and what a round trip is exact about
+
+Coordinates are snapped to 1/4096 on the way in, which is what the file stores.
+Without it a number that has been through decimal text lands a fraction off the
+one beside it and the packer, which deduplicates points by exact equality,
+writes two points where the mesh had one. `Fixed.ToInt` **truncates** rather
+than rounds, and anything comparing a built face against a written one has to
+do the same or every corner reads as moved.
+
+The Newell sum is taken **in double and about the polygon's own centre**. In
+single precision, on a wall fifty units from the origin whose own edges are a
+fraction of a unit long, cancellation eats most of the answer: a face that
+should have been (1, 0, 0) came out (0.9998, 0, 0), which is a different plane,
+and df_dust2 ended up with 2,879 planes where it had 2,716.
+
+Measured, exporting df_dust2's collision and generating from it unedited:
+
+```
+kept      5468 faces
+removed    100 faces  (0 u2)     <- the ones that enclose no area
+added        0 faces
+```
+
+and 10,308 points down to **7,829**, because the file itself holds 2,479
+duplicate points: the packer deduplicates before quantising, so two patch
+vertices a millionth apart are two points that get written as the same three
+integers. Snapping first removes them. 399,896 bytes to 357,312.
+
+## Checking one before it is generated
+
+```bash
+FruityPrime -mapcheck "ROOM"
+```
+
+Builds the map in memory, writes nothing, and reports five things. It exists
+because every way of getting hand-edited collision wrong is invisible: a face
+turned inside out is a wall you walk through, a concave polygon rejects part of
+its own interior, a floor deleted by accident is a hole you fall down, and a
+material name with `damaging` in it that should not be there is a floor that
+kills. None of those look like anything in Blender, and the first three do not
+look like anything in the game either until somebody walks into them.
+
+1. **Against the format's limits** -- faces, distinct points, and grid
+   references, which is the one that bites first: the grid lists every face in
+   every cell it reaches and indexes those listings with sixteen bits.
+   df_dust2 sits at 36% of it.
+2. **Shape** -- faces enclosing no area, and faces that **reject part of their
+   own interior**, which is `GetEdgeDotDifference` transcribed with its own
+   `-0.03125` margin rather than an approximation of it. This is what catches a
+   concave polygon, which is what a 3D tool produces the moment somebody drags
+   a vertex past its neighbours.
+3. **What the surfaces are** -- the terrain census, and the count of faces that
+   hurt on its own line whether or not it is zero, because "lava" where "rock"
+   was meant is not an error and never will be.
+4. **What the .obj changed**, against the collision the geometry would have
+   made: kept, removed with their area, added. The most useful line once a map
+   has a mesh, because the edit is not visible anywhere else -- the recipe says
+   a filename, the .obj is thousands of numbers, and a face deleted on purpose
+   and a face deleted by a stray click look exactly alike.
+5. **Drawn surfaces with nothing solid behind them**, sampled half a unit apart
+   over every drawn polygon. Read as places to look at rather than as faults: a
+   level draws plenty that was never meant to stop anybody, and a converted
+   level's collision is often a coarser version of what is drawn -- a
+   `modelclip` ramp arrives as a staircase of flat plates -- so the check
+   allows a unit behind the drawn surface and a quarter in front and still
+   reports the trim.
 
 ## Pickups a custom map may use
 
@@ -377,6 +599,9 @@ FruityPrime -q3shaders path/to/pak.pk3 -map wrackdm17   # what it draws with
 FruityPrime -mapgen                       # generate every map in maps/
 FruityPrime -mapgen "LONGEST YARD"        # just one
 FruityPrime -mapmaterials "MP3 PROVING GROUND"   # what textures can be borrowed
+FruityPrime -mapitems "DUST2"             # what pickups the level already holds
+FruityPrime -mapcheck "DUST2"             # what its collision will be, before generating
+python tools/collision-to-obj.py dust2 --files FILES --group terrain   # collision out, to edit
 FruityPrime -maptest "LONGEST YARD" -players 8 -seconds 22
 FruityPrime -thumbnail "LONGEST YARD"     # the launcher's picture
 ```

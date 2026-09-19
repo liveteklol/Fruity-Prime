@@ -46,7 +46,46 @@ namespace MphRead.Mods.MapGen
             bool verbose = true)
         {
             BuiltMap map = def.Import == null ? MapBuilder.Build(def) : Q3Import.Build(def, verbose);
+            ApplyCollision(map, def, verbose);
             Generate(map, archiveDir, entityDir, nodeDir, verbose);
+        }
+
+        /// <summary>
+        /// Swap the room's collision for the one in the map's .obj, if it
+        /// names one.
+        ///
+        /// Here rather than inside either builder because it is the same
+        /// answer to both: collision and drawn geometry are already separate
+        /// lists, so a map may be drawn from a converted level and blocked by
+        /// a hand-edited mesh, which is the arrangement this exists for.
+        /// `MapNodePacker` reads the same list, so the bots' waypoints follow
+        /// the edit with nothing else to do.
+        /// </summary>
+        public static void ApplyCollision(BuiltMap map, MapDefinition def, bool verbose)
+        {
+            if (def.Collision == null || def.Collision.Source.Length == 0)
+            {
+                return;
+            }
+            byte[]? bytes = def.Collision.ReadBytes();
+            if (bytes == null)
+            {
+                throw new ProgramException(
+                    $"{def.Name} says its collision is {def.Collision.Source}, which is not beside "
+                    + $"the map file, in {CustomRooms.MapDirectory}, or with the game files. "
+                    + "Write one with tools/collision-to-obj.py, or take the \"collision\" key out "
+                    + "to go back to the collision the geometry makes.");
+            }
+            CollisionObj.Result read = CollisionObj.Read(bytes, def.Collision.Source, def.Collision.ZUp);
+            int replaced = map.Solid.Count;
+            map.Solid.Clear();
+            map.Solid.AddRange(read.Faces);
+            if (verbose)
+            {
+                Console.WriteLine($"  collision from {def.Collision.Source}: {read.Faces.Count} faces"
+                    + $" over {read.Vertices} vertices, in place of the geometry's {replaced}"
+                    + (read.Degenerate > 0 ? $" ({read.Degenerate} enclosing no area, skipped)" : ""));
+            }
         }
 
         private static (byte[], int) BuildModel(BuiltMap map)
@@ -290,7 +329,15 @@ namespace MphRead.Mods.MapGen
                         LayerMask = (ushort)(4 | GetPrimaryAxis(part.Normal)),
                         Plane = new Vector4(part.Normal, Vector3.Dot(part.Normal, part.Points[0])),
                         Damaging = face.Damaging,
-                        Terrain = face.Terrain
+                        Terrain = face.Terrain,
+                        Slipperiness = face.Slipperiness,
+                        Reflect = face.ReflectBeams,
+                        // the editor states these the other way round: it asks
+                        // whether a face is there for players, beams and the
+                        // scan visor, and the file stores whether to ignore it
+                        Players = !face.IgnorePlayers,
+                        Beams = !face.IgnoreBeams,
+                        Scan = !face.IgnoreScan
                     };
                     editor.Points.AddRange(part.Points);
                     editors.Add(editor);
