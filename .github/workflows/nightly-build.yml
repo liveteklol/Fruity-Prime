@@ -1,0 +1,211 @@
+# Continuously publish the latest successful build pushed to a Nightly source
+# branch. The pushed branch itself is built; this workflow does not switch to
+# or merge another branch.
+#
+# The actual compilation stays in build.yml. This workflow calls that reusable
+# workflow instead of copying its build matrix, so Nightly and ordinary CI use
+# the same tests, target list, packaging inputs and asset guards.
+name: Nightly Build
+
+on:
+  push:
+    branches:
+      - nightly
+      - develop
+      - main
+      - master
+  workflow_dispatch:
+
+concurrency:
+  group: fruity-prime-nightly-build
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  NIGHTLY_TAG: nightly-release
+  NIGHTLY_NAME: Nightly Build
+
+jobs:
+  build:
+    name: Build all targets
+    uses: ./.github/workflows/build.yml
+
+  publish:
+    name: Publish Nightly release
+    needs: build
+    if: >-
+      github.repository == 'Zection6V/Fruity-Prime' &&
+      (github.ref_name == 'nightly' ||
+       github.ref_name == 'develop' ||
+       github.ref_name == 'main' ||
+       github.ref_name == 'master')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out the built commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+
+      # Keep every build artifact in its own directory. In particular, the
+      # macOS jobs already produce validated tarballs and Android already
+      # produces the installable APK; those should not be rebuilt here.
+      - name: Download Nightly build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: FruityPrime-*
+          path: artifacts
+
+      - name: Package Nightly assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+
+          test -s artifacts/FruityPrime-win-x64/FruityPrime.exe
+          (
+            cd artifacts/FruityPrime-win-x64
+            zip -qr "$GITHUB_WORKSPACE/dist/FruityPrime-nightly-win-x64.zip" .
+          )
+
+          test -s artifacts/FruityPrime-linux-x64/FruityPrime
+          tar -C artifacts/FruityPrime-linux-x64 -czf             dist/FruityPrime-nightly-linux-x64.tar.gz .
+
+          test -s artifacts/FruityPrime-linux-x64-server/FruityPrime
+          tar -C artifacts/FruityPrime-linux-x64-server -czf             dist/FruityPrime-nightly-server-linux-x64.tar.gz .
+
+          test -s artifacts/FruityPrime-linux-arm64/FruityPrime
+          tar -C artifacts/FruityPrime-linux-arm64 -czf             dist/FruityPrime-nightly-server-linux-arm64.tar.gz .
+
+          test -s artifacts/FruityPrime-win-x64-server/FruityPrimeServer.exe
+          (
+            cd artifacts/FruityPrime-win-x64-server
+            zip -qr "$GITHUB_WORKSPACE/dist/FruityPrime-nightly-server-win-x64.zip" .
+          )
+
+          arm64_macos=(artifacts/FruityPrime-osx-arm64/*.tar.gz)
+          x64_macos=(artifacts/FruityPrime-osx-x64/*.tar.gz)
+          test "${#arm64_macos[@]}" -eq 1
+          test "${#x64_macos[@]}" -eq 1
+          test -s "${arm64_macos[0]}"
+          test -s "${x64_macos[0]}"
+          cp "${arm64_macos[0]}" dist/FruityPrime-nightly-macos-arm64.tar.gz
+          cp "${x64_macos[0]}" dist/FruityPrime-nightly-macos-x64.tar.gz
+
+          test -s artifacts/FruityPrime-android/FruityPrime-release.apk
+          cp artifacts/FruityPrime-android/FruityPrime-release.apk             dist/FruityPrime-nightly-android.apk
+
+      - name: Verify Nightly payload and write checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected=(
+            FruityPrime-nightly-win-x64.zip
+            FruityPrime-nightly-linux-x64.tar.gz
+            FruityPrime-nightly-server-linux-x64.tar.gz
+            FruityPrime-nightly-server-linux-arm64.tar.gz
+            FruityPrime-nightly-server-win-x64.zip
+            FruityPrime-nightly-macos-arm64.tar.gz
+            FruityPrime-nightly-macos-x64.tar.gz
+            FruityPrime-nightly-android.apk
+          )
+
+          for file in "${expected[@]}"; do
+            test -s "dist/$file"
+            echo "obtained: $file ($(stat -c%s "dist/$file") bytes)"
+          done
+
+          (
+            cd dist
+            sha256sum "${expected[@]}" > SHA256SUMS.txt
+          )
+
+          echo
+          cat dist/SHA256SUMS.txt
+
+      - name: Compose Nightly release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "Built automatically from the latest \`${GITHUB_REF_NAME}\` branch."
+            echo
+            echo "Commit: \`${GITHUB_SHA}\`"
+            echo "Build date: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+            echo
+            echo "These builds are automatically generated and may contain unfinished or unstable changes."
+            echo
+            echo "No Metroid Prime Hunters game data is included."
+          } > nightly-notes.md
+          cat nightly-notes.md
+
+      - name: Move Nightly tag to this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${NIGHTLY_TAG}" >/dev/null 2>&1; then
+            gh api --method PATCH               "repos/${GITHUB_REPOSITORY}/git/refs/tags/${NIGHTLY_TAG}"               -f sha="${GITHUB_SHA}" -F force=true >/dev/null
+            echo "Moved ${NIGHTLY_TAG} to ${GITHUB_SHA}"
+          else
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs"               -f ref="refs/tags/${NIGHTLY_TAG}" -f sha="${GITHUB_SHA}" >/dev/null
+            echo "Created ${NIGHTLY_TAG} at ${GITHUB_SHA}"
+          fi
+
+      - name: Create or update Nightly prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "${NIGHTLY_TAG}" >/dev/null 2>&1; then
+            gh release edit "${NIGHTLY_TAG}"               --title "${NIGHTLY_NAME}"               --notes-file nightly-notes.md               --prerelease               --draft=false
+          else
+            gh release create "${NIGHTLY_TAG}"               --title "${NIGHTLY_NAME}"               --notes-file nightly-notes.md               --prerelease
+          fi
+
+      - name: Upload Nightly assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release upload "${NIGHTLY_TAG}" dist/* --clobber
+
+      # Fixed asset names make every Nightly URL stable. Remove anything from
+      # an older naming scheme only after the complete new payload is attached.
+      - name: Remove stale Nightly assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd dist && ls -1) > published.txt
+          gh release view "${NIGHTLY_TAG}" --json assets --jq '.assets[].name' > attached.txt
+
+          while IFS= read -r asset; do
+            [ -n "${asset}" ] || continue
+            if ! grep -Fxq "${asset}" published.txt; then
+              echo "Deleting stale asset: ${asset}"
+              gh release delete-asset "${NIGHTLY_TAG}" "${asset}" --yes
+            fi
+          done < attached.txt
+
+      - name: Summarize
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "### Nightly Build published"
+            echo
+            echo "- Source branch: \`${GITHUB_REF_NAME}\`"
+            echo "- Tag: \`${NIGHTLY_TAG}\` -> \`${GITHUB_SHA}\`"
+            echo "- Assets:"
+            (cd dist && ls -1 | sed 's/^/  - /')
+          } >> "${GITHUB_STEP_SUMMARY}"
