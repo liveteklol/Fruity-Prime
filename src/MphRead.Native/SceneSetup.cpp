@@ -1259,6 +1259,17 @@ namespace MphRead
         return beams;
     }
 
+    void BeamProjectileArray::ReleaseReferences() noexcept
+    {
+        for (std::int32_t i = 0; i < _length; ++i)
+        {
+            if (_items[static_cast<std::size_t>(i)])
+            {
+                _items[static_cast<std::size_t>(i)]->ReleaseReferences();
+            }
+        }
+    }
+
     EntityList SceneSetup::GetExtraEntities(
         std::int32_t roomId, const EntityList& entities, Scene* scene)
     {

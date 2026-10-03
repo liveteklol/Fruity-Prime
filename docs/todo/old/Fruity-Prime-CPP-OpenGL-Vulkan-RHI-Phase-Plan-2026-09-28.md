@@ -2354,7 +2354,7 @@ Phase 0完了時のGolden Captureと比較。Phase 0では撮影補助を実装�
 - [x] OpenGL stable
 - [x] CI green
 
-2026-09-30完了。最終コード `5e3c3275` はGolden Capture 7/7完全一致（Phase 3、およびPhase 0 bridge経由）、CTest 5/5、GL分類D=0、shellshot 28枚・終了コード0、GPU lifetime全種ゼロ。オンライン描画・マップ変更・Map Vote、cel/fog、最小化復帰を確認。[CI 36666551184](https://github.com/Zection6V/Fruity-Prime/actions/runs/36666551184) は11/11 PASS。被弾は本Phaseの要件ではない。TRANSFER LOCKの黄色い光は移行前にも存在し、ユーザー指定により既存描画を維持。詳細は [検証記録](Fruity-Prime-CPP-OpenGL-RHI-Phase10-11-Gate-2026-09-30.md)。Phase 12以降には進まない。
+2026-09-30完了。最終コード `5e3c3275` はGolden Capture 7/7完全一致（Phase 3、およびPhase 0 bridge経由）、CTest 5/5、GL分類D=0、shellshot 28枚・終了コード0、GPU lifetime全種ゼロ。オンライン描画・マップ変更・Map Vote、cel/fog、最小化復帰を確認。[CI 36666551184](https://github.com/Zection6V/Fruity-Prime/actions/runs/36666551184) は11/11 PASS。被弾は本Phaseの要件ではない。TRANSFER LOCKの黄色い光は移行前にも存在し、ユーザー指定により既存描画を維持。詳細は [検証記録](Fruity-Prime-CPP-OpenGL-RHI-Phase10-11-Gate-2026-09-30.md)。Phase 11までの当初依頼はここまで完了。追加のPhase 26までの依頼により、Phase 12以降を再開する。
 
 一つでもNoならVulkan Phaseへ進まない。
 
@@ -2484,13 +2484,15 @@ CommandBuffer
 
 ## 完了条件
 
-- [ ] Vulkan instance creation
-- [ ] physical GPU列挙
-- [ ] device creation
-- [ ] queue取得
-- [ ] validation重大エラーなし
-- [ ] clean shutdown
-- [ ] OpenGL build/runtime unaffected
+- [x] Vulkan instance creation
+- [x] physical GPU列挙
+- [x] device creation
+- [x] queue取得
+- [x] validation重大エラーなし
+- [x] clean shutdown
+- [x] OpenGL build/runtime unaffected
+
+2026-09-30完了。コード `5403e1ea` は実GPUおよびLinux/llvmpipeでvalidation有効・正常終了、Golden Capture 7/7完全一致、CTest 5/5、OpenGL shellshot 28枚・終了コード0、[CI 36670960931](https://github.com/Zection6V/Fruity-Prime/actions/runs/36670960931) 11/11 PASS。Vulkanドライバーを利用できない条件でもOpenGL shellshotは成功。詳細は [Phase 12検証記録](Fruity-Prime-CPP-Vulkan-RHI-Phase12-Gate-2026-09-30.md)。
 
 ---
 
@@ -2609,13 +2611,21 @@ Present
 
 ## 完了条件
 
-- [ ] Vulkan window表示
-- [ ] clear color present
-- [ ] resize
-- [ ] fullscreen
-- [ ] minimize/restore
-- [ ] validation clean
-- [ ] shutdown clean
+- [x] Vulkan window表示
+- [x] clear color present
+- [x] resize
+- [x] fullscreen
+- [x] minimize/restore
+- [x] validation clean
+- [x] shutdown clean
+
+## 検証結果 (2026-09-30)
+
+実装SHA `8c6f2d2a044544c5975515fa838730271a02f003`。Windows RTX 5070 Ti / Vulkan 1.4 の `-vulkanpresentcheck` でclear present、windowed resize、fullscreen往復、minimize/restore、FIFO/Mailbox切替、終了を通し、validation有効・errors 0。`-vulkancheck` のfoundation PASSと既存OpenGLの `-thumbnailwindowcheck` もPASS。CTestは5/5 PASS。
+
+同一SHAの [CI run 36684051768](https://github.com/Zection6V/Fruity-Prime/actions/runs/36684051768) は11/11 jobs PASS。Windows/MSVC、Linux/GCC、macOS/Clang、Android NDK arm64/x86_64とAPKを含み、LinuxではVulkan foundationおよびpresentation runtime gateが成功。実装と検証範囲は [Phase 13 gate記録](Fruity-Prime-CPP-Vulkan-RHI-Phase13-Gate-2026-09-30.md) を参照。
+
+この段階のruntime gateはswapchain上のclear-only描画であり、ゲームrendererのVulkan移植・画像parityは後続フェーズの対象。ローカル検証機では `VK_EXT_swapchain_maintenance1` が有効でpresent fenceによる終了を検証した。未対応機器の終了fallbackは別条件でのruntime検証をしていない。
 
 ---
 
@@ -2728,13 +2738,19 @@ transitionはactive rendering scope外で行う。
 
 ## 完了条件
 
-- [ ] Buffer RHI実装
-- [ ] Texture RHI実装
-- [ ] staging upload
-- [ ] readback buffer
-- [ ] resource transition helper
-- [ ] validation clean
-- [ ] leakなし
+- [x] Buffer RHI実装
+- [x] Texture RHI実装
+- [x] staging upload
+- [x] readback buffer
+- [x] resource transition helper
+- [x] validation clean
+- [x] leakなし
+
+完了SHA: `db2ed0f4d353b88b2cee196232ac9b04bbf9f069`。
+Windows/MSVC・Linux/GCC・macOS/ClangとAndroid 4/4のCI成功、
+Windows NVIDIAとLinux llvmpipeのresource診断でvalidation error 0・live 0。
+詳細: [Phase 14 gate](Fruity-Prime-CPP-Vulkan-RHI-Phase14-Gate-2026-09-30.md)。
+次はPhase 15。
 
 ---
 
@@ -2804,13 +2820,22 @@ RHI semanticsを優先。
 
 ## 完了条件
 
-- [ ] BindingLayout Vulkan mapping
-- [ ] BindingSet Vulkan mapping
-- [ ] per-frame safe allocator
-- [ ] descriptor lifetime errorなし
-- [ ] frontend Vulkan descriptor awarenessなし
+- [x] BindingLayout Vulkan mapping
+- [x] BindingSet Vulkan mapping
+- [x] per-frame safe allocator
+- [x] descriptor lifetime errorなし
+- [x] frontend Vulkan descriptor awarenessなし
 
 ---
+
+## 検証記録
+
+実装 `7f9e42493d8e3d749acf4896387c16e9e75ccdf4`。
+Desktop CI 36727161309 は3/3、Android CI 36727166007 は4/4 PASS。
+ローカルCTest 5/5、GPU bind送信・pool拡張・frame再利用を含む
+resource checkはvalidation=1、errors=0、live=0。
+詳細: [Phase 15 gate](Fruity-Prime-CPP-Vulkan-RHI-Phase15-Gate-2026-09-30.md)。
+次はPhase 16。
 
 ## Commit例
 
@@ -2910,13 +2935,17 @@ fade
 
 ## 完了条件
 
-- [ ] SPIR-V reproducible build
-- [ ] pipeline creation
-- [ ] descriptor/pipeline layout一致
-- [ ] validation clean
-- [ ] shader semantics documented
+- [x] SPIR-V reproducible build
+- [x] pipeline creation
+- [x] descriptor/pipeline layout一致
+- [x] validation clean
+- [x] shader semantics documented
 
 ---
+
+## 検証記録
+
+2026-10-01完了。実装 `cebd532c`。ユーザー指定によりWindowsはローカルMinGW Releaseビルド成功を完了条件とした。CTest 5/5、実GPUのpipeline/module/binding/resource検証はvalidation=1、errors=0、live=0。Linux・macOS CI成功、Android 4/4 PASS。詳細は[Phase 16 gate](Fruity-Prime-CPP-Vulkan-RHI-Phase16-Gate-2026-10-01.md)。Phase 16完了後に停止する指示に従い、Phase 17は未着手。
 
 ## Commit例
 
@@ -2991,16 +3020,18 @@ debug geometry
 
 ## 完了条件
 
-- [ ] room表示
-- [ ] model表示
-- [ ] textures正常
-- [ ] no flipped UV
-- [ ] correct winding
-- [ ] depth正常
-- [ ] decals正常
-- [ ] translucent正常
-- [ ] stencil正常
-- [ ] particles/trails正常
+- [x] room表示
+- [x] model表示
+- [x] textures正常
+- [x] no flipped UV
+- [x] correct winding
+- [x] depth正常
+- [x] decals正常
+- [x] translucent正常
+- [x] stencil正常
+- [x] particles/trails正常
+
+2026-10-01完了。実装 `feb0a40b` / `bc6468cc` / `74a4aaf4`。`-rhi vulkan` でGolden 7/7 captured・全gate verified、scene部はOpenGLとpixel一致（HUD文字quadの半画素境界fill-rule差303px のみ、Phase 18へ持越し）。実マップ3種renderprobe PASS、validation errors 0、`-gpulifetime -rhi vulkan` 4/4 解放後ゼロ。OpenGLはGolden 7/7維持。詳細は[Phase 17 gate](Fruity-Prime-CPP-Vulkan-RHI-Phase17-Gate-2026-10-01.md)。
 
 ---
 
@@ -3079,16 +3110,18 @@ fullscreen pass。
 
 ## 完了条件
 
-- [ ] cel shading
-- [ ] outline
-- [ ] HUD
-- [ ] mask
-- [ ] whiteout
-- [ ] disruption
-- [ ] fade
-- [ ] scoreboard
-- [ ] pause game background
-- [ ] OpenGL comparison pass
+- [x] cel shading
+- [x] outline
+- [x] HUD
+- [x] mask
+- [x] whiteout
+- [x] disruption
+- [x] fade
+- [x] scoreboard
+- [x] pause game background
+- [x] OpenGL comparison pass
+
+2026-10-01完了。Phase 17のdeferred pipeline / 自動layout遷移 / depth-only sampled viewで後段処理も通り、追加コード不要。cel probe（決定的なspawn 0–2で差は最大1階調）、Golden fade/hud/whiteout-disruption、実試合 `-hudshots` 20枚（HUD・mask・scoreboard）で確認。残差は2D quadの画素/texel中心tieに当たる1px縁のみで、座標規約の反転・quad分割変更でも不変＝実装依存のtie解決としてPhase 24の許容差に定義。pause背景のscene側は完成、Launcher合成はPhase 19。詳細は[Phase 18 gate](Fruity-Prime-CPP-Vulkan-RHI-Phase18-Gate-2026-10-01.md)。
 
 ---
 
@@ -3258,15 +3291,17 @@ Vulkan present
 
 ## 完了条件
 
-- [ ] Launcher Vulkan
-- [ ] Settings Vulkan
-- [ ] Pause Vulkan
-- [ ] Map Vote Vulkan
-- [ ] End Screen Vulkan
-- [ ] hidden GL contextなし
-- [ ] CPU full-frame fallbackなし
-- [ ] Skia/Vulkan sync validation clean
-- [ ] texture corruptionなし
+- [x] Launcher Vulkan
+- [x] Settings Vulkan
+- [x] Pause Vulkan
+- [x] Map Vote Vulkan
+- [x] End Screen Vulkan
+- [x] hidden GL contextなし
+- [x] CPU full-frame fallbackなし
+- [x] Skia/Vulkan sync validation clean
+- [x] texture corruptionなし
+
+2026-10-01完了。`f3650254` / `cbdde122` / `19bcb655`。`-rhi vulkan` でゲームウィンドウはNoApi＋Vulkan present、Skia GaneshはRHIのVkDevice/queueをVulkanInteropから共有（VMAアロケータ供給）、UI targetはRHI texture（COLOR_ATTACHMENTで受け渡し）。MSVC＋vcpkg skia[vulkan]で `-shellshot` 28枚（Launcher/Settings/Pause/Map Vote/End Screen含む）exit 0、同期検証込みvalidation 0。詳細は[Phase 19 gate](Fruity-Prime-CPP-Vulkan-RHI-Phase19-Gate-2026-10-01.md)。
 
 ---
 
@@ -3336,11 +3371,13 @@ Frontendには同じtop/bottom conventionを返す。
 
 ## 完了条件
 
-- [ ] screenshot一致
-- [ ] recording一致
-- [ ] scene target capture一致
-- [ ] unnecessary WaitIdleなし
-- [ ] no leak
+- [x] screenshot一致
+- [x] recording一致
+- [x] scene target capture一致
+- [x] unnecessary WaitIdleなし
+- [x] no leak
+
+2026-10-01完了。`09d67cc1` / `19bcb655` / `715f5131`。全captureは `CommandList::ReadColor` 経由（window readbackもRHI化）。RHI screenshot/record exportは両backendでPASSかつ同一バイト、定常フレームのhost stallは0（以前は35/frame、uploadをstream内記録に変更）、gpulifetime解放後ゼロ。詳細は[Phase 20 gate](Fruity-Prime-CPP-Vulkan-RHI-Phase20-Gate-2026-10-01.md)。
 
 ---
 
@@ -3425,11 +3462,13 @@ validation status
 
 ## 完了条件
 
-- [ ] explicit OpenGL
-- [ ] explicit Vulkan
-- [ ] Auto
-- [ ] error visible
-- [ ] no silent fallback
+- [x] explicit OpenGL
+- [x] explicit Vulkan
+- [x] Auto
+- [x] error visible
+- [x] no silent fallback
+
+2026-10-01完了。`-rhi opengl|vulkan|auto` と `launcher.txt` の `renderer=`（Settings→Game→Renderer (next start)）。明示Vulkanが不可なら `SceneBackendUnavailable` を理由付きのネイティブエラーダイアログで表示しフォールバックなし、Autoは判定理由をログ。起動時にrequested/selected/GPU/API/driver/swapchain/depth/frames in flight/validationを1行記録。詳細は[Phase 21 gate](Fruity-Prime-CPP-Vulkan-RHI-Phase21-Gate-2026-10-01.md)。
 
 ---
 
@@ -3567,6 +3606,8 @@ GPU Vulkan pathを使う。
 - [ ] Vulkan validation clean
 - [ ] GLES build/run維持
 
+2026-10-01: **コード実装・両ABIビルド完了、実機検証は未了**（この環境にAndroid端末/エミュレータが無く、adbがローカルサーバへ接続できない）。共通Vulkan backendをlibvulkan.so/ANativeWindow surfaceで接続、device生存のままsurface/swapchainのみ再生成、明示Vulkan失敗はエラー通知（GLESへ黙って戻らない）。端末での確認手順は[Phase 22 gate](Fruity-Prime-CPP-Vulkan-RHI-Phase22-Gate-2026-10-01.md)。
+
 ---
 
 # 31. Phase 23 — CI分割
@@ -3650,12 +3691,14 @@ precompiled stale shaderをcommitしてcompile stepを避けない。
 
 ## 完了条件
 
-- [ ] Windows CI green
-- [ ] Linux CI green
-- [ ] macOS OpenGL CI green
-- [ ] Android GLES CI green
-- [ ] Android Vulkan CI green
-- [ ] shader build reproducible
+- [x] Windows CI green
+- [x] Linux CI green
+- [x] macOS OpenGL CI green
+- [x] Android GLES CI green
+- [x] Android Vulkan CI green
+- [x] shader build reproducible
+
+2026-10-01完了。build_cpp run 36802488060 全job green。[Phase 23 gate](Fruity-Prime-CPP-Vulkan-RHI-Phase23-Gate-2026-10-01.md)。
 
 ---
 
@@ -3760,7 +3803,9 @@ flipped output
 
 ## 完了条件
 
-全golden testで重大差分なし。
+- [x] 全golden testで重大差分なし。
+
+2026-10-01完了。Golden 7/7、renderprobe 4マップ76枚、実試合hudshots 20/20がクロスバックエンド検証を通過。許容差は`tools/validate-cross-backend-parity.py`に一元定義（隣接画素一致のnearest sampling tieのみ別枠、shift/flip/黒画面は不合格）。[Phase 24 gate](Fruity-Prime-CPP-Vulkan-RHI-Phase24-Gate-2026-10-01.md)。
 
 ---
 
@@ -3827,7 +3872,9 @@ swapchain lifetime error
 
 ## 完了条件
 
-長時間増加傾向なし。
+- [x] 長時間増加傾向なし。（デスクトップ。Android pause/resume・surface再生成の反復は実機待ち）
+
+2026-10-01完了。ストレスで1ルームロード毎に約25MBのCPUリーク（両バックエンド、map rotationも同経路）を発見し修正：player/beam/effectのshared_ptr循環とcollision候補プールの増殖。`-gpulifetime`がcycle毎のprivate memoryを出し、1MB/cycle以上で失敗する。3マップ×40cycle×両backend、validation 0。[Phase 25 gate](Fruity-Prime-CPP-Vulkan-RHI-Phase25-Gate-2026-10-01.md)。
 
 ---
 
@@ -3930,6 +3977,12 @@ D3D12Swapchain
 ```
 
 を追加するだけでFrontendが成立するか確認。
+
+---
+
+## Phase 26 結果
+
+2026-10-01完了。分離監査を`tools/check-rhi-isolation.py`としてCI化（違反0）。共通RHIに`Rhi::WindowUi`を追加し、Mods側のVulkan名指しを除去。Metal/D3D12レビューではfrontend変更不要。[Phase 26 gate](Fruity-Prime-CPP-Vulkan-RHI-Phase26-Gate-2026-10-01.md)。
 
 ---
 
@@ -4551,7 +4604,8 @@ D3D12
 
 ## 現在の作業位置
 
-- **Phase 11まで完了 (2026-09-30)。** Phase 11最終コード `5e3c3275` はGolden 7/7、CTest 5/5、GL分類D=0、shellshot 28枚、[CI 36666551184](https://github.com/Zection6V/Fruity-Prime/actions/runs/36666551184) 11/11 PASS。 Phase 6〜9の保存済みキャプチャは各7/7完全一致。Phase 10最終コード `220e900a` はGolden 7/7、GPU lifetime arena 5/5・実マップcel 3/3で解放後全種ゼロ、shellshot 24枚、2クライアントのSANCTORUS↔PROVING GROUND遷移がPASS。C++ソース同一の `a6144b61` は [CI 36647299171](https://github.com/Zection6V/Fruity-Prime/actions/runs/36647299171) 10/10 PASS。Phase 0完了 `5d3a0892` からの追加captureもPhase 3と7/7完全一致、UI 26/26一致。詳細と範囲は [Phase 10/11検証記録](Fruity-Prime-CPP-OpenGL-RHI-Phase10-11-Gate-2026-09-30.md) を参照。以下のPhase 4〜5記録は過去の経緯として保持する。
+- **Phase 17完了 (2026-10-01)。** Vulkanでmain sceneを描画（`-rhi vulkan`）。Golden 7/7がOpenGLとscene部pixel一致、validation 0、GPU lifetime 4/4。[Phase 17 gate](Fruity-Prime-CPP-Vulkan-RHI-Phase17-Gate-2026-10-01.md)。**Phase 18完了** ([gate](Fruity-Prime-CPP-Vulkan-RHI-Phase18-Gate-2026-10-01.md))。**Phase 19完了**（Skia Ganesh Vulkan、[gate](Fruity-Prime-CPP-Vulkan-RHI-Phase19-Gate-2026-10-01.md)）。**Phase 20完了**（readback/定常stall 0、[gate](Fruity-Prime-CPP-Vulkan-RHI-Phase20-Gate-2026-10-01.md)）。**Phase 21完了**（[gate](Fruity-Prime-CPP-Vulkan-RHI-Phase21-Gate-2026-10-01.md)）。**Phase 22はコード完了・実機検証待ち**（[gate](Fruity-Prime-CPP-Vulkan-RHI-Phase22-Gate-2026-10-01.md)）。**Phase 24完了**（[gate](Fruity-Prime-CPP-Vulkan-RHI-Phase24-Gate-2026-10-01.md)）。**Phase 25完了**（[gate](Fruity-Prime-CPP-Vulkan-RHI-Phase25-Gate-2026-10-01.md)）。**Phase 23完了**（[gate](Fruity-Prime-CPP-Vulkan-RHI-Phase23-Gate-2026-10-01.md)）。**Phase 26完了**（[gate](Fruity-Prime-CPP-Vulkan-RHI-Phase26-Gate-2026-10-01.md)）。Phase 17–26完遂（Phase 22の実機検証のみ端末待ち）。
+- **Phase 13まで完了 (2026-09-30)。** Phase 11最終コード `5e3c3275` はGolden 7/7、CTest 5/5、GL分類D=0、shellshot 28枚、[CI 36666551184](https://github.com/Zection6V/Fruity-Prime/actions/runs/36666551184) 11/11 PASS。Phase 10最終コード `220e900a` はGolden 7/7、GPU lifetime arena 5/5・実マップcel 3/3で解放後全種ゼロ、shellshot 24枚、2クライアントのSANCTORUS↔PROVING GROUND遷移がPASS。C++ソース同一の `a6144b61` は [CI 36647299171](https://github.com/Zection6V/Fruity-Prime/actions/runs/36647299171) 10/10 PASS。Phase 13実装SHA `8c6f2d2a` はclear-only Vulkan presentation、resize/fullscreen/minimize復帰、終了を実機でvalidation errors 0、CTest 5/5、[CI 36684051768](https://github.com/Zection6V/Fruity-Prime/actions/runs/36684051768) 11/11 PASS。詳細は[Phase 10/11検証記録](Fruity-Prime-CPP-OpenGL-RHI-Phase10-11-Gate-2026-09-30.md)と[Phase 13 gate記録](Fruity-Prime-CPP-Vulkan-RHI-Phase13-Gate-2026-09-30.md)を参照。**次はPhase 14。** 以下のPhase 4〜5記録は過去の経緯として保持する。
 
 - **Phase 5 完了 (2026-09-30, SHA `5e52078b5545294cfa423715457e1a2279cd9398`)。** 本文の完了条件5項目すべてチェック済み。次はPhase 6。
   - **built-in撤去:** desktopのGLSL 1.20 shaderは`gl_Vertex`/`gl_Normal`/`gl_Color`/`gl_MultiTexCoord*`を読まず、`a_position`/`a_normal`/`a_color`/`a_texcoord`/`a_texcoord1`を`attribute`で宣言。`GL::LinkProgram`がリンク前に名前でlocationをbindする。共通定義は`NativeRuntime/Rhi/VertexSemantics.hpp`の1箇所（desktop 0/2/3/8/9 = NV alias表、GLES 0/2/1/3、Vulkan 0/1/2/3/4）。matrix-stack indexは`TexCoord.z`で運ぶことを契約として明記。current-value呼出しはgenericとconventionalの両方を設定し、link時にconventional既定値をgenericへ写す。

@@ -1,6 +1,6 @@
 #include "RhiReadbackCheck.hpp"
 #include "../../Export/Images.hpp"
-#include "../../NativeRuntime/Rhi/OpenGL/OpenGlDevice.hpp"
+#include "../../NativeRuntime/Rhi/SceneBackend.hpp"
 #include "../../NativeRuntime/Rhi/GraphicsDevice.hpp"
 #include "../../NativeRuntime/Rhi/CommandList.hpp"
 #include "../../NativeRuntime/Stb/Image.hpp"
@@ -18,7 +18,12 @@ namespace MphRead::Mods::Diagnostics
         namespace Rhi = NativeRuntime::Rhi;
         // An odd RGB row width catches four-byte pack alignment mistakes.
         constexpr int width = 641, height = 127;
-        auto commands = Rhi::OpenGL::ContextDevice().CreateCommandList();
+        // The device that draws the window, whichever backend that is.
+        Rhi::GraphicsDevice& device = Rhi::SceneDevice();
+        auto commands = device.CreateCommandList();
+        // Both backends record only inside Begin/End: OpenGL refuses work on a
+        // list that is not recording since the recording scopes were enforced.
+        commands->Begin();
         const std::array<Rhi::ClearColor, 3> colors{{
             {1, 0, 0, 1}, {0, 1, 0, 1}, {0, 0, 1, 1}}};
         Rhi::RenderingInfo target{};
@@ -47,11 +52,13 @@ namespace MphRead::Mods::Diagnostics
         target.renderArea = {};
         commands->BeginRendering(target);
         commands->EndRendering();
+        commands->End();
         for (const auto& prefix : {screenshot, recording})
         {
             NativeRuntime::Image image;
             for (int attempt = 0; attempt < 250; ++attempt)
             {
+                Export::Images::PollReadbacks();
                 if (NativeRuntime::FileExists(prefix + ".png"))
                 {
                     // Recording writes on another thread. On Windows the PNG

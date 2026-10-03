@@ -17,6 +17,11 @@
 #include <string_view>
 #include <vector>
 
+namespace MphRead::NativeRuntime::Rhi
+{
+    class Texture;
+}
+
 namespace MphRead::NativeRuntime::Skia
 {
     struct Point final
@@ -285,6 +290,9 @@ namespace MphRead::NativeRuntime::Skia
         [[nodiscard]] std::int32_t Width() const noexcept;
         [[nodiscard]] std::int32_t Height() const noexcept;
         [[nodiscard]] std::int32_t TextureId() const noexcept;
+        // The Vulkan window's UI target, when Ganesh draws through Vulkan;
+        // null under OpenGL, where TextureId() names the texture instead.
+        [[nodiscard]] const ::MphRead::NativeRuntime::Rhi::Texture* RhiTexture() const noexcept;
         void BeginFrame();
         void EndFrame();
         void Clear(Color color);

@@ -8,7 +8,7 @@ set "LOG=%SCRIPT_DIR%out\build-cs.log"
 echo Building C# solution... (log: %LOG%)
 call "%SCRIPT_DIR%build-cs.bat" %* > "%LOG%" 2>&1
 set "RC=%ERRORLEVEL%"
-echo exit code: %RC%>> "%LOG%"
+>> "%LOG%" echo exit code: %RC%
 powershell -NoProfile -Command "Get-Content -Tail 40 '%LOG%'"
 echo.
 echo exit code: %RC%

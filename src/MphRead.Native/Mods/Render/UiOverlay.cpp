@@ -1,9 +1,15 @@
 #include "UiOverlay.hpp"
-#include "../../NativeRuntime/OpenTK/GpuTrace.hpp"
 
 #include "LauncherHunter.hpp"
 #include "LauncherPhoto.hpp"
-#include "../../NativeRuntime/OpenTK/GL.hpp"
+#include "SceneWindowUi.hpp"
+#include "../../NativeRuntime/Rhi/OpenGL/OpenGlLauncherOverlay.hpp"
+#include "../../NativeRuntime/Rhi/SceneBackend.hpp"
+
+#include "../../NativeRuntime/Rhi/WindowUi.hpp"
+
+#include <array>
+#include <memory>
 
 #include <algorithm>
 #include <cstddef>
@@ -11,17 +17,46 @@
 
 namespace MphRead::Mods::Render
 {
-    namespace GL = ::OpenTK::Graphics::OpenGL::GL;
-
-    std::int32_t UiOverlay::_texture = 0;
-    std::int32_t UiOverlay::_vertexBuffer = 0;
-    std::int32_t UiOverlay::_indexBuffer = 0;
     std::int32_t UiOverlay::_width = 0;
     std::int32_t UiOverlay::_height = 0;
     bool UiOverlay::_hasFrame = false;
     bool UiOverlay::_visible = false;
-    bool UiOverlay::_ownsTexture = false;
     bool UiOverlay::_topRowAtTextureZero = true;
+
+    namespace
+    {
+        namespace Rhi = ::MphRead::NativeRuntime::Rhi;
+
+        // The scene-presented window's overlay: the texture shown, the one this owns
+        // when the UI had to be uploaded, and how it is sampled.
+        struct WindowOverlay final
+        {
+            const Rhi::Texture* Shown = nullptr;
+            std::unique_ptr<Rhi::Texture> Owned;
+            std::unique_ptr<Rhi::Sampler> Sampler;
+        };
+
+        WindowOverlay& Vk()
+        {
+            static WindowOverlay overlay;
+            return overlay;
+        }
+
+        const Rhi::Sampler& LinearClamp()
+        {
+            auto& sampler = Vk().Sampler;
+            if (!sampler)
+            {
+                Rhi::SamplerDesc desc{};
+                desc.minFilter = Rhi::Filter::Linear;
+                desc.magFilter = Rhi::Filter::Linear;
+                desc.addressU = Rhi::SamplerAddressMode::ClampToEdge;
+                desc.addressV = Rhi::SamplerAddressMode::ClampToEdge;
+                sampler = Rhi::SceneDevice().CreateSampler(desc);
+            }
+            return *sampler;
+        }
+    }
 
     bool UiOverlay::Visible() noexcept
     {
@@ -44,49 +79,31 @@ namespace MphRead::Mods::Render
         {
             return;
         }
-        GL::ActiveTexture(GL::TextureUnit::Texture0);
-        if (_texture != 0 && !_ownsTexture)
+        if (SceneWindowUi::Active())
         {
-            _texture = 0;
-            _width = 0;
-            _height = 0;
-        }
-        if (_texture == 0)
-        {
-            _texture = Name;
-            _ownsTexture = true;
-            _topRowAtTextureZero = true;
-            GL::BindTexture(GL::TextureTarget::Texture2D, _texture);
-            GL::TexParameter(GL::TextureTarget::Texture2D, GL::TextureParameterName::TextureMinFilter,
-                static_cast<std::int32_t>(GL::TextureMinFilter::Linear));
-            GL::TexParameter(GL::TextureTarget::Texture2D, GL::TextureParameterName::TextureMagFilter,
-                static_cast<std::int32_t>(GL::TextureMagFilter::Linear));
-            GL::TexParameter(GL::TextureTarget::Texture2D, GL::TextureParameterName::TextureWrapS,
-                static_cast<std::int32_t>(GL::TextureWrapMode::ClampToEdge));
-            GL::TexParameter(GL::TextureTarget::Texture2D, GL::TextureParameterName::TextureWrapT,
-                static_cast<std::int32_t>(GL::TextureWrapMode::ClampToEdge));
-        }
-        else
-        {
-            GL::BindTexture(GL::TextureTarget::Texture2D, _texture);
-        }
-        GL::PixelStore(GL::PixelStoreParameter::UnpackAlignment, 4);
-        if (width != _width || height != _height)
-        {
+            auto& gpu = Rhi::SceneDevice();
+            auto& owned = Vk().Owned;
+            if (!owned || owned->Desc().width != static_cast<std::uint32_t>(width)
+                || owned->Desc().height != static_cast<std::uint32_t>(height))
+            {
+                owned = gpu.CreateTexture(Rhi::TextureDesc{static_cast<std::uint32_t>(width),
+                    static_cast<std::uint32_t>(height), 1, 1, 1, 1, Rhi::TextureFormat::RGBA8Unorm,
+                    Rhi::TextureUsage::Sampled | Rhi::TextureUsage::TransferDst});
+            }
+            gpu.WriteTexture(*owned, Rhi::TextureWrite{static_cast<std::uint32_t>(width),
+                static_cast<std::uint32_t>(height), Rhi::TextureFormat::RGBA8Unorm, pixels});
+            Vk().Shown = owned.get();
             _width = width;
             _height = height;
-            GL::TexImage2D(GL::TextureTarget::Texture2D, 0, GL::PixelInternalFormat::Rgba,
-                width, height, 0, GL::PixelFormat::Rgba, GL::PixelType::UnsignedByte, pixels);
+            _topRowAtTextureZero = true;
+            _hasFrame = true;
+            return;
         }
-        else
-        {
-            GL::TexSubImage2D(GL::TextureTarget::Texture2D, 0, 0, 0, width, height,
-                GL::PixelFormat::Rgba, GL::PixelType::UnsignedByte, pixels);
-        }
-        GL::BindTexture(GL::TextureTarget::Texture2D, 0);
+        Rhi::OpenGL::OpenGlLauncherOverlay::Upload(pixels, width, height);
+        _width = width;
+        _height = height;
+        _topRowAtTextureZero = true;
         _hasFrame = true;
-        ::MphRead::NativeRuntime::GpuTrace::Uploads++;
-        ::MphRead::NativeRuntime::GpuTrace::UploadBytes += static_cast<std::int64_t>(width) * height * 4;
     }
 
     void UiOverlay::UseTexture(std::int32_t texture, std::int32_t width, std::int32_t height)
@@ -95,111 +112,76 @@ namespace MphRead::Mods::Render
         {
             return;
         }
-        if (_ownsTexture && _texture != 0)
-        {
-            GL::DeleteTexture(_texture);
-        }
-        _texture = texture;
+        Rhi::OpenGL::OpenGlLauncherOverlay::Adopt(texture);
         _width = width;
         _height = height;
-        _ownsTexture = false;
         _topRowAtTextureZero = false;
+        _hasFrame = true;
+    }
+
+    void UiOverlay::UseTexture(const Rhi::Texture& texture, std::int32_t width, std::int32_t height)
+    {
+        if (width <= 0 || height <= 0)
+        {
+            return;
+        }
+        Vk().Shown = &texture;
+        // Composited by the GL overlay when the window is not presented
+        // through the RHI: the same texture, by the GL name it has there.
+        if (!SceneWindowUi::Active() && texture.Handle())
+        {
+            Rhi::OpenGL::OpenGlLauncherOverlay::Adopt(texture.Handle().value);
+        }
+        _width = width;
+        _height = height;
+        _topRowAtTextureZero = true;
         _hasFrame = true;
     }
 
     void UiOverlay::Draw(std::int32_t width, std::int32_t height)
     {
-        if (!_visible || !_hasFrame || _texture == 0)
+#if !defined(__ANDROID__)
+        if (auto* ui = SceneWindowUi::Get())
+        {
+            if (!_visible || !_hasFrame || Vk().Shown == nullptr || width <= 0 || height <= 0)
+            {
+                return;
+            }
+            const float topT = _topRowAtTextureZero ? 0.0F : 1.0F;
+            const float bottomT = _topRowAtTextureZero ? 1.0F : 0.0F;
+            const std::array<Rhi::WindowQuadVertex, 4> strip{{
+                {{ 1.0F,  1.0F}, {1.0F, topT}, {}},
+                {{-1.0F,  1.0F}, {0.0F, topT}, {}},
+                {{ 1.0F, -1.0F}, {1.0F, bottomT}, {}},
+                {{-1.0F, -1.0F}, {0.0F, bottomT}, {}}}};
+            ui->Begin(static_cast<std::uint32_t>(width), static_cast<std::uint32_t>(height), false);
+            ui->DrawTexture(*Vk().Shown, LinearClamp(), strip, true);
+            ui->End();
+            return;
+        }
+#endif
+        if (!_visible || !_hasFrame)
         {
             return;
         }
-        if (width > 0 && height > 0)
-        {
-            GL::Viewport(0, 0, width, height);
-        }
-        GL::UseProgram(0);
-        GL::Disable(GL::EnableCap::DepthTest);
-        GL::Disable(GL::EnableCap::CullFace);
-        GL::Disable(GL::EnableCap::AlphaTest);
-        GL::Disable(GL::EnableCap::StencilTest);
-        GL::Enable(GL::EnableCap::Blend);
-        GL::BlendFunc(GL::BlendingFactor::One, GL::BlendingFactor::OneMinusSrcAlpha);
-        GL::ActiveTexture(GL::TextureUnit::Texture1);
-        GL::BindTexture(GL::TextureTarget::Texture2D, 0);
-        GL::Disable(GL::EnableCap::Texture2D);
-        GL::ActiveTexture(GL::TextureUnit::Texture0);
-        GL::Enable(GL::EnableCap::Texture2D);
-        GL::BindTexture(GL::TextureTarget::Texture2D, _texture);
-        GL::TexEnv(GL::TextureEnvTarget::TextureEnv, GL::TextureEnvParameter::TextureEnvMode,
-            static_cast<std::int32_t>(GL::TextureEnvMode::Replace));
-        GL::Color4(1, 1, 1, 1);
-        GL::MatrixMode(GL::MatrixMode::Projection);
-        GL::PushMatrix();
-        GL::LoadIdentity();
-        GL::MatrixMode(GL::MatrixMode::Modelview);
-        GL::PushMatrix();
-        GL::LoadIdentity();
-        const float topT = _topRowAtTextureZero ? 0.0F : 1.0F;
-        const float bottomT = _topRowAtTextureZero ? 1.0F : 0.0F;
-        struct OverlayVertex final
-        {
-            float Position[3];
-            float TexCoord[2];
-        };
-        const OverlayVertex vertices[]{
-            {{ 1.0F,  1.0F, 0.0F}, {1.0F, topT}},
-            {{-1.0F,  1.0F, 0.0F}, {0.0F, topT}},
-            {{ 1.0F, -1.0F, 0.0F}, {1.0F, bottomT}},
-            {{-1.0F, -1.0F, 0.0F}, {0.0F, bottomT}}
-        };
-        constexpr std::uint32_t indices[]{0U, 1U, 2U, 3U};
-        if (_vertexBuffer == 0)
-        {
-            _vertexBuffer = GL::GenBuffer();
-        }
-        if (_indexBuffer == 0)
-        {
-            _indexBuffer = GL::GenBuffer();
-        }
-        GL::BindBuffer(GL::BufferTarget::ArrayBuffer, _vertexBuffer);
-        GL::BufferData(GL::BufferTarget::ArrayBuffer, sizeof(vertices),
-            vertices, GL::BufferUsageHint::StreamDraw);
-        GL::BindBuffer(GL::BufferTarget::ElementArrayBuffer, _indexBuffer);
-        GL::BufferData(GL::BufferTarget::ElementArrayBuffer, sizeof(indices),
-            indices, GL::BufferUsageHint::StreamDraw);
-        GL::EnableClientState(GL::ClientState::VertexArray);
-        GL::VertexPointer(3, GL::PointerType::Float,
-            static_cast<std::int32_t>(sizeof(OverlayVertex)),
-            reinterpret_cast<const void*>(offsetof(OverlayVertex, Position)));
-        GL::ClientActiveTexture(GL::TextureUnit::Texture0);
-        GL::EnableClientState(GL::ClientState::TextureCoordArray);
-        GL::TexCoordPointer(2, GL::PointerType::Float,
-            static_cast<std::int32_t>(sizeof(OverlayVertex)),
-            reinterpret_cast<const void*>(offsetof(OverlayVertex, TexCoord)));
-        GL::DrawElements(GL::PrimitiveType::TriangleStrip, 4,
-            GL::DrawElementsType::UnsignedInt, nullptr);
-        GL::DisableClientState(GL::ClientState::TextureCoordArray);
-        GL::DisableClientState(GL::ClientState::VertexArray);
-        GL::BindBuffer(GL::BufferTarget::ArrayBuffer, 0);
-        GL::BindBuffer(GL::BufferTarget::ElementArrayBuffer, 0);
-        GL::TexCoord2(0.0F, bottomT);
-        GL::PopMatrix();
-        GL::MatrixMode(GL::MatrixMode::Projection);
-        GL::PopMatrix();
-        GL::MatrixMode(GL::MatrixMode::Modelview);
-        GL::TexEnv(GL::TextureEnvTarget::TextureEnv, GL::TextureEnvParameter::TextureEnvMode,
-            static_cast<std::int32_t>(GL::TextureEnvMode::Modulate));
-        GL::BindTexture(GL::TextureTarget::Texture2D, 0);
-        GL::BlendFunc(GL::BlendingFactor::SrcAlpha, GL::BlendingFactor::OneMinusSrcAlpha);
-        GL::Enable(GL::EnableCap::DepthTest);
+        Rhi::OpenGL::OpenGlLauncherOverlay::Draw(width, height, _topRowAtTextureZero);
     }
 
     void UiOverlay::DrawAlone(::MphRead::RenderWindow& window, std::int32_t width, std::int32_t height)
     {
-        GL::Viewport(0, 0, std::max(width, 1), std::max(height, 1));
-        GL::ClearColor(0, 0, 0, 1);
-        GL::Clear(GL::ClearBufferMask::ColorBufferBit | GL::ClearBufferMask::DepthBufferBit
-            | GL::ClearBufferMask::StencilBufferBit);
+#if !defined(__ANDROID__)
+        if (auto* ui = SceneWindowUi::Get())
+        {
+            ui->Begin(static_cast<std::uint32_t>(std::max(width, 1)), static_cast<std::uint32_t>(std::max(height, 1)),
+                true);
+            ui->End();
+            LauncherPhoto::Draw(width, height);
+            Draw(width, height);
+            LauncherHunter::Draw(window, width, height);
+            return;
+        }
+#endif
+        Rhi::OpenGL::OpenGlLauncherOverlay::Clear(width, height);
         LauncherPhoto::Draw(width, height);
         Draw(width, height);
         LauncherHunter::Draw(window, width, height);
@@ -207,25 +189,22 @@ namespace MphRead::Mods::Render
 
     void UiOverlay::Release()
     {
-        if (_indexBuffer != 0)
+        if (SceneWindowUi::Active())
         {
-            GL::DeleteBuffer(_indexBuffer);
-            _indexBuffer = 0;
+            Vk().Shown = nullptr;
+            Vk().Owned.reset();
+            Vk().Sampler.reset();
+            SceneWindowUi::Release();
+            _width = 0;
+            _height = 0;
+            _hasFrame = false;
+            _topRowAtTextureZero = true;
+            return;
         }
-        if (_vertexBuffer != 0)
-        {
-            GL::DeleteBuffer(_vertexBuffer);
-            _vertexBuffer = 0;
-        }
-        if (_texture != 0 && _ownsTexture)
-        {
-            GL::DeleteTexture(_texture);
-        }
-        _texture = 0;
+        Rhi::OpenGL::OpenGlLauncherOverlay::Release();
         _width = 0;
         _height = 0;
         _hasFrame = false;
-        _ownsTexture = false;
         _topRowAtTextureZero = true;
     }
 }

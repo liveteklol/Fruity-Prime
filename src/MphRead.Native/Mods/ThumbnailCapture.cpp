@@ -1,4 +1,5 @@
 #include "ThumbnailCapture.hpp"
+#include "../NativeRuntime/Rhi/SceneBackend.hpp"
 
 #include "Branding.hpp"
 #include "ScreenCapture.hpp"
@@ -676,8 +677,7 @@ namespace MphRead::Mods
 
         const std::int32_t viewportWidth = ClientSize().X;
         const std::int32_t viewportHeight = ClientSize().Y;
-        OpenTK::Graphics::OpenGL::GL::Viewport(
-            0, 0, viewportWidth, viewportHeight);
+        ::MphRead::NativeRuntime::Rhi::ResetWindowViewport(viewportWidth, viewportHeight);
         _scene->OnResize();
 
         if (!_describedContext)

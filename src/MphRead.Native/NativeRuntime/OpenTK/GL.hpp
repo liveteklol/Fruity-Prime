@@ -14,6 +14,10 @@
 
 namespace OpenTK::Graphics::OpenGL
 {
+    // A GL entry point from the context current on this thread, found
+    // without asking the window toolkit (GLFW or Qt) that made it.
+    [[nodiscard]] void* GetEntryPoint(const char* name);
+
     enum class FramebufferErrorCode : std::int32_t
     {
         FramebufferUndefined = 0x8219,
@@ -243,7 +247,9 @@ namespace OpenTK::Graphics::OpenGL
         void ClearColor(::OpenTK::Mathematics::Vector4 color);
         void ClearColor(float red, float green, float blue, float alpha);
         void ClearStencil(std::int32_t s);
+#if defined(__ANDROID__)
         void ClientActiveTexture(TextureUnit texture);
+#endif
         void Color3(float red, float green, float blue);
         void Color3(::OpenTK::Mathematics::Vector3 color);
         void Color4(float red, float green, float blue, float alpha);
@@ -262,12 +268,16 @@ namespace OpenTK::Graphics::OpenGL
         void DepthMask(bool flag);
         void DetachShader(std::int32_t program, std::int32_t shader);
         void Disable(EnableCap cap);
+#if defined(__ANDROID__)
         void DisableClientState(ClientState array);
+#endif
         void DisableVertexAttribArray(std::uint32_t index);
         void DrawBuffer(DrawBufferMode mode);
         void DrawElements(PrimitiveType mode, std::int32_t count, DrawElementsType type, const void* indices);
         void Enable(EnableCap cap);
+#if defined(__ANDROID__)
         void EnableClientState(ClientState array);
+#endif
         void EnableVertexAttribArray(std::uint32_t index);
         void FramebufferRenderbuffer(FramebufferTarget target, FramebufferAttachment attachment,
             RenderbufferTarget renderbuffertarget, std::int32_t renderbuffer);
@@ -307,8 +317,12 @@ namespace OpenTK::Graphics::OpenGL
         void MatrixMode(enum MatrixMode mode);
         void MultiTexCoord2(TextureUnit texture, float s, float t);
         void Normal3(float nx, float ny, float nz);
+#if defined(__ANDROID__)
         void NormalPointer(PointerType type, std::int32_t stride, const void* pointer);
+#endif
+#if defined(__ANDROID__)
         void ColorPointer(std::int32_t size, PointerType type, std::int32_t stride, const void* pointer);
+#endif
         void PixelStore(PixelStoreParameter pname, std::int32_t param);
         void LineWidth(float width);
         void PolygonMode(TriangleFace face, PolygonMode mode);
@@ -323,7 +337,9 @@ namespace OpenTK::Graphics::OpenGL
         void StencilMask(std::int32_t mask);
         void StencilOp(StencilOp sfail, StencilOp dpfail, StencilOp dppass);
         void TexEnv(TextureEnvTarget target, TextureEnvParameter pname, std::int32_t param);
+#if defined(__ANDROID__)
         void TexCoordPointer(std::int32_t size, PointerType type, std::int32_t stride, const void* pointer);
+#endif
         void TexCoord2(float s, float t);
         void TexCoord3(float s, float t, float r);
         void TexCoord3(::OpenTK::Mathematics::Vector3 coord);
@@ -347,7 +363,9 @@ namespace OpenTK::Graphics::OpenGL
         void UseProgram(std::int32_t program);
         void VertexAttribPointer(std::uint32_t index, std::int32_t size, PointerType type,
             bool normalized, std::int32_t stride, const void* pointer);
+#if defined(__ANDROID__)
         void VertexPointer(std::int32_t size, PointerType type, std::int32_t stride, const void* pointer);
+#endif
         void PopMatrix();
         void PushMatrix();
         void Scissor(std::int32_t x, std::int32_t y, std::int32_t width, std::int32_t height);

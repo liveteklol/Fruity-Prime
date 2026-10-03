@@ -198,6 +198,7 @@ namespace MphRead::Entities
         void SetAfflictions(Affliction value) noexcept;
         [[nodiscard]] std::shared_ptr<EntityBase> Owner() const noexcept;
         void SetOwner(std::shared_ptr<EntityBase> value) noexcept;
+        void ReleaseReferences() noexcept;
         [[nodiscard]] std::shared_ptr<WeaponInfo> RicochetWeapon() const noexcept;
         void SetRicochetWeapon(std::shared_ptr<WeaponInfo> value) noexcept;
         [[nodiscard]] std::shared_ptr<Effects::EffectEntry> Effect() const noexcept;

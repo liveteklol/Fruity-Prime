@@ -4,7 +4,12 @@
 #include "../MphRead.Native/NativeRuntime/System/ExceptionText.hpp"
 #include "../MphRead.Native/NativeRuntime/System/Exceptions.hpp"
 
+#include "../MphRead.Native/Mods/Render/SceneWindowUi.hpp"
+#include "../MphRead.Native/NativeRuntime/Rhi/SceneBackend.hpp"
+#include "../MphRead.Native/NativeRuntime/Rhi/WindowUi.hpp"
 #include <GLES3/gl3.h>
+#include <array>
+#include <memory>
 
 #include <algorithm>
 #include <cstddef>
@@ -81,6 +86,25 @@ void main()
 
 namespace MphRead::Droid
 {
+    namespace
+    {
+        namespace Rhi = ::MphRead::NativeRuntime::Rhi;
+
+        // The scene-presented surface's overlay: the UI raster in an RHI texture,
+        // composited by the scene device's WindowUi. No GLES context exists.
+        struct WindowOverlay final
+        {
+            std::unique_ptr<Rhi::Texture> Texture;
+            std::unique_ptr<Rhi::Sampler> Sampler;
+        };
+
+        WindowOverlay& Vk()
+        {
+            static WindowOverlay overlay;
+            return overlay;
+        }
+    }
+
     std::int32_t AndroidUiOverlay::_program = 0;
     std::int32_t AndroidUiOverlay::_vao = 0;
     std::int32_t AndroidUiOverlay::_buffer = 0;
@@ -115,7 +139,29 @@ namespace MphRead::Droid
             static_cast<std::size_t>(width)
             * static_cast<std::size_t>(height)
             * 4u;
-        if (pixels.size() < required || !Ensure())
+        if (pixels.size() < required)
+        {
+            return;
+        }
+        if (::MphRead::Mods::Render::SceneWindowUi::Active())
+        {
+            auto& gpu = Rhi::SceneDevice();
+            auto& texture = Vk().Texture;
+            if (!texture || texture->Desc().width != static_cast<std::uint32_t>(width)
+                || texture->Desc().height != static_cast<std::uint32_t>(height))
+            {
+                texture = gpu.CreateTexture(Rhi::TextureDesc{static_cast<std::uint32_t>(width),
+                    static_cast<std::uint32_t>(height), 1, 1, 1, 1, Rhi::TextureFormat::RGBA8Unorm,
+                    Rhi::TextureUsage::Sampled | Rhi::TextureUsage::TransferDst});
+            }
+            gpu.WriteTexture(*texture, Rhi::TextureWrite{static_cast<std::uint32_t>(width),
+                static_cast<std::uint32_t>(height), Rhi::TextureFormat::RGBA8Unorm, pixels.data()});
+            _width = width;
+            _height = height;
+            _hasFrame = true;
+            return;
+        }
+        if (!Ensure())
         {
             return;
         }
@@ -162,6 +208,33 @@ namespace MphRead::Droid
         std::int32_t height
     )
     {
+        if (auto* ui = ::MphRead::Mods::Render::SceneWindowUi::Get())
+        {
+            if (!_visible || !_hasFrame || !Vk().Texture || width <= 0 || height <= 0)
+            {
+                return;
+            }
+            if (!Vk().Sampler)
+            {
+                Rhi::SamplerDesc desc{};
+                desc.minFilter = Rhi::Filter::Linear;
+                desc.magFilter = Rhi::Filter::Linear;
+                desc.addressU = Rhi::SamplerAddressMode::ClampToEdge;
+                desc.addressV = Rhi::SamplerAddressMode::ClampToEdge;
+                Vk().Sampler = Rhi::SceneDevice().CreateSampler(desc);
+            }
+            // Avalonia's first row is the top of the screen: t = 0 at the top,
+            // as the GLES path's shader has it.
+            const std::array<Rhi::WindowQuadVertex, 4> strip{{
+                {{ 1.0F,  1.0F}, {1.0F, 0.0F}, {}},
+                {{-1.0F,  1.0F}, {0.0F, 0.0F}, {}},
+                {{ 1.0F, -1.0F}, {1.0F, 1.0F}, {}},
+                {{-1.0F, -1.0F}, {0.0F, 1.0F}, {}}}};
+            ui->Begin(static_cast<std::uint32_t>(width), static_cast<std::uint32_t>(height), false);
+            ui->DrawTexture(*Vk().Texture, *Vk().Sampler, strip, true);
+            ui->End();
+            return;
+        }
         if (_failed || !_visible || !_hasFrame || _program == 0)
         {
             return;
@@ -191,6 +264,16 @@ namespace MphRead::Droid
 
     void AndroidUiOverlay::Release()
     {
+        if (::MphRead::Mods::Render::SceneWindowUi::Active())
+        {
+            Vk().Texture.reset();
+            Vk().Sampler.reset();
+            ::MphRead::Mods::Render::SceneWindowUi::Release();
+            _width = 0;
+            _height = 0;
+            _hasFrame = false;
+            return;
+        }
         if (_texture != 0)
         {
             const GLuint texture = static_cast<GLuint>(_texture);

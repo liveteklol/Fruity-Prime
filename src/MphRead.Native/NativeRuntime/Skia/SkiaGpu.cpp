@@ -3,6 +3,10 @@
 #endif
 
 #include "Skia.hpp"
+#include "VulkanInterop.hpp"
+#include "../Rhi/Resources.hpp"
+#include "../Rhi/SceneBackend.hpp"
+#include "../Rhi/OpenGL/OpenGlDevice.hpp"
 
 #include "../OpenTK/GL.hpp"
 #include "../OpenTK/GLFW.hpp"
@@ -286,6 +290,7 @@ namespace MphRead::NativeRuntime::Skia
             U1 BindVertexArray = nullptr;
             U2 BindBuffer = nullptr;
             U1 DisableVertexAttribArray = nullptr;
+            U2 VertexAttribDivisor = nullptr;
             U1 ActiveTexture = nullptr;
             U2 BindTexture = nullptr;
             GetIntegervFn GetIntegerv = nullptr;
@@ -309,6 +314,7 @@ namespace MphRead::NativeRuntime::Skia
                 BindVertexArray = Resolve<U1>("glBindVertexArray");
                 BindBuffer = Resolve<U2>("glBindBuffer");
                 DisableVertexAttribArray = Resolve<U1>("glDisableVertexAttribArray");
+                VertexAttribDivisor = Resolve<U2>("glVertexAttribDivisor");
                 ActiveTexture = Resolve<U1>("glActiveTexture");
                 BindTexture = Resolve<U2>("glBindTexture");
                 GetIntegerv = Resolve<GetIntegervFn>("glGetIntegerv");
@@ -405,6 +411,9 @@ namespace MphRead::NativeRuntime::Skia
         std::int32_t Height = 0;
         std::int32_t Texture = 0;
         bool InFrame = false;
+        // Ganesh on the Vulkan window's device instead of the GL context.
+        bool VulkanMode = false;
+        VulkanInterop::Target VulkanTarget;
         std::int32_t PreviousFramebuffer = 0;
         std::array<std::int32_t, 4> PreviousViewport{};
         std::array<std::int32_t, 4> PreviousScissor{};
@@ -493,6 +502,12 @@ namespace MphRead::NativeRuntime::Skia
                 for (int i = 0; i < attribs; ++i)
                 {
                     Extra.DisableVertexAttribArray(static_cast<unsigned>(i));
+                    // Ganesh draws instanced: a divisor left on an attribute
+                    // the game's fixed-function arrays alias (2 is the normal,
+                    // 3 the colour on NVIDIA) hands every vertex of a draw the
+                    // first vertex's value -- flat lighting, wrong colours.
+                    if (Extra.VertexAttribDivisor != nullptr)
+                        Extra.VertexAttribDivisor(static_cast<unsigned>(i), 0);
                 }
             }
             if (Extra.FrontFace != nullptr)
@@ -556,7 +571,25 @@ namespace MphRead::NativeRuntime::Skia
             {
                 throw std::logic_error("Skia GPU surface resized outside a render frame.");
             }
+#if defined(FRUITY_SKIA_VULKAN)
+            if (VulkanMode)
+            {
+                Surface.reset();
+                Surface = VulkanInterop::MakeSurface(*Context, VulkanTarget, width, height);
+                Width = width;
+                Height = height;
+                Texture = 0;
+                Images.clear();
+                ImageBytes = 0;
+                ImageClock = 0;
+                Surface->getCanvas()->clear(SK_ColorTRANSPARENT);
+                return;
+            }
+#endif
             const ::SkImageInfo info = ::SkImageInfo::Make(width, height, kRGBA_8888_SkColorType, kPremul_SkAlphaType);
+#if !defined(__ANDROID__)
+            Rhi::OpenGL::AdmitInteropTextureStorage(Rhi::TextureFormat::RGBA8Unorm, width, height);
+#endif
 #if FRUITY_SKIA_GANESH_V2
             Surface = ::SkSurfaces::RenderTarget(Context.get(), skgpu::Budgeted::kYes, info, 0,
                 kBottomLeft_GrSurfaceOrigin, nullptr);
@@ -758,6 +791,17 @@ namespace MphRead::NativeRuntime::Skia
 
     GpuSurface::~GpuSurface()
     {
+        if (_impl != nullptr && _impl->VulkanMode)
+        {
+            // Skia's work is complete at every EndFrame; drop the surface
+            // before the image it wraps, and the context last.
+            _impl->Surface.reset();
+            _impl->Images.clear();
+            _impl->Fonts.clear();
+            _impl->VulkanTarget.Texture.reset();
+            _impl->Context.reset();
+            return;
+        }
         if (_impl != nullptr && _impl->Context != nullptr)
         {
             _impl->Context->abandonContext();
@@ -784,11 +828,37 @@ namespace MphRead::NativeRuntime::Skia
         return _impl != nullptr ? _impl->Texture : 0;
     }
 
+    const ::MphRead::NativeRuntime::Rhi::Texture* GpuSurface::RhiTexture() const noexcept
+    {
+        return _impl != nullptr && _impl->VulkanMode ? _impl->VulkanTarget.Texture.get() : nullptr;
+    }
+
     void GpuSurface::BeginFrame()
     {
         if (_impl->InFrame)
         {
             throw std::logic_error("Skia GPU render frame is already active.");
+        }
+        if (::MphRead::NativeRuntime::Rhi::ScenePresentsWindow())
+        {
+#if defined(FRUITY_SKIA_VULKAN)
+            _impl->VulkanMode = true;
+            if (_impl->Context == nullptr) _impl->Context = VulkanInterop::MakeContext();
+            VulkanInterop::BeginFrame(_impl->VulkanTarget);
+            _impl->InFrame = true;
+            if (_impl->Surface != nullptr)
+            {
+                ::SkCanvas* canvas = _impl->Surface->getCanvas();
+                canvas->restoreToCount(1);
+                canvas->resetMatrix();
+            }
+            return;
+#else
+            // No GL context exists to fall back to, and a CPU frame is not a
+            // fallback this renderer takes.
+            throw std::runtime_error("This build's Skia has no Vulkan backend: the launcher cannot draw "
+                "into a window that presents through Vulkan. Use -rhi opengl.");
+#endif
         }
         _impl->PreviousFramebuffer = GL::GetInteger(GlFramebufferBinding);
         GL::GetIntegers(GlViewport, _impl->PreviousViewport.data());
@@ -858,6 +928,15 @@ namespace MphRead::NativeRuntime::Skia
         {
             return;
         }
+#if defined(FRUITY_SKIA_VULKAN)
+        if (_impl->VulkanMode)
+        {
+            _impl->InFrame = false;
+            if (_impl->Surface != nullptr && _impl->Context != nullptr)
+                VulkanInterop::EndFrame(*_impl->Context, *_impl->Surface, _impl->VulkanTarget);
+            return;
+        }
+#endif
         try
         {
             if (_impl->Surface != nullptr && _impl->Context != nullptr)

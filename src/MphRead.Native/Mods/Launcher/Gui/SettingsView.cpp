@@ -1,4 +1,6 @@
 #include "SettingsView.hpp"
+#include "Shell.hpp"
+#include "../../../NativeRuntime/Rhi/SceneBackend.hpp"
 
 #include "ControllerNav.hpp"
 #include "CrosshairPreview.hpp"
@@ -111,6 +113,7 @@ namespace MphRead::Mods::Launcher::Gui
     SettingsView::SettingsView(std::shared_ptr<::MphRead::MenuSettings> settings,
         bool inGame)
         : _settings(std::move(settings)), _inGame(inGame),
+          _originalLowLatency(LauncherPrefs::LowLatency()),
           _pages(std::make_shared<Controls::Panel>())
     {
         (void)RequireReference(_settings);
@@ -208,6 +211,7 @@ namespace MphRead::Mods::Launcher::Gui
     {
         if (!_saved)
         {
+            LauncherPrefs::LowLatency(_originalLowLatency);
             RenderOptions::FieldOfView(RenderOptions::ParseFov(
                 std::string_view(_settings->FieldOfView), RenderOptions::DefaultFov));
         }
@@ -313,6 +317,21 @@ namespace MphRead::Mods::Launcher::Gui
             std::vector<std::string>{"Windowed", "Fullscreen (borderless)"},
             LauncherPrefs::WindowMode() == WindowStartMode::BorderlessFullscreen ? 1 : 0));
 #endif
+        // The window (or the Android surface) is made for one backend, so
+        // this is read at the next start.
+#if defined(__ANDROID__)
+        constexpr const char* ownGl = "OpenGL ES";
+#else
+        constexpr const char* ownGl = "OpenGL";
+#endif
+#if defined(__ANDROID__)
+        constexpr const char* rendererLabel = "Renderer (next start)";
+#else
+        constexpr const char* rendererLabel = "Renderer";
+#endif
+        _rendererRow = Add(page, std::make_shared<ChoiceRow>(rendererLabel,
+            std::vector<std::string>{ownGl, "Vulkan", "Auto"},
+            LauncherPrefs::Renderer() == "vulkan" ? 1 : LauncherPrefs::Renderer() == "auto" ? 2 : 0));
 
         Heading(page, "View");
         _fovRow = Add(page, std::make_shared<SliderRow>("Field of view",
@@ -327,6 +346,25 @@ namespace MphRead::Mods::Launcher::Gui
         };
 
         Heading(page, "Performance");
+        _lowLatencyRow = Add(page, std::make_shared<ChoiceRow>("Low Latency",
+            std::vector<std::string>{"Off", "On", "On + Boost"}, static_cast<std::int32_t>(LauncherPrefs::LowLatency())));
+        _lowLatencyNote = std::make_shared<Note>("");
+        const auto updateLatency = [this]
+        {
+            namespace Rhi = ::MphRead::NativeRuntime::Rhi;
+            const auto mode = static_cast<Rhi::LowLatencyMode>(std::clamp(_lowLatencyRow->Index(), 0, 2));
+            const auto state = Rhi::ResolveLowLatency(mode, Rhi::SceneLowLatencyCaps());
+            _lowLatencyNote->Text(state.fallbackReason.empty()
+                ? (state.effective == Rhi::LowLatencyMode::Off ? "Normal frame scheduling." : "On limits queued GPU work to one frame.")
+                : std::string(state.fallbackReason));
+        };
+        _lowLatencyRow->Changed += [this, updateLatency](ChoiceRow&)
+        {
+            LauncherPrefs::LowLatency(static_cast<::MphRead::NativeRuntime::Rhi::LowLatencyMode>(std::clamp(_lowLatencyRow->Index(), 0, 2)));
+            updateLatency();
+        };
+        updateLatency();
+        page->Children.Add(_lowLatencyNote);
         _resolutionScale = Add(page, std::make_shared<SliderRow>("Render scale",
             RenderOptions::ResolutionScale(), [](std::int32_t value)
             {
@@ -917,6 +955,19 @@ namespace MphRead::Mods::Launcher::Gui
     void SettingsView::Commit()
     {
         ::MphRead::MenuSettings& settings = RequireReference(_settings);
+        if (_lowLatencyRow) LauncherPrefs::LowLatency(static_cast<::MphRead::NativeRuntime::Rhi::LowLatencyMode>(std::clamp(_lowLatencyRow->Index(), 0, 2)));
+        if (_rendererRow != nullptr)
+        {
+            static constexpr std::array<const char*, 3> Renderers{"opengl", "vulkan", "auto"};
+            const char* chosen = Renderers[static_cast<std::size_t>(std::clamp(_rendererRow->Index(), 0, 2))];
+            LauncherPrefs::Renderer(chosen);
+#if !defined(__ANDROID__)
+            // Applied now: the window is remade on the chosen renderer.
+            ::MphRead::NativeRuntime::Rhi::SceneBackendRequest request{};
+            if (::MphRead::NativeRuntime::Rhi::ParseSceneBackendRequest(chosen, request))
+                Shell::RequestRenderer(request, true);
+#endif
+        }
         if (_windowRow != nullptr)
         {
             const WindowStartMode mode = _windowRow->Index() == 1

@@ -147,6 +147,7 @@ namespace MphRead::Mods::Diagnostics
                 ThrowInvalidOperation("Avalonia initialization failed.");
             }
         }, failures);
+#if defined(MPHREAD_AVALONIA)
         Check("Skia", []
         {
             NativeRuntime::Skia::Bitmap bitmap(2, 2);
@@ -157,6 +158,7 @@ namespace MphRead::Mods::Diagnostics
                 ThrowInvalidOperation("Skia rasterization failed.");
             }
         }, failures);
+#endif
         Check("launcher resources", []
         {
             constexpr std::array<std::string_view, 5> resources = {

@@ -15,6 +15,8 @@
 #include <bit>
 #include <cassert>
 #include <chrono>
+#include <condition_variable>
+#include <iostream>
 #include <cstdint>
 #include <deque>
 #include <exception>
@@ -189,6 +191,14 @@ namespace
         static BytePool pool;
         return pool;
     }
+    struct PendingCapture final
+    {
+        MphRead::NativeRuntime::Rhi::ReadbackTicket Ticket;
+        std::string Name;
+        int Width = 0, Height = 0;
+    };
+    // Access only on the device thread. Device quota also bounds these requests.
+    std::vector<PendingCapture> g_pendingCaptures;
 
     struct IntPair final
     {
@@ -221,13 +231,25 @@ namespace MphRead::Export
             std::string Name;
             std::int32_t Width = 0;
             std::int32_t Height = 0;
+            NativeRuntime::Rhi::ReadbackResult Pixels;
         };
 
         void Enqueue(Item item)
         {
             std::lock_guard<std::mutex> lock(_mutex);
             _items.push_back(std::move(item));
+            const auto& added = _items.back();
+            _bytes += added.Pixels ? added.Pixels.Bytes().size() : added.Buffer.size();
+            ++_usageItems;
+            _changed.notify_one();
         }
+        bool WaitForData()
+        {
+            std::unique_lock lock(_mutex);
+            _changed.wait(lock, [&] { return _stopping || !_items.empty(); });
+            return !_items.empty(); // Drain already queued output on shutdown.
+        }
+        void Stop() { std::lock_guard lock(_mutex); _stopping = true; _changed.notify_all(); }
 
         [[nodiscard]] bool TryDequeue(Item& item)
         {
@@ -244,20 +266,29 @@ namespace MphRead::Export
         [[nodiscard]] std::size_t Count() const
         {
             std::lock_guard<std::mutex> lock(_mutex);
-            return _items.size();
+            return _usageItems;
+        }
+        std::uint64_t Bytes() const { std::lock_guard lock(_mutex); return _bytes; }
+        void Release(std::uint64_t bytes)
+        {
+            std::lock_guard lock(_mutex);
+            _bytes -= bytes;
+            --_usageItems;
         }
 
     private:
         mutable std::mutex _mutex;
         std::deque<Item> _items;
+        std::condition_variable _changed;
+        bool _stopping = false;
+        std::uint64_t _bytes = 0;
+        std::size_t _usageItems = 0;
     };
 
     class Images::TaskState final
     {
     public:
-        TaskState()
-        {
-            std::thread([this]
+        TaskState() : _thread([this]
             {
                 try
                 {
@@ -265,21 +296,36 @@ namespace MphRead::Export
                 }
                 catch (...)
                 {
+                    std::lock_guard lock(_mutex);
                     _exception = std::current_exception();
                 }
-            }).detach();
-        }
+            }) {}
+        ~TaskState() { Images::_queue.Stop(); if (_thread.joinable()) _thread.join(); }
+        void CheckFailure() const
+        { std::lock_guard lock(_mutex); if (_exception) std::rethrow_exception(_exception); }
 
         TaskState(const TaskState&) = delete;
         TaskState& operator=(const TaskState&) = delete;
 
     private:
         std::exception_ptr _exception{};
+        mutable std::mutex _mutex;
+        std::thread _thread; // explicitly joined before the fields it references
     };
 
-    ::MphRead::NativeRuntime::AtomicSharedPtr<Images::TaskState> Images::_task{};
-    std::atomic<bool> Images::_recording{false};
     Images::QueueState Images::_queue{};
+    std::atomic<bool> Images::_recording{false};
+    ::MphRead::NativeRuntime::AtomicSharedPtr<Images::TaskState> Images::_task{};
+    bool Images::CaptureFits(std::int32_t width, std::int32_t height)
+    {
+        if (width <= 0 || height <= 0) throw std::invalid_argument("Empty capture extent.");
+        const auto bytes = NativeRuntime::Rhi::ReadbackColorBytes(width, height, 3);
+        std::uint64_t pendingBytes = _queue.Bytes();
+        for (const auto& pending : g_pendingCaptures)
+            pendingBytes += NativeRuntime::Rhi::ReadbackColorBytes(pending.Width, pending.Height, 3);
+        constexpr std::uint64_t maxBytes = 64ULL << 20;
+        return g_pendingCaptures.size() + _queue.Count() < 8 && bytes <= maxBytes && pendingBytes <= maxBytes - bytes;
+    }
 
     void Images::Screenshot(
         NativeRuntime::Rhi::CommandList& commands,
@@ -287,8 +333,6 @@ namespace MphRead::Export
         std::int32_t height,
         std::optional<std::string> name)
     {
-        std::vector<std::uint8_t> buffer(NewArrayLength(width, height));
-        ImagesInterop::ReadPixelsRgbUnsignedByte(commands, 0, 0, width, height, buffer);
         const std::string path = Paths::Combine(Paths::Export(), "_screenshots");
         std::filesystem::create_directories(PathFromUtf8(path));
         if (!name.has_value())
@@ -298,6 +342,20 @@ namespace MphRead::Export
                 = std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
             name = std::to_string(milliseconds);
         }
+        if (commands.SupportsAsyncReadback())
+        {
+            if (!CaptureFits(width, height))
+            { std::cerr << "[capture] screenshot skipped: capture queue is full\n"; return; }
+            NativeRuntime::Rhi::RenderingInfo target{};
+            target.swapchain = true; target.width = width; target.height = height;
+            auto ticket = commands.EnqueueReadColor(target, 0, 0, width, height, NativeRuntime::Rhi::TextureFormat::RGB8Unorm);
+            if (!ticket)
+            { std::cerr << "[capture] screenshot skipped: readback quota is full\n"; return; }
+            g_pendingCaptures.push_back({std::move(ticket), *name, width, height});
+            return;
+        }
+        std::vector<std::uint8_t> buffer(NewArrayLength(width, height));
+        ImagesInterop::ReadPixelsRgbUnsignedByte(commands, 0, 0, width, height, buffer);
         std::ofstream fileStream = CreateFile(
             Paths::Combine(path, *name + ".png"));
         ImagesInterop::SetFlipVerticallyOnSave(true);
@@ -311,6 +369,17 @@ namespace MphRead::Export
         const std::string& name)
     {
         _recording.store(true, std::memory_order_relaxed);
+        if (commands.SupportsAsyncReadback())
+        {
+            // Drop the new recording frame under backpressure; never wait or
+            // grow a GPU/CPU queue. Frame names retain their original sequence.
+            if (!CaptureFits(width, height)) return;
+            NativeRuntime::Rhi::RenderingInfo target{};
+            target.swapchain = true; target.width = width; target.height = height;
+            auto ticket = commands.EnqueueReadColor(target, 0, 0, width, height, NativeRuntime::Rhi::TextureFormat::RGB8Unorm);
+            if (ticket) g_pendingCaptures.push_back({std::move(ticket), name, width, height});
+            return;
+        }
         if (!_task.load(std::memory_order_relaxed))
         {
             std::shared_ptr<TaskState> task = std::make_shared<TaskState>();
@@ -330,28 +399,53 @@ namespace MphRead::Export
     {
         _recording.store(false, std::memory_order_relaxed);
     }
+    void Images::PollReadbacks()
+    {
+        if (auto task = _task.load(std::memory_order_relaxed)) task->CheckFailure();
+        for (auto it = g_pendingCaptures.begin(); it != g_pendingCaptures.end();)
+        {
+            if (it->Ticket.Status() == NativeRuntime::Rhi::ReadbackStatus::Cancelled)
+            {
+                std::cerr << "[capture] cancelled on device shutdown: " << it->Name << '\n';
+                it = g_pendingCaptures.erase(it);
+            }
+            else if (it->Ticket.IsReady() && _queue.Count() < 8)
+            {
+                auto pixels = it->Ticket.MapResult();
+                _queue.Enqueue({{}, it->Name, it->Width, it->Height, std::move(pixels)});
+                if (!_task.load(std::memory_order_relaxed))
+                    _task.store(std::make_shared<TaskState>(), std::memory_order_relaxed);
+                it = g_pendingCaptures.erase(it);
+            }
+            else ++it;
+        }
+    }
 
     void Images::ProcessQueue()
     {
-        while (_recording.load(std::memory_order_relaxed)
-            || _queue.Count() > 0)
+        while (_queue.WaitForData())
         {
             QueueState::Item result;
             while (_queue.TryDequeue(result))
             {
+                struct Release final
+                {
+                    QueueState::Item& Item; std::uint64_t Bytes;
+                    ~Release() { Item.Pixels = {}; Images::_queue.Release(Bytes); }
+                } release{result, result.Pixels ? result.Pixels.Bytes().size() : result.Buffer.size()};
                 const std::string path = Paths::Combine(Paths::Export(), "_screenshots");
                 std::filesystem::create_directories(PathFromUtf8(path));
                 std::ofstream fileStream = CreateFile(
                     Paths::Combine(path, result.Name + ".png"));
                 ImagesInterop::SetFlipVerticallyOnSave(true);
                 ImagesInterop::WritePngRgb(
-                    result.Buffer,
+                    result.Pixels ? std::span(reinterpret_cast<const std::uint8_t*>(result.Pixels.Bytes().data()), result.Pixels.Bytes().size())
+                        : std::span<const std::uint8_t>(result.Buffer),
                     result.Width,
                     result.Height,
                     fileStream);
-                SharedBytePool().Return(std::move(result.Buffer));
+                if (!result.Buffer.empty()) SharedBytePool().Return(std::move(result.Buffer));
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
     }
 

@@ -96,18 +96,12 @@ jobs:
 
   build:
     needs: resolve
-    uses: ./.github/workflows/native-cpp-all.yml
-    with:
-      checkout_ref: refs/tags/${{ needs.resolve.outputs.tag }}
-
-  android:
-    needs: resolve
-    uses: ./.github/workflows/native-cpp-android.yml
+    uses: ./.github/workflows/build_cpp.yml
     with:
       checkout_ref: refs/tags/${{ needs.resolve.outputs.tag }}
 
   publish:
-    needs: [resolve, build, android]
+    needs: [resolve, build]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4

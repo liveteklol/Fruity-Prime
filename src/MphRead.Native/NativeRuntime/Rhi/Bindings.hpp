@@ -34,6 +34,16 @@ namespace MphRead::NativeRuntime::Rhi
         bool operator==(const BindingLayoutDesc&) const = default;
     };
 
+    // Complete, value-owned contract of a pipeline's logical groups. Backend
+    // creation maps each group to its native layout. Keeping descriptions by
+    // value lets a cached pipeline outlive the input BindingLayout resources.
+    struct PipelineLayout final
+    {
+        std::vector<BindingLayoutDesc> groups;
+
+        bool operator==(const PipelineLayout&) const = default;
+    };
+
     struct BufferBinding final
     {
         const Buffer* buffer = nullptr;
@@ -63,6 +73,8 @@ namespace MphRead::NativeRuntime::Rhi
     {
         std::uint32_t binding = 0;
         BindingResource resource{BufferBinding{}};
+        // Index within the layout entry's descriptor array.
+        std::uint32_t arrayElement = 0;
 
         bool operator==(const BindingSetEntry&) const = default;
     };

@@ -270,6 +270,7 @@ void main()
 #version 120
 
 uniform sampler2D photo;
+uniform sampler2D noise_tex;
 uniform float strength;
 uniform float time;
 uniform float view_width;
@@ -277,9 +278,12 @@ uniform float view_height;
 varying vec2 photocoord;
 varying vec2 noisecoord;
 
-float hash12(vec2 p)
+float lattice_noise(vec2 cell)
 {
-    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+    const float noise_size = 64.0;
+    vec2 wrapped = mod(cell, noise_size);
+    vec2 uv = (wrapped + vec2(0.5)) / noise_size;
+    return texture2D(noise_tex, uv).r;
 }
 
 float value_noise(vec2 p)
@@ -287,10 +291,10 @@ float value_noise(vec2 p)
     vec2 i = floor(p);
     vec2 f = fract(p);
     vec2 u = f * f * (3.0 - 2.0 * f);
-    float a = hash12(i);
-    float b = hash12(i + vec2(1.0, 0.0));
-    float c = hash12(i + vec2(0.0, 1.0));
-    float d = hash12(i + vec2(1.0, 1.0));
+    float a = lattice_noise(i);
+    float b = lattice_noise(i + vec2(1.0, 0.0));
+    float c = lattice_noise(i + vec2(0.0, 1.0));
+    float d = lattice_noise(i + vec2(1.0, 1.0));
     return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
 }
 

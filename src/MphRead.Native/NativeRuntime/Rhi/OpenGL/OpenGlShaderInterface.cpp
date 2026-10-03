@@ -1,4 +1,5 @@
 #include "OpenGlShaderInterface.hpp"
+#include "../SceneShaderAbi.hpp"
 
 #include "OpenGlDevice.hpp"
 #include "../../OpenTK/GL.hpp"
@@ -348,14 +349,16 @@ namespace MphRead::NativeRuntime::Rhi::OpenGL
                 l.UseMask = at(composite, "use_mask");
                 l.ViewWidth = at(composite, "view_width");
                 l.ViewHeight = at(composite, "view_height");
-                const std::int32_t texLocation = at(composite, "tex");
-                const std::int32_t maskLocation = at(composite, "mask");
-                GL::UseProgram(composite);
-                GL::Uniform1(texLocation, 0);
-                GL::Uniform1(maskLocation, 1);
-                GL::UseProgram(cel);
-                GL::Uniform1(at(cel, "tex"), 0);
-                GL::Uniform1(at(cel, "depth_tex"), 1);
+                const auto textureUnits = [&](std::int32_t native, std::string_view program) {
+                    GL::UseProgram(native);
+                    for (const auto& texture : SceneShaderAbi::Textures)
+                        if (texture.program == program)
+                            GL::Uniform1(at(native, texture.name.data()), static_cast<std::int32_t>(texture.unit));
+                };
+                textureUnits(composite, "composite");
+                textureUnits(cel, "cel");
+                textureUnits(shift, "shift");
+                textureUnits(main, "main");
                 l.ShiftTable = at(shift, "shift_table");
                 l.ShiftIndex = at(shift, "shift_idx");
                 l.ShiftFactor = at(shift, "shift_fac");

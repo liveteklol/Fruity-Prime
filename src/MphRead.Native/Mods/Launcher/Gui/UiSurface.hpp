@@ -38,6 +38,8 @@ namespace MphRead::Mods::Launcher::Gui
         void Hide();
         void Resize(std::int32_t width, std::int32_t height);
         void Invalidate(bool animation = false, bool idling = false);
+        // The window is going for a renderer switch: drop Ganesh's context.
+        void ReleaseGpu();
         void Tick();
         void PointerMoved(double x, double y);
         void PointerButton(Av::Input::MouseButton button, bool down);

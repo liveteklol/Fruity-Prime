@@ -207,9 +207,12 @@ namespace MphRead::NativeRuntime::Rhi
 
     struct GraphicsPipelineDesc final
     {
+        // Creation inputs borrowed for native compilation. A compiled
+        // pipeline's Desc keeps its value state and clears these pointers;
+        // releasing public shader wrappers does not release its executable.
         const Shader* vertexShader = nullptr;
         const Shader* fragmentShader = nullptr;
-        const BindingLayout* bindingLayout = nullptr;
+        PipelineLayout pipelineLayout{};
         PrimitiveTopology topology = PrimitiveTopology::TriangleList;
         RasterizerStateDesc rasterizer{};
         DepthStencilStateDesc depthStencil{};
@@ -220,6 +223,8 @@ namespace MphRead::NativeRuntime::Rhi
         TextureFormat depthStencilFormat = TextureFormat::Undefined;
         std::uint32_t sampleCount = 1;
         AlphaTestMode alphaTest = AlphaTestMode::Disabled;
+        // Portable budget; zero means this pipeline has no small constants.
+        std::uint32_t smallConstantBytes = 0;
 
         bool operator==(const GraphicsPipelineDesc&) const = default;
     };

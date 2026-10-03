@@ -1,4 +1,5 @@
 #include "OpenGlLauncherNoise.hpp"
+#include "OpenGlDevice.hpp"
 
 #include "../../../Mods/Render/NoiseField.hpp"
 #include "../../../Mods/DebugLog.hpp"
@@ -67,6 +68,9 @@ namespace MphRead::NativeRuntime::Rhi::OpenGL
         LauncherNoiseState& state = State();
         try
         {
+#if !defined(__ANDROID__)
+            AdmitInteropTextureStorage(TextureFormat::RGB8Unorm, state.Width, state.Height);
+#endif
             GL::ActiveTexture(GL::TextureUnit::Texture0);
             if (state.Texture == 0)
             {
@@ -84,6 +88,9 @@ namespace MphRead::NativeRuntime::Rhi::OpenGL
             GL::TexImage2D(GL::TextureTarget::Texture2D, 0, GL::PixelInternalFormat::Rgb,
                 state.Width, state.Height, 0, GL::PixelFormat::Rgb, GL::PixelType::UnsignedByte,
                 state.Field.Pixels().data());
+#if !defined(__ANDROID__)
+            CheckInteropStorageResult("OpenGL launcher noise allocation");
+#endif
             GL::TexParameter(GL::TextureTarget::Texture2D, GL::TextureParameterName::TextureMinFilter,
                 static_cast<std::int32_t>(GL::TextureMinFilter::Nearest));
             GL::TexParameter(GL::TextureTarget::Texture2D, GL::TextureParameterName::TextureMagFilter,

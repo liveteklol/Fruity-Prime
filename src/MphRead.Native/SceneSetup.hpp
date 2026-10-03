@@ -54,6 +54,9 @@ namespace MphRead
             operator[](std::int32_t index);
         [[nodiscard]] const std::shared_ptr<Entities::BeamProjectileEntity>&
             operator[](std::int32_t index) const;
+        // A discarded array: every beam lets go of its owner, equip (which
+        // holds this array), effects and target, so the cycle can be freed.
+        void ReleaseReferences() noexcept;
 
     private:
         friend class SceneSetup;

@@ -707,6 +707,12 @@ namespace MphRead::Entities
 
         static void Construct(MphRead::Scene* scene);
         static void Reset();
+        // A discarded player lets go of every entity and effect it points at.
+        // The halfturret, the beams, the AI and the last attacker all point
+        // back, which the C# garbage collector never minded and shared_ptr
+        // cannot see through: without this every player of every room stays
+        // alive with its models, a room's worth per match or map change.
+        void ReleaseReferences() noexcept;
         [[nodiscard]] static std::shared_ptr<PlayerEntity> Create(MphRead::Hunter hunter, std::int32_t recolor);
         void CreateHalfturret();
         void Initialize() override;

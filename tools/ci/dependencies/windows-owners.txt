@@ -1,0 +1,11 @@
+curl:x64-windows
+libarchive:x64-windows
+zlib:x64-windows
+glfw3:x64-windows
+freetype:x64-windows
+libjpeg-turbo:x64-windows
+openal-soft:x64-windows
+vulkan-loader:x64-windows
+vulkan-memory-allocator:x64-windows
+shaderc:x64-windows
+skia[gl,freetype]:x64-windows

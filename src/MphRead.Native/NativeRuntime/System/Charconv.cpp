@@ -11,7 +11,7 @@
 
 #if defined(__APPLE__)
 #include <xlocale.h>
-#elif !defined(__ANDROID__) && !defined(_WIN32)
+#elif !defined(__ANDROID__)
 #include <locale.h>
 #endif
 
@@ -139,6 +139,13 @@ namespace MphRead::NativeRuntime
             static const locale_t locale = ::newlocale(LC_ALL_MASK, "C", static_cast<locale_t>(0));
             return locale;
         }
+#elif defined(_WIN32)
+        // MinGW: libc++ without floating from_chars; the CRT's _l variants.
+        [[nodiscard]] _locale_t CLocale()
+        {
+            static const _locale_t locale = ::_create_locale(LC_ALL, "C");
+            return locale;
+        }
 #endif
 
         template <typename T>
@@ -156,6 +163,20 @@ namespace MphRead::NativeRuntime
             }
             else
             {
+                return std::strtold(text, end);
+            }
+#elif defined(_WIN32)
+            if constexpr (std::is_same_v<T, float>)
+            {
+                return ::_strtof_l(text, end, CLocale());
+            }
+            else if constexpr (std::is_same_v<T, double>)
+            {
+                return ::_strtod_l(text, end, CLocale());
+            }
+            else
+            {
+                // MinGW has no _strtold_l; the CRT starts in the "C" locale.
                 return std::strtold(text, end);
             }
 #else

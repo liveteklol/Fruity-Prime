@@ -1,6 +1,9 @@
 #include "GuiLauncher.hpp"
 
 #include "Shell.hpp"
+#include "../../Branding.hpp"
+#include "../../../NativeRuntime/Rhi/SceneBackend.hpp"
+#include "../../../NativeRuntime/System/ErrorDialog.hpp"
 #include "UiTopLevel.hpp"
 #include "../../Diagnostics/PlatformDiagnostics.hpp"
 #include "../../../NativeRuntime/System/Console.hpp"
@@ -52,6 +55,16 @@ namespace MphRead::Mods::Launcher::Gui
 #else
             return Shell::Run();
 #endif
+        }
+        catch (const ::MphRead::NativeRuntime::Rhi::SceneBackendUnavailable& unavailable)
+        {
+            // A renderer asked for by name that cannot start is the person's
+            // to hear about, not a reason to open a different launcher.
+            Runtime::ConsoleWriteLine(std::string("[launcher] ") + unavailable.what());
+            Runtime::ShowErrorDialog(std::string(::MphRead::Mods::Branding::Name),
+                std::string(unavailable.what())
+                    + "\n\nChoose OpenGL or Auto under Settings > Game > Renderer, or start with -rhi opengl.");
+            return true;
         }
         catch (...)
         {

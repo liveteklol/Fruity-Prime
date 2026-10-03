@@ -55,6 +55,12 @@ namespace MphRead::NativeRuntime::Rhi
 
     [[nodiscard]] constexpr bool IsValidResourceState(ResourceState state) noexcept
     {
+        constexpr ResourceState known = ResourceState::Common | ResourceState::VertexBuffer
+            | ResourceState::IndexBuffer | ResourceState::ConstantBuffer | ResourceState::ShaderRead
+            | ResourceState::ShaderWrite | ResourceState::ColorAttachment | ResourceState::DepthStencilRead
+            | ResourceState::DepthStencilWrite | ResourceState::CopySrc | ResourceState::CopyDst | ResourceState::Present;
+        using U = std::underlying_type_t<ResourceState>;
+        if ((static_cast<U>(state) & ~static_cast<U>(known)) != 0) return false;
         if (state == ResourceState::Undefined)
         {
             return true;
@@ -71,9 +77,23 @@ namespace MphRead::NativeRuntime::Rhi
             | ResourceState::DepthStencilWrite
             | ResourceState::CopyDst;
 
-        using U = std::underlying_type_t<ResourceState>;
         const U writes = static_cast<U>(state & writeStates);
-        return writes == 0 || (writes & (writes - 1)) == 0;
+        // Read-only states may be combined. A write state names exclusive
+        // access; ShaderWrite itself includes storage reads on each backend.
+        return writes == 0 || HasSingleBit(state);
+    }
+
+    [[nodiscard]] constexpr bool IsValidBufferState(ResourceState state) noexcept
+    {
+        constexpr auto imageOnly = ResourceState::ColorAttachment | ResourceState::DepthStencilRead
+            | ResourceState::DepthStencilWrite | ResourceState::Present;
+        return IsValidResourceState(state) && !HasAny(state, imageOnly);
+    }
+
+    [[nodiscard]] constexpr bool IsValidTextureState(ResourceState state) noexcept
+    {
+        constexpr auto bufferOnly = ResourceState::VertexBuffer | ResourceState::IndexBuffer | ResourceState::ConstantBuffer;
+        return IsValidResourceState(state) && !HasAny(state, bufferOnly);
     }
 
     [[nodiscard]] constexpr bool IsValidTransition(

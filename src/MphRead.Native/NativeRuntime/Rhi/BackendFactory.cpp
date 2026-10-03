@@ -1,17 +1,20 @@
 #include "BackendFactory.hpp"
+#include "Vulkan/VulkanSwapchain.hpp"
 
 #include "../../Renderer.hpp"
 
 #include <stdexcept>
 #include <utility>
 
-#if !defined(__ANDROID__)
+#if defined(MPHREAD_QT)
+#include "../../../MphRead.Native.Qt/Platform/QtSwapchain.hpp"
+#elif !defined(__ANDROID__)
 #include <GLFW/glfw3.h>
 #endif
 
 namespace MphRead::NativeRuntime::Rhi
 {
-#if !defined(__ANDROID__)
+#if !defined(__ANDROID__) && !defined(MPHREAD_QT)
     namespace
     {
         class OpenGlBackbufferTexture final : public Texture
@@ -70,6 +73,7 @@ namespace MphRead::NativeRuntime::Rhi
                     throw std::invalid_argument(
                         "An OpenGL swapchain requires a native GLFW window handle.");
                 }
+                SetPresentMode(_desc.presentMode);
             }
 
             [[nodiscard]] const SwapchainDesc& Desc() const noexcept override
@@ -92,13 +96,26 @@ namespace MphRead::NativeRuntime::Rhi
                 return _backbuffer;
             }
 
+            AcquireResult TryAcquireTexture() override
+            {
+                // A close request leaves the drawable valid until the owner
+                // tears it down. The shell uses that request for switching.
+                if (::glfwWindowShouldClose(_handle)) return {PresentationStatus::TemporarilyUnavailable, nullptr};
+                if (::glfwGetWindowAttrib(_handle, GLFW_ICONIFIED))
+                    return {PresentationStatus::TemporarilyUnavailable, nullptr};
+                int width = 0, height = 0;
+                ::glfwGetFramebufferSize(_handle, &width, &height);
+                if (width <= 0 || height <= 0) return {PresentationStatus::TemporarilyUnavailable, nullptr};
+                return {PresentationStatus::Ready, &_backbuffer};
+            }
+            PresentationCapabilities PresentationCaps() const noexcept override
+            { return {true, true, false, 2, 2}; }
+            PresentMode RequestedPresentMode() const noexcept override { return _requestedMode; }
+
             void SetPresentMode(PresentMode mode) override
             {
-                if (mode == PresentMode::Mailbox)
-                {
-                    throw std::runtime_error(
-                        "Mailbox presentation is not available through GLFW OpenGL.");
-                }
+                _requestedMode = mode;
+                if (mode == PresentMode::Mailbox) mode = PresentMode::Fifo;
                 ::glfwMakeContextCurrent(_handle);
                 ::glfwSwapInterval(mode == PresentMode::Fifo ? 1 : 0);
                 _desc.presentMode = mode;
@@ -108,11 +125,19 @@ namespace MphRead::NativeRuntime::Rhi
             {
                 ::glfwSwapBuffers(_handle);
             }
+            PresentResult TryPresent() override
+            {
+                const auto acquire = TryAcquireTexture();
+                if (!acquire.texture) return {acquire.status, acquire.failure};
+                Present();
+                return {PresentationStatus::Ready, std::nullopt, true};
+            }
 
         private:
             ::MphRead::RendererPlatform::Window& _window;
             GLFWwindow* _handle = nullptr;
             SwapchainDesc _desc{};
+            PresentMode _requestedMode = PresentMode::Fifo;
             OpenGlBackbufferTexture _backbuffer;
         };
     }
@@ -125,7 +150,9 @@ namespace MphRead::NativeRuntime::Rhi
         switch (backend)
         {
         case GraphicsBackend::OpenGl:
-#if !defined(__ANDROID__)
+#if defined(MPHREAD_QT)
+            return ::MphRead::Qt::CreateOpenGlSwapchain(window, desc);
+#elif !defined(__ANDROID__)
             return std::make_unique<GlfwOpenGlSwapchain>(window, desc);
 #else
             (void)window;
@@ -134,8 +161,7 @@ namespace MphRead::NativeRuntime::Rhi
                 "The desktop OpenGL swapchain is not available on Android.");
 #endif
         case GraphicsBackend::Vulkan:
-            throw std::runtime_error(
-                "The Vulkan swapchain is not implemented in Phase 2.");
+            return Vulkan::CreateSwapchain(window, desc);
         case GraphicsBackend::Metal:
             throw std::runtime_error(
                 "The Metal backend is not implemented.");

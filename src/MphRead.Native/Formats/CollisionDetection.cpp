@@ -202,6 +202,13 @@ namespace MphRead::Formats
 
     void CollisionDetection::Init()
     {
+        // Called by every scene's load: the pool starts again rather than
+        // growing by another 2048 each time, and lets go of the candidates
+        // still pointing at the last room's collision.
+        _activeItems.clear();
+        _tempItems.clear();
+        _seenData.clear();
+        _inactiveItems.clear();
         for (std::int32_t i = 0; i < 2048; i++)
         {
             _inactiveItems.push_back(

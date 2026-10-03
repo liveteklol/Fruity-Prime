@@ -1,4 +1,5 @@
 #include "ModEntry.hpp"
+#include "../NativeRuntime/Rhi/SceneBackend.hpp"
 #include "Platform/AppPaths.hpp"
 
 #include "../Entities/Players/PlayerEntity.hpp"
@@ -11,8 +12,12 @@
 #include "DebugLog.hpp"
 #include "Diagnostics/CompatibilityCheck.hpp"
 #include "Diagnostics/GpuLifetimeCheck.hpp"
+#include "Diagnostics/RhiConformanceCheck.hpp"
+#include "Diagnostics/PresentConformanceCheck.hpp"
+#include "Diagnostics/BackdropParityCheck.hpp"
+#include "Diagnostics/FramePerformance.hpp"
 #include "Diagnostics/PlatformDiagnostics.hpp"
-#if defined(MPHREAD_SHELL)
+#if defined(MPHREAD_AVALONIA_SHELL)
 #include "Diagnostics/GlfwPathCheck.hpp"
 #include "Diagnostics/LauncherWindowCheck.hpp"
 #include "Diagnostics/ThumbnailWindowCheck.hpp"
@@ -32,11 +37,14 @@
 #include "Launcher/Gui/UiCapture.hpp"
 #include "Launcher/Gui/UiDesigns.hpp"
 #endif
-#if defined(MPHREAD_SHELL)
+#if defined(MPHREAD_AVALONIA_SHELL)
 #include "Launcher/Gui/DeckTile.hpp"
-#include "Launcher/Gui/Shell.hpp"
 #include "Launcher/Gui/UiBench.hpp"
 #include "Launcher/Gui/UiSurface.hpp"
+#endif
+#if defined(MPHREAD_SHELL)
+#include "Launcher/Gui/GuiLauncher.hpp"
+#include "Launcher/Gui/Shell.hpp"
 #endif
 #include "Launcher/Portable/LauncherPrefs.hpp"
 #include "Launcher/Portable/TextLauncher.hpp"
@@ -75,6 +83,8 @@
 #include "Render/FrameTiming.hpp"
 #include "Render/FrameTimingCheck.hpp"
 #include "Render/GoldenCapture.hpp"
+#include "../NativeRuntime/Rhi/Vulkan/VulkanContext.hpp"
+#include "../NativeRuntime/Rhi/Vulkan/VulkanSwapchain.hpp"
 #include "Render/Radar.hpp"
 #include "RenderOptions.hpp"
 #include "ShutdownSignals.hpp"
@@ -610,6 +620,18 @@ namespace
         using MphRead::Mods::Render::Crosshair;
         using MphRead::Mods::Render::FrameTiming;
 
+        // -rhi vulkan: the scene draws through the Vulkan backend, offscreen,
+        // into targets the captures read back. -vkvalidation adds the layers.
+        const std::optional<std::string> rhi = ValueAfter(args, "rhi");
+        ::MphRead::NativeRuntime::Rhi::SceneBackendRequest backend{};
+        if (rhi.has_value() && ::MphRead::NativeRuntime::Rhi::ParseSceneBackendRequest(*rhi, backend))
+        {
+            ::MphRead::NativeRuntime::Rhi::RequestSceneBackend(backend, true);
+            std::cout << "[render] scene backend requested: "
+                << ::MphRead::NativeRuntime::Rhi::SceneBackendRequestName(backend) << std::endl;
+        }
+        if (HasFlag(args, "vkvalidation")) ::MphRead::NativeRuntime::Rhi::SetSceneValidation(true);
+
         const std::optional<std::string> cel = ValueAfter(args, "cel");
         if (cel.has_value() && !StartsWithHyphen(cel))
         {
@@ -645,6 +667,16 @@ namespace
         }
 
         const std::optional<std::string> fpsCap = ValueAfter(args, "fpscap");
+        const auto measure = ValueAfter(args, "fpsmeasure");
+        if (measure && !StartsWithHyphen(measure))
+        {
+            std::optional<int> measurementCap;
+            if (fpsCap && !StartsWithHyphen(fpsCap))
+                measurementCap = MphRead::NativeRuntime::StringEqualsOrdinalIgnoreCase(*fpsCap, "unlimited")
+                    || MphRead::NativeRuntime::StringEqualsOrdinalIgnoreCase(*fpsCap, "uncapped")
+                    ? -1 : FrameTiming::ParseCap(*fpsCap, FrameTiming::FrameRateCap());
+            MphRead::Mods::Diagnostics::FramePerformance::Configure(*measure, HasFlag(args, "gpuprofile"), measurementCap);
+        }
         if (fpsCap.has_value() && !StartsWithHyphen(fpsCap))
         {
             FrameTiming::SetFrameRateCap(
@@ -887,7 +919,7 @@ namespace
 #endif
     int RunUiBench(const std::vector<std::string>& args)
     {
-#if defined(MPHREAD_SHELL)
+#if defined(MPHREAD_AVALONIA_SHELL)
         try
         {
             using namespace MphRead::Mods::Launcher::Gui;
@@ -1020,7 +1052,65 @@ namespace MphRead::Mods
 {
     bool ModEntry::TryHandleHeadless(const std::vector<std::string>& args)
     {
-#if defined(MPHREAD_SHELL)
+        if (const std::optional<std::string> contract = ValueAfter(args, "rhicontract"); contract.has_value())
+        {
+            try
+            {
+                // Relative to where the command was typed: startup has moved the
+                // working directory to the installation by now.
+                const std::string path = FullPathCombine(ConsoleSetup::LaunchDirectory(), *contract);
+                std::ofstream file(std::filesystem::path(std::u8string(path.begin(), path.end())), std::ios::binary | std::ios::trunc);
+                file << ::MphRead::NativeRuntime::Rhi::SceneBackendContract();
+                SetExitCode(file.good() ? 0 : 1);
+            }
+            catch (...)
+            {
+                SetExitCode(1);
+            }
+            return true;
+        }
+        if (::HasFlag(args, "vulkancheck"))
+        {
+            SetExitCode(::MphRead::NativeRuntime::Rhi::Vulkan::RunFoundationCheck());
+            return true;
+        }
+        if (const auto directory = ValueAfter(args, "backdropparity"); directory.has_value())
+        {
+            SetExitCode(Diagnostics::RunBackdropParityCheck(
+                FullPathCombine(ConsoleSetup::LaunchDirectory(), *directory), ::HasFlag(args, "backdropobserve")));
+            return true;
+        }
+        if (::HasFlag(args, "presentconformance"))
+        {
+            SetExitCode(Diagnostics::RunPresentConformanceCheck());
+            return true;
+        }
+        if (::HasFlag(args, "rhiconformance"))
+        {
+            SetExitCode(Diagnostics::RunRhiConformanceCheck());
+            return true;
+        }
+        if (::HasFlag(args, "reflexcheck"))
+        {
+            SetExitCode(::MphRead::NativeRuntime::Rhi::Vulkan::RunPresentationCheck(false, true));
+            return true;
+        }
+        if (::HasFlag(args, "vulkanpresentcheck"))
+        {
+            SetExitCode(::MphRead::NativeRuntime::Rhi::Vulkan::RunPresentationCheck());
+            return true;
+        }
+        if (::HasFlag(args, "vulkanresourcecheck"))
+        {
+            SetExitCode(::MphRead::NativeRuntime::Rhi::Vulkan::RunResourceCheck());
+            return true;
+        }
+        if (::HasFlag(args, "vulkanpresentfallbackcheck"))
+        {
+            SetExitCode(::MphRead::NativeRuntime::Rhi::Vulkan::RunPresentationCheck(true));
+            return true;
+        }
+#if defined(MPHREAD_AVALONIA_SHELL)
         if (::HasFlag(args, "glfwpathcheck"))
         {
             SetExitCode(Diagnostics::GlfwPathCheck::Run());
@@ -1372,7 +1462,7 @@ namespace MphRead::Mods
 #endif
         if ((::HasFlag(args, "launcher") || doubleClicked) && !::HasFlag(args, "menu"))
         {
-#if defined(MPHREAD_AVALONIA)
+#if defined(MPHREAD_SHELL) || defined(MPHREAD_AVALONIA)
             if (!::HasFlag(args, "text") && Launcher::Gui::GuiLauncher::TryRun())
             {
                 return true;
@@ -1668,7 +1758,7 @@ namespace MphRead::Mods
         }
         if (::HasFlag(args, "uinativeres"))
         {
-#if defined(MPHREAD_SHELL)
+#if defined(MPHREAD_AVALONIA_SHELL)
             Launcher::Gui::UiSurface::NativeRaster(true);
 #endif
         }

@@ -5,6 +5,7 @@
 
 #include "../../Renderer.hpp"
 #include "../Rhi/OpenGL/OpenGlDevice.hpp"
+#include "../Rhi/PresentationSleep.hpp"
 
 #include "../../Mods/Chat/ChatBox.hpp"
 #include "../System/Heartbeat.hpp"
@@ -24,12 +25,18 @@
 #include <utility>
 
 #include <GLFW/glfw3.h>
+#if defined(_WIN32)
+#include <windows.h>
+#undef CreateWindow
+#endif
 
 using ::MphRead::NativeRuntime::ConsoleWrite;
 using ::MphRead::NativeRuntime::ConsoleWriteLine;
 
 namespace
 {
+    namespace Rhi = MphRead::NativeRuntime::Rhi;
+    using Rhi::SleepForPresentation;
     using MphRead::RendererPlatform::CursorState;
     using MphRead::RendererPlatform::FrameEventArgs;
     using MphRead::RendererPlatform::GraphicsWindowMode;
@@ -222,7 +229,7 @@ namespace
                 if (_graphicsMode == GraphicsWindowMode::OpenGL)
                 {
                     ::glfwMakeContextCurrent(_handle);
-                    MphRead::NativeRuntime::Rhi::OpenGL::FinishContextDevice();
+                    MphRead::NativeRuntime::Rhi::OpenGL::ReleaseContextDevice();
                 }
                 ::glfwDestroyWindow(_handle);
                 _handle = nullptr;
@@ -248,6 +255,16 @@ namespace
             while (::glfwWindowShouldClose(_handle) == GLFW_FALSE)
             {
                 ::MphRead::NativeRuntime::FrameHeartbeat();
+                // Native sleep precedes every fresh input read. Poll a busy
+                // generic budget with events serviced, but never sample input
+                // while the driver's native frame-start signal is pending.
+                if (!events.BeforeFrame())
+                {
+                    if (events.CanSampleInputWhileWaiting()) ::glfwPollEvents();
+                    continue;
+                }
+                SleepForPresentation(_presentation.Deadline(Rhi::PresentationScheduler::Clock::now()));
+                events.OnInputSample();
                 // OpenTK's NewInputFrame polls the current cursor position
                 // separately from the cursor callback's last-reported point.
                 double cursorX = 0.0;
@@ -256,6 +273,10 @@ namespace
                 _mouse.X = static_cast<float>(cursorX);
                 _mouse.Y = static_cast<float>(cursorY);
                 ::glfwPollEvents();
+                // Bounded budget waits run with events serviced between them.
+                // A busy GPU postpones admission; no primary draw or simulation
+                // step is recorded and discarded. Elapsed time is retained.
+
                 const auto now = std::chrono::steady_clock::now();
                 const double elapsed
                     = std::chrono::duration<double>(now - previous).count();
@@ -268,6 +289,7 @@ namespace
                     continue;
                 }
                 previous = now;
+                _presentationFrameStart = now;
                 FrameEventArgs args;
                 args.Time = elapsed;
                 events.OnRenderFrame(args);
@@ -315,6 +337,17 @@ namespace
         {
             _updateFrequency = value;
         }
+        void PresentationTiming(Rhi::PresentMode mode, std::int32_t cap, Rhi::PacingAuthority authority) override
+        {
+            const auto monitor = MonitorForWindow(_handle);
+            const auto* video = monitor ? glfwGetVideoMode(monitor) : nullptr;
+            _presentation.Configure({cap, video && video->refreshRate > 0 ? static_cast<double>(video->refreshRate) : 60.0, mode, authority});
+        }
+        // Anchor the deadline at frame admission. A blocking FIFO present
+        // already consumes that period; do not sleep a second whole period
+        // after it returns. Advance only after native present accepts work.
+        void PresentationAccepted() override { _presentation.Accepted(_presentationFrameStart); }
+        void PresentationUnavailable() override { _presentation.Unavailable(); }
 
         void Visible(bool value) override
         {
@@ -725,6 +758,8 @@ namespace
         GraphicsWindowMode _graphicsMode = GraphicsWindowMode::OpenGL;
         WindowEvents* _events = nullptr;
         double _updateFrequency = 0.0;
+        Rhi::PresentationScheduler _presentation;
+        Rhi::PresentationScheduler::Time _presentationFrameStart{};
         MphRead::RendererPlatform::KeyboardState _keyboard{};
         MphRead::RendererPlatform::MouseState _mouse{};
         float _lastReportedMouseX = 0.0F;
@@ -734,6 +769,16 @@ namespace
 
 namespace MphRead::RendererPlatform
 {
+    void* CurrentGlContext() noexcept
+    {
+        return ::glfwGetCurrentContext();
+    }
+
+    void MakeGlContextCurrent(void* context) noexcept
+    {
+        ::glfwMakeContextCurrent(static_cast<GLFWwindow*>(context));
+    }
+
     std::shared_ptr<Window> CreateWindow(const WindowSettings& settings)
     {
         return std::make_shared<GlfwWindow>(settings);

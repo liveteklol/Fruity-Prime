@@ -162,6 +162,7 @@ jobs:
             "zlib:${triplet}" \
             "freetype:${triplet}" \
             "libjpeg-turbo:${triplet}" \
+            "vulkan-memory-allocator:${triplet}" \
             --clean-after-build
 
       - name: Save Android vcpkg binary cache
@@ -172,11 +173,17 @@ jobs:
           path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
           key: native-android-vcpkg-v1-${{ matrix.abi }}-${{ steps.vcpkg.outputs.commit }}-${{ hashFiles('.github/workflows/native-cpp-android.yml') }}
 
+      # Refresh immutable snapshots weekly; avoid a full duplicate on every push.
+      - name: Select compiler cache generation
+        shell: bash
+        run: echo "COMPILER_CACHE_WEEK=$(date -u +%G-%V)" >> "$GITHUB_ENV"
+
       - name: Set up ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
-          key: native-ccache-android-${{ matrix.abi }}
-          max-size: 1G
+          key: native-ccache-android-${{ matrix.abi }}-${{ env.COMPILER_CACHE_WEEK }}
+          max-size: 500M
+          append-timestamp: false
 
       - name: Configure and build shared library
         shell: bash
@@ -207,6 +214,16 @@ jobs:
           test -f "$build_dir/libFruityPrime.so"
           "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf" \
             -d "$build_dir/libFruityPrime.so" | tee "$build_dir/readelf-dynamic.log"
+
+          # Both renderers in the one library: GLES as before, and the shared
+          # Vulkan backend with its SPIR-V and the Android surface path.
+          grep -F -- '-- Android Vulkan backend: on' "$build_dir/configure.log"
+          test "$(ls "$build_dir"/generated/vulkan-shaders/*.spv | wc -l)" -eq 10
+          nm="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm"
+          "$nm" -C --defined-only "$build_dir/libFruityPrime.so" > "$build_dir/symbols.txt"
+          for symbol in 'Rhi::AttachSceneSurface' 'Rhi::Vulkan::CreateSurfaceSwapchain' 'Rhi::Vulkan::WindowUi::DrawTexture' 'Rhi::OpenGL::ContextDevice'; do
+            grep -qF "$symbol" "$build_dir/symbols.txt" || { echo "missing $symbol" >&2; exit 1; }
+          done
 
       - name: Upload Android shared library
         uses: actions/upload-artifact@v4

@@ -104,9 +104,24 @@ namespace MphRead::NativeRuntime::Avalonia
             }
         }
         [[nodiscard]] bool GpuRendering() const noexcept { return _gpuRendering; }
+        // The window is going for a renderer switch: Ganesh's context and
+        // surface go with it (destroyed as a GpuSurface is, in order), and
+        // the next frame makes them again on whatever the new window is.
+        void ReleaseGpu()
+        {
+            {
+                Skia::GpuSurface old(std::move(_surface));
+            }
+            _surface = Skia::GpuSurface();
+            InvalidateRender();
+        }
         [[nodiscard]] std::int32_t TextureId() const noexcept
         {
             return _gpuRendering ? _surface.TextureId() : 0;
+        }
+        [[nodiscard]] const ::MphRead::NativeRuntime::Rhi::Texture* RhiTexture() const noexcept
+        {
+            return _gpuRendering ? _surface.RhiTexture() : nullptr;
         }
         [[nodiscard]] const std::uint8_t* Pixels() const noexcept
         {

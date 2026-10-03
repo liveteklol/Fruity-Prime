@@ -9,6 +9,7 @@
 #include "UiMark.hpp"
 #include "UiTabs.hpp"
 #include "../../Input/TouchSettings.hpp"
+#include "../../../NativeRuntime/Rhi/LowLatency.hpp"
 
 #include <cstdint>
 #include <memory>
@@ -102,12 +103,16 @@ namespace MphRead::Mods::Launcher::Gui
         std::shared_ptr<::MphRead::MenuSettings> _settings;
         const bool _inGame;
         bool _saved = false;
+        const NativeRuntime::Rhi::LowLatencyMode _originalLowLatency;
         std::shared_ptr<Av::Controls::Panel> _pages;
         std::vector<Section> _sections;
         std::shared_ptr<UiTabs> _tabs;
         std::shared_ptr<UiTabs> _controlTabs;
 
         std::shared_ptr<ChoiceRow> _windowRow;
+        std::shared_ptr<ChoiceRow> _rendererRow;
+        std::shared_ptr<ChoiceRow> _lowLatencyRow;
+        std::shared_ptr<Note> _lowLatencyNote;
         std::shared_ptr<ChoiceRow> _clipSecondsRow;
         std::shared_ptr<SliderRow> _resolutionScale;
         std::shared_ptr<ToggleRow> _lightingRow;

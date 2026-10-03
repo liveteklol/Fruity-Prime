@@ -281,6 +281,17 @@ namespace MphRead::Entities
     const std::array<Vector3, 10>& BeamProjectileEntity::PastPositions() const noexcept { return _pastPositions; }
 
     std::shared_ptr<EntityBase> BeamProjectileEntity::Owner() const noexcept { return _owner; }
+    void BeamProjectileEntity::ReleaseReferences() noexcept
+    {
+        _owner.reset();
+        _ricochetWeapon.reset();
+        _effect.reset();
+        _muzzleEffect.reset();
+        _target.reset();
+        _equip.reset();
+        _trailModel.reset();
+    }
+
     void BeamProjectileEntity::SetOwner(std::shared_ptr<EntityBase> value) noexcept { _owner = std::move(value); }
     std::shared_ptr<WeaponInfo> BeamProjectileEntity::RicochetWeapon() const noexcept { return _ricochetWeapon; }
     void BeamProjectileEntity::SetRicochetWeapon(std::shared_ptr<WeaponInfo> value) noexcept { _ricochetWeapon = std::move(value); }

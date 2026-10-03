@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Submission.hpp"
+
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -8,23 +10,17 @@
 
 // The GPU lifetime contract, the same for every backend.
 //
-// Frames are numbered from 1. At most FramesInFlight frames' GPU work is
-// outstanding: BeginFrame for frame N first retires frame N - FramesInFlight,
-// which is the last one to have used the same FrameContext slot. A resource
-// the frontend destroys is not destroyed then -- the GPU may still be reading
-// it for a frame already submitted -- but retired: queued with the number of
-// the frame it was last usable in, and destroyed natively once the device
-// knows that frame's work is complete (OpenGL: a GLsync fence; Vulkan: the
-// frame's fence or timeline value). WaitIdle waits for everything and
-// destroys every retired resource at once, which is what a scene's release
-// does, in the context it drew with.
+// Frame slots govern reusable per-frame storage. Resource lifetime follows
+// actual completed submissions, independently of those slots. Vulkan uses a
+// graphics-queue timeline; OpenGL uses GLsync stream markers. WaitIdle is an
+// explicit release boundary, not required for ordinary destruction or resize.
 namespace MphRead::NativeRuntime::Rhi
 {
     inline constexpr std::uint32_t FramesInFlight = 2;
 
     struct FrameContext final
     {
-        // The frame's number; the retirement value of what is destroyed during it.
+        // The frame's number; this is not a submission serial.
         std::uint64_t Number = 0;
         // Which of the FramesInFlight per-frame slots it uses.
         std::uint32_t Slot = 0;
@@ -38,10 +34,29 @@ namespace MphRead::NativeRuntime::Rhi
         std::uint32_t Shaders = 0;
         std::uint32_t Programs = 0;
         std::uint32_t Framebuffers = 0;
+        std::uint32_t Samplers = 0;
+        std::uint32_t VertexArrays = 0;
+        std::uint32_t TimestampSets = 0;
         std::uint32_t Retired = 0;
         std::uint64_t CompletedFrame = 0;
+        // Times the CPU has stopped to wait for the GPU (a fence or the whole
+        // device). Implicit driver waits in upload/map APIs are not counted here.
+        std::uint64_t HostWaits = 0;
+        // Actual queue progress, not a simulation/presentation frame counter.
+        SubmissionSerial Submitted{};
+        SubmissionSerial Completed{};
+        std::uint64_t DeviceWideWaits = 0;
+        // Reusable GPU-only staging the backend keeps for its own transfers
+        // (Vulkan's RGB copy scratch). Internal, so not in LiveObjects: a
+        // caller cannot release it, and a stable count is the reuse proof.
+        std::uint32_t TransferScratchPages = 0;
 
         bool operator==(const GpuResourceStatistics&) const = default;
+        [[nodiscard]] std::uint64_t LiveObjects() const noexcept
+        {
+            return static_cast<std::uint64_t>(Textures) + Buffers + Renderbuffers + Shaders
+                + Programs + Framebuffers + Samplers + VertexArrays + TimestampSets;
+        }
     };
 
     // Native objects waiting for the GPU to finish with them. Backend
@@ -51,20 +66,20 @@ namespace MphRead::NativeRuntime::Rhi
     class RetirementQueue final
     {
     public:
-        void Retire(T object, std::uint64_t lastUsedFrame)
+        void Retire(T object, SubmissionSerial lastUse)
         {
-            _entries.push_back(Entry{std::move(object), lastUsedFrame});
+            _entries.push_back(Entry{std::move(object), lastUse});
         }
 
-        // Destroy everything last used in a frame the GPU has completed.
+        // Destroy everything whose last-use value the GPU has completed.
         template <typename Destroy>
-        std::size_t Collect(std::uint64_t completedFrame, Destroy&& destroy)
+        std::size_t Collect(SubmissionSerial completedValue, Destroy&& destroy)
         {
             std::size_t destroyed = 0;
             auto keep = _entries.begin();
             for (auto it = _entries.begin(); it != _entries.end(); ++it)
             {
-                if (it->LastUsedFrame <= completedFrame)
+                if (it->LastUse <= completedValue)
                 {
                     destroy(it->Object);
                     ++destroyed;
@@ -112,7 +127,7 @@ namespace MphRead::NativeRuntime::Rhi
         struct Entry final
         {
             T Object;
-            std::uint64_t LastUsedFrame;
+            SubmissionSerial LastUse;
         };
 
         std::vector<Entry> _entries{};

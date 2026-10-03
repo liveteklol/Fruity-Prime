@@ -165,11 +165,20 @@ namespace MphRead::NativeRuntime::Rhi
         bool operator==(const SamplerDesc&) const = default;
     };
 
+    enum class ShaderCodeFormat : std::uint8_t
+    {
+        SpirV,
+        GlslSource,
+        Dxil,
+        MetalLibrary
+    };
+
     struct ShaderDesc final
     {
         ShaderStage stage = ShaderStage::None;
         std::vector<std::byte> code;
         std::string entryPoint = "main";
+        ShaderCodeFormat format = ShaderCodeFormat::SpirV;
 
         bool operator==(const ShaderDesc&) const = default;
     };

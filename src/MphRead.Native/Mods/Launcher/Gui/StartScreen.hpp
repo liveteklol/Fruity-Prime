@@ -36,6 +36,8 @@ namespace MphRead::Mods::Launcher::Gui
     class StartScreen final : public Av::Controls::UserControl
     {
     public:
+        // The settings page, pushed over the front screen.
+        void OpenSettings();
         [[nodiscard]] static std::shared_ptr<StartScreen> Create(
             const std::shared_ptr<::MphRead::MenuSettings>& settings,
             const std::vector<std::string>& rooms);
@@ -79,7 +81,6 @@ namespace MphRead::Mods::Launcher::Gui
         void OpenPlay();
         void OpenCreateServer();
         void ConnectedOrFinished(::MphRead::Mods::Launcher::LaunchPlan plan);
-        void OpenSettings();
         void OpenSetup();
         void AskToQuit();
         void OpenVote();

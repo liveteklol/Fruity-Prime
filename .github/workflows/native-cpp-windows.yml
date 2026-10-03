@@ -1,8 +1,8 @@
 name: Native C++ Windows / MSVC
 
 on:
-  # build_cpp.yml calls this on every push and PR; firing it here too
-  # built the same commit twice.
+  # build_cpp.yml defines the desktop game builds.
+  # This owner-only diagnostic workflow remains manual/reusable.
   # push:
   #   branches: [develop2]
   #   paths:
@@ -32,6 +32,8 @@ jobs:
   windows-native:
     name: Windows / MSVC
     runs-on: windows-2025
+    env:
+      SCCACHE_GHA_ENABLED: "true"
 
     steps:
       - name: Checkout
@@ -41,10 +43,32 @@ jobs:
         shell: pwsh
         run: New-Item -ItemType Directory -Force -Path $env:VCPKG_DEFAULT_BINARY_CACHE | Out-Null
 
-      - name: Locate vcpkg
+      - name: Set up MSVC environment for Ninja
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Set up pinned Windows vcpkg
         id: vcpkg
-        shell: bash
-        run: echo "commit=$(git -C "$VCPKG_INSTALLATION_ROOT" rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+        shell: pwsh
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP "fruity-vcpkg"
+          git init $root
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git -C $root remote add origin https://github.com/microsoft/vcpkg.git
+          git -C $root fetch --depth 1 origin 07f4812200df3d3c931c0c8a6081d3b21fe2bf9f
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git -C $root checkout --detach FETCH_HEAD
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:VCPKG_ROOT = $root
+          "VCPKG_ROOT=$root" >> $env:GITHUB_ENV
+          & "$root/bootstrap-vcpkg.bat" -disableMetrics
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "VCPKG_INSTALLATION_ROOT=$root" >> $env:GITHUB_ENV
+          "commit=$(git -C $root rev-parse HEAD)" >> $env:GITHUB_OUTPUT
+          $compiler = (Get-Command cl.exe -ErrorAction Stop).Source
+          "compiler=$((Get-FileHash -LiteralPath $compiler -Algorithm SHA256).Hash)" >> $env:GITHUB_OUTPUT
+          & "$root/vcpkg.exe" version
 
       - name: Restore vcpkg binary cache
         id: vcpkg-cache
@@ -52,8 +76,10 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
-          key: native-vcpkg-v1-${{ runner.os }}-${{ runner.arch }}-msvc-x64-windows-${{ steps.vcpkg.outputs.commit }}
+          key: native-vcpkg-windows-v2-${{ runner.arch }}-${{ steps.vcpkg.outputs.commit }}-${{ steps.vcpkg.outputs.compiler }}-${{ hashFiles('tools/ci/dependencies/windows-owners.txt') }}
           restore-keys: |
+            native-vcpkg-windows-v2-${{ runner.arch }}-${{ steps.vcpkg.outputs.commit }}-${{ steps.vcpkg.outputs.compiler }}-
+            native-vcpkg-all-${{ runner.os }}-${{ runner.arch }}-
             native-vcpkg-v1-${{ runner.os }}-${{ runner.arch }}-msvc-x64-windows-
 
       - name: Report vcpkg cache result
@@ -80,7 +106,8 @@ jobs:
           if (-not $env:VCPKG_INSTALLATION_ROOT) { throw "VCPKG_INSTALLATION_ROOT is not set on the runner." }
           $vcpkg = Join-Path $env:VCPKG_INSTALLATION_ROOT "vcpkg.exe"
           if (-not (Test-Path $vcpkg)) { throw "vcpkg.exe was not found at $vcpkg" }
-          & $vcpkg install curl:x64-windows libarchive:x64-windows zlib:x64-windows glfw3:x64-windows freetype:x64-windows libjpeg-turbo:x64-windows openal-soft:x64-windows "skia[gl,freetype]:x64-windows" --clean-after-build
+          $packages = @(Get-Content tools/ci/dependencies/windows-owners.txt | Where-Object { $_.Trim() })
+          & $vcpkg install @packages --clean-after-build 2>&1 | Tee-Object -FilePath "$env:RUNNER_TEMP/vcpkg-install.log"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           "CMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT\scripts\buildsystems\vcpkg.cmake" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
@@ -90,15 +117,25 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
-          key: native-vcpkg-v1-${{ runner.os }}-${{ runner.arch }}-msvc-x64-windows-${{ steps.vcpkg.outputs.commit }}
+          key: native-vcpkg-windows-v2-${{ runner.arch }}-${{ steps.vcpkg.outputs.commit }}-${{ steps.vcpkg.outputs.compiler }}-${{ hashFiles('tools/ci/dependencies/windows-owners.txt') }}
+
+      - name: Set up compiler cache
+        uses: mozilla-actions/sccache-action@v0.0.11
+        with:
+          version: "v0.16.0"
 
       - name: Configure with MSVC
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path build/native | Out-Null
-          cmake -S . -B build/native -A x64 `
+          cmake -S . -B build/native -G "Ninja Multi-Config" `
             -DCMAKE_TOOLCHAIN_FILE="$env:CMAKE_TOOLCHAIN_FILE" `
-            -DVCPKG_TARGET_TRIPLET=x64-windows 2>&1 | Tee-Object -FilePath build/native/configure.log
+            -DVCPKG_TARGET_TRIPLET=x64-windows `
+            -DFRUITY_REQUIRE_VULKAN=ON `
+            -DCMAKE_C_COMPILER_LAUNCHER=sccache `
+            -DCMAKE_CXX_COMPILER_LAUNCHER=sccache `
+            -DCMAKE_POLICY_DEFAULT_CMP0141=NEW `
+            -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded 2>&1 | Tee-Object -FilePath build/native/configure.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build shared native owners
@@ -111,6 +148,11 @@ jobs:
             --verbose \
             --target fruity_ncsfplay_native fruity_mphread_native 2>&1 | tee build/native/build.log
 
+      - name: Report compiler cache statistics
+        if: always()
+        shell: pwsh
+        run: sccache --show-stats
+
       - name: Upload native build diagnostics
         if: always()
         uses: actions/upload-artifact@v4
@@ -121,6 +163,8 @@ jobs:
           path: |
             build/native/CMakeCache.txt
             build/native/CMakeFiles/CMakeConfigureLog.yaml
+            ${{ runner.temp }}/vcpkg-install.log
+            ${{ runner.temp }}/fruity-vcpkg/installed/x64-windows/share/*/vcpkg_abi_info.txt
             build/native/configure.log
             build/native/build.log
             build/native/**/*.a

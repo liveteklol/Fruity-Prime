@@ -29,6 +29,9 @@ namespace MphRead::Export
             std::optional<std::string> name = std::nullopt);
         static void Record(NativeRuntime::Rhi::CommandList& commands, std::int32_t width, std::int32_t height, const std::string& name);
         static void StopRecording();
+        // Device-thread pump: nonblocking GPU polls, then immutable CPU leases
+        // are handed to the PNG worker. Session-close cancellation is reported.
+        static void PollReadbacks();
         static void ExportImages(const Model& model);
         static void ExportPalettes(const Model& model);
         static void SaveTexture(
@@ -55,5 +58,6 @@ namespace MphRead::Export
         static QueueState _queue;
 
         static void ProcessQueue();
+        static bool CaptureFits(std::int32_t width, std::int32_t height);
     };
 }

@@ -1,4 +1,5 @@
 #include "WeaponDps.hpp"
+#include "../../NativeRuntime/Rhi/SceneBackend.hpp"
 #include "../../NativeRuntime/OpenTK/GL.hpp"
 
 #include "../../GameState.hpp"
@@ -193,8 +194,7 @@ namespace MphRead::Mods::Network
         _scene->Size(ClientSize());
         _scene->OnLoad();
         _window->BaseOnLoad();
-        OpenTK::Graphics::OpenGL::GL::Viewport(
-            0, 0, ClientSize().X, ClientSize().Y);
+        ::MphRead::NativeRuntime::Rhi::ResetWindowViewport(ClientSize().X, ClientSize().Y);
         _scene->OnResize();
     }
 

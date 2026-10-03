@@ -1,10 +1,13 @@
 #include "../NativeRuntime/Rhi/VertexSemantics.hpp"
+#include "../NativeRuntime/Rhi/SceneShaderAbi.hpp"
 #include "../NativeRuntime/Rhi/VulkanShaderInterface.hpp"
 #include "../Shaders.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <iostream>
+#include <map>
+#include <regex>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -13,8 +16,8 @@
 
 // Phase 5's contract, checked without a GL context: one semantic table, every
 // backend's numbering distinct within itself, desktop shaders that read only
-// the semantic inputs, and a Vulkan interface whose locations and std140
-// packing agree with the frontend's constant groups.
+// the semantic inputs and the same logical constant capacities. Production
+// Vulkan packing and compiled reflection have dedicated CPU fixtures.
 namespace
 {
     using namespace MphRead::NativeRuntime::Rhi;
@@ -47,14 +50,46 @@ namespace
         Expect(names.size() == VertexSemanticCount, "semantic names are not unique");
     }
 
-    void TestDesktopUsesTheAliasTable()
+    void TestLogicalSceneAbi()
     {
-        // NV_vertex_program: vertex 0, normal 2, colour 3, texcoord0 8, texcoord1 9.
-        Expect(Location(OpenGlDesktopLocations, VertexSemantic::Position) == 0U, "desktop position");
-        Expect(Location(OpenGlDesktopLocations, VertexSemantic::Normal) == 2U, "desktop normal");
-        Expect(Location(OpenGlDesktopLocations, VertexSemantic::Color) == 3U, "desktop colour");
-        Expect(Location(OpenGlDesktopLocations, VertexSemantic::TexCoord) == 8U, "desktop texcoord");
-        Expect(Location(OpenGlDesktopLocations, VertexSemantic::TexCoord1) == 9U, "desktop texcoord1");
+        using namespace SceneShaderAbi;
+        Expect(IsValid() && GroupCount == 4, "logical groups must be valid and distinct");
+        Expect(MaterialTexture.type == BindingType::SampledTexture
+            && MaterialSampler.type == BindingType::Sampler, "image and sampler are separate resources");
+        Expect(MaterialTexture.group == MaterialSampler.group
+            && MaterialTexture.binding != MaterialSampler.binding, "material sampler has its own binding");
+        for (const auto& binding : Bindings)
+        {
+            const auto mapped = Vulkan::MapBinding(binding);
+            Expect(mapped.Set == static_cast<std::uint32_t>(binding.group)
+                && mapped.Binding == binding.binding, "Vulkan adapter changed the logical ABI");
+        }
+        Expect(Vulkan::FrameBlock.Set != Vulkan::MaterialBlock.Set
+            && Vulkan::MaterialBlock.Set != Vulkan::DrawBlock.Set
+            && Vulkan::DrawBlock.Set != Vulkan::HudPostBlock.Set, "update groups collapsed");
+    }
+
+    void TestPipelineLayoutOwnsItsContract()
+    {
+        BindingLayoutDesc frame{{{0, BindingType::UniformBuffer, ShaderStage::AllGraphics, 1}}};
+        BindingLayoutDesc material{{{1, BindingType::SampledTexture, ShaderStage::Fragment, 1},
+            {2, BindingType::Sampler, ShaderStage::Fragment, 1}}};
+        PipelineLayout layout{{frame, material, {}, {}}};
+        const auto snapshot = layout;
+        frame.entries.clear(); material.entries[0].binding = 99;
+        Expect(layout == snapshot && layout.groups.size() == SceneShaderAbi::GroupCount,
+            "pipeline groups must not refer back to temporary input layouts");
+        auto different = layout;
+        different.groups[1].entries[0].binding = 99;
+        Expect(different != layout, "group binding changes affect pipeline identity");
+        different = layout; different.groups.pop_back();
+        Expect(different != layout, "group count affects pipeline identity");
+    }
+
+    void TestDesktopUsesTheCommonInterface()
+    {
+        Expect(OpenGlDesktopLocations == VulkanLocations,
+            "desktop and Vulkan must share the explicit vertex input interface");
     }
 
     void TestVulkanMatchesThePlan()
@@ -63,19 +98,7 @@ namespace
         Expect(Location(VulkanLocations, VertexSemantic::Normal) == 1U, "vulkan normal");
         Expect(Location(VulkanLocations, VertexSemantic::Color) == 2U, "vulkan colour");
         Expect(Location(VulkanLocations, VertexSemantic::TexCoord) == 3U, "vulkan texcoord");
-        for (std::size_t i = 0; i < VertexSemanticCount; ++i)
-        {
-            const std::string declared = "layout(location = " + std::to_string(VulkanLocations[i])
-                + ") in ";
-            const std::size_t at = Vulkan::VertexInterfaceGlsl.find(declared);
-            Expect(at != std::string_view::npos, "Vulkan GLSL does not declare location "
-                + std::to_string(VulkanLocations[i]));
-            const std::size_t end = Vulkan::VertexInterfaceGlsl.find(';', at);
-            const std::string_view line = Vulkan::VertexInterfaceGlsl.substr(at, end - at);
-            Expect(line.ends_with(VertexSemanticNames[i]),
-                "Vulkan GLSL location " + std::to_string(VulkanLocations[i]) + " is not "
-                + std::string(VertexSemanticNames[i]));
-        }
+
     }
 
     void ExpectNoBuiltinInputs(const std::string& source, std::string_view name)
@@ -125,50 +148,62 @@ namespace
             "main vertex shader has no position input");
     }
 
-    void TestVulkanPacking()
+    void TestLogicalConstantArrays()
     {
-        using ::OpenTK::Mathematics::Vector3;
-        using ::OpenTK::Mathematics::Vector4;
-        const MaterialConstants material{true, Vector3(1, 2, 3), Vector3(4, 5, 6),
-            Vector3(7, 8, 9), Vector3(10, 11, 12), 0.5F, 3};
-        const Vulkan::MaterialBlockData packed = Vulkan::Pack(material);
-        Expect(packed.Diffuse.X == 1.0F && packed.Diffuse.Z == 3.0F, "material diffuse");
-        Expect(packed.Emission.Y == 11.0F, "material emission");
-        Expect(packed.Alpha == 0.5F && packed.PolygonMode == 3 && packed.UseLight == 1U,
-            "material scalars");
-
-        const SceneFogConstants fog{Vector4(0.1F, 0.2F, 0.3F, 0.4F), 0.25F, 0.75F};
-        const Vulkan::SceneFogBlockData fogData = Vulkan::Pack(fog);
-        Expect(fogData.Color[3] == 0.4F && fogData.MinDistance == 0.25F
-            && fogData.MaxDistance == 0.75F, "fog packing");
-
-        std::vector<float> stack(40U * 16U);
-        for (std::size_t i = 0; i < stack.size(); ++i)
-        {
-            stack[i] = static_cast<float>(i);
-        }
-        const Vulkan::DrawBlockData draw = Vulkan::Pack(DrawConstants{stack});
-        Expect(draw.MatrixStack[0] == 0.0F
-            && draw.MatrixStack[MatrixStackCapacity * 16U - 1U]
-                == static_cast<float>(MatrixStackCapacity * 16U - 1U),
-            "a matrix stack longer than 32 is cut at 32");
-
-        const CelPostConstants cel{1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F, true};
-        const Vulkan::CelPostBlockData celData = Vulkan::Pack(cel);
-        Expect(celData.DepthQuantum == 6.0F && celData.Probe == 1U, "cel packing");
-
-        const HudPostConstants hud{Vector4(1.0F, 0.5F, 0.25F, 0.125F), 0.75F, true, 640.0F, 480.0F};
-        const Vulkan::HudPostBlockData hudData = Vulkan::Pack(hud);
-        Expect(hudData.FadeColor[3] == 0.125F && hudData.LayerAlpha == 0.75F
-            && hudData.UseMask == 1U && hudData.ViewHeight == 480.0F, "HUD post packing");
-
-        const Vulkan::DisruptionPostBlockData disruption
-            = Vulkan::Pack(DisruptionPostConstants{0.5F, 7, 0.25F, -1.0F});
-        Expect(disruption.ShiftIndex == 7 && disruption.WhiteoutFactor == -1.0F,
-            "disruption packing");
-        Expect(sizeof(Vulkan::DisruptionTablesBlockData) / 16U == 16U + 48U,
-            "disruption tables are 16 + 48 vec4");
+        const auto check = [](std::string_view program, std::string_view name, SceneShaderAbi::ValueType type, std::size_t count) {
+            const auto found = std::find_if(SceneShaderAbi::Constants.begin(), SceneShaderAbi::Constants.end(),
+                [&](const auto& member) { return member.program == program && member.name == name; });
+            Expect(found != SceneShaderAbi::Constants.end() && found->type == type && found->count == count,
+                "logical constant capacity/type drift");
+        };
+        check("main", "mtx_stack", SceneShaderAbi::ValueType::Mat4, MatrixStackCapacity);
+        check("shift", "shift_table", SceneShaderAbi::ValueType::Float, ShiftTableLength);
+        check("shift", "white_table", SceneShaderAbi::ValueType::Float, WhiteoutTableLength);
+        Expect(SceneShaderAbi::Constants.size() == 55 && SceneShaderAbi::Textures.size() == 8,
+            "production program interface coverage changed");
+        Expect(SceneShaderAbi::TextureUnit("backdrop", "noise_tex") == 1,
+            "backdrop noise must use the auxiliary texture unit");
     }
+
+    void TestDesktopUniformContract()
+    {
+        using MphRead::Shaders;
+        struct Program { std::string_view Name; const std::string* Vertex; const std::string* Fragment; };
+        const Program programs[]{
+            {"main", &Shaders::VertexShader, &Shaders::FragmentShader},
+            {"composite", &Shaders::RttVertexShader, &Shaders::RttFragmentShader},
+            {"cel", &Shaders::RttVertexShader, &Shaders::CelFragmentShader},
+            {"shift", &Shaders::RttVertexShader, &Shaders::ShiftFragmentShader},
+            {"backdrop", &Shaders::BackdropVertexShader, &Shaders::BackdropFragmentShader}};
+        const std::regex declaration(R"(uniform (\w+)(?:\[(\d+)\])? (\w+);)");
+        const auto typeName = [](SceneShaderAbi::ValueType type) -> std::string {
+            using SceneShaderAbi::ValueType;
+            switch (type) {
+            case ValueType::Bool: return "bool"; case ValueType::Int: return "int"; case ValueType::Float: return "float";
+            case ValueType::Vec3: return "vec3"; case ValueType::Vec4: return "vec4"; case ValueType::Mat4: return "mat4";
+            }
+            throw std::logic_error("Unknown logical shader value type.");
+        };
+        for (const auto& program : programs)
+        {
+            std::map<std::string, std::pair<std::string, unsigned long>> actual, expected;
+            for (const auto* source : {program.Vertex, program.Fragment})
+                for (auto i = std::sregex_iterator(source->begin(), source->end(), declaration); i != std::sregex_iterator(); ++i)
+                {
+                    const auto& match = *i;
+                    const std::pair value{match[1].str(), match[2].matched ? std::stoul(match[2].str()) : 0UL};
+                    const auto [previous, inserted] = actual.emplace(match[3].str(), value);
+                    Expect(inserted || previous->second == value, "uniform type differs between stages");
+                }
+            for (const auto& member : SceneShaderAbi::Constants)
+                if (member.program == program.Name)
+                    expected.emplace(member.name, std::pair{typeName(member.type), static_cast<unsigned long>(member.count)});
+            for (const auto& texture : SceneShaderAbi::Textures)
+                if (texture.program == program.Name) expected.emplace(texture.name, std::pair{std::string("sampler2D"), 0UL});
+            Expect(actual == expected, std::string(program.Name) + " desktop source differs from the logical ABI");
+        }
+    }
+
 }
 
 int main()
@@ -176,10 +211,13 @@ int main()
     try
     {
         TestTablesAreDistinct();
-        TestDesktopUsesTheAliasTable();
+        TestLogicalSceneAbi();
+        TestPipelineLayoutOwnsItsContract();
+        TestDesktopUsesTheCommonInterface();
         TestVulkanMatchesThePlan();
         TestDesktopShadersUseExplicitInputs();
-        TestVulkanPacking();
+        TestLogicalConstantArrays();
+        TestDesktopUniformContract();
         std::cout << "ShaderInterface tests passed.\n";
         return 0;
     }

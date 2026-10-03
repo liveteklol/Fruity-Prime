@@ -436,12 +436,46 @@ namespace MphRead::Entities
         }
     }
 
+    void PlayerEntity::ReleaseReferences() noexcept
+    {
+        _halfturret.reset();
+        _enemySpawner.reset();
+        _attachedEnemy.reset();
+        _field35C.reset();
+        _morphCamera.reset();
+        _octolithFlag.reset();
+        _lastJumpPad.reset();
+        _burnedBy.reset();
+        _lastTarget.reset();
+        _shockCoilTarget.reset();
+        if (_beams)
+        {
+            _beams->ReleaseReferences();
+        }
+        _beams.reset();
+        _equipInfo.reset();
+        _deathaltEffect.reset();
+        _doubleDmgEffect.reset();
+        _burnEffect.reset();
+        _furlEffect.reset();
+        _boostEffect.reset();
+        _muzzleEffect.reset();
+        _chargeEffect.reset();
+        _syluxBombs.fill(nullptr);
+        AiData.reset();
+    }
+
     void PlayerEntity::Reset()
     {
         for (std::int32_t i = 0; i < static_cast<std::int32_t>(_players.size()); ++i)
         {
+            if (const std::shared_ptr<PlayerEntity>& slot = ManagedAt(_players, i))
+            {
+                slot->ReleaseReferences();
+            }
             ManagedAt(_players, i).reset();
         }
+        PlayerAiData::InitializeGlobals();
         _playerCount = 0;
         _playersCreated = 0;
         _mainPlayerIndex = 0;

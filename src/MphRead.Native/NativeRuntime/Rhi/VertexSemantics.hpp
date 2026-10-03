@@ -40,18 +40,10 @@ namespace MphRead::NativeRuntime::Rhi
         "a_texcoord1",
     };
 
-    // Desktop OpenGL (compatibility context, GLSL 1.20 with `attribute`).
-    //
-    // These are the conventional attributes' own slots in the NV_vertex_program
-    // alias table (vertex 0, normal 2, colour 3, texcoord0 8, texcoord1 9).
-    // The GL 2.x specification says generic and conventional attributes never
-    // alias; NVIDIA's compatibility driver aliases them anyway, and the
-    // launcher's overlay still draws with fixed function through the
-    // conventional arrays. Any other numbering puts one stream in another's
-    // slot on that driver -- which is what the Phase 4 colour regression was:
-    // texcoords at location 3 read back as gl_Color.
+    // Desktop inputs are explicit generic attributes, in the same order as
+    // Vulkan. No conventional arrays or NV_vertex_program alias slots are used.
     inline constexpr std::array<std::uint32_t, VertexSemanticCount> OpenGlDesktopLocations{
-        0U, 2U, 3U, 8U, 9U,
+        0U, 1U, 2U, 3U, 4U,
     };
 
     // OpenGL ES 3.0 (the Android head). Its shaders are written with

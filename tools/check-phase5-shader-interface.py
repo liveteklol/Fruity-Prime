@@ -15,6 +15,7 @@ Fails when
 
 from __future__ import annotations
 
+from scene_shader_abi import read_contract, read_programs
 import hashlib
 import pathlib
 import re
@@ -29,6 +30,9 @@ OPENGL_BACKEND = NATIVE / "NativeRuntime" / "Rhi" / "OpenGL"
 
 BUILTIN = re.compile(r"\bgl_(Vertex|Normal|Color|MultiTexCoord\d|SecondaryColor|FogCoord)\b")
 SHADER_BLOCK = re.compile(r'R"(shader|glsl)\((.*?)\)\1"', re.S)
+CONVENTIONAL = re.compile(
+    r"\b(?:GL::(?:EnableClientState|DisableClientState|VertexPointer|ColorPointer|NormalPointer|TexCoordPointer|ClientActiveTexture)"
+    r"|::gl(?:EnableClientState|DisableClientState|VertexPointer|ColorPointer|NormalPointer|TexCoordPointer|ClientActiveTexture|Color[34]f|Normal3f|TexCoord[23]f))\s*\(")
 SEMANTIC_ORDER = ("a_position", "a_normal", "a_color", "a_texcoord", "a_texcoord1")
 MIGRATED = re.compile(
     r"_shaderLocations->(Light[12](Vector|Color)|Fog(Color|MinDistance|MaxDistance)"
@@ -65,6 +69,10 @@ def main() -> int:
             scanned += 1
             for hit in BUILTIN.finditer(block.group(2)):
                 errors.append(f"{path.relative_to(ROOT)}: shader reads built-in {hit.group(0)}")
+        if path.name != "GLAndroid.cpp":
+            for line_no, line in enumerate(text.splitlines(), 1):
+                if CONVENTIONAL.search(line):
+                    errors.append(f"{path.relative_to(ROOT)}:{line_no}: desktop conventional vertex input")
         if OPENGL_BACKEND not in path.parents:
             for line_no, line in enumerate(text.splitlines(), 1):
                 if (path.name, line.strip()) in ALLOWED:
@@ -74,7 +82,15 @@ def main() -> int:
                         f"{path.relative_to(ROOT)}:{line_no}: uploads a ShaderConstantSink "
                         f"group through a raw uniform location")
 
+    try:
+        logical = read_contract()
+        read_programs(DESKTOP_SHADERS, logical)
+    except ValueError as error:
+        errors.append(f"Logical scene ABI: {error}")
+
     semantics = read(SEMANTICS)
+    if table(semantics, "OpenGlDesktopLocations") != table(semantics, "VulkanLocations"):
+        errors.append("Desktop OpenGL and Vulkan vertex locations must agree")
     es_table = dict(zip(SEMANTIC_ORDER, table(semantics, "OpenGlEsLocations")))
     es = read(ES_SHADERS)
     for location, name in re.findall(r"layout\(location = (\d+)\) in \w+ (a_\w+);", es):
@@ -94,7 +110,7 @@ def main() -> int:
             print(f"FAIL: {error}")
         return 1
     print(f"Phase 5 shader interface audit passed: {scanned} shader sources, "
-          f"no built-in vertex attributes, ES locations and hashes in sync.")
+          f"no built-in or conventional vertex inputs, desktop/Vulkan locations agree, ES unchanged.")
     return 0
 
 

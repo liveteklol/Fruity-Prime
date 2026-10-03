@@ -1,6 +1,7 @@
 #include "ScreenCapture.hpp"
+#include "../NativeRuntime/Rhi/OpenGL/OpenGlDiagnostics.hpp"
+#include "../NativeRuntime/Rhi/SceneBackend.hpp"
 
-#include "../NativeRuntime/OpenTK/GL.hpp"
 #include "../NativeRuntime/OpenTK/GLFW.hpp"
 #include "../NativeRuntime/System/Console.hpp"
 #include "../NativeRuntime/System/Globalization.hpp"
@@ -125,28 +126,19 @@ namespace
 
 namespace
 {
-    // GL_KHR_debug and the two glGet forms this file reads, which the managed
-    // build reaches through OpenTK's own GL class.
-    using GlDebugProc = void (*)(
-        std::int32_t, std::int32_t, std::int32_t, std::int32_t, std::int32_t,
-        const char*, const void*);
+    namespace GlDiag = ::MphRead::NativeRuntime::Rhi::OpenGL;
+    using GlDebugProc = GlDiag::DebugProc;
 
-    void GlEnable(std::int32_t capability)
-    {
-        ::OpenTK::Graphics::OpenGL::GL::Enable(
-            static_cast<::OpenTK::Graphics::OpenGL::GL::EnableCap>(capability));
-    }
+    void GlEnable(std::int32_t capability) { GlDiag::EnableCapability(capability); }
 
     void GlDebugMessageCallback(GlDebugProc callback, const void* userParam)
     {
-        ::OpenTK::Graphics::OpenGL::GL::DebugMessageCallback(
-            reinterpret_cast<void*>(callback), userParam);
+        GlDiag::DebugMessageCallback(callback, userParam);
     }
 
     [[nodiscard]] std::optional<std::string> GlGetString(std::int32_t name)
     {
-        std::string value = ::OpenTK::Graphics::OpenGL::GL::GetString(
-            static_cast<::OpenTK::Graphics::OpenGL::GL::StringName>(name));
+        std::string value = GlDiag::ContextString(name);
         if (value.empty())
         {
             return std::nullopt;
@@ -154,10 +146,7 @@ namespace
         return value;
     }
 
-    [[nodiscard]] std::int32_t GlGetInteger(std::int32_t pname)
-    {
-        return ::OpenTK::Graphics::OpenGL::GL::GetInteger(pname);
-    }
+    [[nodiscard]] std::int32_t GlGetInteger(std::int32_t pname) { return GlDiag::ContextInteger(pname); }
 
     [[nodiscard]] std::pair<std::int32_t, std::int32_t> ContextVersion()
     {
@@ -259,15 +248,15 @@ namespace MphRead::Mods
             const std::int32_t byteCount = UncheckedMultiply(
                 UncheckedMultiply(width, height), 3);
             std::vector<std::uint8_t> buffer(static_cast<std::size_t>(byteCount));
-            ::OpenTK::Graphics::OpenGL::GL::BindFramebuffer(
-                ::OpenTK::Graphics::OpenGL::GL::FramebufferTarget::ReadFramebuffer, 0);
-            ::OpenTK::Graphics::OpenGL::GL::ReadBuffer(
-                ::OpenTK::Graphics::OpenGL::GL::ReadBufferMode::Back);
-            ::OpenTK::Graphics::OpenGL::GL::PixelStore(
-                ::OpenTK::Graphics::OpenGL::GL::PixelStoreParameter::PackAlignment, 1);
-            ::OpenTK::Graphics::OpenGL::GL::ReadPixels(0, 0, width, height,
-                ::OpenTK::Graphics::OpenGL::GL::PixelFormat::Rgb,
-                ::OpenTK::Graphics::OpenGL::GL::PixelType::UnsignedByte, buffer.data());
+            // The window as the device that draws it holds it: OpenGL's back
+            // buffer, or the Vulkan window target the swapchain is fed from.
+            namespace Rhi = ::MphRead::NativeRuntime::Rhi;
+            auto commands = Rhi::SceneDevice().CreateCommandList();
+            Rhi::RenderingInfo info{};
+            info.width = static_cast<std::uint32_t>(width);
+            info.height = static_cast<std::uint32_t>(height);
+            info.swapchain = true;
+            commands->ReadColor(info, 0, 0, info.width, info.height, Rhi::TextureFormat::RGB8Unorm, buffer.data());
             return buffer;
         };
         return Save(nullptr, path, read);

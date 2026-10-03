@@ -8,6 +8,7 @@ namespace MphRead
 {
     enum class Hunter : std::uint8_t;
 }
+namespace MphRead::NativeRuntime::Rhi { enum class LowLatencyMode : std::uint8_t; }
 
 namespace MphRead::Mods
 {
@@ -73,6 +74,12 @@ namespace MphRead::Mods::Launcher
         [[nodiscard]] static bool AutoUpdate() noexcept;
         static void AutoUpdate(bool value) noexcept;
 
+        // Which renderer the game starts with: "opengl", "vulkan" or "auto".
+        // Read at the next start (the window is made for one backend).
+        [[nodiscard]] static const std::string& Renderer() noexcept;
+        static void Renderer(std::string value);
+        [[nodiscard]] static NativeRuntime::Rhi::LowLatencyMode LowLatency() noexcept;
+        static void LowLatency(NativeRuntime::Rhi::LowLatencyMode value) noexcept;
         [[nodiscard]] static MphRead::Mods::WindowStartMode WindowMode() noexcept;
         static void WindowMode(MphRead::Mods::WindowStartMode value) noexcept;
 
@@ -146,6 +153,8 @@ namespace MphRead::Mods::Launcher
         static std::int32_t _lastKind;
         static bool _autoUpdate;
         static MphRead::Mods::WindowStartMode _windowMode;
+        static std::string _renderer;
+        static NativeRuntime::Rhi::LowLatencyMode _lowLatency;
         static std::int32_t _windowWidth;
         static std::int32_t _windowHeight;
         static std::int32_t _windowX;

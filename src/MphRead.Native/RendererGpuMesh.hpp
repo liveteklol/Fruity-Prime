@@ -87,6 +87,13 @@ namespace MphRead
     // sequence without exposing backend buffer names to renderer/domain types.
     void BuildTransientIndexSequence(std::span<std::uint32_t> indices);
 
+    // Preserve the cartridge primitive winding when lowering legacy quads,
+    // strips and fans to the triangle/line lists shared by current backends.
+    void AppendSceneTriangleIndices(std::vector<std::uint32_t>& output,
+        std::span<const std::uint32_t> input, ScenePrimitiveTopology topology);
+    void AppendTransientDrawIndices(std::vector<std::uint32_t>& output,
+        std::span<const std::uint32_t> input, TransientPrimitiveTopology topology);
+
     class TransientGeometryResource
     {
     public:

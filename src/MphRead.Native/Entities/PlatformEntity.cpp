@@ -427,6 +427,10 @@ namespace MphRead::Entities
 
     void PlatformEntity::DestroyBeams()
     {
+        if (_beams)
+        {
+            _beams->ReleaseReferences();
+        }
         _beams.reset();
     }
 

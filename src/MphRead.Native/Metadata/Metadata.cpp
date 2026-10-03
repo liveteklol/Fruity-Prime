@@ -338,37 +338,37 @@ OpenTK::Mathematics::Vector3 GetColor(std::uint16_t value) noexcept
 }
 
 const std::array<std::pair<int, std::vector<int>>, 13> ModeLayers{{
-    {1, std::vector<int>{0, 1, 2}},
-    {2, std::vector<int>{3}},
-    {3, std::vector<int>{15}},
-    {4, std::vector<int>{15}},
-    {5, std::vector<int>{12}},
-    {6, std::vector<int>{8, 9, 10}},
-    {7, std::vector<int>{11}},
-    {8, std::vector<int>{4, 5, 6}},
-    {9, std::vector<int>{7}},
-    {10, std::vector<int>{14}},
-    {11, std::vector<int>{14}},
-    {12, std::vector<int>{0, 1, 2}},
-    {15, std::vector<int>{13}},
+    {static_cast<int>(GameMode::Battle), std::vector<int>{0, 1, 2}},
+    {static_cast<int>(GameMode::BattleTeams), std::vector<int>{3}},
+    {static_cast<int>(GameMode::Survival), std::vector<int>{15}},
+    {static_cast<int>(GameMode::SurvivalTeams), std::vector<int>{15}},
+    {static_cast<int>(GameMode::Capture), std::vector<int>{12}},
+    {static_cast<int>(GameMode::Bounty), std::vector<int>{8, 9, 10}},
+    {static_cast<int>(GameMode::BountyTeams), std::vector<int>{11}},
+    {static_cast<int>(GameMode::Nodes), std::vector<int>{4, 5, 6}},
+    {static_cast<int>(GameMode::NodesTeams), std::vector<int>{7}},
+    {static_cast<int>(GameMode::Defender), std::vector<int>{14}},
+    {static_cast<int>(GameMode::DefenderTeams), std::vector<int>{14}},
+    {static_cast<int>(GameMode::PrimeHunter), std::vector<int>{0, 1, 2}},
+    {static_cast<int>(GameMode::Unknown15), std::vector<int>{13}},
 }};
 
 std::string_view ModeName(int value)
 {
     switch (value)
     {
-    case 1: return "Battle";
-    case 2: return "BattleTeams";
-    case 3: return "Survival";
-    case 4: return "SurvivalTeams";
-    case 5: return "Capture";
-    case 6: return "Bounty";
-    case 7: return "BountyTeams";
-    case 8: return "Nodes";
-    case 9: return "NodesTeams";
-    case 10: return "Defender";
-    case 11: return "DefenderTeams";
-    case 12: return "PrimeHunter";
+    case static_cast<int>(GameMode::Battle): return "Battle";
+    case static_cast<int>(GameMode::BattleTeams): return "BattleTeams";
+    case static_cast<int>(GameMode::Survival): return "Survival";
+    case static_cast<int>(GameMode::SurvivalTeams): return "SurvivalTeams";
+    case static_cast<int>(GameMode::Capture): return "Capture";
+    case static_cast<int>(GameMode::Bounty): return "Bounty";
+    case static_cast<int>(GameMode::BountyTeams): return "BountyTeams";
+    case static_cast<int>(GameMode::Nodes): return "Nodes";
+    case static_cast<int>(GameMode::NodesTeams): return "NodesTeams";
+    case static_cast<int>(GameMode::Defender): return "Defender";
+    case static_cast<int>(GameMode::DefenderTeams): return "DefenderTeams";
+    case static_cast<int>(GameMode::PrimeHunter): return "PrimeHunter";
     case 15: return "Unknown15";
     default: return "";
     }
@@ -1469,6 +1469,7 @@ const ObjectMetadata& GetObjectById(std::uint32_t id)
 const PlatformMetadata* GetPlatformById(int id)
 {
     if (id < 0 || id > static_cast<int>(Platforms.size())) throw std::invalid_argument("id");
+    if (id == 1) id = 0;
     const auto& value=Platforms.at(static_cast<std::size_t>(id));
     return value.get();
 }

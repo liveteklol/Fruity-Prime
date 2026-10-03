@@ -32,6 +32,11 @@ namespace MphRead::NativeRuntime::Skia
         return _impl == nullptr ? 0 : _impl->Height;
     }
 
+    const ::MphRead::NativeRuntime::Rhi::Texture* GpuSurface::RhiTexture() const noexcept
+    {
+        return nullptr;
+    }
+
     std::int32_t GpuSurface::TextureId() const noexcept
     {
         return 0;

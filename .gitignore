@@ -421,3 +421,6 @@ android/app/src/main/jniLibs/*/libFruityPrime.so
 
 # Gradle's machine-local dependency and execution cache.
 android/.gradle/
+
+# Local driver compilation data; a renderer recreates it when absent.
+render-cache/

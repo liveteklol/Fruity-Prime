@@ -1,4 +1,9 @@
+#if defined(__ANDROID__)
+#include "OpenGlAndroidLauncherPhotoInternal.inc"
+#else
 #include "OpenGlLauncherPhoto.hpp"
+#include "OpenGlWindowDraw.hpp"
+#include "OpenGlDevice.hpp"
 
 #include "../../../Mods/DebugLog.hpp"
 #include "../../../Shaders.hpp"
@@ -25,48 +30,6 @@ namespace MphRead::NativeRuntime::Rhi::OpenGL
 
     namespace
     {
-        struct BufferCleanup final
-        {
-            std::int32_t Vertex = 0;
-            std::int32_t Index = 0;
-
-            ~BufferCleanup()
-            {
-                try
-                {
-                    if (Index != 0)
-                    {
-                        GL::DeleteBuffer(Index);
-                    }
-                    if (Vertex != 0)
-                    {
-                        GL::DeleteBuffer(Vertex);
-                    }
-                }
-                catch (...)
-                {
-                }
-            }
-        };
-
-        struct ShaderCleanup final
-        {
-            std::int32_t Vertex = 0;
-            std::int32_t Fragment = 0;
-
-            ~ShaderCleanup()
-            {
-                if (Fragment != 0)
-                {
-                    GL::DeleteShader(Fragment);
-                }
-                if (Vertex != 0)
-                {
-                    GL::DeleteShader(Vertex);
-                }
-            }
-        };
-
         [[nodiscard]] std::int64_t BackdropClock()
         {
             static const std::int64_t clock = Runtime::StopwatchGetTimestamp();
@@ -79,13 +42,7 @@ namespace MphRead::NativeRuntime::Rhi::OpenGL
     std::int32_t OpenGlLauncherPhoto::_width = 0;
     std::int32_t OpenGlLauncherPhoto::_height = 0;
     bool OpenGlLauncherPhoto::_tried = false;
-    std::int32_t OpenGlLauncherPhoto::_program = 0;
-    bool OpenGlLauncherPhoto::_programTried = false;
-    std::int32_t OpenGlLauncherPhoto::_photoUniform = -1;
-    std::int32_t OpenGlLauncherPhoto::_timeUniform = -1;
-    std::int32_t OpenGlLauncherPhoto::_viewWidthUniform = -1;
-    std::int32_t OpenGlLauncherPhoto::_viewHeightUniform = -1;
-    std::int32_t OpenGlLauncherPhoto::_strengthUniform = -1;
+    std::unique_ptr<OpenGlWindowDraw> OpenGlLauncherPhoto::_draw;
 
     void OpenGlLauncherPhoto::Enabled(bool value) noexcept
     {
@@ -97,65 +54,13 @@ namespace MphRead::NativeRuntime::Rhi::OpenGL
         return _enabled;
     }
 
-    bool OpenGlLauncherPhoto::EnsureProgram()
+    void OpenGlLauncherPhoto::Forget() noexcept
     {
-        if (_programTried)
-        {
-            return _program != 0;
-        }
-        _programTried = true;
-        ShaderCleanup shaders;
-        try
-        {
-            shaders.Vertex = GL::CreateShader(GL::ShaderType::VertexShader);
-            GL::ShaderSource(shaders.Vertex, ::MphRead::Shaders::BackdropVertexShader);
-            GL::CompileShader(shaders.Vertex);
-            std::int32_t vertexOk = 0;
-            GL::GetShader(shaders.Vertex, GL::ShaderParameter::CompileStatus, vertexOk);
-
-            shaders.Fragment = GL::CreateShader(GL::ShaderType::FragmentShader);
-            GL::ShaderSource(shaders.Fragment, ::MphRead::Shaders::BackdropFragmentShader);
-            GL::CompileShader(shaders.Fragment);
-            std::int32_t fragmentOk = 0;
-            GL::GetShader(shaders.Fragment, GL::ShaderParameter::CompileStatus, fragmentOk);
-            if (vertexOk == 0 || fragmentOk == 0)
-            {
-                DebugLog::Line("ui", "the moving backdrop's shaders would not compile: "
-                    + GL::GetShaderInfoLog(shaders.Vertex) + " " + GL::GetShaderInfoLog(shaders.Fragment));
-                return false;
-            }
-
-            const std::int32_t program = GL::CreateProgram();
-            GL::AttachShader(program, shaders.Vertex);
-            GL::AttachShader(program, shaders.Fragment);
-            GL::LinkProgram(program);
-            GL::DetachShader(program, shaders.Vertex);
-            GL::DetachShader(program, shaders.Fragment);
-            std::int32_t linked = 0;
-            GL::GetProgram(program, GL::GetProgramParameterName::LinkStatus, linked);
-            if (linked == 0)
-            {
-                DebugLog::Line("ui", "the moving backdrop would not link: " + GL::GetProgramInfoLog(program));
-                GL::DeleteProgram(program);
-                return false;
-            }
-
-            _program = program;
-            _photoUniform = GL::GetUniformLocation(program, "photo");
-            _timeUniform = GL::GetUniformLocation(program, "time");
-            _viewWidthUniform = GL::GetUniformLocation(program, "view_width");
-            _viewHeightUniform = GL::GetUniformLocation(program, "view_height");
-            _strengthUniform = GL::GetUniformLocation(program, "strength");
-            DebugLog::Line("ui", "the moving backdrop is on");
-            return true;
-        }
-        catch (...)
-        {
-            _program = 0;
-            DebugLog::Line("ui", "the moving backdrop could not be set up: "
-                + ::MphRead::NativeRuntime::ExceptionMessage(std::current_exception()));
-            return false;
-        }
+        _texture = 0;
+        _width = 0;
+        _height = 0;
+        _tried = false;
+        _draw.reset();
     }
 
     void OpenGlLauncherPhoto::Draw(std::int32_t width, std::int32_t height)
@@ -182,106 +87,17 @@ namespace MphRead::NativeRuntime::Rhi::OpenGL
         const float v0 = (1 - v) / 2;
         const float v1 = v0 + v;
 
-        // Generate the moving layer in the fragment shader. CPU work here is
-        // scalar uniform setup only: there is no pixel fill or noise upload.
-        const bool moving = EnsureProgram();
-        GL::UseProgram(moving ? _program : 0);
-        GL::Disable(GL::EnableCap::DepthTest);
-        GL::Disable(GL::EnableCap::CullFace);
-        GL::Disable(GL::EnableCap::AlphaTest);
-        GL::Disable(GL::EnableCap::StencilTest);
-        GL::Disable(GL::EnableCap::Blend);
-
-        GL::ActiveTexture(GL::TextureUnit::Texture0);
-        GL::Enable(GL::EnableCap::Texture2D);
-        GL::BindTexture(GL::TextureTarget::Texture2D, _texture);
-        GL::TexEnv(GL::TextureEnvTarget::TextureEnv, GL::TextureEnvParameter::TextureEnvMode,
-            static_cast<std::int32_t>(GL::TextureEnvMode::Replace));
+        const std::array<WindowVertex, 4> vertices{{
+            {{1, 1, 0}, {u1, v0}, {1, 0}}, {{-1, 1, 0}, {u0, v0}, {0, 0}},
+            {{1, -1, 0}, {u1, v1}, {1, 1}}, {{-1, -1, 0}, {u0, v1}, {0, 1}}}};
+        if (!_draw) _draw = std::make_unique<OpenGlWindowDraw>();
+        const float seconds = static_cast<float>(
+            Runtime::TimeSpanTotalMilliseconds(Runtime::StopwatchGetElapsedTicks(BackdropClock())) / 1000.0);
+        _draw->Draw(_texture, vertices, width, height, false, true, Strength, seconds);
         GL::Color4(1, 1, 1, 1);
-        if (moving)
-        {
-            const float seconds = static_cast<float>(
-                Runtime::TimeSpanTotalMilliseconds(Runtime::StopwatchGetElapsedTicks(BackdropClock())) / 1000.0);
-            GL::Uniform1(_photoUniform, 0);
-            GL::Uniform1(_strengthUniform, Strength);
-            GL::Uniform1(_timeUniform, seconds);
-            GL::Uniform1(_viewWidthUniform, static_cast<float>(width));
-            GL::Uniform1(_viewHeightUniform, static_cast<float>(height));
-        }
-
-        GL::MatrixMode(GL::MatrixMode::Projection);
-        GL::PushMatrix();
-        GL::LoadIdentity();
-        GL::MatrixMode(GL::MatrixMode::Modelview);
-        GL::PushMatrix();
-        GL::LoadIdentity();
-
-        struct BackdropVertex final
-        {
-            float Position[3];
-            float PhotoCoord[2];
-            float NoiseCoord[2];
-        };
-        const BackdropVertex vertices[]{
-            {{ 1.0F,  1.0F, 0.0F}, {u1, v0}, {1.0F, 0.0F}},
-            {{-1.0F,  1.0F, 0.0F}, {u0, v0}, {0.0F, 0.0F}},
-            {{ 1.0F, -1.0F, 0.0F}, {u1, v1}, {1.0F, 1.0F}},
-            {{-1.0F, -1.0F, 0.0F}, {u0, v1}, {0.0F, 1.0F}}
-        };
-        constexpr std::uint32_t indices[]{0U, 1U, 2U, 3U};
-        BufferCleanup buffers{};
-        buffers.Vertex = GL::GenBuffer();
-        buffers.Index = GL::GenBuffer();
-        GL::BindBuffer(GL::BufferTarget::ArrayBuffer, buffers.Vertex);
-        GL::BufferData(GL::BufferTarget::ArrayBuffer, sizeof(vertices),
-            vertices, GL::BufferUsageHint::StreamDraw);
-        GL::BindBuffer(GL::BufferTarget::ElementArrayBuffer, buffers.Index);
-        GL::BufferData(GL::BufferTarget::ElementArrayBuffer, sizeof(indices),
-            indices, GL::BufferUsageHint::StreamDraw);
-
-        // Semantic inputs: the backdrop shader reads them as generic
-        // attributes, and GL mirrors them into the conventional arrays for the
-        // fixed-function fallback (a photograph with no moving layer).
-        namespace VI = GL::VertexInput;
-        GL::EnableVertexAttribArray(VI::Position);
-        GL::VertexAttribPointer(VI::Position, 3, GL::PointerType::Float, false,
-            static_cast<std::int32_t>(sizeof(BackdropVertex)),
-            reinterpret_cast<const void*>(offsetof(BackdropVertex, Position)));
-        GL::EnableVertexAttribArray(VI::TexCoord);
-        GL::VertexAttribPointer(VI::TexCoord, 2, GL::PointerType::Float, false,
-            static_cast<std::int32_t>(sizeof(BackdropVertex)),
-            reinterpret_cast<const void*>(offsetof(BackdropVertex, PhotoCoord)));
-        GL::EnableVertexAttribArray(VI::TexCoord1);
-        GL::VertexAttribPointer(VI::TexCoord1, 2, GL::PointerType::Float, false,
-            static_cast<std::int32_t>(sizeof(BackdropVertex)),
-            reinterpret_cast<const void*>(offsetof(BackdropVertex, NoiseCoord)));
-
-        GL::DrawElements(GL::PrimitiveType::TriangleStrip, 4,
-            GL::DrawElementsType::UnsignedInt, nullptr);
-
-        GL::DisableVertexAttribArray(VI::TexCoord1);
-        GL::DisableVertexAttribArray(VI::TexCoord);
-        GL::DisableVertexAttribArray(VI::Position);
-        GL::BindBuffer(GL::BufferTarget::ArrayBuffer, 0);
-        GL::BindBuffer(GL::BufferTarget::ElementArrayBuffer, 0);
-        // Client arrays do not update fixed-function current texture
-        // coordinates. Preserve the terminal state of the former immediate path.
         GL::MultiTexCoord2(GL::TextureUnit::Texture0, u0, v1);
-        GL::MultiTexCoord2(GL::TextureUnit::Texture1, 0.0F, 1.0F);
-
-        GL::PopMatrix();
-        GL::MatrixMode(GL::MatrixMode::Projection);
-        GL::PopMatrix();
-        GL::MatrixMode(GL::MatrixMode::Modelview);
-        GL::TexEnv(GL::TextureEnvTarget::TextureEnv, GL::TextureEnvParameter::TextureEnvMode,
-            static_cast<std::int32_t>(GL::TextureEnvMode::Modulate));
-        GL::BindTexture(GL::TextureTarget::Texture2D, 0);
-        if (moving)
-        {
-            GL::UseProgram(0);
-        }
+        GL::MultiTexCoord2(GL::TextureUnit::Texture1, 0, 1);
         GL::Enable(GL::EnableCap::Blend);
-        GL::Enable(GL::EnableCap::DepthTest);
     }
 
     bool OpenGlLauncherPhoto::Ensure()
@@ -315,6 +131,7 @@ namespace MphRead::NativeRuntime::Rhi::OpenGL
                 return false;
             }
 
+            AdmitInteropTextureStorage(TextureFormat::RGBA8Unorm, _width, _height);
             GL::ActiveTexture(GL::TextureUnit::Texture0);
             _texture = Name;
             GL::BindTexture(GL::TextureTarget::Texture2D, _texture);
@@ -328,12 +145,7 @@ namespace MphRead::NativeRuntime::Rhi::OpenGL
             GL::PixelStore(GL::PixelStoreParameter::UnpackLsbFirst, 0);
             GL::TexImage2D(GL::TextureTarget::Texture2D, 0, GL::PixelInternalFormat::Rgba,
                 _width, _height, 0, GL::PixelFormat::Rgba, GL::PixelType::UnsignedByte, pixels->Pixels());
-            const ::OpenTK::Graphics::OpenGL::ErrorCode uploaded = GL::GetError();
-            if (uploaded != ::OpenTK::Graphics::OpenGL::ErrorCode::NoError)
-            {
-                DebugLog::Line("ui", "backdrop upload said "
-                    + ::OpenTK::Graphics::OpenGL::ToString(uploaded));
-            }
+            CheckInteropStorageResult("OpenGL launcher backdrop allocation");
             GL::TexParameter(GL::TextureTarget::Texture2D, GL::TextureParameterName::TextureBaseLevel, 0);
             GL::TexParameter(GL::TextureTarget::Texture2D, GL::TextureParameterName::TextureMaxLevel, 0);
             GL::TexParameter(GL::TextureTarget::Texture2D, GL::TextureParameterName::TextureMinFilter,
@@ -357,3 +169,5 @@ namespace MphRead::NativeRuntime::Rhi::OpenGL
         }
     }
 }
+
+#endif

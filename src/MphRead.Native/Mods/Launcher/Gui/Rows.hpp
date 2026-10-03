@@ -41,6 +41,7 @@ namespace MphRead::Mods::Launcher::Gui
         [[nodiscard]] std::int32_t Index() const noexcept { return _index; }
         void Index(std::int32_t value);
         [[nodiscard]] std::string Value() const { return _options.empty() ? std::string() : _options[static_cast<std::size_t>(_index)]; }
+        [[nodiscard]] const std::string& Label() const noexcept { return _label; }
 
         // Replace the options in place, e.g. after a room list changes.
         void SetItems(std::vector<std::string> options, std::int32_t index = 0);

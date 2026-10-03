@@ -89,6 +89,31 @@ namespace
         Expect(empty.empty(), "empty transient draw keeps an empty IBO");
     }
 
+    void TestPrimitiveWindingAndIncompleteTails()
+    {
+        const std::vector<std::uint32_t> input{10, 11, 12, 13, 14, 15, 16};
+        const auto scene = [&](ScenePrimitiveTopology topology, std::vector<std::uint32_t> expected) {
+            std::vector<std::uint32_t> result{99};
+            expected.insert(expected.begin(), 99);
+            AppendSceneTriangleIndices(result, input, topology);
+            Expect(result == expected, "triangle lowering preserves winding and ignores incomplete primitives");
+        };
+        scene(ScenePrimitiveTopology::Triangles, {10,11,12,13,14,15});
+        scene(ScenePrimitiveTopology::Quads, {10,11,12,10,12,13});
+        scene(ScenePrimitiveTopology::TriangleStrip, {10,11,12,12,11,13,12,13,14,14,13,15,14,15,16});
+        scene(ScenePrimitiveTopology::QuadStrip, {10,11,13,10,13,12,12,13,15,12,15,14});
+        std::vector<std::uint32_t> result;
+        AppendTransientDrawIndices(result, std::span(input).first(4), TransientPrimitiveTopology::LineLoop);
+        Expect(result == std::vector<std::uint32_t>{10,11,11,12,12,13,13,10}, "line loop closes exactly once");
+        result.clear();
+        AppendTransientDrawIndices(result, std::span(input).first(4), TransientPrimitiveTopology::TriangleFan);
+        Expect(result == std::vector<std::uint32_t>{10,11,12,10,12,13}, "fan keeps its common first vertex");
+        result.clear();
+        AppendSceneTriangleIndices(result, {}, ScenePrimitiveTopology::TriangleStrip);
+        AppendTransientDrawIndices(result, std::span(input).first(1), TransientPrimitiveTopology::LineLoop);
+        Expect(result.empty(), "incomplete primitives emit no indices");
+    }
+
     void TestCacheUsesLiveModelAndMeshIdentity()
     {
         GpuMeshCache cache{};
@@ -176,6 +201,7 @@ int main()
     {
         TestDrawPlanPreservesRanges();
         TestTransientIndexSequencePreservesSubmissionOrder();
+        TestPrimitiveWindingAndIncompleteTails();
         TestCacheUsesLiveModelAndMeshIdentity();
         std::cout << "RendererGpuMesh tests passed.\n";
         return 0;

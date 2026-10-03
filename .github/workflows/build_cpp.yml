@@ -1,8 +1,4 @@
-# Build the C++ port on every push and PR.
-#
-# The build steps themselves live in native-cpp-all.yml (the game on Windows,
-# Linux and macOS) and native-cpp-android.yml (the Android native library).
-# This file only decides *when* they run, so there is one definition of each.
+# Build, audit and package artifacts for desktop and Android C++.
 name: build_cpp
 
 on:
@@ -11,6 +7,18 @@ on:
     tags-ignore: ["**"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      checkout_ref:
+        description: Branch, tag, or commit to build (empty uses the current commit)
+        required: false
+        type: string
+        default: ""
+  workflow_call:
+    inputs:
+      checkout_ref:
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -18,8 +26,11 @@ permissions:
 # One run per branch: a push and the PR it updates build the same commit,
 # and a newer push makes an older run's result worthless.
 concurrency:
-  group: build_cpp-${{ github.head_ref || github.ref_name }}
+  group: build_cpp-${{ github.workflow }}-${{ inputs.checkout_ref || github.head_ref || github.ref_name }}
   cancel-in-progress: true
+
+env:
+  VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.cache/vcpkg/archives
 
 jobs:
   phase4_legacy_gl_audit:
@@ -28,6 +39,8 @@ jobs:
     steps:
       - name: Checkout C++ source
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
       - name: Reject display lists and immediate vertex submission
         run: python3 tools/check-phase4-legacy-gl.py
 
@@ -37,6 +50,8 @@ jobs:
     steps:
       - name: Checkout C++ source
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
       - name: Reject built-in vertex attributes and a drifted shader interface
         run: python3 tools/check-phase5-shader-interface.py
 
@@ -46,6 +61,8 @@ jobs:
     steps:
       - name: Checkout C++ source
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
       - name: Reject direct OpenGL in the renderer frontend
         run: python3 tools/check-phase9-frontend-gl.py
 
@@ -55,13 +72,481 @@ jobs:
     steps:
       - name: Checkout C++ source
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
       - name: Reject unclassified OpenGL dependencies
         run: |
           python3 tools/test-phase11-gl-boundaries.py
           python3 tools/check-phase11-gl-boundaries.py
 
-  desktop:
-    uses: ./.github/workflows/native-cpp-all.yml
+  phase26_rhi_isolation_audit:
+    name: phase26 / RHI backend isolation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout C++ source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
+      - name: Native GL and Vulkan only inside their backends
+        run: python3 tools/check-rhi-isolation.py
+
+  windows:
+    name: Windows / MSVC
+    runs-on: windows-2025
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+
+    steps:
+      - name: Checkout C++ source
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
+
+      - name: Set up MSVC environment for Ninja
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Set up pinned Windows vcpkg
+        id: vcpkg
+        shell: pwsh
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP "fruity-vcpkg"
+          git init $root
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git -C $root remote add origin https://github.com/microsoft/vcpkg.git
+          git -C $root fetch --depth 1 origin 07f4812200df3d3c931c0c8a6081d3b21fe2bf9f
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git -C $root checkout --detach FETCH_HEAD
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:VCPKG_ROOT = $root
+          "VCPKG_ROOT=$root" >> $env:GITHUB_ENV
+          & "$root/bootstrap-vcpkg.bat" -disableMetrics
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "VCPKG_INSTALLATION_ROOT=$root" >> $env:GITHUB_ENV
+          "commit=$(git -C $root rev-parse HEAD)" >> $env:GITHUB_OUTPUT
+          $compiler = (Get-Command cl.exe -ErrorAction Stop).Source
+          "compiler=$((Get-FileHash -LiteralPath $compiler -Algorithm SHA256).Hash)" >> $env:GITHUB_OUTPUT
+          & "$root/vcpkg.exe" version
+
+      # Separate archives by pinned ports, compiler and dependency recipe.
+      - name: Cache vcpkg binary archives
+        id: vcpkg-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+          key: native-vcpkg-windows-v2-${{ runner.arch }}-${{ steps.vcpkg.outputs.commit }}-${{ steps.vcpkg.outputs.compiler }}-${{ hashFiles('tools/ci/dependencies/windows-game.txt') }}
+          restore-keys: |
+            native-vcpkg-windows-v2-${{ runner.arch }}-${{ steps.vcpkg.outputs.commit }}-${{ steps.vcpkg.outputs.compiler }}-
+            native-vcpkg-all-${{ runner.os }}-${{ runner.arch }}-
+            native-vcpkg-v1-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Prepare vcpkg binary cache directory
+        shell: bash
+        run: mkdir -p "$VCPKG_DEFAULT_BINARY_CACHE"
+
+      - name: Install native dependencies
+        shell: pwsh
+        run: |
+          if (-not $env:VCPKG_INSTALLATION_ROOT) {
+            throw "VCPKG_INSTALLATION_ROOT is not set on the runner."
+          }
+          $vcpkg = Join-Path $env:VCPKG_INSTALLATION_ROOT "vcpkg.exe"
+          if (-not (Test-Path $vcpkg)) {
+            throw "vcpkg.exe was not found at $vcpkg"
+          }
+          $packages = @(Get-Content tools/ci/dependencies/windows-game.txt | Where-Object { $_.Trim() })
+          & $vcpkg install @packages --clean-after-build 2>&1 | Tee-Object -FilePath "$env:RUNNER_TEMP/vcpkg-install.log"
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+
+      # Save before the long game build so cancellation does not lose dependencies.
+      - name: Save vcpkg binary archives after install
+        if: steps.vcpkg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+          key: native-vcpkg-windows-v2-${{ runner.arch }}-${{ steps.vcpkg.outputs.commit }}-${{ steps.vcpkg.outputs.compiler }}-${{ hashFiles('tools/ci/dependencies/windows-game.txt') }}
+
+      - name: Upload dependency cache diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vcpkg-cache-windows-${{ github.run_id }}
+          retention-days: 7
+          path: |
+            ${{ runner.temp }}/vcpkg-install.log
+            ${{ runner.temp }}/fruity-vcpkg/installed/x64-windows/share/*/vcpkg_abi_info.txt
+
+      - name: Set up compiler cache
+        uses: mozilla-actions/sccache-action@v0.0.11
+        with:
+          version: "v0.16.0"
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          cmake -S . -B build/native -G "Ninja Multi-Config" `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT\scripts\buildsystems\vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows `
+            -DFRUITY_REQUIRE_VULKAN=ON `
+            -DCMAKE_C_COMPILER_LAUNCHER=sccache `
+            -DCMAKE_CXX_COMPILER_LAUNCHER=sccache `
+            -DCMAKE_POLICY_DEFAULT_CMP0141=NEW `
+            -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+
+      - name: Build C++ FruityPrime
+        shell: pwsh
+        run: |
+          cmake --build build/native --config RelWithDebInfo --parallel $env:NUMBER_OF_PROCESSORS --target fruity_prime
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+
+      - name: Backend contract (OpenGL, Vulkan, Skia Vulkan)
+        shell: pwsh
+        run: |
+          # One binary carries both backends; this says so without a GPU.
+          $contract = Join-Path $PWD 'rhi-contract.txt'
+          $process = Start-Process -FilePath build/native/RelWithDebInfo/FruityPrime.exe `
+            -ArgumentList '-rhicontract', $contract, '-noupdate' -Wait -PassThru -NoNewWindow
+          if ($process.ExitCode -ne 0) { throw "-rhicontract exited $($process.ExitCode)" }
+          Get-Content $contract
+          foreach ($line in 'opengl=compiled', 'vulkan=compiled', 'vulkan-shader-stages=10', 'skia-vulkan=compiled') {
+            if (-not (Select-String -Path $contract -SimpleMatch $line -Quiet)) { throw "backend contract is missing $line" }
+          }
+
+      - name: Report compiler cache statistics
+        if: always()
+        shell: pwsh
+        run: sccache --show-stats
+
+      - name: Upload Windows build
+        uses: actions/upload-artifact@v4
+        with:
+          name: FruityPrime-cpp-windows-${{ github.run_number }}
+          if-no-files-found: error
+          path: |
+            build/native/RelWithDebInfo/FruityPrime.exe
+            build/native/RelWithDebInfo/*.dll
+            build/native/RelWithDebInfo/fruity-prime-logo.png
+            build/native/RelWithDebInfo/fruity-prime-mark.png
+
+  linux:
+    name: Linux / GCC
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout C++ source
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
+
+      # Pin ports/tools: runner updates must not silently change Skia's ABI.
+      - name: Set up pinned vcpkg
+        id: vcpkg
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="${RUNNER_TEMP}/fruity-vcpkg"
+          git init "$root"
+          git -C "$root" remote add origin https://github.com/microsoft/vcpkg.git
+          git -C "$root" fetch --depth 1 origin 07f4812200df3d3c931c0c8a6081d3b21fe2bf9f
+          git -C "$root" checkout --detach FETCH_HEAD
+          "$root/bootstrap-vcpkg.sh" -disableMetrics
+          echo "root=$root" >> "$GITHUB_OUTPUT"
+          echo "commit=$(git -C "$root" rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "compiler=$(sha256sum /usr/bin/g++ | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+          "$root/vcpkg" version
+          g++ --version
+
+      # Reuse one archive per pinned dependency/toolchain set, rather than per run.
+      - name: Cache vcpkg binary archives
+        id: skia-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+          key: native-skia-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.vcpkg.outputs.commit }}-${{ steps.vcpkg.outputs.compiler }}-${{ hashFiles('tools/ci/dependencies/linux.txt') }}
+          restore-keys: |
+            native-skia-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.vcpkg.outputs.commit }}-
+            native-vcpkg-all-${{ runner.os }}-${{ runner.arch }}-
+            native-vcpkg-v1-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Prepare vcpkg binary cache directory
+        shell: bash
+        run: mkdir -p "$VCPKG_DEFAULT_BINARY_CACHE"
+
+      - name: Install native dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            libvulkan-dev \
+            glslc \
+            mesa-vulkan-drivers \
+            vulkan-validationlayers \
+            openbox \
+            xvfb \
+            xauth \
+            cmake \
+            autoconf \
+            autoconf-archive \
+            automake \
+            libtool \
+            libarchive-dev \
+            libcurl4-openssl-dev \
+            zlib1g-dev \
+            libgl-dev \
+            libglx-dev \
+            libopengl-dev \
+            libglfw3-dev \
+            libfreetype-dev \
+            libopenal-dev \
+            libicu-dev
+
+      - name: Install Skia Ganesh
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="${{ steps.vcpkg.outputs.root }}"
+          mapfile -t packages < tools/ci/dependencies/linux.txt
+          "$root/vcpkg" install "${packages[@]}" --clean-after-build 2>&1 | tee "$RUNNER_TEMP/skia-install.log"
+          echo "FRUITY_SKIA_PREFIX=$root/installed/x64-linux" >> "$GITHUB_ENV"
+
+      - name: Save Skia cache immediately after install
+        if: steps.skia-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+          key: native-skia-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.vcpkg.outputs.commit }}-${{ steps.vcpkg.outputs.compiler }}-${{ hashFiles('tools/ci/dependencies/linux.txt') }}
+
+      - name: Upload Skia cache diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: skia-cache-linux-${{ github.run_id }}
+          retention-days: 7
+          path: |
+            ${{ runner.temp }}/skia-install.log
+            ${{ steps.vcpkg.outputs.root }}/installed/x64-linux/share/*/vcpkg_abi_info.txt
+
+      # Refresh immutable snapshots weekly; avoid a full duplicate on every push.
+      - name: Select compiler cache generation
+        shell: bash
+        run: echo "COMPILER_CACHE_WEEK=$(date -u +%G-%V)" >> "$GITHUB_ENV"
+
+      - name: Set up ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: native-ccache-${{ runner.os }}-${{ runner.arch }}-gcc-game-${{ env.COMPILER_CACHE_WEEK }}
+          max-size: 500M
+          append-timestamp: false
+
+      - name: Configure
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S . -B build/native -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_PREFIX_PATH="${FRUITY_SKIA_PREFIX}" -DFRUITY_REQUIRE_VULKAN=ON
+
+      - name: Build C++ FruityPrime
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --build build/native --config RelWithDebInfo --parallel "$(nproc)" --target fruity_prime
+
+      - name: Backend contract (OpenGL, Vulkan, Skia Vulkan)
+        shell: bash
+        run: |
+          set -euo pipefail
+          build/native/FruityPrime -rhicontract build/native/rhi-contract.txt -noupdate
+          cat build/native/rhi-contract.txt
+          for line in opengl=compiled vulkan=compiled vulkan-shader-stages=10 skia-vulkan=compiled; do
+            grep -qxF "$line" build/native/rhi-contract.txt || { echo "backend contract is missing $line" >&2; exit 1; }
+          done
+
+      - name: SPIR-V is regenerated reproducibly
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The shaders are generated from Shaders.cpp in every build (none is
+          # committed); two independent generations must match each other
+          # and the build's own, word for word.
+          glslc="$(grep -E '^FRUITY_GLSLC:' build/native/CMakeCache.txt | cut -d= -f2-)"
+          for run in a b; do
+            python3 tools/generate-vulkan-scene-shaders.py --source src/MphRead.Native/Shaders.cpp --output "$RUNNER_TEMP/spirv-$run"
+            for source in "$RUNNER_TEMP"/spirv-$run/*.vert "$RUNNER_TEMP"/spirv-$run/*.frag; do
+              "$glslc" --target-env=vulkan1.3 --target-spv=spv1.5 -O0 "$source" -o "$source.spv"
+            done
+          done
+          count=0
+          for spv in "$RUNNER_TEMP"/spirv-a/*.spv; do
+            name="$(basename "$spv")"
+            cmp "$spv" "$RUNNER_TEMP/spirv-b/$name"
+            cmp "$spv" "build/native/generated/vulkan-shaders/$name"
+            count=$((count + 1))
+          done
+          test "$count" -eq 10
+          cmp "$RUNNER_TEMP/spirv-a/bindings.json" build/native/generated/vulkan-shaders/bindings.json
+          echo "SPIR-V reproducible: $count stages"
+
+      - name: Vulkan foundation runtime gate
+        shell: bash
+        env:
+          ALSOFT_DRIVERS: "null"
+        run: |
+          set -euo pipefail
+          xvfb-run -a build/native/FruityPrime -vulkancheck -noupdate 2>&1 | tee build/native/vulkan-foundation.log
+          grep -F 'foundation PASS; clean shutdown; validation=1' build/native/vulkan-foundation.log
+
+      - name: Vulkan resource runtime gate
+        shell: bash
+        env:
+          ALSOFT_DRIVERS: "null"
+        run: |
+          set -euo pipefail
+          xvfb-run -a build/native/FruityPrime -vulkanresourcecheck -noupdate 2>&1 | tee build/native/vulkan-resources.log
+          grep -F 'resources PASS; buffer upload/copy/readback; texture upload/readback/resize; transitions; live=0; validation=1; errors=0' build/native/vulkan-resources.log
+
+      - name: Vulkan presentation runtime gate
+        shell: bash
+        env:
+          ALSOFT_DRIVERS: "null"
+        run: |
+          set -euo pipefail
+          xvfb-run -a --server-args="-screen 0 1280x720x24" bash -lc '
+            set -euo pipefail
+            openbox --sm-disable > build/native/openbox.log 2>&1 &
+            window_manager_pid=$!
+            trap "kill $window_manager_pid 2>/dev/null || true" EXIT
+            sleep 1
+            build/native/FruityPrime -vulkanpresentcheck -noupdate 2>&1 | tee build/native/vulkan-presentation.log
+            build/native/FruityPrime -vulkanpresentfallbackcheck -noupdate 2>&1 | tee build/native/vulkan-presentation-fallback.log
+          '
+          grep -F 'presentation PASS; clear present; resize; fullscreen; minimize/restore; clean shutdown; validation=1; errors=0' build/native/vulkan-presentation.log
+          grep -F 'presentation PASS; clear present; resize; fullscreen; minimize/restore; clean shutdown; validation=1; errors=0' build/native/vulkan-presentation-fallback.log
+          grep -E 'fallback-retired-releases=[1-9][0-9]*' build/native/vulkan-presentation-fallback.log
+
+      - name: Upload Linux build
+        uses: actions/upload-artifact@v4
+        with:
+          name: FruityPrime-cpp-linux-${{ github.run_number }}
+          if-no-files-found: error
+          path: |
+            build/native/FruityPrime
+            build/native/fruity-prime-logo.png
+            build/native/fruity-prime-mark.png
+
+  macos:
+    name: macOS / Clang
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout C++ source
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
+
+      - name: Set up pinned macOS vcpkg
+        id: vcpkg
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="${RUNNER_TEMP}/fruity-vcpkg"
+          git init "$root"
+          git -C "$root" remote add origin https://github.com/microsoft/vcpkg.git
+          git -C "$root" fetch --depth 1 origin 07f4812200df3d3c931c0c8a6081d3b21fe2bf9f
+          git -C "$root" checkout --detach FETCH_HEAD
+          "$root/bootstrap-vcpkg.sh" -disableMetrics
+          echo "root=$root" >> "$GITHUB_OUTPUT"
+          echo "commit=$(git -C "$root" rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "compiler=$(clang++ --version | shasum -a 256 | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache vcpkg binary archives
+        id: skia-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+          key: native-skia-macos-v1-${{ runner.arch }}-${{ steps.vcpkg.outputs.commit }}-${{ steps.vcpkg.outputs.compiler }}-${{ hashFiles('tools/ci/dependencies/macos.txt') }}
+          restore-keys: |
+            native-skia-macos-v1-${{ runner.arch }}-${{ steps.vcpkg.outputs.commit }}-${{ steps.vcpkg.outputs.compiler }}-
+            native-vcpkg-all-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Prepare vcpkg binary cache directory
+        shell: bash
+        run: mkdir -p "$VCPKG_DEFAULT_BINARY_CACHE"
+
+      - name: Install native dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew install autoconf autoconf-archive automake libtool curl libarchive zlib glfw freetype openal-soft
+          echo "CMAKE_PREFIX_PATH=$(brew --prefix curl);$(brew --prefix libarchive);$(brew --prefix zlib);$(brew --prefix glfw);$(brew --prefix freetype);$(brew --prefix openal-soft)" >> "$GITHUB_ENV"
+
+      - name: Install Skia Ganesh
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="${{ steps.vcpkg.outputs.root }}"
+          if [[ "$(uname -m)" == "arm64" ]]; then
+            triplet="arm64-osx"
+          else
+            triplet="x64-osx"
+          fi
+          packages=()
+          while IFS= read -r package; do packages+=("$package:$triplet"); done < tools/ci/dependencies/macos.txt
+          "$root/vcpkg" install "${packages[@]}" --clean-after-build
+          echo "FRUITY_SKIA_PREFIX=$root/installed/$triplet" >> "$GITHUB_ENV"
+
+      - name: Save macOS dependencies after install
+        if: steps.skia-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+          key: native-skia-macos-v1-${{ runner.arch }}-${{ steps.vcpkg.outputs.commit }}-${{ steps.vcpkg.outputs.compiler }}-${{ hashFiles('tools/ci/dependencies/macos.txt') }}
+
+      # Refresh immutable snapshots weekly; avoid a full duplicate on every push.
+      - name: Select compiler cache generation
+        shell: bash
+        run: echo "COMPILER_CACHE_WEEK=$(date -u +%G-%V)" >> "$GITHUB_ENV"
+
+      - name: Set up ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: native-ccache-${{ runner.os }}-${{ runner.arch }}-clang-game-${{ env.COMPILER_CACHE_WEEK }}
+          max-size: 500M
+          append-timestamp: false
+
+      - name: Configure
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S . -B build/native -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_PREFIX_PATH="${FRUITY_SKIA_PREFIX};$CMAKE_PREFIX_PATH"
+
+      - name: Build C++ FruityPrime
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --build build/native --config RelWithDebInfo --parallel "$(sysctl -n hw.ncpu)" --target fruity_prime
+
+      - name: Upload macOS build
+        uses: actions/upload-artifact@v4
+        with:
+          name: FruityPrime-cpp-macos-${{ github.run_number }}
+          if-no-files-found: error
+          path: |
+            build/native/FruityPrime
+            build/native/fruity-prime-logo.png
+            build/native/fruity-prime-mark.png
 
   android:
     uses: ./.github/workflows/native-cpp-android.yml
+    with:
+      checkout_ref: ${{ inputs.checkout_ref }}

@@ -219,6 +219,10 @@ namespace MphRead
         {
             return false;
         }
+        // This stand-alone launcher ornament may yield to an occupied GPU
+        // command slot. The match path and its simulation never enter here.
+        // Screens keep their ordinary portrait/card when no preview draws.
+        if (!Commands().TryPrepareOptionalWork()) return false;
         _targetSize = windowSize;
         try
         {

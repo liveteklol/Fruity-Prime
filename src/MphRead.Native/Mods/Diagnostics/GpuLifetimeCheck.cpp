@@ -5,9 +5,11 @@
 #include "../../GameState.hpp"
 #include "../../NativeRuntime/Rhi/BackendFactory.hpp"
 #include "../../NativeRuntime/Rhi/OpenGL/OpenGlDevice.hpp"
+#include "../../NativeRuntime/Rhi/SceneBackend.hpp"
 #include "../../Renderer.hpp"
 #include "../../Scene.hpp"
 #include "../Network/NetLaunch.hpp"
+#include "../../NativeRuntime/System/ProcessMemory.hpp"
 
 #include <algorithm>
 #include <exception>
@@ -72,7 +74,10 @@ namespace MphRead::Mods::Diagnostics
                         (void)_scene->OnRenderFrame();
                         _swapchain->Present();
                         _scene->AfterRenderFrame();
-                        if (++_frame >= _frames)
+                        // Loading is over by the halfway frame: from there to the
+                        // end is what drawing alone costs.
+                        if (++_frame == _frames / 2) _mid = NativeRuntime::Rhi::SceneDevice().Statistics();
+                        if (_frame >= _frames)
                         {
                             EndCycle();
                             if (static_cast<std::int32_t>(_after.size()) < _cycles)
@@ -106,20 +111,46 @@ namespace MphRead::Mods::Diagnostics
                         && s.Renderbuffers == _after.front().Renderbuffers
                         && s.Framebuffers == _after.front().Framebuffers
                         && s.Shaders == _after.front().Shaders
-                        && s.Programs == _after.front().Programs;
-                    const bool drained = s.Retired == 0 && s.Textures == 0 && s.Buffers == 0
-                        && s.Renderbuffers == 0 && s.Framebuffers == 0 && s.Shaders == 0 && s.Programs == 0;
+                        && s.Programs == _after.front().Programs
+                        && s.Samplers == _after.front().Samplers
+                        && s.VertexArrays == _after.front().VertexArrays;
+                    const bool drained = s.Retired == 0 && s.LiveObjects() == 0 && s.Completed == s.Submitted;
                     pass = pass && steady && drained;
                     std::cout << "GPULIFETIME " << _room << " | cycle " << (i + 1)
                         << " | while drawing: " << _during[i].Textures << " textures, "
                         << _during[i].Framebuffers << " framebuffers, " << _during[i].Shaders << " shaders, "
                         << _during[i].Programs << " programs, " << _during[i].Buffers << " buffers, "
-                        << _during[i].Renderbuffers << " renderbuffers"
+                        << _during[i].Renderbuffers << " renderbuffers, " << _during[i].Samplers
+                        << " samplers, " << _during[i].VertexArrays << " vertex arrays"
                         << " | after release: " << s.Textures << " textures, " << s.Framebuffers
                         << " framebuffers, " << s.Shaders << " shaders, " << s.Programs << " programs, "
                         << s.Buffers << " buffers, " << s.Renderbuffers << " renderbuffers, "
+                        << s.Samplers << " samplers, " << s.VertexArrays << " vertex arrays, "
                         << s.Retired << " retired | frames completed " << s.CompletedFrame
+                        << " | submissions completed " << s.Completed.Value << "/" << s.Submitted.Value
+                        << " | host waits over the last " << (_frames - _frames / 2) << " frames: "
+                        << _steadyWaits[i]
+                        << " | private " << (i < _privateKiB.size() ? _privateKiB[i] / 1024U : 0U) << " MB"
                         << (steady ? "" : " | GREW") << (drained ? "" : " | NOT DRAINED") << '\n';
+                }
+                // CPU memory: after a warm-up quarter, the peak of the last
+                // quarter against the peak of the second, per cycle between
+                // them. A room's worth leaked per load is tens of MB a cycle;
+                // under 1 MB is the allocator's band and the GL driver's own
+                // bookkeeping for programs relinked every cycle.
+                if (_privateKiB.size() >= 8 && _privateKiB.front() != 0)
+                {
+                    const std::size_t quarter = _privateKiB.size() / 4;
+                    const std::uint64_t early = *std::max_element(_privateKiB.begin() + static_cast<std::ptrdiff_t>(quarter),
+                        _privateKiB.begin() + static_cast<std::ptrdiff_t>(2 * quarter));
+                    const std::uint64_t late = *std::max_element(_privateKiB.end() - static_cast<std::ptrdiff_t>(quarter),
+                        _privateKiB.end());
+                    const double span = static_cast<double>(_privateKiB.size() - 2 * quarter);
+                    const double perCycle = late > early ? static_cast<double>(late - early) / 1024.0 / span : 0.0;
+                    const bool flat = perCycle < 1.0;
+                    std::cout << "GPULIFETIME " << _room << " | private memory peak " << early / 1024U << " MB -> "
+                        << late / 1024U << " MB, " << perCycle << " MB a cycle" << (flat ? "" : " | GREW") << std::endl;
+                    pass = pass && flat;
                 }
                 std::cout << "GPULIFETIME " << _room << " | " << _after.size() << "/" << _cycles
                     << " cycles | " << (pass ? "PASS" : "FAIL") << '\n';
@@ -148,12 +179,14 @@ namespace MphRead::Mods::Diagnostics
 
             void EndCycle()
             {
-                NativeRuntime::Rhi::GraphicsDevice& device = NativeRuntime::Rhi::OpenGL::ContextDevice();
+                NativeRuntime::Rhi::GraphicsDevice& device = NativeRuntime::Rhi::SceneDevice();
                 _during.push_back(device.Statistics());
+                _steadyWaits.push_back(_during.back().HostWaits - _mid.HostWaits);
                 _scene->DoCleanup();
                 _scene->ReleaseGpuResources();
                 _scene.reset();
                 _after.push_back(device.Statistics());
+                _privateKiB.push_back(NativeRuntime::System::PrivateKiB());
             }
 
             std::string _room;
@@ -165,7 +198,10 @@ namespace MphRead::Mods::Diagnostics
             std::unique_ptr<NativeRuntime::Rhi::Swapchain> _swapchain{};
             std::shared_ptr<Scene> _scene{};
             std::vector<NativeRuntime::Rhi::GpuResourceStatistics> _during{};
+            NativeRuntime::Rhi::GpuResourceStatistics _mid{};
+            std::vector<std::uint64_t> _steadyWaits{};
             std::vector<NativeRuntime::Rhi::GpuResourceStatistics> _after{};
+            std::vector<std::uint64_t> _privateKiB{};
         };
     }
 

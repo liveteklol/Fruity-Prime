@@ -136,6 +136,10 @@ namespace MphRead::Entities
 
     void EnemyInstanceEntity::DestroyBeams()
     {
+        if (_beams)
+        {
+            _beams->ReleaseReferences();
+        }
         _beams.reset();
     }
 
