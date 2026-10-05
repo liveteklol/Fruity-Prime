@@ -20,7 +20,7 @@ namespace MphRead
 {
     class CollisionVolume;
     class Material;
-    class MessageInfo;
+    struct MessageInfo;
     class Node;
     class Scene;
 

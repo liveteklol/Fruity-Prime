@@ -56,7 +56,7 @@ namespace MphRead
 {
     class BeamProjectileArray;
     class EquipInfo;
-    struct WeaponInfo;
+    class WeaponInfo;
     class Scene;
 
     namespace Formats

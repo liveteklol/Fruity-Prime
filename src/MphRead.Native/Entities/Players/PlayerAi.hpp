@@ -25,7 +25,7 @@ namespace MphRead
 {
     class Scene;
     class EquipInfo;
-    struct WeaponInfo;
+    class WeaponInfo;
     class Keybind;
 
     namespace Formats

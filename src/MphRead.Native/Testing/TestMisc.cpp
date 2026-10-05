@@ -15,6 +15,7 @@
 #include "../NativeRuntime/System/Globalization.hpp"
 #include "../NativeRuntime/System/IO.hpp"
 #include "../NativeRuntime/System/Managed.hpp"
+#include "../NativeRuntime/Stb/Image.hpp"
 
 #include <algorithm>
 #include <array>
@@ -27,6 +28,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <iterator>
 #include <limits>
 #include <memory>
 #include <numeric>
@@ -64,7 +66,15 @@ namespace MphRead::Export::ImagesInterop
 
 namespace MphRead::Testing::TestMiscInterop
 {
-    [[nodiscard]] std::vector<std::uint8_t> LoadPngRgb(std::istream& stream);
+    // StbImage.Load(stream, StbiImageFormat.Rgb).Data: the decoded pixels,
+    // three bytes each. Declared and never defined before, which GCC and Clang
+    // forgave and MSVC refused at the final link.
+    [[nodiscard]] std::vector<std::uint8_t> LoadPngRgb(std::istream& stream)
+    {
+        const std::vector<std::uint8_t> bytes{
+            std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
+        return ::MphRead::NativeRuntime::LoadPng(bytes, 3).Pixels;
+    }
 }
 
 namespace

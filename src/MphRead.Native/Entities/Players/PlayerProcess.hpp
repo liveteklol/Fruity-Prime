@@ -10,7 +10,7 @@
 
 namespace MphRead
 {
-    class MessageInfo;
+    struct MessageInfo;
     class Model;
 }
 
