@@ -266,6 +266,60 @@ namespace MphRead::Mods::Launcher::Gui
             }
         }
 
+        // FP_BENCH_SECONDS=N: the same offline match on every build
+        // (FRUITY_SHOT_ROOM, Samus, Battle, 3 level-1 bots), held N seconds
+        // once loaded, frames per second printed each second, then quit. The
+        // main player stays on "press fire"; the bots play.
+        void BenchStep(MphRead::RenderWindow& window)
+        {
+            static const int seconds = qEnvironmentVariableIntValue("FP_BENCH_SECONDS");
+            if (seconds <= 0)
+            {
+                return;
+            }
+            static int frame = 0;
+            ++frame;
+            if (frame == 60)
+            {
+                LaunchPlan::Init init;
+                init.Kind = LaunchKind::Offline;
+                init.RoomKey = qEnvironmentVariable("FRUITY_SHOT_ROOM").toStdString();
+                init.Mode = static_cast<MphRead::GameMode>(3); // Battle
+                init.Hunter = static_cast<MphRead::Hunter>(0); // Samus
+                init.Bots = 3;
+                init.BotLevel = 1;
+                Decided(LaunchPlan(init));
+                return;
+            }
+            if (frame < 60 || !window.HasScene())
+            {
+                return;
+            }
+            using Clock = std::chrono::steady_clock;
+            static std::optional<Clock::time_point> start;
+            static Clock::time_point second;
+            static int frames = 0;
+            const auto now = Clock::now();
+            if (!start)
+            {
+                start = now;
+                second = now;
+                std::cout << "[bench] match loaded" << std::endl;
+            }
+            ++frames;
+            if (now - second >= std::chrono::seconds(1))
+            {
+                std::cout << "[bench] fps=" << frames << std::endl;
+                frames = 0;
+                second = now;
+            }
+            if (now - *start >= std::chrono::seconds(seconds))
+            {
+                std::cout << "[bench] done" << std::endl;
+                Shell::RequestQuit();
+            }
+        }
+
         // FP_QT_DEMO=DIR: a scripted check in the real window -- the front
         // screen, then an offline match, then the pause menu over it, each
         // captured to DIR, then quit.
@@ -769,6 +823,7 @@ namespace MphRead::Mods::Launcher::Gui
     {
         MphRead::Mods::Diagnostics::LauncherWindowCheck::AfterDraw(window);
         MaybeShoot(window);
+        BenchStep(window);
         DemoStep(window);
     }
 
