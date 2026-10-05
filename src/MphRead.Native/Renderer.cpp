@@ -5887,6 +5887,13 @@ namespace MphRead
             return;
         }
         _appliedFrameRateCap = cap;
+        // Bench only: no VSync and no frame limiter at all.
+        if (std::getenv("FP_BENCH_UNCAPPED") != nullptr)
+        {
+            _swapchain->SetPresentMode(NativeRuntime::Rhi::PresentMode::Immediate);
+            _window->UpdateFrequency(0.0);
+            return;
+        }
         if (cap == Mods::Render::FrameTiming::DisplayRate)
         {
             _swapchain->SetPresentMode(NativeRuntime::Rhi::PresentMode::Fifo);
