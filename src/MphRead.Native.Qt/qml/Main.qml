@@ -125,9 +125,9 @@ Item {
         id: base
         parent: stage
         anchors.fill: parent
-        visible: !root.stacked
+        visible: !root.stacked && !classicMenu.running
         enabled: visible
-        focus: !root.stacked
+        focus: !root.stacked && !classicMenu.running
         sourceComponent: ShellHost.page === "front" ? start
                        : ShellHost.page === "pause" ? pause
                        : ShellHost.page === "end" ? end
@@ -170,6 +170,64 @@ Item {
             }
         }
         onLoaded: item.forceActiveFocus()
+    }
+
+    // Debug: the DS game's own title and menus in place of the front
+    // screen, from the player's files (Mods/ClassicMenu, after Second Hunt).
+    // MULTIPLAYER there opens Fruity Prime's own multiplayer screen.
+    property bool classic: false
+    ClassicMenu {
+        id: classicMenu
+        parent: stage
+        anchors.fill: parent
+        z: 500
+        visible: running
+        running: root.classic && ShellHost.page === "front" && !root.stacked && ShellHost.gameFilesReady
+        focus: running
+        onRunningChanged: {
+            if (!running && error.length > 0) {
+                root.classic = false
+                ShellHost.systemMessage("The DS menus could not run: " + error)
+            }
+        }
+        onMultiplayerRequested: {
+            root.classic = false
+            root.openPlay()
+        }
+        onAdventureRequested: {
+            root.classic = false
+            root.openPlay()
+        }
+        onQuitRequested: ShellHost.quit()
+        Component.onCompleted: if (scripted) root.classic = true
+    }
+    Rectangle {
+        id: classicSwitch
+        parent: stage
+        z: 600
+        visible: ShellHost.page === "front" && !root.stacked && ShellHost.gameFilesReady
+            && ShellHost.startupState === "FrontReady"
+        anchors.top: parent.top
+        anchors.right: parent.right
+        anchors.margins: 8
+        width: classicLabel.implicitWidth + 16
+        height: classicLabel.implicitHeight + 8
+        radius: 4
+        color: classicArea.containsMouse ? "#c0303848" : "#a0181c24"
+        border.color: "#60e8ecf4"
+        Text {
+            id: classicLabel
+            anchors.centerIn: parent
+            color: "#e8ecf4"
+            font.pixelSize: 12
+            text: root.classic ? "DEBUG: FRUITY UI" : "DEBUG: DS UI"
+        }
+        MouseArea {
+            id: classicArea
+            anchors.fill: parent
+            hoverEnabled: true
+            onClicked: root.classic = !root.classic
+        }
     }
 
     ControllerKeyboard {
