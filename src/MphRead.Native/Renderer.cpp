@@ -681,7 +681,8 @@ namespace MphRead
                 << ", " << Mods::RenderOptions::CelBands() << " bands, outline "
                 << NativeRuntime::ToStringInvariant(Mods::RenderOptions::CelEdge(), "0.00")
                 << ", fog " << BoolOnOff(Mods::RenderOptions::Fog())
-                << ", performance mode " << BoolOnOff(Mods::RenderOptions::PerformanceMode()) << '\n';
+                << ", performance mode " << BoolOnOff(Mods::RenderOptions::PerformanceMode()
+                    || Mods::ThumbnailMode::Active()) << '\n';
             InitShaders();
             _transientGeometry
                 = NativeRuntime::Rhi::CreateSceneTransientGeometry(Gpu(), Commands());
@@ -2257,11 +2258,14 @@ namespace MphRead
         BeginScenePass(ScenePass::Opaque);
         for (const auto& item : _nonDecalItems) RenderItem(item);
         // The depth the rebuild pass below would draw again, kept aside.
-        const bool opaqueDepthSaved = !Mods::RenderOptions::PerformanceMode() && SaveOpaqueDepth()
+        // Map thumbnails are always drawn in performance mode, whatever the
+        // player chose, so a preview looks the same on every machine.
+        const bool performance = Mods::RenderOptions::PerformanceMode() || Mods::ThumbnailMode::Active();
+        const bool opaqueDepthSaved = !performance && SaveOpaqueDepth()
             && Commands().SaveAttachmentDepth();
         BeginScenePass(ScenePass::Decal);
         for (const auto& item : _decalItems) RenderItem(item);
-        if (Mods::RenderOptions::PerformanceMode())
+        if (performance)
         {
             // Performance mode: each translucent item once, blended over the
             // opaque depth. No stencil pass, depth clear or depth rebuild.
@@ -3787,6 +3791,11 @@ namespace MphRead
     void Scene::UpdateUniforms()
     {
         UseRoomLights();
+        // Every frame, as the lights: written only when the room was set, the
+        // fog went to whichever program was bound then, and the scene program
+        // kept the previous room's -- the launcher backdrop's warm Alinos fog
+        // over a Data Shrine match on one renderer, its own green on the other.
+        SetShaderFog();
         _shaderConstants->SetFogEnabled(_hasFog && FogOn());
         _shaderConstants->SetCelBands(Mods::RenderOptions::CelShading() ? Mods::RenderOptions::CelBands() : 0);
         _shaderConstants->SetShowColors(_showColors);
@@ -7241,6 +7250,11 @@ namespace MphRead
     bool RenderWindow::WindowStateFullscreen()
     {
         return _window->WindowStateFullscreen();
+    }
+
+    bool RenderWindow::WindowStateBorderless()
+    {
+        return _window->WindowStateBorderless();
     }
 
     double RenderWindow::RefreshRate() const

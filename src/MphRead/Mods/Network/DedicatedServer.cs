@@ -141,7 +141,9 @@ namespace MphRead.Mods.Network
         /// voting for their own map passes 1 of 1 every time, and they can
         /// have the map without the ceremony.
         /// </summary>
-        private const int VoteMinimumPlayers = 2;
+        // One: a player alone on a server can vote the map they want, and
+        // the vote passes on their own ballot.
+        private const int VoteMinimumPlayers = 1;
 
         /// <summary>
         /// The loop's clock, kept where code reached from a packet can read
@@ -1241,14 +1243,17 @@ namespace MphRead.Mods.Network
                 Tell(peer, "not enough players to hold a vote");
                 return;
             }
+            // The cooldowns keep one player from spamming the others with
+            // votes; nobody is spammed by a player who is alone.
+            bool alone = _peers.Count == 1;
             double sinceVote = now - _voteResolvedAt;
-            if (sinceVote < VoteCooldownSeconds)
+            if (!alone && sinceVote < VoteCooldownSeconds)
             {
                 Tell(peer, $"another vote may be called in {VoteCooldownSeconds - sinceVote:0} s");
                 return;
             }
             double sinceMine = now - peer.LastProposal;
-            if (sinceMine < ProposalCooldownSeconds)
+            if (!alone && sinceMine < ProposalCooldownSeconds)
             {
                 Tell(peer, $"you may propose again in {ProposalCooldownSeconds - sinceMine:0} s");
                 return;

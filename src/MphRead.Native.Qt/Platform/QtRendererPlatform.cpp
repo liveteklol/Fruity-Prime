@@ -223,6 +223,7 @@ namespace
             _window->showNormal();
         }
         bool WindowStateFullscreen() override;
+        bool WindowStateBorderless() override;
         [[nodiscard]] double RefreshRate() const override
         {
             const QScreen* const screen = _window->screen();
@@ -789,6 +790,40 @@ namespace
         return true;
 #else
         _window->showFullScreen();
+        return true;
+#endif
+    }
+
+    bool QtWindow::WindowStateBorderless()
+    {
+        _window->setFlag(Qt::FramelessWindowHint, true);
+        _window->setMaximumSize(QSize(16777215, 16777215));
+#if defined(_WIN32)
+        // In the monitor's own pixels, as the exclusive path above: the
+        // logical rectangle Qt would take is the physical one divided by the
+        // scale, and at 175 % that does not land on whole pixels.
+        _window->show();
+        const HWND hwnd = reinterpret_cast<HWND>(_window->winId());
+        const HMONITOR monitor = ::MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+        MONITORINFO info{};
+        info.cbSize = sizeof(info);
+        if (monitor == nullptr || !::GetMonitorInfoW(monitor, &info))
+        {
+            return false;
+        }
+        const RECT& r = info.rcMonitor;
+        ::SetWindowPos(hwnd, HWND_TOP, r.left, r.top, r.right - r.left, r.bottom - r.top - 1,
+            SWP_FRAMECHANGED | SWP_SHOWWINDOW | SWP_NOOWNERZORDER);
+        return true;
+#else
+        const QScreen* const screen = ScreenOf();
+        if (screen == nullptr)
+        {
+            return false;
+        }
+        const QRect area = screen->geometry();
+        _window->show();
+        _window->setGeometry(area.x(), area.y(), area.width(), area.height() - 1);
         return true;
 #endif
     }
