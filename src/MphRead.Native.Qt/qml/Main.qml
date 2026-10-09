@@ -109,7 +109,11 @@ Item {
             if (ShellHost.page === "front" && !ShellHost.gameFilesReady)
                 root.openSetup()
         }
-        function onLobbyOpened() { root.openLobby() }
+        function onLobbyOpened() {
+            // the DS menus have a room of their own
+            if (root.classic && classicMenu.running) classicMenu.show("room")
+            else root.openLobby()
+        }
         function onKeyboardDriving() { Theme.keyboardDriving = true }
         function onScreenRequested(url, props) {
             if (url.length > 0) {
@@ -172,9 +176,10 @@ Item {
         onLoaded: item.forceActiveFocus()
     }
 
-    // Debug: the DS game's own title and menus in place of the front
-    // screen, from the player's files (Mods/ClassicMenu, after Second Hunt).
-    // MULTIPLAYER there opens Fruity Prime's own multiplayer screen.
+    // Debug: the DS game's own title and menus in place of the launcher's
+    // pages, from the player's files (Mods/ClassicMenu, after Second Hunt),
+    // on one screen: the front screen, the rooms, the pause menu and the
+    // results panel all stay in the DS's menus while this is on.
     property bool classic: false
     ClassicMenu {
         id: classicMenu
@@ -182,7 +187,8 @@ Item {
         anchors.fill: parent
         z: 500
         visible: running
-        running: root.classic && ShellHost.page === "front" && !root.stacked && ShellHost.gameFilesReady
+        running: root.classic && !root.stacked && ShellHost.gameFilesReady
+            && (ShellHost.page === "front" || ShellHost.page === "pause" || ShellHost.page === "end")
         focus: running
         onRunningChanged: {
             if (!running && error.length > 0) {
@@ -190,16 +196,15 @@ Item {
                 ShellHost.systemMessage("The DS menus could not run: " + error)
             }
         }
-        onMultiplayerRequested: {
-            root.classic = false
-            root.openPlay()
-        }
-        onAdventureRequested: {
-            root.classic = false
-            root.openPlay()
-        }
         onQuitRequested: ShellHost.quit()
         Component.onCompleted: if (scripted) root.classic = true
+        Connections {
+            target: ShellHost
+            function onPageChanged() {
+                if (!root.classic) return
+                classicMenu.show(ShellHost.page === "pause" ? "pause" : ShellHost.page === "end" ? "end" : "front")
+            }
+        }
     }
     Rectangle {
         id: classicSwitch

@@ -167,6 +167,9 @@ namespace MphRead::Mods::ClassicMenu
         [[nodiscard]] const std::string& operator[](int id) const;
         [[nodiscard]] int IndexOf(const std::string& text) const;
         void Fill(int id, const std::string& text);
+        // A string the ROM does not have (a label the single-screen pages add).
+        int Add(const std::string& text);
+        [[nodiscard]] int Count() const noexcept { return static_cast<int>(_strings.size()); }
 
     private:
         std::vector<std::string> _strings;

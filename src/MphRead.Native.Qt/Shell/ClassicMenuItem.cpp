@@ -1,13 +1,14 @@
 #include "ClassicMenuItem.hpp"
 
+#include "ClassicHost.hpp"
+#include "SettingsModel.hpp"
+
 #include "../../MphRead.Native/Mods/ClassicMenu/ClassicMenu.hpp"
 #include "../../MphRead.Native/Mods/ClassicMenu/MenuData.hpp"
 
 #include <QtGui/QKeyEvent>
 #include <QtGui/QMouseEvent>
-#include <QtGui/QPainter>
 #include <QtQuick/QQuickWindow>
-#include <QtQuick/QSGSimpleRectNode>
 #include <QtQuick/QSGSimpleTextureNode>
 #include <QtQuick/QSGTexture>
 
@@ -20,30 +21,20 @@ namespace MphRead::Qt
     namespace
     {
         using Menu = Mods::ClassicMenu::Facade;
-        constexpr int W = Menu::ScreenWidth;
-        constexpr int H = Menu::ScreenHeight;
-        // Between the two screens, in DS pixels, like the DS's hinge.
-        constexpr int Gap = 8;
-
-        // The scene graph's tree for the item: a black backdrop, then the two
-        // screens. Textures belong to the nodes.
-        struct Screens final : QSGSimpleRectNode
-        {
-            QSGSimpleTextureNode* Top = nullptr;
-            QSGSimpleTextureNode* Bottom = nullptr;
-        };
-
-        QImage Picture(const std::vector<std::uint32_t>& pixels)
-        {
-            return QImage(reinterpret_cast<const uchar*>(pixels.data()), W, H, W * 4, QImage::Format_RGBA8888).copy();
-        }
     }
 
     ClassicMenuItem::ClassicMenuItem(QQuickItem* parent) : QQuickItem(parent)
     {
         setFlag(QQuickItem::ItemHasContents, true);
         setAcceptedMouseButtons(::Qt::LeftButton);
+        setAcceptHoverEvents(true);
         setActiveFocusOnTab(true);
+        _host = new ClassicHost(this);
+        connect(_host, &ClassicHost::roomClosed, this, [](const QString&)
+        {
+            // back to the multiplayer pages, as the launcher's own lobby page does
+            Menu::Show("front");
+        });
         // The menus tick at the DS's 30 Hz; the item polls at the display's
         // rate so a tick is shown the frame it happens.
         _timer.setInterval(8);
@@ -53,20 +44,29 @@ namespace MphRead::Qt
 
     ClassicMenuItem::~ClassicMenuItem()
     {
-        if (_running) Menu::SetActive(false, this);
+        if (_running)
+        {
+            Menu::SetHost(nullptr);
+            Menu::SetActive(false, this);
+        }
     }
 
     void ClassicMenuItem::SetRunning(bool value)
     {
         if (value == _running) return;
         _error.clear();
-        if (value && !Menu::SetActive(true, this))
+        if (value)
         {
-            _error = QString::fromStdString(Menu::LastError());
-            emit runningChanged();
-            return;
+            // keep the session a lobby or a match left behind: only start one
+            // when none is there for this item
+            if (!Menu::Owns(this) && !Menu::SetActive(true, this))
+            {
+                _error = QString::fromStdString(Menu::LastError());
+                emit runningChanged();
+                return;
+            }
+            Menu::SetHost(_host);
         }
-        if (!value) Menu::SetActive(false, this);
         _running = value;
         if (_running)
         {
@@ -77,20 +77,23 @@ namespace MphRead::Qt
         else
         {
             _timer.stop();
-            _topImage = QImage();
-            _bottomImage = QImage();
+            _image = QImage();
             _fresh = true;
             update();
         }
         emit runningChanged();
     }
 
-    void ClassicMenuItem::SetStacked(bool value)
+    void ClassicMenuItem::show(const QString& what)
     {
-        if (value == _stacked) return;
-        _stacked = value;
-        update();
-        emit stackedChanged();
+        if (what == QLatin1String("room")) _host->OpenRoom();
+        Menu::Show(what.toStdString());
+    }
+
+    QSize ClassicMenuItem::PixelSize() const
+    {
+        const qreal ratio = window() != nullptr ? window()->effectiveDevicePixelRatio() : 1.0;
+        return QSize(std::max(1, static_cast<int>(std::lround(width() * ratio))), std::max(1, static_cast<int>(std::lround(height() * ratio))));
     }
 
     void ClassicMenuItem::Step()
@@ -103,7 +106,8 @@ namespace MphRead::Qt
             return;
         }
         const double seconds = static_cast<double>(_clock.restart()) / 1000.0;
-        if (!Menu::RenderScreens(seconds, _top, _bottom))
+        const QSize size = PixelSize();
+        if (!Menu::Render(seconds, size.width(), size.height(), _pixels))
         {
             if (!Menu::Active())
             {
@@ -114,70 +118,38 @@ namespace MphRead::Qt
             }
             return;
         }
-        _topImage = Picture(_top);
-        _bottomImage = Picture(_bottom);
+        // the picture's own size: the shell scales it to the item
+        int w = 0, h = 0;
+        Menu::DrawnSize(w, h);
+        if (w <= 0 || h <= 0 || static_cast<std::size_t>(w) * static_cast<std::size_t>(h) != _pixels.size()) return;
+        _image = QImage(reinterpret_cast<const uchar*>(_pixels.data()), w, h, w * 4, QImage::Format_RGBA8888).copy();
         _fresh = true;
         update();
         RunScript();
-        if (const auto request = Menu::TakeRequest())
-        {
-            if (*request == Mods::ClassicMenu::Request::Multiplayer) emit multiplayerRequested();
-            else emit adventureRequested();
-        }
-    }
-
-    // The two screens at the largest whole-pixel scale that fits (a smaller
-    // one only when the item cannot hold even 1x), centred.
-    void ClassicMenuItem::Layout(QRectF& top, QRectF& bottom) const
-    {
-        const qreal ratio = window() != nullptr ? window()->effectiveDevicePixelRatio() : 1.0;
-        const qreal unitsW = _stacked ? W : 2 * W + Gap;
-        const qreal unitsH = _stacked ? 2 * H + Gap : H;
-        qreal scale = std::min(width() * ratio / unitsW, height() * ratio / unitsH);
-        if (scale >= 1.0) scale = std::floor(scale);
-        scale /= ratio;
-        const qreal x0 = std::round((width() - unitsW * scale) / 2);
-        const qreal y0 = std::round((height() - unitsH * scale) / 2);
-        top = QRectF(x0, y0, W * scale, H * scale);
-        bottom = _stacked
-            ? QRectF(x0, y0 + (H + Gap) * scale, W * scale, H * scale)
-            : QRectF(x0 + (W + Gap) * scale, y0, W * scale, H * scale);
     }
 
     QSGNode* ClassicMenuItem::updatePaintNode(QSGNode* old, UpdatePaintNodeData*)
     {
-        auto* root = static_cast<Screens*>(old);
-        if (_topImage.isNull() || window() == nullptr)
+        auto* node = static_cast<QSGSimpleTextureNode*>(old);
+        if (_image.isNull() || window() == nullptr)
         {
-            delete root;
+            delete node;
             return nullptr;
         }
-        if (root == nullptr)
+        if (node == nullptr)
         {
-            root = new Screens();
-            root->setColor(::Qt::black);
-            root->Top = new QSGSimpleTextureNode();
-            root->Bottom = new QSGSimpleTextureNode();
-            for (auto* node : {root->Top, root->Bottom})
-            {
-                node->setOwnsTexture(true);
-                node->setFiltering(QSGTexture::Nearest);
-                root->appendChildNode(node);
-            }
+            node = new QSGSimpleTextureNode();
+            node->setOwnsTexture(true);
+            node->setFiltering(QSGTexture::Linear);
         }
-        root->setRect(boundingRect());
         if (_fresh)
         {
-            root->Top->setTexture(window()->createTextureFromImage(_topImage));
-            root->Bottom->setTexture(window()->createTextureFromImage(_bottomImage));
+            node->setTexture(window()->createTextureFromImage(_image,
+                Menu::OverGame() ? QQuickWindow::TextureHasAlphaChannel : QQuickWindow::CreateTextureOptions{}));
             _fresh = false;
         }
-        QRectF top;
-        QRectF bottom;
-        Layout(top, bottom);
-        root->Top->setRect(top);
-        root->Bottom->setRect(bottom);
-        return root;
+        node->setRect(boundingRect());
+        return node;
     }
 
     bool ClassicMenuItem::Scripted() const
@@ -187,8 +159,9 @@ namespace MphRead::Qt
 
     // FRUITY_CLASSIC_SCRIPT=DIR;STEP:ACTION;... -- a check of the menus with
     // no one at the keyboard. Actions at a step count: shot (DIR/step-N.png,
-    // both screens as the DS holds them), a, b, up, down, left, right,
-    // touch:X:Y (DS pixels on the touch screen), quit.
+    // the one screen as drawn), a, b, up, down, left, right, touch:X:Y (DS
+    // pixels on the touch screen), click:U:V and hover:U:V (fractions of the
+    // item), type:WORDS, enter, quit.
     void ClassicMenuItem::RunScript()
     {
         static const QStringList script = qEnvironmentVariable("FRUITY_CLASSIC_SCRIPT").split(QLatin1Char(';'));
@@ -197,20 +170,13 @@ namespace MphRead::Qt
         static int steps = 0;
         _steps = ++steps;
         using namespace Mods::ClassicMenu;
+        const QSize size = PixelSize();
         for (int i = 1; i < script.size(); ++i)
         {
             const QStringList parts = script[i].split(QLatin1Char(':'));
             if (parts.size() < 2 || parts[0].toInt() != _steps) continue;
             const QString action = parts[1];
-            if (action == QLatin1String("shot"))
-            {
-                QImage both(W, 2 * H, QImage::Format_RGBA8888);
-                QPainter painter(&both);
-                painter.drawImage(0, 0, _topImage);
-                painter.drawImage(0, H, _bottomImage);
-                painter.end();
-                both.save(script[0] + QStringLiteral("/step-%1.png").arg(_steps));
-            }
+            if (action == QLatin1String("shot")) _image.save(script[0] + QStringLiteral("/step-%1.png").arg(_steps));
             else if (action == QLatin1String("a")) Menu::Press(static_cast<std::uint16_t>(KeyA | KeyStart));
             else if (action == QLatin1String("b")) Menu::Press(KeyB);
             else if (action == QLatin1String("up")) Menu::Navigate(0, 1);
@@ -218,6 +184,15 @@ namespace MphRead::Qt
             else if (action == QLatin1String("left")) Menu::Navigate(-1, 0);
             else if (action == QLatin1String("right")) Menu::Navigate(1, 0);
             else if (action == QLatin1String("touch") && parts.size() >= 4) Menu::Touch(parts[2].toFloat(), parts[3].toFloat());
+            else if ((action == QLatin1String("click") || action == QLatin1String("hover")) && parts.size() >= 4)
+            {
+                Menu::Pointer(parts[2].toFloat() * static_cast<float>(size.width()), parts[3].toFloat() * static_cast<float>(size.height()),
+                    action == QLatin1String("click"));
+            }
+            else if (action == QLatin1String("type") && parts.size() >= 3) Menu::Type(parts[2].toStdString(), false, false);
+            else if (action == QLatin1String("enter")) Menu::Type("", false, true);
+            else if (action == QLatin1String("show") && parts.size() >= 3) show(parts[2]);
+            else if (action == QLatin1String("page") && parts.size() >= 3) Menu::Visit(parts[2].toStdString());
             else if (action == QLatin1String("quit")) emit quitRequested();
         }
     }
@@ -225,21 +200,37 @@ namespace MphRead::Qt
     void ClassicMenuItem::mousePressEvent(QMouseEvent* event)
     {
         forceActiveFocus();
-        QRectF top;
-        QRectF bottom;
-        Layout(top, bottom);
-        const QPointF p = event->position();
-        if (bottom.contains(p))
-        {
-            Menu::Touch(static_cast<float>((p.x() - bottom.x()) / bottom.width() * W),
-                static_cast<float>((p.y() - bottom.y()) / bottom.height() * H));
-        }
+        const qreal ratio = window() != nullptr ? window()->effectiveDevicePixelRatio() : 1.0;
+        const QPointF p = event->position() * ratio;
+        Menu::Pointer(static_cast<float>(p.x()), static_cast<float>(p.y()), true);
+        event->accept();
+    }
+
+    void ClassicMenuItem::hoverMoveEvent(QHoverEvent* event)
+    {
+        const qreal ratio = window() != nullptr ? window()->effectiveDevicePixelRatio() : 1.0;
+        const QPointF p = event->position() * ratio;
+        Menu::Pointer(static_cast<float>(p.x()), static_cast<float>(p.y()), false);
         event->accept();
     }
 
     void ClassicMenuItem::keyPressEvent(QKeyEvent* event)
     {
         using namespace Mods::ClassicMenu;
+        // a key binding waits for its key: the settings have it
+        if (Menu::Listening() && _host->Settings() != nullptr)
+        {
+            _host->Settings()->pressKey(event->key(), event->nativeScanCode(), event->nativeVirtualKey(),
+                static_cast<int>(event->modifiers()), event->text());
+            event->accept();
+            return;
+        }
+        // the DS keyboard is up: typed keys are words
+        const QString text = event->text();
+        const bool typing = !text.isEmpty() && text.at(0).isPrint();
+        if (typing && Menu::Type(text.toStdString(), false, false)) { event->accept(); return; }
+        if ((event->key() == ::Qt::Key_Backspace) && Menu::Type("", true, false)) { event->accept(); return; }
+        if ((event->key() == ::Qt::Key_Return || event->key() == ::Qt::Key_Enter) && Menu::Type("", false, true)) { event->accept(); return; }
         switch (event->key())
         {
         case ::Qt::Key_Left: Menu::Navigate(-1, 0); break;

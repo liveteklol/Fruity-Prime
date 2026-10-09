@@ -1,11 +1,13 @@
 #pragma once
 
 // The front screen as the DS game drew it: a debug switch on the launcher
-// puts the game's own title and menus (MenuData) in place of Fruity Prime's.
-// Each DS screen is drawn at its own 256x192, as the game draws it, on the
-// CPU (the front screen has no game scene, and it is then the same on every
-// renderer); the Qt shell shows the two pictures. MULTIPLAYER leaves for
-// Fruity Prime's own multiplayer screens.
+// puts the game's own title and menus (MenuData) in place of Fruity Prime's,
+// on one screen (OneScreen), with every page the launcher has rebuilt from
+// the ROM's pieces (Compose) and answered by the launcher (Host). Drawn on
+// the CPU into one picture of the window's shape, so it is the same on
+// every renderer; the Qt shell shows it.
+
+#include "Host.hpp"
 
 #include <cstdint>
 #include <optional>
@@ -14,12 +16,6 @@
 
 namespace MphRead::Mods::ClassicMenu
 {
-    enum class Request
-    {
-        Multiplayer,
-        Adventure
-    };
-
     class Facade final
     {
     public:
@@ -37,15 +33,30 @@ namespace MphRead::Mods::ClassicMenu
         static constexpr int ScreenWidth = 256;
         static constexpr int ScreenHeight = 192;
 
-        // Advance by real time, then draw both DS screens at their own size
-        // into `top` and `bottom` (RGBA8, row-major, top row first). False
-        // when inactive.
-        static bool RenderScreens(double seconds, std::vector<std::uint32_t>& top, std::vector<std::uint32_t>& bottom);
+        // What the launcher answers with. Not owned; null to detach.
+        static void SetHost(Host* host);
 
-        // A touch on the touch screen, in DS pixels (y down).
-        static void Touch(float x, float y);
+        // Advance by real time, then draw the one screen into `pixels`
+        // (RGBA8, row-major, top row first) at `width` x `height`. False when
+        // inactive.
+        static bool Render(double seconds, int width, int height, std::vector<std::uint32_t>& pixels);
+        // The size the last picture was drawn at (the shell scales it to the item).
+        static void DrawnSize(int& width, int& height);
+        // The pointer, in the last picture's pixels: moved, or pressed.
+        static void Pointer(float x, float y, bool press);
         static void Press(std::uint16_t keys);
         static void Navigate(int dx, int dy);
-        [[nodiscard]] static std::optional<Request> TakeRequest();
+        // A real keyboard, while the DS keyboard waits for words.
+        static bool Type(const std::string& text, bool backspace, bool enter);
+        // A key binding waits for its key: keys belong to the settings.
+        [[nodiscard]] static bool Listening();
+        // The launcher moved on: "room" (a lobby opened), "pause", "end", "front".
+        static void Show(const std::string& what);
+        // Drawn over a running match: the picture has no backdrop.
+        [[nodiscard]] static bool OverGame();
+        // A touch on the DS touch screen, in DS pixels (y down): the check script.
+        static void Touch(float x, float y);
+        // Straight to a page (the check script); "servers", "settings", ... or a number.
+        static void Visit(const std::string& page);
     };
 }

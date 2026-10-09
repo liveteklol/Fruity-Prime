@@ -424,6 +424,12 @@ namespace MphRead::Mods::ClassicMenu
         if (id >= 0 && static_cast<std::size_t>(id) < _strings.size()) _strings[static_cast<std::size_t>(id)] = text;
     }
 
+    int MenuStrings::Add(const std::string& text)
+    {
+        _strings.push_back(text);
+        return static_cast<int>(_strings.size()) - 1;
+    }
+
     // ---- textures and the draw list ----
 
     int UiTextureCache::GetOrAdd(const std::string& key, const std::function<UiTexture()>& create)
