@@ -197,6 +197,7 @@ namespace MphRead::NativeRuntime::Rhi::Vulkan
                 _suspended = true;
                 _desc.width = 0;
                 _desc.height = 0;
+                _drawable = {};
                 return;
             }
             int framebufferWidth = 0, framebufferHeight = 0;
@@ -207,7 +208,7 @@ namespace MphRead::NativeRuntime::Rhi::Vulkan
                 height = static_cast<std::uint32_t>(framebufferHeight);
             }
             _suspended = false;
-            if (_needsRecreate || width != _desc.width || height != _desc.height)
+            if (_needsRecreate || width != _drawable.width || height != _drawable.height)
                 Recreate(width, height);
         }
 
@@ -227,13 +228,14 @@ namespace MphRead::NativeRuntime::Rhi::Vulkan
                     _suspended = true;
                     _desc.width = 0;
                     _desc.height = 0;
+                    _drawable = {};
                     WaitForDrawable();
                     continue;
                 }
                 const auto w = static_cast<std::uint32_t>(width);
                 const auto h = static_cast<std::uint32_t>(height);
                 SyncExclusive();
-                if (_suspended || _needsRecreate || w != _desc.width || h != _desc.height)
+                if (_suspended || _needsRecreate || w != _drawable.width || h != _drawable.height)
                     Recreate(w, h);
                 else if (_exclusiveWanted && !_exclusiveHeld && --_exclusiveRetryIn == 0)
                     AcquireExclusive();
@@ -313,6 +315,7 @@ namespace MphRead::NativeRuntime::Rhi::Vulkan
                 _suspended = true;
                 _desc.width = 0;
                 _desc.height = 0;
+                _drawable = {};
                 return false;
             }
             (void)AcquireNextTexture();
@@ -626,6 +629,13 @@ namespace MphRead::NativeRuntime::Rhi::Vulkan
         std::unique_ptr<VulkanNvidiaReflex> _reflex;
         VkFormat _vkFormat = VK_FORMAT_UNDEFINED;
         VkExtent2D _extent{};
+        // The drawable size the swapchain was made for, which is what a resize
+        // is detected against. Not _desc: the surface's own extent wins over
+        // the request, and the toolkit's size is its logical size times the
+        // scale -- 1707 x 1.5 = 2561 for a window 2560 pixels wide at 150 % --
+        // so comparing the two recreated the swapchain on every frame of
+        // borderless fullscreen (7 fps on an Iris Xe laptop).
+        VkExtent2D _drawable{};
         std::array<Frame, FrameCount> _frames{};
         std::vector<ImageState> _images;
         std::vector<RetiredSwapchain> _retired;
@@ -788,6 +798,7 @@ namespace MphRead::NativeRuntime::Rhi::Vulkan
             {
                 _suspended = true;
                 _desc.width = _desc.height = 0;
+                _drawable = {};
                 return;
             }
             std::uint32_t imageCount = std::max(_desc.imageCount, capabilities.minImageCount + 1);
@@ -905,6 +916,7 @@ namespace MphRead::NativeRuntime::Rhi::Vulkan
                 RetireImages(oldSwapchain);
             }
             _extent = extent;
+            _drawable = {requestedWidth, requestedHeight};
             _desc.width = extent.width;
             _desc.height = extent.height;
             _desc.format = rhiFormat;
