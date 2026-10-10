@@ -14,7 +14,7 @@ def embed(directory, destination):
              'namespace MphRead::NativeRuntime::Rhi::Vulkan::Generated {',
              '// One member of main\'s blocks and where main_fast2 wants it.',
              'struct FastCopy { std::string_view block; std::uint32_t offset, size, dest; };']
-    for program in ('main_fast', 'main_fast2'):
+    for program in ('main_fast', 'main_fast2', 'composite_fast'):
         for stage in ('vert', 'frag'):
             code = (directory / f'{program}.{stage}.spv').read_bytes()
             if len(code) % 4 or len(code) < 20:

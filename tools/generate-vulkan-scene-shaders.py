@@ -224,6 +224,17 @@ def generate(source, output):
                     fast += 'layout(location=0) out vec4 fragment_color;\n'
                 fast_body = body.replace('#version 450', '#version 450\n' + fast, 1)
                 (output / f"main_fast.{stage}").write_text(fast_body, encoding="utf-8", newline="\n")
+            if program == 'composite':
+                # composite_fast (performance mode's HUD): the Hud block as
+                # push constants, the textures in set 0, nothing else moved.
+                hud = blocks['Hud']
+                hud_layout = f"std140,set={hud['group']},binding={hud['binding']}"
+                fast = prefix.replace(f"layout({hud_layout}) uniform", "layout(std430,push_constant) uniform", 1)
+                fast = re.sub(r'layout\(set=\d+,binding=', 'layout(set=0,binding=', fast)
+                if len(blocks) != 1 or hud['size'] > 128:
+                    raise ValueError('composite_fast expects the Hud block alone, within 128 bytes')
+                (output / f"composite_fast.{stage}").write_text(body.replace('#version 450', '#version 450\n' + fast, 1),
+                                                                encoding="utf-8", newline="\n")
             body = body.replace('#version 450', '#version 450\n' + prefix, 1)
             (output / f"{program}.{stage}").write_text(body, encoding="utf-8", newline="\n")
         manifest['programs'][program] = dict(blocks=list(blocks.values()), members=metadata, inputs=inputs['inputs'])

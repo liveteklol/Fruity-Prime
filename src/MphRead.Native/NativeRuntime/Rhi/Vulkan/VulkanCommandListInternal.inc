@@ -91,7 +91,7 @@
                 vk.vkCmdBindDescriptorSets(_commandSlots->Buffer(), VK_PIPELINE_BIND_POINT_GRAPHICS,
                     _pipeline->Layout(), index, 1, &descriptor, 0, nullptr);
                 _boundSceneSets.fill(VK_NULL_HANDLE); _boundSceneLayout = {};
-                _fastSetsBound = false; _fast2SetsBound = false; _fast2BoundGeometry = nullptr;
+                _fastSetsBound = false; _fast2SetsBound = false; _hudBound = false; _fast2BoundGeometry = nullptr; _hudBoundPage = VK_NULL_HANDLE; _hudBoundIndexPage = VK_NULL_HANDLE;
                 _genericSets[index] = {std::move(snapshot), descriptor, _bindingGeneration};
             }
             void SetStencilReference(std::uint32_t reference) override
@@ -152,6 +152,12 @@
                 std::uint32_t InheritFlags = 0;
                 std::array<float, 4> InheritedColor{};
                 std::array<float, 3> InheritedNormal{};
+                // Transient geometry interleaved at 24 bytes (position,
+                // texcoord) in an upload page: the page and where the draw
+                // is in it, so fast HUD draws bind the page once.
+                VkBuffer TransientVertices = VK_NULL_HANDLE;
+                std::int32_t TransientVertexOffset = 0;
+                std::uint32_t TransientFirstIndex = 0;
             };
             using RingSlice = VulkanUploadArena::Slice;
             void DrawScene(const SceneDraw& draw);
@@ -456,6 +462,34 @@
             std::array<std::byte, 128> _fast2Pushed{};
             const FastGeometryView* _fast2BoundGeometry = nullptr;
             std::uint64_t _metricFast2Draws = 0;
+
+            // composite_fast (DrawCompositeFast): HUD objects, layers, fades.
+            [[nodiscard]] bool DrawCompositeFast(VulkanSceneProgram& program, const SceneDraw& draw,
+                const std::array<SampledDescriptor, 4>& textures);
+            [[nodiscard]] VulkanGraphicsPipeline& HudVariantFor(const VulkanSceneProgram& program, const SceneDraw& draw);
+            struct HudTextureKey final
+            {
+                FastTextureKey Texture, Mask;
+                bool operator==(const HudTextureKey&) const = default;
+            };
+            struct HudTextureHash final
+            {
+                std::size_t operator()(const HudTextureKey& key) const noexcept
+                {
+                    const FastTextureHash hash;
+                    return hash(key.Texture) * 31U ^ hash(key.Mask);
+                }
+            };
+            std::unordered_map<HudTextureKey, VkDescriptorSet, HudTextureHash> _hudTextureSets;
+            std::shared_ptr<VulkanDescriptorAllocator> _hudTextures;
+            std::unordered_map<VariantKey, Variant, VariantHash> _hudVariants;
+            std::array<RecentVariant, 4> _hudRecent{};
+            std::size_t _hudRecentNext = 0;
+            bool _hudBound = false;
+            VkDescriptorSet _hudBoundTexture = VK_NULL_HANDLE;
+            std::array<std::byte, 128> _hudPushed{};
+            VkBuffer _hudBoundPage = VK_NULL_HANDLE, _hudBoundIndexPage = VK_NULL_HANDLE;
+            std::uint64_t _metricHudDraws = 0;
             // Opt-in instrumentation: no per-draw clocks or allocations.
             bool _metricsEnabled = std::getenv("FRUITY_RENDER_METRICS") != nullptr;
             std::uint64_t _metricDraws = 0, _metricAllocations = 0, _metricUpdates = 0,
@@ -607,7 +641,7 @@
             for (auto& state : _programUniforms) state.Sets = {};
             _device->SceneFlushers[this] = [this] { Flush(); };
             _boundSceneSets.fill(VK_NULL_HANDLE); _boundSceneLayout = {}; _boundSmallBytes = 0;
-            _fastSetsBound = false; _fast2SetsBound = false; _fast2BoundGeometry = nullptr;
+            _fastSetsBound = false; _fast2SetsBound = false; _hudBound = false; _fast2BoundGeometry = nullptr; _hudBoundPage = VK_NULL_HANDLE; _hudBoundIndexPage = VK_NULL_HANDLE;
             _device->RecordingList = this;
             for (const auto& label : _debugLabels) NativeBeginLabel(label);
         }
@@ -665,7 +699,8 @@
                     << " persistent_material_full=" << _metricPersistentFull
                     << " optional_work_busy_skip_count=" << _metricOptionalSkips
                     << " fast_scene_draws=" << _metricFastDraws
-                    << " fast2_scene_draws=" << _metricFast2Draws << '\n';
+                    << " fast2_scene_draws=" << _metricFast2Draws
+                    << " fast_hud_draws=" << _metricHudDraws << '\n';
             for (auto& state : _programUniforms) state.Sets = {};
             _boundNative = VK_NULL_HANDLE;
         }
@@ -768,6 +803,9 @@
             _fast2Recent = {};
             for (auto& slot : _fast2Slots)
                 if (slot.Program == object) slot.Recording = 0, slot.Program = nullptr;
+            for (auto it = _hudVariants.begin(); it != _hudVariants.end();)
+                it = it->first.Program == object || it->first.Base == object ? _hudVariants.erase(it) : std::next(it);
+            _hudRecent = {};
             if (_pipeline == object) { _pipeline = nullptr; _genericSets.clear(); }
         }
 
@@ -991,7 +1029,7 @@
                     VK_SHADER_STAGE_ALL_GRAPHICS, 0, sizeof(constants), &constants);
                 _smallConstants = constants;
                 _smallCurrent = true;
-                _fastSetsBound = false; _fast2SetsBound = false; _fast2BoundGeometry = nullptr;
+                _fastSetsBound = false; _fast2SetsBound = false; _hudBound = false; _fast2BoundGeometry = nullptr; _hudBoundPage = VK_NULL_HANDLE; _hudBoundIndexPage = VK_NULL_HANDLE;
                 if (_metricsEnabled) ++_metricSmallConstants;
             }
         }
@@ -1016,7 +1054,7 @@
                 _boundSceneSets.fill(VK_NULL_HANDLE); _boundSceneLayout = {};
                 vk.vkCmdBindPipeline(_commandSlots->Buffer(), VK_PIPELINE_BIND_POINT_GRAPHICS, _pipeline->Native());
                 _boundNative = _pipeline->Native();
-                _fast2BoundGeometry = nullptr;
+                _fast2BoundGeometry = nullptr; _hudBoundPage = VK_NULL_HANDLE; _hudBoundIndexPage = VK_NULL_HANDLE;
                 for (const auto& [slot, binding] : _vertexBindings)
                 {
                     if (binding.Lifetime.expired()) continue;
@@ -1042,7 +1080,7 @@
                 {
                     vk.vkCmdBindDescriptorSets(_commandSlots->Buffer(), VK_PIPELINE_BIND_POINT_GRAPHICS,
                         _pipeline->Layout(), slot, 1, &set.Native, 0, nullptr);
-                    _fastSetsBound = false; _fast2SetsBound = false; _fast2BoundGeometry = nullptr;
+                    _fastSetsBound = false; _fast2SetsBound = false; _hudBound = false; _fast2BoundGeometry = nullptr; _hudBoundPage = VK_NULL_HANDLE; _hudBoundIndexPage = VK_NULL_HANDLE;
                 }
             }
             _genericDirty = false;
@@ -1346,7 +1384,7 @@
         bool VulkanCommandList::DrawSceneFast(VulkanSceneProgram& program, const SceneDraw& draw,
             const std::array<SampledDescriptor, 4>& textures)
         {
-            if (!program.FastVertex || !FastScene::Enabled()) return false;
+            if (program.Id != SceneProgram::Main || !program.FastVertex || !FastScene::Enabled()) return false;
             auto& vk = *_device->ContextPointer->_impl;
             if (vk.legacy) return false;
             auto& slot = _fastSlots.at(_commandSlots->SlotIndex());
@@ -1438,8 +1476,8 @@
             vk.vkCmdBindIndexBuffer(commands, draw.IndexBuffer, draw.IndexOffset, VK_INDEX_TYPE_UINT32);
             vk.vkCmdDrawIndexed(commands, draw.IndexCount, 1, 0, 0, 0);
             // Its sets, push range and vertex streams replace main_fast2's.
-            _fast2SetsBound = false;
-            _fast2BoundGeometry = nullptr;
+            _fast2SetsBound = false; _hudBound = false;
+            _fast2BoundGeometry = nullptr; _hudBoundPage = VK_NULL_HANDLE; _hudBoundIndexPage = VK_NULL_HANDLE;
             if (_metricsEnabled) ++_metricFastDraws;
             return true;
         }
@@ -1512,7 +1550,7 @@
             auto& vk = *_device->ContextPointer->_impl;
             vk.vkUpdateDescriptorSets(vk.device, static_cast<std::uint32_t>(FastRecordKinds), writes.data(), 0, nullptr);
             slot.Program = &program;
-            _fastSetsBound = false; _fast2SetsBound = false; _fast2BoundGeometry = nullptr;
+            _fastSetsBound = false; _fast2SetsBound = false; _hudBound = false; _fast2BoundGeometry = nullptr; _hudBoundPage = VK_NULL_HANDLE; _hudBoundIndexPage = VK_NULL_HANDLE;
             return true;
         }
 
@@ -1544,7 +1582,7 @@
         bool VulkanCommandList::DrawSceneFast2(VulkanSceneProgram& program, const SceneDraw& draw,
             const std::array<SampledDescriptor, 4>& textures)
         {
-            if (!program.Fast2Vertex || !draw.Geometry || !FastScene::Enabled()) return false;
+            if (program.Id != SceneProgram::Main || !program.Fast2Vertex || !draw.Geometry || !FastScene::Enabled()) return false;
             auto& vk = *_device->ContextPointer->_impl;
             if (vk.legacy) return false;
             auto& slot = _fast2Slots.at(_commandSlots->SlotIndex());
@@ -1640,6 +1678,8 @@
             _smallPipeline = nullptr;
             _smallCurrent = false;
             _fastSetsBound = false;
+            _hudBound = false;
+            _hudBoundPage = VK_NULL_HANDLE; _hudBoundIndexPage = VK_NULL_HANDLE;
             ApplyDynamicState();
             const bool fresh = !_fast2SetsBound;
             if (fresh || _fast2BoundSet != slot.Set || _fast2BoundOffsets != offsets)
@@ -1759,7 +1799,7 @@
             auto& vk = *_device->ContextPointer->_impl;
             vk.vkUpdateDescriptorSets(vk.device, static_cast<std::uint32_t>(Fast2Regions), writes.data(), 0, nullptr);
             slot.Program = &program;
-            _fast2SetsBound = false;
+            _fast2SetsBound = false; _hudBound = false;
             return true;
         }
 
@@ -1810,6 +1850,138 @@
             for (auto& recent : _fast2Recent) if (recent.Key == key) recent = {};
             _fast2Recent[_fast2RecentNext] = {key, entry.Native.get()};
             _fast2RecentNext = (_fast2RecentNext + 1) % _fast2Recent.size();
+            return *entry.Native;
+        }
+
+        // composite_fast: a HUD object, layer or fade is its Hud block pushed,
+        // its texture and mask set from a cache and a draw at its place in
+        // the transient upload page, which consecutive HUD draws share.
+        bool VulkanCommandList::DrawCompositeFast(VulkanSceneProgram& program, const SceneDraw& draw,
+            const std::array<SampledDescriptor, 4>& textures)
+        {
+            if (program.Id != SceneProgram::Composite || !program.FastVertex || !FastScene::Enabled()) return false;
+            if (!draw.TransientVertices || draw.Streams[0].Buffer != draw.TransientVertices
+                || draw.Streams[3].Buffer != draw.TransientVertices || draw.Streams[0].Stride != 24
+                || draw.Streams[3].Stride != 24 || draw.Lines)
+                return false;
+            auto& vk = *_device->ContextPointer->_impl;
+            if (vk.legacy || program.Textures.size() != 2) return false;
+
+            const auto key = [&](const SampledDescriptor& t) {
+                return FastTextureKey{t.View, t.Sampler, t.Layout, t.Identity, t.Generation, t.SamplerIdentity};
+            };
+            const HudTextureKey textureKey{key(textures[program.Textures[0].unit]), key(textures[program.Textures[1].unit])};
+            VkDescriptorSet texture = VK_NULL_HANDLE;
+            if (const auto found = _hudTextureSets.find(textureKey); found != _hudTextureSets.end()) texture = found->second;
+            else
+            {
+                if (_hudTextureSets.size() >= 16384) ClearFastTextures();
+                if (!_hudTextures)
+                {
+                    _hudTextures = _device->MakeDescriptors({1024, {0, 0, 2048, 0, 2048}});
+                    _hudTextures->ResetAfterCompletion({0});
+                }
+                const auto& layout = *program.FastLayouts[0];
+                texture = _hudTextures->Allocate(layout.Native(), layout.Desc());
+                std::array<VkDescriptorImageInfo, 4> images{};
+                std::array<VkWriteDescriptorSet, 4> writes{};
+                for (std::size_t i = 0; i < 2; ++i)
+                {
+                    const auto& binding = program.Textures[i];
+                    const auto& t = textures[binding.unit];
+                    images[i * 2] = {VK_NULL_HANDLE, t.View, t.Layout};
+                    images[i * 2 + 1] = {t.Sampler, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_UNDEFINED};
+                    for (std::size_t j = 0; j < 2; ++j)
+                    {
+                        auto& write = writes[i * 2 + j];
+                        write = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+                        write.dstSet = texture;
+                        write.dstBinding = j ? binding.sampler : binding.image;
+                        write.descriptorCount = 1;
+                        write.descriptorType = j ? VK_DESCRIPTOR_TYPE_SAMPLER : VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+                        write.pImageInfo = &images[i * 2 + j];
+                    }
+                }
+                vk.vkUpdateDescriptorSets(vk.device, static_cast<std::uint32_t>(writes.size()), writes.data(), 0, nullptr);
+                if (_metricsEnabled) ++_metricUpdates;
+                _hudTextureSets.emplace(textureKey, texture);
+            }
+
+            VulkanGraphicsPipeline& native = HudVariantFor(program, draw);
+            const auto commands = _commandSlots->Buffer();
+            if (native.Native() != _boundNative)
+            {
+                vk.vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, native.Native());
+                if (_metricsEnabled) ++_metricPipelines;
+                _boundNative = native.Native();
+                _genericDirty = true;
+            }
+            _boundSceneLayout = nullptr;
+            _boundSceneSets.fill(VK_NULL_HANDLE);
+            _smallPipeline = nullptr;
+            _smallCurrent = false;
+            _fastSetsBound = false;
+            _fast2SetsBound = false;
+            _fast2BoundGeometry = nullptr;
+            ApplyDynamicState();
+            const bool fresh = !_hudBound;
+            if (fresh || _hudBoundTexture != texture)
+            {
+                vk.vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, native.Layout(), 0, 1, &texture, 0, nullptr);
+                if (_metricsEnabled) ++_metricBinds;
+                _hudBoundTexture = texture;
+            }
+            const auto& hud = program.BlockAt(program.FastBlocks[0]);
+            if (fresh || std::memcmp(_hudPushed.data(), hud.Data.data(), program.FastPushBytes) != 0)
+            {
+                vk.vkCmdPushConstants(commands, native.Layout(), VK_SHADER_STAGE_ALL_GRAPHICS, 0, program.FastPushBytes, hud.Data.data());
+                if (_metricsEnabled) ++_metricSmallConstants;
+                std::memcpy(_hudPushed.data(), hud.Data.data(), program.FastPushBytes);
+            }
+            _hudBound = true;
+            if (_hudBoundPage != draw.TransientVertices)
+            {
+                const VkDeviceSize zero = 0, stride = 24;
+                vk.vkCmdBindVertexBuffers2(commands, 0, 1, &draw.TransientVertices, &zero, nullptr, &stride);
+                _hudBoundPage = draw.TransientVertices;
+            }
+            if (_hudBoundIndexPage != draw.IndexBuffer)
+            {
+                vk.vkCmdBindIndexBuffer(commands, draw.IndexBuffer, 0, VK_INDEX_TYPE_UINT32);
+                _hudBoundIndexPage = draw.IndexBuffer;
+            }
+            vk.vkCmdDrawIndexed(commands, draw.IndexCount, 1, draw.TransientFirstIndex, draw.TransientVertexOffset, 0);
+            if (_metricsEnabled) ++_metricHudDraws;
+            return true;
+        }
+
+        VulkanGraphicsPipeline& VulkanCommandList::HudVariantFor(const VulkanSceneProgram& program, const SceneDraw& draw)
+        {
+            VariantKey key{_pipeline, &program,
+                _target.Color ? _target.Color->Desc().format : TextureFormat::Undefined,
+                _target.Depth ? _target.Depth->Desc().format : TextureFormat::Undefined, draw.Lines};
+            for (const auto& recent : _hudRecent)
+                if (recent.Native && recent.Key == key) return *recent.Native;
+            const auto found = _hudVariants.find(key);
+            if (found != _hudVariants.end() && found->second.BaseDesc == _pipeline->Desc())
+            {
+                _hudRecent[_hudRecentNext] = {key, found->second.Native.get()};
+                _hudRecentNext = (_hudRecentNext + 1) % _hudRecent.size();
+                return *found->second.Native;
+            }
+            GraphicsPipelineDesc desc = SceneVariantDesc(program, key);
+            desc.vertexShader = program.FastVertex.get();
+            desc.fragmentShader = program.FastFragment.get();
+            desc.pipelineLayout.groups = {program.FastLayouts[0]->Desc()};
+            desc.smallConstantBytes = program.FastPushBytes;
+            desc.vertexBuffers = {{0, 24}};
+            desc.vertexAttributes = {{0, 0, VertexFormat::Float3, 0}, {3, 0, VertexFormat::Float3, 12}};
+            auto& entry = _hudVariants[key];
+            entry.BaseDesc = _pipeline->Desc();
+            entry.Native = std::make_shared<VulkanGraphicsPipeline>(_device, desc, true);
+            for (auto& recent : _hudRecent) if (recent.Key == key) recent = {};
+            _hudRecent[_hudRecentNext] = {key, entry.Native.get()};
+            _hudRecentNext = (_hudRecentNext + 1) % _hudRecent.size();
             return *entry.Native;
         }
 
@@ -1899,7 +2071,12 @@
             if (_fastTextures)
                 _device->Retire([descriptors = std::move(_fastTextures)] { descriptors->Close(); });
             _fastTextures.reset();
-            _fastSetsBound = false; _fast2SetsBound = false; _fast2BoundGeometry = nullptr;
+            _hudTextureSets.clear();
+            if (_hudTextures)
+                _device->Retire([descriptors = std::move(_hudTextures)] { descriptors->Close(); });
+            _hudTextures.reset();
+            _hudBound = false;
+            _fastSetsBound = false; _fast2SetsBound = false; _hudBound = false; _fast2BoundGeometry = nullptr; _hudBoundPage = VK_NULL_HANDLE; _hudBoundIndexPage = VK_NULL_HANDLE;
         }
 
         void VulkanCommandList::CloseFast() noexcept
@@ -1950,6 +2127,12 @@
             _fast2Sets.reset();
             _fast2Variants.clear();
             _fast2Recent = {};
+            try { if (_hudTextures) _device->Retire([descriptors = std::move(_hudTextures)] { descriptors->Close(); }); }
+            catch (...) {}
+            _hudTextures.reset();
+            _hudTextureSets.clear();
+            _hudVariants.clear();
+            _hudRecent = {};
         }
 
         void VulkanCommandList::DrawScene(const SceneDraw& draw)
@@ -1987,9 +2170,10 @@
             }
             if (!_renderingActive) Materialize();
             if (DrawSceneFast2(*program, draw, textures)) return;
+            if (DrawCompositeFast(*program, draw, textures)) return;
             if (DrawSceneFast(*program, draw, textures)) return;
             // What the ordinary path binds below replaces what DrawSceneFast bound.
-            _fastSetsBound = false; _fast2SetsBound = false; _fast2BoundGeometry = nullptr;
+            _fastSetsBound = false; _fast2SetsBound = false; _hudBound = false; _fast2BoundGeometry = nullptr; _hudBoundPage = VK_NULL_HANDLE; _hudBoundIndexPage = VK_NULL_HANDLE;
 
             VulkanGraphicsPipeline& native = VariantFor(*program, draw);
             if (native.Native() != _boundNative)
@@ -2259,7 +2443,7 @@
             const VkDeviceSize at = offset;
             _device->ContextPointer->_impl->vkCmdBindVertexBuffers2(_commandSlots->Buffer(), slot, 1, &handle, &at, nullptr, nullptr);
             _vertexBindings[slot] = {&native, native.Lifetime(), offset};
-            _fast2BoundGeometry = nullptr;
+            _fast2BoundGeometry = nullptr; _hudBoundPage = VK_NULL_HANDLE; _hudBoundIndexPage = VK_NULL_HANDLE;
         }
 
         void VulkanCommandList::SetIndexBuffer(const Buffer& buffer, IndexType type, std::uint64_t offset)
@@ -2272,7 +2456,7 @@
             _device->ContextPointer->_impl->vkCmdBindIndexBuffer(_commandSlots->Buffer(), native.Native(), offset,
                 type == IndexType::UInt16 ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32);
             _indexBinding = {&native, native.Lifetime(), offset}; _indexType = type;
-            _fast2BoundGeometry = nullptr;
+            _fast2BoundGeometry = nullptr; _hudBoundPage = VK_NULL_HANDLE; _hudBoundIndexPage = VK_NULL_HANDLE;
         }
 
         void VulkanCommandList::Draw(std::uint32_t vertexCount, std::uint32_t instanceCount,

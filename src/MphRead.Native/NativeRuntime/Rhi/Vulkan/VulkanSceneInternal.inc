@@ -223,7 +223,35 @@ private:
         for (std::uint32_t group = 0; group < SceneShaderAbi::GroupCount; ++group)
             program->Layouts[group] = std::make_unique<VulkanBindingLayout>(_device, layouts[group]);
         if (id == SceneProgram::Main) AddFast(*program, uniforms, textures, blocks);
+        if (id == SceneProgram::Composite) AddFastComposite(*program, textures, blocks);
         _programs.push_back(std::move(program));
+    }
+
+    // composite_fast (performance mode's HUD): its one block, Hud, is the
+    // push constants; its textures are set 0 at their own bindings.
+    template <typename Textures, typename Blocks>
+    void AddFastComposite(VulkanSceneProgram& program, const Textures& textures, const Blocks& blocks)
+    {
+        if (blocks.size() != 1 || blocks[0].small || blocks[0].size > 128 || textures.size() != 2) return;
+        program.FastBlocks[0] = 0;
+        program.FastPushBytes = blocks[0].size;
+        BindingLayoutDesc layout{};
+        for (const auto& texture : textures)
+        {
+            layout.entries.push_back({texture.image, BindingType::SampledTexture, ShaderStage::AllGraphics, 1});
+            layout.entries.push_back({texture.sampler, BindingType::Sampler, ShaderStage::AllGraphics, 1});
+        }
+        program.FastLayouts[0] = std::make_unique<VulkanBindingLayout>(_device, layout);
+        const auto shader = [&](const auto& words, ShaderStage stage) {
+            ShaderDesc desc{};
+            desc.stage = stage;
+            desc.format = ShaderCodeFormat::SpirV;
+            desc.code.resize(words.size() * sizeof(std::uint32_t));
+            std::memcpy(desc.code.data(), words.data(), desc.code.size());
+            return std::make_unique<VulkanShader>(_device, desc);
+        };
+        program.FastVertex = shader(Generated::composite_fast_vert, ShaderStage::Vertex);
+        program.FastFragment = shader(Generated::composite_fast_frag, ShaderStage::Fragment);
     }
 
     // main_fast's modules and layouts, and where its records are in main's
@@ -685,7 +713,9 @@ public:
         MphRead::AppendTransientDrawIndices(indices, sequence, topology);
         if (indices.capacity() != previousCapacity) FrameTelemetry::Count(FrameTelemetry::Counter::VectorGrowth);
         if (indices.empty()) return;
-        auto positions = _commands.Allocate(n * 24U);
+        // 48: the ring's 16 and the 24-byte stride, so the slice is a whole
+        // vertex offset into its page and fast draws can share one binding.
+        auto positions = _commands.Allocate(n * 24U, 48);
         auto* out = reinterpret_cast<float*>(positions.Data);
         for (std::size_t i = 0; i < n; ++i)
         {
@@ -710,6 +740,12 @@ public:
         draw.IndexOffset = index.Offset;
         draw.IndexCount = static_cast<std::uint32_t>(indices.size());
         draw.Lines = lines;
+        if (hasTexCoords)
+        {
+            draw.TransientVertices = positions.Buffer;
+            draw.TransientVertexOffset = static_cast<std::int32_t>(positions.Offset / 24U);
+            draw.TransientFirstIndex = static_cast<std::uint32_t>(index.Offset / 4U);
+        }
         _commands.DrawScene(draw);
     }
 

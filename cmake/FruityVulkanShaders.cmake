@@ -23,7 +23,7 @@ endforeach()
 # main_fast: the main program over storage-buffer records (performance mode).
 # main_fast2: the cpp-port renderer's layout for meshes in the global geometry buffer.
 set(_fruity_fast_spirv)
-foreach(_program main_fast main_fast2)
+foreach(_program main_fast main_fast2 composite_fast)
     foreach(_stage vert frag)
         list(APPEND _fruity_generated_glsl "${FRUITY_VULKAN_SHADER_DIR}/${_program}.${_stage}")
         list(APPEND _fruity_fast_spirv "${FRUITY_VULKAN_SHADER_DIR}/${_program}.${_stage}.spv")
