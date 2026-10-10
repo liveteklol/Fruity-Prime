@@ -21,13 +21,17 @@ foreach(_program main composite cel shift backdrop)
     endforeach()
 endforeach()
 # main_fast: the main program over storage-buffer records (performance mode).
+# main_fast2: the cpp-port renderer's layout for meshes in the global geometry buffer.
 set(_fruity_fast_spirv)
-foreach(_stage vert frag)
-    list(APPEND _fruity_generated_glsl "${FRUITY_VULKAN_SHADER_DIR}/main_fast.${_stage}")
-    list(APPEND _fruity_fast_spirv "${FRUITY_VULKAN_SHADER_DIR}/main_fast.${_stage}.spv")
+foreach(_program main_fast main_fast2)
+    foreach(_stage vert frag)
+        list(APPEND _fruity_generated_glsl "${FRUITY_VULKAN_SHADER_DIR}/${_program}.${_stage}")
+        list(APPEND _fruity_fast_spirv "${FRUITY_VULKAN_SHADER_DIR}/${_program}.${_stage}.spv")
+    endforeach()
 endforeach()
 add_custom_command(
     OUTPUT ${_fruity_generated_glsl} "${FRUITY_VULKAN_SHADER_DIR}/bindings.json"
+        "${FRUITY_VULKAN_SHADER_DIR}/main_fast2.json"
     COMMAND Python3::Interpreter "${_fruity_shader_generator}"
         --source "${_fruity_shader_sources}" --output "${FRUITY_VULKAN_SHADER_DIR}"
     DEPENDS "${_fruity_shader_generator}" "${_fruity_shader_sources}"
@@ -61,7 +65,8 @@ add_custom_command(
     OUTPUT "${_fruity_fast_header}"
     COMMAND Python3::Interpreter "${CMAKE_CURRENT_SOURCE_DIR}/tools/embed-vulkan-fast-shaders.py"
         --directory "${FRUITY_VULKAN_SHADER_DIR}" --output "${_fruity_fast_header}"
-    DEPENDS ${_fruity_fast_spirv} "${CMAKE_CURRENT_SOURCE_DIR}/tools/embed-vulkan-fast-shaders.py"
+    DEPENDS ${_fruity_fast_spirv} "${FRUITY_VULKAN_SHADER_DIR}/main_fast2.json"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/embed-vulkan-fast-shaders.py"
     VERBATIM)
 add_custom_target(fruity_vulkan_shaders DEPENDS "${_fruity_shader_header}" "${_fruity_fast_header}")
 target_sources(fruity_mphread_native PRIVATE "${_fruity_shader_header}" "${_fruity_fast_header}")

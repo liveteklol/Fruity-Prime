@@ -268,11 +268,110 @@ private:
         program.FastLayouts[1] = std::make_unique<VulkanBindingLayout>(_device, textureLayout);
         program.FastVertex = shader(Generated::main_fast_vert, ShaderStage::Vertex);
         program.FastFragment = shader(Generated::main_fast_frag, ShaderStage::Fragment);
+
+        // main_fast2: the copy tables name main's blocks by semantic.
+        using From = VulkanSceneProgram::FastCopy::From;
+        const auto copies = [&](const auto& table, std::vector<VulkanSceneProgram::FastCopy>& out) {
+            for (const auto& entry : table)
+            {
+                const From source = entry.block == "DrawSmall" ? From::Small
+                    : entry.block == "Material" ? From::Material : From::Draw;
+                if (entry.block != "DrawSmall" && entry.block != "Material" && entry.block != "Draw") return false;
+                out.push_back({source, entry.offset, entry.size, entry.dest});
+            }
+            return true;
+        };
+        if (!copies(Generated::main_fast2_push, program.Fast2Push) || !copies(Generated::main_fast2_record, program.Fast2Record))
+            return;
+        BindingLayoutDesc fast2Layout{};
+        for (std::uint32_t binding = 0; binding < 4; ++binding)
+            fast2Layout.entries.push_back({binding, BindingType::UniformBuffer, ShaderStage::AllGraphics, 1, true});
+        fast2Layout.entries.push_back({4, BindingType::StorageBuffer, ShaderStage::AllGraphics, 1});
+        fast2Layout.entries.push_back({5, BindingType::StorageBuffer, ShaderStage::AllGraphics, 1});
+        program.Fast2Records = std::make_unique<VulkanBindingLayout>(_device, fast2Layout);
+        program.Fast2Vertex = shader(Generated::main_fast2_vert, ShaderStage::Vertex);
+        program.Fast2Fragment = shader(Generated::main_fast2_frag, ShaderStage::Fragment);
     }
 
     std::shared_ptr<VulkanDeviceState> _device;
     std::vector<std::unique_ptr<VulkanSceneProgram>> _programs;
     VulkanSceneConstants _constants;
+};
+
+// Performance mode's global geometry buffer, the cpp-port renderer's
+// m_vertexBuffer: GPU meshes are copied into large shared vertex and index
+// buffers as they are made, so a fast draw binds neither and draws a range.
+// Chunks are bump-allocated; one whose meshes are all gone starts over once
+// the GPU is done with them.
+class FastGeometryArena final
+{
+public:
+    struct Chunk final
+    {
+        VulkanCommandList::FastGeometryView View{};
+        std::unique_ptr<VulkanBuffer> Vertices, Indices;
+        std::uint32_t VertexCursor = 0, IndexCursor = 0, Live = 0;
+        std::uint64_t Epoch = 0;
+    };
+    struct Range final
+    {
+        std::shared_ptr<Chunk> Owner;
+        std::uint32_t FirstIndex = 0;
+        std::int32_t VertexOffset = 0;
+    };
+    static constexpr std::uint32_t VertexCapacity = 1U << 18, IndexCapacity = 1U << 20;
+
+    explicit FastGeometryArena(std::shared_ptr<VulkanDeviceState> device) : _device(std::move(device)) {}
+
+    std::optional<Range> Add(VulkanGraphicsDevice& device, std::span<const float> vertices, std::span<const std::uint32_t> indices)
+    {
+        const auto count = static_cast<std::uint32_t>(vertices.size() / 13U);
+        if (!count || indices.empty() || count > VertexCapacity || indices.size() > IndexCapacity) return std::nullopt;
+        std::shared_ptr<Chunk> chunk;
+        for (const auto& candidate : _chunks)
+            if (candidate->VertexCursor + count <= VertexCapacity
+                && candidate->IndexCursor + indices.size() <= IndexCapacity)
+            { chunk = candidate; break; }
+        if (!chunk)
+        {
+            const auto make = [&](VkDeviceSize size, BufferUsage usage) {
+                BufferDesc desc{};
+                desc.size = size;
+                desc.usage = usage | BufferUsage::TransferDst;
+                desc.memoryUsage = MemoryUsage::GpuOnly;
+                desc.initialState = usage == BufferUsage::Index ? ResourceState::IndexBuffer : ResourceState::VertexBuffer;
+                return std::make_unique<VulkanBuffer>(device.State(), desc);
+            };
+            chunk = std::make_shared<Chunk>();
+            chunk->Vertices = make(VkDeviceSize{VertexCapacity} * 13U * sizeof(float), BufferUsage::Vertex);
+            chunk->Indices = make(VkDeviceSize{IndexCapacity} * sizeof(std::uint32_t), BufferUsage::Index);
+            chunk->View = {chunk->Vertices->Native(), chunk->Indices->Native()};
+            _chunks.push_back(chunk);
+        }
+        device.WriteBuffer(*chunk->Vertices, VkDeviceSize{chunk->VertexCursor} * 13U * sizeof(float), std::as_bytes(vertices));
+        device.WriteBuffer(*chunk->Indices, VkDeviceSize{chunk->IndexCursor} * sizeof(std::uint32_t), std::as_bytes(indices));
+        Range range{chunk, chunk->IndexCursor, static_cast<std::int32_t>(chunk->VertexCursor)};
+        chunk->VertexCursor += count;
+        chunk->IndexCursor += static_cast<std::uint32_t>(indices.size());
+        ++chunk->Live;
+        ++chunk->Epoch;
+        return range;
+    }
+
+    void Release(const Range& range)
+    {
+        auto& chunk = *range.Owner;
+        if (chunk.Live == 0 || --chunk.Live != 0) return;
+        const auto epoch = chunk.Epoch;
+        _device->Retire([weak = std::weak_ptr<Chunk>(range.Owner), epoch] {
+            if (const auto chunk = weak.lock(); chunk && chunk->Live == 0 && chunk->Epoch == epoch)
+                chunk->VertexCursor = chunk->IndexCursor = 0;
+        });
+    }
+
+private:
+    std::shared_ptr<VulkanDeviceState> _device;
+    std::vector<std::shared_ptr<Chunk>> _chunks;
 };
 
 class VulkanGpuMesh final : public MphRead::GpuMeshResource
@@ -306,6 +405,22 @@ public:
             _vertexBuffer = Upload(device, std::as_bytes(std::span(_vertices)), BufferUsage::Vertex);
         if (!indices.empty())
             _indexBuffer = Upload(device, std::as_bytes(std::span(indices)), BufferUsage::Index);
+        // Also in the global geometry buffer, unless some vertices carry a
+        // colour or normal and others inherit it (those keep their streams).
+        if (!_vertices.empty() && !indices.empty() && _colorMode != Mode::Mixed && _normalMode != Mode::Mixed)
+        {
+            auto& arena = device.FastGeometry();
+            if (!arena) arena = std::make_shared<FastGeometryArena>(device.State());
+            _fastRange = arena->Add(device, std::span<const float>(_vertices), std::span<const std::uint32_t>(indices));
+            if (_fastRange) _fastArena = arena;
+        }
+    }
+
+    ~VulkanGpuMesh() override
+    {
+        if (!_fastRange) return;
+        if (const auto arena = _fastArena.lock())
+            try { arena->Release(*_fastRange); } catch (...) {}
     }
 
     void Draw() override
@@ -325,6 +440,15 @@ public:
             draw.IndexBuffer = _indexBuffer->Native();
             draw.IndexCount = _indexCount;
             draw.Matrices = _matrices;
+            if (_fastRange)
+            {
+                draw.Geometry = &_fastRange->Owner->View;
+                draw.FirstIndex = _fastRange->FirstIndex;
+                draw.VertexOffset = _fastRange->VertexOffset;
+                draw.InheritFlags = (_colorMode == Mode::Inherited ? 1U : 0U) | (_normalMode == Mode::Inherited ? 2U : 0U);
+                draw.InheritedColor = _device->CurrentColor;
+                draw.InheritedNormal = _device->CurrentNormal;
+            }
             _commands.DrawScene(draw);
         }
         // The current attributes the display list leaves behind.
@@ -340,6 +464,8 @@ private:
     enum class Mode : std::uint8_t { Inherited, Static, Mixed };
     // Matrix-stack entries the vertices index (performance mode copies these).
     std::uint32_t _matrices = 1;
+    std::optional<FastGeometryArena::Range> _fastRange;
+    std::weak_ptr<FastGeometryArena> _fastArena;
 
     static std::unique_ptr<VulkanBuffer> Upload(VulkanGraphicsDevice& device, std::span<const std::byte> data,
         BufferUsage usage)
