@@ -350,6 +350,37 @@ namespace MphRead::Mods::Launcher::Gui
                             std::cout << "[focus fixture] rapid focus round trips: PASS\n";
                         }
                     }
+                    // FRUITY_FPS_FIRE=tap|charge: the main player fires through
+                    // the real Fire input (taps, or 2.4 s charges) from 2 s on,
+                    // and the window is captured every 250 ms (fire-NNN.png):
+                    // shot, muzzle and charge effects to compare between builds.
+                    static const QByteArray fireMode = qgetenv("FRUITY_FPS_FIRE");
+                    if (!fireMode.isEmpty() && elapsed >= std::chrono::seconds(2))
+                    {
+                        static bool fireDown = false;
+                        static int captured = 0;
+                        const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            elapsed - std::chrono::seconds(2)).count();
+                        const bool down = fireMode == "charge" ? ms % 3000 < 2400 : ms % 500 < 120;
+                        if (down != fireDown)
+                        {
+                            auto* target = MphRead::Qt::GameWindow();
+                            const QPointF centre(target->width() / 2, target->height() / 2);
+                            QMouseEvent fire(down ? QEvent::MouseButtonPress : QEvent::MouseButtonRelease,
+                                centre, QPointF(target->mapToGlobal(centre.toPoint())), ::Qt::LeftButton,
+                                down ? ::Qt::LeftButton : ::Qt::NoButton, ::Qt::NoModifier);
+                            QCoreApplication::sendEvent(target, &fire);
+                            fireDown = down;
+                        }
+                        if (ms >= captured * 250 && captured < 32)
+                        {
+                            QDir().mkpath(dir);
+                            const auto size = window.FramebufferSize();
+                            const auto name = QStringLiteral("fire-%1.png").arg(captured, 3, 10, QLatin1Char('0'));
+                            (void)MphRead::Mods::ScreenCapture::SaveWindow(size.X, size.Y, QDir(dir).filePath(name).toStdString());
+                            ++captured;
+                        }
+                    }
                     if (elapsed < std::chrono::seconds(focusCheck ? 20 : 10))
                     { --frame; return; }
                     const auto main = MphRead::Entities::PlayerEntity::Main();
