@@ -586,6 +586,13 @@ namespace MphRead
         return {count, std::move(result)};
     }
 
+    std::shared_ptr<Model> Read::ReadModelFile(const std::string& name,
+        const std::string& modelPath, const std::optional<std::string>& animationPath)
+    {
+        const std::vector<RecolorMetadata> recolors{RecolorMetadata("default", modelPath)};
+        return ReadModel(name, modelPath, animationPath, std::nullopt, recolors, false);
+    }
+
     std::shared_ptr<Model> Read::ReadModel(
         const std::string& name, const std::string& modelPath,
         const std::optional<std::string>& animationPath,

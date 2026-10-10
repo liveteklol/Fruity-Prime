@@ -7,6 +7,7 @@
 #include "../Formats/Enums.hpp"
 #include "../Utility/Console.hpp"
 #include "Branding.hpp"
+#include "ClassicMenu/Frames.hpp"
 #include "ConsoleWindow.hpp"
 #include "Credits.hpp"
 #include "DebugLog.hpp"
@@ -1494,6 +1495,15 @@ namespace MphRead::Mods
         if (uiDesign.has_value())
         {
             SetExitCode(RunUiDesigns(*uiDesign));
+            return true;
+        }
+
+        const std::optional<std::string> classicFrames = ValueAfter(args, "classicframes");
+        if (classicFrames.has_value())
+        {
+            const int index = IndexOfFlag(args, "classicframes");
+            const std::size_t script = static_cast<std::size_t>(index) + 2;
+            SetExitCode(ClassicMenu::RunFrames(*classicFrames, script < args.size() ? args[script] : std::string()));
             return true;
         }
 
