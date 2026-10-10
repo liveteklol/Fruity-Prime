@@ -8,7 +8,9 @@
 #include "../NativeRuntime/System/Globalization.hpp"
 #include "../NativeRuntime/System/Managed.hpp"
 
+#include <algorithm>
 #include <bit>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -198,10 +200,23 @@ namespace MphRead::Mods
         window.WindowBorder(HiddenWindowBorder);
         RendererPlatform::ProcessEvents();
         window.Location(monitor.Min);
-        
-            window.ClientSize(OpenTK::Mathematics::Vector2i{
-                monitor.Size.X,
-                UncheckedDecrement(monitor.Size.Y)});
+
+        // The monitor is in physical pixels, the client size in the
+        // toolkit's own units: logical ones under Qt. At 150 % scaling the
+        // physical size given as is made a 3840x2399 window on a 2560x1600
+        // screen, and only its top-left two thirds were visible.
+        const OpenTK::Mathematics::Vector2i client = window.ClientSize();
+        const OpenTK::Mathematics::Vector2i framebuffer = window.FramebufferSize();
+        const auto logical = [](std::int32_t physical, std::int32_t clientUnits, std::int32_t pixels)
+        {
+            return clientUnits > 0 && pixels > 0
+                ? std::max<std::int32_t>(1, static_cast<std::int32_t>(std::lround(
+                    static_cast<double>(physical) * clientUnits / pixels)))
+                : physical;
+        };
+        window.ClientSize(OpenTK::Mathematics::Vector2i{
+            logical(monitor.Size.X, client.X, framebuffer.X),
+            logical(UncheckedDecrement(monitor.Size.Y), client.Y, framebuffer.Y)});
 
         SetTopmost(window, true);
         // And written down, so the next session opens this way. See

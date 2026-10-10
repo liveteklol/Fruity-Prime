@@ -662,6 +662,37 @@ namespace
         format.setSwapInterval(interval);
         _window->setFormat(format);
         _context->makeCurrent(_window.get());
+        // ...but the platform window keeps the format it was created with,
+        // so a later change never reached the driver: VSync off still ran
+        // at the refresh rate in OpenGL. Set it on the context directly; Qt
+        // only reapplies its own interval when that format changes.
+#if defined(_WIN32)
+        using SwapIntervalWgl = BOOL(WINAPI*)(int);
+        if (const auto set = reinterpret_cast<SwapIntervalWgl>(_context->getProcAddress("wglSwapIntervalEXT")))
+        {
+            set(interval);
+        }
+#elif defined(__linux__)
+        if (QGuiApplication::platformName() == QLatin1String("xcb"))
+        {
+            using SwapIntervalMesa = int (*)(unsigned int);
+            if (const auto set = reinterpret_cast<SwapIntervalMesa>(_context->getProcAddress("glXSwapIntervalMESA")))
+            {
+                set(static_cast<unsigned int>(interval));
+            }
+        }
+        else
+        {
+            using CurrentDisplay = void* (*)();
+            using SwapIntervalEgl = unsigned int (*)(void*, int);
+            const auto display = reinterpret_cast<CurrentDisplay>(_context->getProcAddress("eglGetCurrentDisplay"));
+            const auto set = reinterpret_cast<SwapIntervalEgl>(_context->getProcAddress("eglSwapInterval"));
+            if (display != nullptr && set != nullptr)
+            {
+                set(display(), interval);
+            }
+        }
+#endif
     }
 
     void QtWindow::Visible(bool value)
