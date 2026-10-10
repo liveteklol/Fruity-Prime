@@ -4,6 +4,7 @@
 #include "Mods/Diagnostics/FramePerformance.hpp"
 #include "RendererGeometry.hpp"
 #include "NativeRuntime/System/Runtime.hpp"
+#include "NativeRuntime/Rhi/FastScene.hpp"
 #include "NativeRuntime/Rhi/SceneBackend.hpp"
 #include "NativeRuntime/System/Console.hpp"
 #include "NativeRuntime/System/Globalization.hpp"
@@ -2239,6 +2240,8 @@ namespace MphRead
     {
         const NativeRuntime::FrameTelemetry::Scope measured(NativeRuntime::FrameTelemetry::Phase::SceneRender);
         const std::lock_guard<std::recursive_mutex> gate(NativeRuntime::SceneGate());
+        // Performance mode draws through the backend's fast scene path.
+        NativeRuntime::Rhi::FastScene::Request(Mods::RenderOptions::PerformanceMode());
         CountFrame();
         if (_exiting) return false;
         std::unique_ptr<NativeRuntime::Rhi::TimestampQuerySet> gpuSample;

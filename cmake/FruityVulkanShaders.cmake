@@ -20,6 +20,12 @@ foreach(_program main composite cel shift backdrop)
         list(APPEND _fruity_generated_spirv "${FRUITY_VULKAN_SHADER_DIR}/${_program}.${_stage}.spv")
     endforeach()
 endforeach()
+# main_fast: the main program over storage-buffer records (performance mode).
+set(_fruity_fast_spirv)
+foreach(_stage vert frag)
+    list(APPEND _fruity_generated_glsl "${FRUITY_VULKAN_SHADER_DIR}/main_fast.${_stage}")
+    list(APPEND _fruity_fast_spirv "${FRUITY_VULKAN_SHADER_DIR}/main_fast.${_stage}.spv")
+endforeach()
 add_custom_command(
     OUTPUT ${_fruity_generated_glsl} "${FRUITY_VULKAN_SHADER_DIR}/bindings.json"
     COMMAND Python3::Interpreter "${_fruity_shader_generator}"
@@ -50,8 +56,15 @@ add_custom_command(
         "${CMAKE_CURRENT_SOURCE_DIR}/tools/reflect_scene_spirv.py"
         "${CMAKE_CURRENT_SOURCE_DIR}/tools/scene_shader_abi.py"
     VERBATIM)
-add_custom_target(fruity_vulkan_shaders DEPENDS "${_fruity_shader_header}")
-target_sources(fruity_mphread_native PRIVATE "${_fruity_shader_header}")
+set(_fruity_fast_header "${FRUITY_VULKAN_SHADER_DIR}/FruityVulkanFastShaders.hpp")
+add_custom_command(
+    OUTPUT "${_fruity_fast_header}"
+    COMMAND Python3::Interpreter "${CMAKE_CURRENT_SOURCE_DIR}/tools/embed-vulkan-fast-shaders.py"
+        --directory "${FRUITY_VULKAN_SHADER_DIR}" --output "${_fruity_fast_header}"
+    DEPENDS ${_fruity_fast_spirv} "${CMAKE_CURRENT_SOURCE_DIR}/tools/embed-vulkan-fast-shaders.py"
+    VERBATIM)
+add_custom_target(fruity_vulkan_shaders DEPENDS "${_fruity_shader_header}" "${_fruity_fast_header}")
+target_sources(fruity_mphread_native PRIVATE "${_fruity_shader_header}" "${_fruity_fast_header}")
 target_include_directories(fruity_mphread_native PRIVATE "${FRUITY_VULKAN_SHADER_DIR}")
 add_dependencies(fruity_mphread_native fruity_vulkan_shaders)
 

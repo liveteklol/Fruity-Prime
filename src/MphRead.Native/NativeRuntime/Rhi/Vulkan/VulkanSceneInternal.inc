@@ -222,7 +222,52 @@ private:
         }
         for (std::uint32_t group = 0; group < SceneShaderAbi::GroupCount; ++group)
             program->Layouts[group] = std::make_unique<VulkanBindingLayout>(_device, layouts[group]);
+        if (id == SceneProgram::Main) AddFast(*program, uniforms, textures, blocks);
         _programs.push_back(std::move(program));
+    }
+
+    // main_fast's modules and layouts, and where its records are in main's
+    // blocks. Left out (FastVertex null) when main's blocks are not the ones
+    // main_fast was generated for, so the ordinary path draws.
+    template <typename Uniforms, typename Textures, typename Blocks>
+    void AddFast(VulkanSceneProgram& program, const Uniforms& uniforms, const Textures& textures, const Blocks& blocks)
+    {
+        constexpr std::array<std::string_view, 5> records{"Frame", "Light", "Fog", "Material", "Draw"};
+        std::array<bool, 5> found{};
+        bool small = false;
+        for (std::size_t i = 0; i < blocks.size(); ++i)
+        {
+            if (blocks[i].small) { program.FastSmall = i; small = true; continue; }
+            for (std::size_t k = 0; k < records.size(); ++k)
+                if (blocks[i].semantic == records[k]) { program.FastBlocks[k] = i; found[k] = true; }
+        }
+        const auto matrices = std::find_if(uniforms.begin(), uniforms.end(),
+            [](const auto& member) { return member.name == "mtx_stack"; });
+        if (!small || std::find(found.begin(), found.end(), false) != found.end() || matrices == uniforms.end()
+            || matrices->block != program.FastBlocks[4] || matrices->offset % 16 || textures.size() != 1
+            || textures[0].group != 1 || blocks[program.FastSmall].size + 32 > 128)
+            return;
+        program.FastMatrixOffset = matrices->offset;
+        program.FastDrawBytes = matrices->offset;
+        program.FastPushBytes = blocks[program.FastSmall].size + 32;
+        const auto shader = [&](const auto& words, ShaderStage stage) {
+            ShaderDesc desc{};
+            desc.stage = stage;
+            desc.format = ShaderCodeFormat::SpirV;
+            desc.code.resize(words.size() * sizeof(std::uint32_t));
+            std::memcpy(desc.code.data(), words.data(), desc.code.size());
+            return std::make_unique<VulkanShader>(_device, desc);
+        };
+        BindingLayoutDesc recordLayout{};
+        for (std::uint32_t binding = 0; binding <= records.size(); ++binding)
+            recordLayout.entries.push_back({binding, BindingType::StorageBuffer, ShaderStage::AllGraphics, 1});
+        BindingLayoutDesc textureLayout{};
+        textureLayout.entries.push_back({textures[0].image, BindingType::SampledTexture, ShaderStage::AllGraphics, 1});
+        textureLayout.entries.push_back({textures[0].sampler, BindingType::Sampler, ShaderStage::AllGraphics, 1});
+        program.FastLayouts[0] = std::make_unique<VulkanBindingLayout>(_device, recordLayout);
+        program.FastLayouts[1] = std::make_unique<VulkanBindingLayout>(_device, textureLayout);
+        program.FastVertex = shader(Generated::main_fast_vert, ShaderStage::Vertex);
+        program.FastFragment = shader(Generated::main_fast_frag, ShaderStage::Fragment);
     }
 
     std::shared_ptr<VulkanDeviceState> _device;
@@ -248,6 +293,7 @@ public:
             _vertices.insert(_vertices.end(), {v.Position.X, v.Position.Y, v.Position.Z,
                 v.Normal.X, v.Normal.Y, v.Normal.Z, v.Color.X, v.Color.Y, v.Color.Z, v.Color.W,
                 v.TexCoord.X, v.TexCoord.Y, static_cast<float>(v.MatrixIndex)});
+            _matrices = std::max(_matrices, std::min<std::uint32_t>(v.MatrixIndex, 31U) + 1U);
             const bool color = MphRead::HasSceneVertexAttributeState(_states[i], SceneVertexAttributeState::Color);
             const bool normal = MphRead::HasSceneVertexAttributeState(_states[i], SceneVertexAttributeState::Normal);
             anyColor |= color; allColor &= color; anyNormal |= normal; allNormal &= normal;
@@ -278,6 +324,7 @@ public:
                 _device->CurrentNormal.data());
             draw.IndexBuffer = _indexBuffer->Native();
             draw.IndexCount = _indexCount;
+            draw.Matrices = _matrices;
             _commands.DrawScene(draw);
         }
         // The current attributes the display list leaves behind.
@@ -291,6 +338,8 @@ public:
 
 private:
     enum class Mode : std::uint8_t { Inherited, Static, Mixed };
+    // Matrix-stack entries the vertices index (performance mode copies these).
+    std::uint32_t _matrices = 1;
 
     static std::unique_ptr<VulkanBuffer> Upload(VulkanGraphicsDevice& device, std::span<const std::byte> data,
         BufferUsage usage)

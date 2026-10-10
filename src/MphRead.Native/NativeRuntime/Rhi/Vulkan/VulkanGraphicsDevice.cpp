@@ -37,6 +37,8 @@
 #include "../SceneShaderAbi.hpp"
 #include "../../../Mods/Platform/AppPaths.hpp"
 #include "FruityVulkanSceneShaders.hpp"
+#include "FruityVulkanFastShaders.hpp"
+#include "../FastScene.hpp"
 #include <vk_mem_alloc.h>
 
 namespace MphRead::NativeRuntime::Rhi::Vulkan
@@ -1184,6 +1186,19 @@ namespace MphRead::NativeRuntime::Rhi::Vulkan
             // Per block: its place among its group's dynamic offsets, which
             // Vulkan takes in binding order.
             std::vector<std::uint8_t> DynamicSlot;
+
+            // Performance mode's main_fast (main only): the same body over
+            // the same blocks, read as storage-buffer records. Layouts: set 0
+            // the records, set 1 the texture. FastBlocks: the Frame, Light,
+            // Fog, Material and Draw blocks in record order; the Draw record
+            // stops where its matrix stack starts (FastMatrixOffset), which
+            // goes to its own buffer.
+            std::unique_ptr<VulkanShader> FastVertex;
+            std::unique_ptr<VulkanShader> FastFragment;
+            std::array<std::unique_ptr<VulkanBindingLayout>, 2> FastLayouts;
+            std::array<std::size_t, 5> FastBlocks{};
+            std::size_t FastSmall = 0;
+            std::uint32_t FastDrawBytes = 0, FastMatrixOffset = 0, FastPushBytes = 0;
         };
 
 #include "VulkanCommandListInternal.inc"

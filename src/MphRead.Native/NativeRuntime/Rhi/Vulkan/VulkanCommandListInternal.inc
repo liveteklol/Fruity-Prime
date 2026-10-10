@@ -91,6 +91,7 @@
                 vk.vkCmdBindDescriptorSets(_commandSlots->Buffer(), VK_PIPELINE_BIND_POINT_GRAPHICS,
                     _pipeline->Layout(), index, 1, &descriptor, 0, nullptr);
                 _boundSceneSets.fill(VK_NULL_HANDLE); _boundSceneLayout = {};
+                _fastSetsBound = false;
                 _genericSets[index] = {std::move(snapshot), descriptor, _bindingGeneration};
             }
             void SetStencilReference(std::uint32_t reference) override
@@ -133,6 +134,8 @@
                 VkDeviceSize IndexOffset = 0;
                 std::uint32_t IndexCount = 0;
                 bool Lines = false;
+                // Matrix-stack entries the draw's vertices index.
+                std::uint32_t Matrices = static_cast<std::uint32_t>(MatrixStackCapacity);
             };
             using RingSlice = VulkanUploadArena::Slice;
             void DrawScene(const SceneDraw& draw);
@@ -321,6 +324,74 @@
             std::uint64_t _metricPersistentHits = 0, _metricPersistentMisses = 0, _metricPersistentFull = 0;
             VkDescriptorSet PersistentMaterialSet(const VulkanSceneProgram&, const std::array<SampledDescriptor, 4>&);
             void ClearPersistentMaterials();
+
+            // Performance mode's scene path (DrawSceneFast). Each command slot
+            // has one host-visible buffer of record arrays -- Frame, Light,
+            // Fog, Material, Draw, then the matrices -- appended to while
+            // the slot records and reset when it records again, after its
+            // fence. A block is copied only when its generation moved since
+            // the last record of its kind.
+            static constexpr std::size_t FastRecordKinds = 5, FastRegions = 6;
+            struct FastSlot final
+            {
+                VulkanResources::BufferStorage Storage{};
+                const VulkanSceneProgram* Program = nullptr;
+                std::uint32_t Scale = 1;
+                std::array<VkDeviceSize, FastRegions> Base{}, Size{}, Element{}, Cursor{};
+                VkDeviceSize Written = 0;
+                VkDescriptorSet Records = VK_NULL_HANDLE;
+                std::uint64_t Recording = 0;
+                bool Overflowed = false;
+                std::array<const void*, FastRecordKinds> LastBlock{};
+                std::array<std::uint64_t, FastRecordKinds> LastGeneration{};
+                std::array<std::int32_t, FastRecordKinds> LastIndex{};
+                std::int32_t LastMatrixBase = 0;
+                std::uint32_t LastMatrixCount = 0;
+            };
+            struct FastTextureKey final
+            {
+                VkImageView View = VK_NULL_HANDLE;
+                VkSampler Sampler = VK_NULL_HANDLE;
+                VkImageLayout Layout = VK_IMAGE_LAYOUT_UNDEFINED;
+                std::uint64_t Identity = 0, Generation = 0, SamplerIdentity = 0;
+                bool operator==(const FastTextureKey&) const = default;
+            };
+            struct FastTextureHash final
+            {
+                std::size_t operator()(const FastTextureKey& key) const noexcept
+                {
+                    std::size_t h = std::hash<VkImageView>{}(key.View);
+                    const auto mix = [&h](std::size_t value) { h ^= value + 0x9e3779b9U + (h << 6) + (h >> 2); };
+                    mix(std::hash<VkSampler>{}(key.Sampler));
+                    for (const std::uint64_t value : {static_cast<std::uint64_t>(key.Layout), key.Identity,
+                        key.Generation, key.SamplerIdentity})
+                        mix(std::hash<std::uint64_t>{}(value));
+                    return h;
+                }
+            };
+            [[nodiscard]] bool DrawSceneFast(VulkanSceneProgram& program, const SceneDraw& draw,
+                const std::array<SampledDescriptor, 4>& textures);
+            [[nodiscard]] bool BeginFastSlot(FastSlot& slot, const VulkanSceneProgram& program);
+            [[nodiscard]] bool AppendFast(FastSlot& slot, std::size_t region, const void* data, VkDeviceSize bytes,
+                std::int32_t& index);
+            [[nodiscard]] VkDescriptorSet FastTextureSet(const VulkanSceneProgram& program,
+                const std::array<SampledDescriptor, 4>& textures);
+            [[nodiscard]] VulkanGraphicsPipeline& FastVariantFor(const VulkanSceneProgram& program, const SceneDraw& draw);
+            [[nodiscard]] GraphicsPipelineDesc SceneVariantDesc(const VulkanSceneProgram& program, const VariantKey& key) const;
+            void FlushFast();
+            void ClearFastTextures();
+            void CloseFast() noexcept;
+            std::array<FastSlot, FramesInFlight> _fastSlots{};
+            std::shared_ptr<VulkanDescriptorAllocator> _fastRecordSets, _fastTextures;
+            std::unordered_map<FastTextureKey, VkDescriptorSet, FastTextureHash> _fastTextureSets;
+            std::unordered_map<VariantKey, Variant, VariantHash> _fastVariants;
+            std::array<RecentVariant, 4> _fastRecent{};
+            std::size_t _fastRecentNext = 0;
+            // What DrawSceneFast last bound; anything else binding descriptor
+            // sets clears _fastSetsBound.
+            bool _fastSetsBound = false;
+            VkDescriptorSet _fastBoundRecords = VK_NULL_HANDLE, _fastBoundTexture = VK_NULL_HANDLE;
+            std::uint64_t _metricFastDraws = 0;
             // Opt-in instrumentation: no per-draw clocks or allocations.
             bool _metricsEnabled = std::getenv("FRUITY_RENDER_METRICS") != nullptr;
             std::uint64_t _metricDraws = 0, _metricAllocations = 0, _metricUpdates = 0,
@@ -434,6 +505,7 @@
             }
             if (!_device->Closing) { try { WaitAll(); } catch (...) {} }
             ClearPersistentMaterials();
+            CloseFast();
             _variants.clear(); _recentVariants = {};
             _genericSets.clear(); _vertexBindings.clear(); _indexBinding = {};
             _dummy.reset();
@@ -471,6 +543,7 @@
             for (auto& state : _programUniforms) state.Sets = {};
             _device->SceneFlushers[this] = [this] { Flush(); };
             _boundSceneSets.fill(VK_NULL_HANDLE); _boundSceneLayout = {}; _boundSmallBytes = 0;
+            _fastSetsBound = false;
             _device->RecordingList = this;
             for (const auto& label : _debugLabels) NativeBeginLabel(label);
         }
@@ -506,6 +579,7 @@
             if (_renderingOpen && _clearsPending) Materialize();
             if (_renderingActive) EndNative();
             if (vk.endLabel) for (std::size_t i = 0; i < _debugLabels.size(); ++i) vk.endLabel(_commandSlots->Buffer());
+            FlushFast();
             _commandSlots->End();
             _recording = false;
             _device->SceneFlushers.erase(this);
@@ -525,7 +599,8 @@
                     << " persistent_material_hits=" << _metricPersistentHits
                     << " persistent_material_misses=" << _metricPersistentMisses
                     << " persistent_material_full=" << _metricPersistentFull
-                    << " optional_work_busy_skip_count=" << _metricOptionalSkips << '\n';
+                    << " optional_work_busy_skip_count=" << _metricOptionalSkips
+                    << " fast_scene_draws=" << _metricFastDraws << '\n';
             for (auto& state : _programUniforms) state.Sets = {};
             _boundNative = VK_NULL_HANDLE;
         }
@@ -617,6 +692,12 @@
             for (auto it = _variants.begin(); it != _variants.end();)
                 it = it->first.Program == object || it->first.Base == object ? _variants.erase(it) : std::next(it);
             _recentVariants = {};
+            for (auto it = _fastVariants.begin(); it != _fastVariants.end();)
+                it = it->first.Program == object || it->first.Base == object ? _fastVariants.erase(it) : std::next(it);
+            _fastRecent = {};
+            ClearFastTextures();
+            for (auto& slot : _fastSlots)
+                if (slot.Program == object) slot.Recording = 0, slot.Program = nullptr;
             if (_pipeline == object) { _pipeline = nullptr; _genericSets.clear(); }
         }
 
@@ -886,8 +967,11 @@
                     set.Generation = _bindingGeneration;
                 }
                 if (restore || fresh)
+                {
                     vk.vkCmdBindDescriptorSets(_commandSlots->Buffer(), VK_PIPELINE_BIND_POINT_GRAPHICS,
                         _pipeline->Layout(), slot, 1, &set.Native, 0, nullptr);
+                    _fastSetsBound = false;
+                }
             }
             _genericDirty = false;
         }
@@ -942,8 +1026,32 @@
                 RememberVariant(key, found->second.Native.get());
                 return *found->second.Native;
             }
+            const GraphicsPipelineDesc base = _pipeline->Desc();
+            GraphicsPipelineDesc desc = SceneVariantDesc(program, key);
+            auto native = std::make_shared<VulkanGraphicsPipeline>(_device, desc, true);
+            auto& entry = _variants[key];
+            if (entry.Native && _boundSceneLayout == &entry.Native->Desc().pipelineLayout)
+            {
+                _boundSceneLayout = nullptr;
+                _boundSceneSets.fill(VK_NULL_HANDLE);
+                _smallPipeline = nullptr;
+                _smallCurrent = false;
+            }
+            entry.BaseDesc = base;
+            entry.Native = std::move(native);
+            // The entry's previous pipeline, if any, is gone: drop it from the recent ones.
+            for (auto& recent : _recentVariants) if (recent.Key == key) recent = {};
+            RememberVariant(key, entry.Native.get());
+            return *entry.Native;
+        }
+
+        // The executable state of a scene draw: the pass pipeline's
+        // fixed-function state with the program's modules and layout.
+        GraphicsPipelineDesc VulkanCommandList::SceneVariantDesc(const VulkanSceneProgram& program,
+            const VariantKey& key) const
+        {
+            const bool lines = key.Lines;
             GraphicsPipelineDesc desc = _pipeline->Desc();
-            const GraphicsPipelineDesc base = desc;
             desc.vertexShader = program.Vertex.get();
             desc.fragmentShader = program.Fragment.get();
             desc.pipelineLayout.groups.clear();
@@ -987,21 +1095,7 @@
                     {4, 4, VertexFormat::Float2, 0}};
             else
                 desc.vertexAttributes = {{0, 0, VertexFormat::Float3, 0}, {3, 3, VertexFormat::Float3, 0}};
-            auto native = std::make_shared<VulkanGraphicsPipeline>(_device, desc, true);
-            auto& entry = _variants[key];
-            if (entry.Native && _boundSceneLayout == &entry.Native->Desc().pipelineLayout)
-            {
-                _boundSceneLayout = nullptr;
-                _boundSceneSets.fill(VK_NULL_HANDLE);
-                _smallPipeline = nullptr;
-                _smallCurrent = false;
-            }
-            entry.BaseDesc = base;
-            entry.Native = std::move(native);
-            // The entry's previous pipeline, if any, is gone: drop it from the recent ones.
-            for (auto& recent : _recentVariants) if (recent.Key == key) recent = {};
-            RememberVariant(key, entry.Native.get());
-            return *entry.Native;
+            return desc;
         }
 
         VkDescriptorSet VulkanCommandList::AllocateSet(const VulkanBindingLayout& layout)
@@ -1167,6 +1261,317 @@
             return slot.Set;
         }
 
+        // Performance mode's scene path, the cpp-port renderer's way of
+        // drawing: a draw is its blocks' record indices pushed as constants,
+        // a texture set from a cache, the vertex streams and the draw. The
+        // blocks are main's own std140 bytes, copied into this slot's
+        // records when their generation moved, and main_fast is main's body
+        // reading them there -- the same picture without a uniform slice,
+        // descriptor write or dynamic offset per draw. False leaves the draw
+        // to the ordinary path (not main, not wanted, legacy device, or this
+        // slot's records full until it records again, larger).
+        bool VulkanCommandList::DrawSceneFast(VulkanSceneProgram& program, const SceneDraw& draw,
+            const std::array<SampledDescriptor, 4>& textures)
+        {
+            if (!program.FastVertex || !FastScene::Enabled()) return false;
+            auto& vk = *_device->ContextPointer->_impl;
+            if (vk.legacy) return false;
+            auto& slot = _fastSlots.at(_commandSlots->SlotIndex());
+            if (slot.Recording != _bindingGeneration && !BeginFastSlot(slot, program)) return false;
+            if (slot.Overflowed || slot.Program != &program) return false;
+            const auto alphaMode = static_cast<std::int32_t>(_pipeline->Desc().alphaTest);
+            program.Write(SceneShaderAbi::ConstantIndex("alpha_test"), &alphaMode, sizeof(alphaMode), SceneShaderAbi::ValueType::Int);
+
+            std::array<std::int32_t, 8> indices{};
+            const auto matrices = std::clamp<std::uint32_t>(draw.Matrices, 1U, static_cast<std::uint32_t>(MatrixStackCapacity));
+            for (std::size_t kind = 0; kind < FastRecordKinds; ++kind)
+            {
+                const auto& block = program.BlockAt(program.FastBlocks[kind]);
+                const bool drawBlock = kind == FastRecordKinds - 1;
+                if (slot.LastBlock[kind] == &block && slot.LastGeneration[kind] == block.Generation
+                    && (!drawBlock || matrices <= slot.LastMatrixCount))
+                {
+                    indices[kind] = slot.LastIndex[kind];
+                    continue;
+                }
+                std::int32_t record = 0;
+                if (!AppendFast(slot, kind, block.Data.data(), drawBlock ? program.FastDrawBytes : block.Data.size(), record))
+                    return false;
+                if (drawBlock)
+                {
+                    std::int32_t base = 0;
+                    if (!AppendFast(slot, FastRegions - 1, block.Data.data() + program.FastMatrixOffset,
+                        static_cast<VkDeviceSize>(matrices) * 64U, base))
+                        return false;
+                    slot.LastMatrixBase = base;
+                    slot.LastMatrixCount = matrices;
+                }
+                slot.LastBlock[kind] = &block;
+                slot.LastGeneration[kind] = block.Generation;
+                slot.LastIndex[kind] = record;
+                indices[kind] = record;
+            }
+            indices[FastRecordKinds] = slot.LastMatrixBase;
+            const VkDescriptorSet texture = FastTextureSet(program, textures);
+
+            VulkanGraphicsPipeline& native = FastVariantFor(program, draw);
+            const auto commands = _commandSlots->Buffer();
+            if (native.Native() != _boundNative)
+            {
+                vk.vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, native.Native());
+                if (_metricsEnabled) ++_metricPipelines;
+                _boundNative = native.Native();
+                _genericDirty = true;
+            }
+            // The ordinary path's bookkeeping no longer describes what is bound.
+            _boundSceneLayout = nullptr;
+            _boundSceneSets.fill(VK_NULL_HANDLE);
+            _smallPipeline = nullptr;
+            _smallCurrent = false;
+            ApplyDynamicState();
+            if (!_fastSetsBound || _fastBoundRecords != slot.Records)
+            {
+                const std::array<VkDescriptorSet, 2> sets{slot.Records, texture};
+                vk.vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, native.Layout(), 0, 2, sets.data(), 0, nullptr);
+                if (_metricsEnabled) ++_metricBinds;
+                _fastSetsBound = true;
+                _fastBoundRecords = slot.Records;
+                _fastBoundTexture = texture;
+            }
+            else if (_fastBoundTexture != texture)
+            {
+                vk.vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, native.Layout(), 1, 1, &texture, 0, nullptr);
+                if (_metricsEnabled) ++_metricBinds;
+                _fastBoundTexture = texture;
+            }
+            std::array<std::byte, 128> push{};
+            const auto& small = program.BlockAt(program.FastSmall);
+            const auto smallBytes = program.FastPushBytes - 32U;
+            std::memcpy(push.data(), small.Data.data(), smallBytes);
+            std::memcpy(push.data() + smallBytes, indices.data(), 32U);
+            vk.vkCmdPushConstants(commands, native.Layout(), VK_SHADER_STAGE_ALL_GRAPHICS, 0, program.FastPushBytes, push.data());
+
+            std::array<VkBuffer, 5> buffers{};
+            std::array<VkDeviceSize, 5> offsets{};
+            std::array<VkDeviceSize, 5> strides{};
+            std::uint32_t streams = 0;
+            for (std::size_t i = 0; i < 5; ++i)
+            {
+                if (draw.Streams[i].Buffer == VK_NULL_HANDLE) break;
+                buffers[i] = draw.Streams[i].Buffer;
+                offsets[i] = draw.Streams[i].Offset;
+                strides[i] = draw.Streams[i].Stride;
+                streams = static_cast<std::uint32_t>(i + 1);
+            }
+            vk.vkCmdBindVertexBuffers2(commands, 0, streams, buffers.data(), offsets.data(), nullptr, strides.data());
+            vk.vkCmdBindIndexBuffer(commands, draw.IndexBuffer, draw.IndexOffset, VK_INDEX_TYPE_UINT32);
+            vk.vkCmdDrawIndexed(commands, draw.IndexCount, 1, 0, 0, 0);
+            if (_metricsEnabled) ++_metricFastDraws;
+            return true;
+        }
+
+        // A slot's first fast draw of a recording: its records start over.
+        // Its last submission is complete (the slot waited for its fence
+        // before recording), so nothing still reads them. The buffer is
+        // laid out again -- larger after an overflow -- when needed.
+        bool VulkanCommandList::BeginFastSlot(FastSlot& slot, const VulkanSceneProgram& program)
+        {
+            const bool grow = slot.Overflowed;
+            slot.Recording = _bindingGeneration;
+            slot.Overflowed = false;
+            slot.Cursor = {};
+            slot.Written = 0;
+            slot.LastBlock = {};
+            slot.LastGeneration = {};
+            slot.LastIndex = {};
+            slot.LastMatrixBase = 0;
+            slot.LastMatrixCount = 0;
+            if (slot.Storage.Buffer && !grow && slot.Program == &program) return true;
+            if (grow) slot.Scale = std::min<std::uint32_t>(slot.Scale * 2U, 64U);
+            // Room for a busy frame: a record per draw of each kind (most
+            // repeat), and a full matrix stack for each.
+            constexpr std::array<VkDeviceSize, FastRegions> counts{256, 256, 256, 2048, 4096, 16384};
+            VkDeviceSize total = 0;
+            for (std::size_t region = 0; region < FastRegions; ++region)
+            {
+                slot.Element[region] = region == FastRegions - 1 ? 64U
+                    : region == FastRecordKinds - 1 ? program.FastDrawBytes
+                    : program.BlockAt(program.FastBlocks[region]).Data.size();
+                slot.Base[region] = total;
+                slot.Size[region] = slot.Element[region] * counts[region] * slot.Scale;
+                total += (slot.Size[region] + 255U) / 256U * 256U;
+            }
+            if (slot.Storage.Buffer)
+            {
+                _device->Retire([allocator = _device->Allocator, storage = slot.Storage] {
+                    vmaDestroyBuffer(allocator, storage.Buffer, storage.Allocation);
+                });
+                --_device->Buffers;
+                slot.Storage = {};
+            }
+            slot.Program = nullptr;
+            slot.Storage = _device->Resources->CreateBuffer({total, BufferUsage::Storage, MemoryUsage::CpuToGpu});
+            ++_device->Buffers;
+            if (!slot.Storage.Mapped) throw std::runtime_error("Vulkan fast scene records are not mapped.");
+            if (!_fastRecordSets)
+            {
+                _fastRecordSets = _device->MakeDescriptors({64, {0, static_cast<std::uint32_t>(64U * FastRegions), 0, 0, 0}});
+                _fastRecordSets->ResetAfterCompletion({0});
+            }
+            const auto& layout = *program.FastLayouts[0];
+            slot.Records = _fastRecordSets->Allocate(layout.Native(), layout.Desc());
+            std::array<VkDescriptorBufferInfo, FastRegions> infos{};
+            std::array<VkWriteDescriptorSet, FastRegions> writes{};
+            for (std::uint32_t region = 0; region < FastRegions; ++region)
+            {
+                infos[region] = {slot.Storage.Buffer, slot.Base[region], slot.Size[region]};
+                writes[region] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+                writes[region].dstSet = slot.Records;
+                writes[region].dstBinding = region;
+                writes[region].descriptorCount = 1;
+                writes[region].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+                writes[region].pBufferInfo = &infos[region];
+            }
+            auto& vk = *_device->ContextPointer->_impl;
+            vk.vkUpdateDescriptorSets(vk.device, FastRegions, writes.data(), 0, nullptr);
+            slot.Program = &program;
+            _fastSetsBound = false;
+            return true;
+        }
+
+        bool VulkanCommandList::AppendFast(FastSlot& slot, std::size_t region, const void* data, VkDeviceSize bytes,
+            std::int32_t& index)
+        {
+            const auto element = slot.Element[region];
+            const auto count = (bytes + element - 1U) / element;
+            if (slot.Cursor[region] + count * element > slot.Size[region])
+            {
+                slot.Overflowed = true;
+                return false;
+            }
+            const auto offset = slot.Base[region] + slot.Cursor[region];
+            std::memcpy(slot.Storage.Mapped + offset, data, bytes);
+            index = static_cast<std::int32_t>(slot.Cursor[region] / element);
+            slot.Cursor[region] += count * element;
+            slot.Written = std::max(slot.Written, offset + count * element);
+            return true;
+        }
+
+        // One set per texture and sampler, written once and kept until a
+        // scene resource goes (Forget) -- cpp-port's textureSetFor.
+        VkDescriptorSet VulkanCommandList::FastTextureSet(const VulkanSceneProgram& program,
+            const std::array<SampledDescriptor, 4>& textures)
+        {
+            const auto& binding = program.Textures.front();
+            const auto& texture = textures[binding.unit];
+            const FastTextureKey key{texture.View, texture.Sampler, texture.Layout, texture.Identity,
+                texture.Generation, texture.SamplerIdentity};
+            if (const auto found = _fastTextureSets.find(key); found != _fastTextureSets.end()) return found->second;
+            if (_fastTextureSets.size() >= 16384) ClearFastTextures();
+            if (!_fastTextures)
+            {
+                _fastTextures = _device->MakeDescriptors({1024, {0, 0, 1024, 0, 1024}});
+                _fastTextures->ResetAfterCompletion({0});
+            }
+            const auto& layout = *program.FastLayouts[1];
+            const VkDescriptorSet set = _fastTextures->Allocate(layout.Native(), layout.Desc());
+            const VkDescriptorImageInfo image{VK_NULL_HANDLE, texture.View, texture.Layout};
+            const VkDescriptorImageInfo sampler{texture.Sampler, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_UNDEFINED};
+            std::array<VkWriteDescriptorSet, 2> writes{};
+            for (std::size_t i = 0; i < writes.size(); ++i)
+            {
+                writes[i] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+                writes[i].dstSet = set;
+                writes[i].dstBinding = i ? binding.sampler : binding.image;
+                writes[i].descriptorCount = 1;
+                writes[i].descriptorType = i ? VK_DESCRIPTOR_TYPE_SAMPLER : VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+                writes[i].pImageInfo = i ? &sampler : &image;
+            }
+            auto& vk = *_device->ContextPointer->_impl;
+            vk.vkUpdateDescriptorSets(vk.device, static_cast<std::uint32_t>(writes.size()), writes.data(), 0, nullptr);
+            if (_metricsEnabled) ++_metricUpdates;
+            _fastTextureSets.emplace(key, set);
+            return set;
+        }
+
+        // VariantFor's pipeline with main_fast's modules, layouts and push range.
+        VulkanGraphicsPipeline& VulkanCommandList::FastVariantFor(const VulkanSceneProgram& program, const SceneDraw& draw)
+        {
+            VariantKey key{_pipeline, &program,
+                _target.Color ? _target.Color->Desc().format : TextureFormat::Undefined,
+                _target.Depth ? _target.Depth->Desc().format : TextureFormat::Undefined, draw.Lines};
+            for (const auto& recent : _fastRecent)
+                if (recent.Native && recent.Key == key) return *recent.Native;
+            const auto found = _fastVariants.find(key);
+            if (found != _fastVariants.end() && found->second.BaseDesc == _pipeline->Desc())
+            {
+                _fastRecent[_fastRecentNext] = {key, found->second.Native.get()};
+                _fastRecentNext = (_fastRecentNext + 1) % _fastRecent.size();
+                return *found->second.Native;
+            }
+            GraphicsPipelineDesc desc = SceneVariantDesc(program, key);
+            desc.vertexShader = program.FastVertex.get();
+            desc.fragmentShader = program.FastFragment.get();
+            desc.pipelineLayout.groups = {program.FastLayouts[0]->Desc(), program.FastLayouts[1]->Desc()};
+            desc.smallConstantBytes = program.FastPushBytes;
+            auto& entry = _fastVariants[key];
+            entry.BaseDesc = _pipeline->Desc();
+            entry.Native = std::make_shared<VulkanGraphicsPipeline>(_device, desc, true);
+            for (auto& recent : _fastRecent) if (recent.Key == key) recent = {};
+            _fastRecent[_fastRecentNext] = {key, entry.Native.get()};
+            _fastRecentNext = (_fastRecentNext + 1) % _fastRecent.size();
+            return *entry.Native;
+        }
+
+        // The host writes of the slot this buffer recorded, made visible
+        // before it is submitted (a no-op on coherent memory).
+        void VulkanCommandList::FlushFast()
+        {
+            auto& slot = _fastSlots.at(_commandSlots->SlotIndex());
+            if (slot.Recording != _bindingGeneration || !slot.Written || !slot.Storage.Buffer) return;
+            Check(vmaFlushAllocation(_device->Allocator, slot.Storage.Allocation, 0, slot.Written),
+                "vmaFlushAllocation(fast scene)");
+        }
+
+        void VulkanCommandList::ClearFastTextures()
+        {
+            _fastTextureSets.clear();
+            if (_fastTextures)
+                _device->Retire([descriptors = std::move(_fastTextures)] { descriptors->Close(); });
+            _fastTextures.reset();
+            _fastSetsBound = false;
+        }
+
+        void VulkanCommandList::CloseFast() noexcept
+        {
+            for (auto& slot : _fastSlots)
+            {
+                if (slot.Storage.Buffer)
+                {
+                    try
+                    {
+                        _device->Retire([allocator = _device->Allocator, storage = slot.Storage] {
+                            vmaDestroyBuffer(allocator, storage.Buffer, storage.Allocation);
+                        });
+                        --_device->Buffers;
+                    }
+                    catch (...) {}
+                }
+                slot = {};
+            }
+            try
+            {
+                _fastTextureSets.clear();
+                if (_fastTextures) _device->Retire([descriptors = std::move(_fastTextures)] { descriptors->Close(); });
+                if (_fastRecordSets) _device->Retire([descriptors = std::move(_fastRecordSets)] { descriptors->Close(); });
+            }
+            catch (...) {}
+            _fastTextures.reset();
+            _fastRecordSets.reset();
+            _fastVariants.clear();
+            _fastRecent = {};
+        }
+
         void VulkanCommandList::DrawScene(const SceneDraw& draw)
         {
             const FrameTelemetry::Scope measured(FrameTelemetry::Phase::DrawScene);
@@ -1201,6 +1606,9 @@
                     texture->Identity(), texture->Generation(), sampler->Identity()};
             }
             if (!_renderingActive) Materialize();
+            if (DrawSceneFast(*program, draw, textures)) return;
+            // What the ordinary path binds below replaces what DrawSceneFast bound.
+            _fastSetsBound = false;
 
             VulkanGraphicsPipeline& native = VariantFor(*program, draw);
             if (native.Native() != _boundNative)
