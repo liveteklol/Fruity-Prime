@@ -150,7 +150,8 @@ namespace MphRead::Mods::ClassicMenu
         [[nodiscard]] std::vector<PlayerRow> RoomRows() const;
         [[nodiscard]] std::vector<PlayerRow> OfflineRows() const;
         void Say(const std::string& text);
-        void FillPanels();
+        // blank: create or join, where the game shows no match until one is picked
+        void FillPanels(bool blank = false);
         std::map<std::string, int> _panelIds;
 
         MenuFile& _file;

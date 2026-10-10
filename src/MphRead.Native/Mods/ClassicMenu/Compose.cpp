@@ -1433,10 +1433,21 @@ namespace MphRead::Mods::ClassicMenu
             static const int typedNew = _strings.IndexOf("newname here");
             if (typedNew >= 0) _strings.Fill(typedNew, _keyboardText + "_");
         }
-        // the match panels on the top screen: what is being put together
-        FillPanels();
+        // the match panels on the top screen: what is being put together --
+        // empty over create or join, as the game leaves them (and its list of
+        // games: joining is the server browser's)
+        const bool blank = page == CreateJoinPage;
+        FillPanels(blank);
+        if (blank)
+        {
+            static const int games[4] = {_strings.IndexOf("game1"), _strings.IndexOf("game2"),
+                _strings.IndexOf("game3"), _strings.IndexOf("game4")};
+            for (const int id : games) if (id >= 0) _strings.Fill(id, " ");
+            static const int name = _strings.IndexOf("arena name");
+            if (name >= 0) _strings.Fill(name, " ");
+        }
         // the arena on the mode pages and on the match panels
-        if (_host)
+        if (_host && !blank)
         {
             const auto arenas = _host->Arenas();
             if (!arenas.empty())
@@ -1461,7 +1472,7 @@ namespace MphRead::Mods::ClassicMenu
 
     // The top screen's match panels hold the ROM's placeholders ("setting
     // a", "client a"): the game writes the match over them, and so does this.
-    void Composer::FillPanels()
+    void Composer::FillPanels(bool blank)
     {
         static const char* const labels[7][4] = {
             {"point goal", "time limit", "team play", ""}, {"lives", "time limit", "team play", ""},
@@ -1487,10 +1498,11 @@ namespace MphRead::Mods::ClassicMenu
             _panelIds["w1"] = ws.size() > 0 ? ws[0] : -1;
             _panelIds["w2"] = ws.size() > 1 ? ws[1] : -1;
         }
-        const auto fill = [this](const char* key, const std::string& words)
+        const auto fill = [this, blank](const char* key, const std::string& words)
         {
             const int id = _panelIds[key];
-            if (id >= 0 && _strings[id] != words) _strings.Fill(id, words.empty() ? " " : words);
+            const std::string shown = blank || words.empty() ? std::string(" ") : words;
+            if (id >= 0 && _strings[id] != shown) _strings.Fill(id, shown);
         };
         const int m = (_vars["mode"] % 7 + 7) % 7;
         fill("mode", Upper(ModeName(m)));
