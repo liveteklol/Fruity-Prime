@@ -207,16 +207,21 @@ namespace MphRead::Mods
         // screen, and only its top-left two thirds were visible.
         const OpenTK::Mathematics::Vector2i client = window.ClientSize();
         const OpenTK::Mathematics::Vector2i framebuffer = window.FramebufferSize();
-        const auto logical = [](std::int32_t physical, std::int32_t clientUnits, std::int32_t pixels)
+        // The width is rounded to the nearest unit; the height is rounded
+        // down so the window stays shorter than the monitor, as it must for
+        // borderless rather than exclusive.
+        const auto logical = [](std::int32_t physical, std::int32_t clientUnits, std::int32_t pixels, bool down)
         {
-            return clientUnits > 0 && pixels > 0
-                ? std::max<std::int32_t>(1, static_cast<std::int32_t>(std::lround(
-                    static_cast<double>(physical) * clientUnits / pixels)))
-                : physical;
+            if (clientUnits <= 0 || pixels <= 0)
+            {
+                return physical;
+            }
+            const double units = static_cast<double>(physical) * clientUnits / pixels;
+            return std::max<std::int32_t>(1, static_cast<std::int32_t>(down ? std::floor(units) : std::round(units)));
         };
         window.ClientSize(OpenTK::Mathematics::Vector2i{
-            logical(monitor.Size.X, client.X, framebuffer.X),
-            logical(UncheckedDecrement(monitor.Size.Y), client.Y, framebuffer.Y)});
+            logical(monitor.Size.X, client.X, framebuffer.X, false),
+            logical(UncheckedDecrement(monitor.Size.Y), client.Y, framebuffer.Y, true)});
 
         SetTopmost(window, true);
         // And written down, so the next session opens this way. See
