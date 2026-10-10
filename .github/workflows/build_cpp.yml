@@ -251,6 +251,13 @@ jobs:
           if-no-files-found: error
           path: build/native/dist/
 
+      - name: Upload Windows PDB (profiling branch only)
+        uses: actions/upload-artifact@v4
+        with:
+          name: FruityPrime-cpp-windows-pdb-${{ github.run_number }}
+          if-no-files-found: warn
+          path: build/native/RelWithDebInfo/*.pdb
+
   linux:
     name: Linux / GCC
     runs-on: ubuntu-24.04
