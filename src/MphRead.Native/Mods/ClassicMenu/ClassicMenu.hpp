@@ -38,8 +38,10 @@ namespace MphRead::Mods::ClassicMenu
 
         // Advance by real time, then draw the one screen into `pixels`
         // (RGBA8, row-major, top row first) at `width` x `height`. False when
-        // inactive.
-        static bool Render(double seconds, int width, int height, std::vector<std::uint32_t>& pixels);
+        // inactive. With no tick, no input and the same size since the last
+        // call, `pixels` is left as it was and `changed` (if given) is false.
+        static bool Render(double seconds, int width, int height, std::vector<std::uint32_t>& pixels,
+            bool* changed = nullptr);
         // Advance `ticks` menu ticks (two DS frames each), then draw the two
         // DS screens as the DS shows them: 256 x 384, the top screen above,
         // backdrop and all. The frames compared against the game itself

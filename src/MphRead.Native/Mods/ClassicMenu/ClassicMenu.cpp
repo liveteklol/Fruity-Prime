@@ -18,6 +18,7 @@
 #include <map>
 #include <memory>
 #include <set>
+#include <thread>
 
 namespace MphRead::Mods::ClassicMenu
 {
@@ -261,9 +262,12 @@ namespace MphRead::Mods::ClassicMenu
             void Advance(double seconds)
             {
                 Update(seconds);
+                // no tick and no input: the triangles stand
+                if (!_dirty && _collected) return;
                 _tris.clear();
                 _menu.Collect(_tris);
                 AddFocusFrame();
+                _collected = true;
             }
 
             // The one screen: W x H units (240 high, or 256 wide in
@@ -329,6 +333,7 @@ namespace MphRead::Mods::ClassicMenu
                 _tris.clear();
                 _menu.Collect(_tris);
                 AddFocusFrame();
+                _collected = true;
             }
 
             // The two screens as the DS shows them, the top one above.
@@ -621,6 +626,7 @@ namespace MphRead::Mods::ClassicMenu
             bool _groovesFailed = false;
             bool _showFocus = false;
             bool _dirty = true;
+            bool _collected = false;
             int _hover = -1;
             float _unit = 0;
             int _layoutPage = -1, _layoutW = 0, _layoutH = 0;
@@ -715,10 +721,166 @@ namespace MphRead::Mods::ClassicMenu
         // ID of the translucent polygon that drew it last (-1: none).
         struct Pixel3d final
         {
-            float R = 0, G = 0, B = 0;
-            int Alpha = 0;
-            int Translucent = -1;
+            std::uint8_t R = 0, G = 0, B = 0, Alpha = 0;
+            std::int32_t Translucent = -1;
         };
+
+        [[nodiscard]] std::uint8_t Byte(float value)
+        {
+            return static_cast<std::uint8_t>(std::clamp(value, 0.0F, 1.0F) * 255.0F + 0.5F);
+        }
+
+        // The rows [rowBegin, rowEnd) of the picture: every triangle that
+        // crosses them, then the 3D layer over the 2D one. Rows are drawn
+        // independently, so bands of them can be drawn at once.
+        void RasterizeRows(const UiDrawList& list, const std::vector<const UiTexture*>& textures, int width,
+            int rowBegin, int rowEnd, std::uint32_t* pixels, Pixel3d* layer, bool clear)
+        {
+            for (std::size_t bi = 0; bi < list.Batches.size(); ++bi)
+            {
+                const UiBatch& batch = list.Batches[bi];
+                const UiTexture* texture = textures[bi];
+                const int tw = texture != nullptr ? texture->Width : 0;
+                const int th = texture != nullptr ? texture->Height : 0;
+                for (int v = batch.Start; v + 2 < batch.Start + batch.Count; v += 3)
+                {
+                    const UiVertex& a = list.Vertices[static_cast<std::size_t>(v)];
+                    const UiVertex& b = list.Vertices[static_cast<std::size_t>(v + 1)];
+                    const UiVertex& c = list.Vertices[static_cast<std::size_t>(v + 2)];
+                    const float area = (b.X - a.X) * (c.Y - a.Y) - (b.Y - a.Y) * (c.X - a.X);
+                    if (std::abs(area) < 1e-6F) continue;
+                    const int minY = std::max(rowBegin, static_cast<int>(std::floor(std::min({a.Y, b.Y, c.Y}))));
+                    const int maxY = std::min(rowEnd - 1, static_cast<int>(std::ceil(std::max({a.Y, b.Y, c.Y}))));
+                    if (minY > maxY) continue;
+                    const int minX = std::max(0, static_cast<int>(std::floor(std::min({a.X, b.X, c.X}))));
+                    const int maxX = std::min(width - 1, static_cast<int>(std::ceil(std::max({a.X, b.X, c.X}))));
+                    if (minX > maxX) continue;
+                    const float inv = 1.0F / area;
+                    // the barycentric weights as planes over pixel centres: w = (A x + B y + C) * inv
+                    const float a0 = (b.Y - c.Y) * inv, b0 = (c.X - b.X) * inv, c0 = (b.X * c.Y - b.Y * c.X) * inv;
+                    const float a1 = (c.Y - a.Y) * inv, b1 = (a.X - c.X) * inv, c1 = (c.X * a.Y - c.Y * a.X) * inv;
+                    // an attribute as a plane: c + (a - c) w0 + (b - c) w1
+                    struct Plane final { float Dx, Dy, At; };
+                    const auto plane = [&](float pa, float pb, float pc)
+                    {
+                        return Plane{(pa - pc) * a0 + (pb - pc) * a1, (pa - pc) * b0 + (pb - pc) * b1,
+                            pc + (pa - pc) * c0 + (pb - pc) * c1};
+                    };
+                    const Plane pr = plane(a.R, b.R, c.R), pg = plane(a.G, b.G, c.G), pb = plane(a.B, b.B, c.B);
+                    const Plane pa = plane(a.A, b.A, c.A), pu = plane(a.U, b.U, c.U), pv = plane(a.V, b.V, c.V);
+                    for (int y = minY; y <= maxY; ++y)
+                    {
+                        const float py = static_cast<float>(y) + 0.5F;
+                        // the span of this row inside all three edges (with a pixel to spare: the test below decides)
+                        float lo = static_cast<float>(minX), hi = static_cast<float>(maxX) + 1.0F;
+                        const auto edge = [&](float ea, float eb, float ec)
+                        {
+                            const float at = eb * py + ec;
+                            if (std::abs(ea) < 1e-12F)
+                            {
+                                if (at < -1e-6F) hi = lo - 1.0F;
+                                return;
+                            }
+                            const float x = -at / ea;
+                            if (ea > 0) lo = std::max(lo, x - 1.0F);
+                            else hi = std::min(hi, x + 1.0F);
+                        };
+                        edge(a0, b0, c0);
+                        edge(a1, b1, c1);
+                        edge(-a0 - a1, -b0 - b1, 1.0F - c0 - c1);
+                        const int x0 = std::max(minX, static_cast<int>(std::floor(lo)));
+                        const int x1 = std::min(maxX, static_cast<int>(std::ceil(hi)));
+                        if (x0 > x1) continue;
+                        const std::size_t row = static_cast<std::size_t>(y) * static_cast<std::size_t>(width);
+                        for (int x = x0; x <= x1; ++x)
+                        {
+                            const float px = static_cast<float>(x) + 0.5F;
+                            const float w0 = a0 * px + b0 * py + c0;
+                            const float w1 = a1 * px + b1 * py + c1;
+                            // a hair inside: a pixel on the edge two triangles share is drawn
+                            // (twice over is harmless -- a translucent one is not blended
+                            // again over its own polygon ID), never dropped by both
+                            constexpr float Inside = -1e-4F;
+                            if (w0 < Inside || w1 < Inside || 1.0F - w0 - w1 < Inside) continue;
+                            float r = pr.Dx * px + pr.Dy * py + pr.At;
+                            float g = pg.Dx * px + pg.Dy * py + pg.At;
+                            float bl = pb.Dx * px + pb.Dy * py + pb.At;
+                            float al = pa.Dx * px + pa.Dy * py + pa.At;
+                            if (texture != nullptr)
+                            {
+                                const float u = pu.Dx * px + pu.Dy * py + pu.At;
+                                const float t = pv.Dx * px + pv.Dy * py + pv.At;
+                                const int tx = WrapCoord(static_cast<int>(std::floor(u * static_cast<float>(tw))), tw, batch.WrapS);
+                                const int ty = WrapCoord(static_cast<int>(std::floor(t * static_cast<float>(th))), th, batch.WrapT);
+                                const ColorRgba& texel = texture->Pixels[static_cast<std::size_t>(ty) * static_cast<std::size_t>(tw)
+                                    + static_cast<std::size_t>(tx)];
+                                constexpr float Unit = 1.0F / 255.0F;
+                                r *= static_cast<float>(texel.Red) * Unit;
+                                g *= static_cast<float>(texel.Green) * Unit;
+                                bl *= static_cast<float>(texel.Blue) * Unit;
+                                al *= static_cast<float>(texel.Alpha) * Unit;
+                            }
+                            const std::size_t at = row + static_cast<std::size_t>(x);
+                            if (batch.Backdrop)
+                            {
+                                if (al <= 0.0F) continue;
+                                pixels[at] = Byte(r) | (static_cast<std::uint32_t>(Byte(g)) << 8)
+                                    | (static_cast<std::uint32_t>(Byte(bl)) << 16) | 0xFF000000U;
+                                continue;
+                            }
+                            const int alpha = std::min(31, static_cast<int>(al * 31.0F + 0.5F));
+                            if (alpha <= 0) continue;
+                            Pixel3d& dst = layer[at];
+                            if (alpha == 31)
+                            {
+                                dst = Pixel3d{Byte(r), Byte(g), Byte(bl), 31, -1};
+                                continue;
+                            }
+                            if (batch.PolyId >= 0 && dst.Translucent == batch.PolyId) continue;
+                            if (dst.Alpha == 0)
+                            {
+                                dst = Pixel3d{Byte(r), Byte(g), Byte(bl), static_cast<std::uint8_t>(alpha), batch.PolyId};
+                                continue;
+                            }
+                            const float s = static_cast<float>(alpha + 1) / 32.0F;
+                            constexpr float Unit = 1.0F / 255.0F;
+                            dst.R = Byte(r * s + static_cast<float>(dst.R) * Unit * (1.0F - s));
+                            dst.G = Byte(g * s + static_cast<float>(dst.G) * Unit * (1.0F - s));
+                            dst.B = Byte(bl * s + static_cast<float>(dst.B) * Unit * (1.0F - s));
+                            dst.Alpha = static_cast<std::uint8_t>(std::max<int>(dst.Alpha, alpha));
+                            dst.Translucent = batch.PolyId;
+                        }
+                    }
+                }
+            }
+            // the 3D layer over the 2D one, by its own alpha
+            const std::size_t begin = static_cast<std::size_t>(rowBegin) * static_cast<std::size_t>(width);
+            const std::size_t end = static_cast<std::size_t>(rowEnd) * static_cast<std::size_t>(width);
+            for (std::size_t at = begin; at < end; ++at)
+            {
+                const Pixel3d& p = layer[at];
+                if (p.Alpha == 0) continue;
+                if (clear)
+                {
+                    const std::uint32_t a = p.Alpha == 31 ? 255U : static_cast<std::uint32_t>((p.Alpha + 1) * 255 / 32);
+                    pixels[at] = p.R | (static_cast<std::uint32_t>(p.G) << 8) | (static_cast<std::uint32_t>(p.B) << 16) | (a << 24);
+                    continue;
+                }
+                const std::uint32_t under = pixels[at];
+                if (p.Alpha == 31)
+                {
+                    pixels[at] = p.R | (static_cast<std::uint32_t>(p.G) << 8) | (static_cast<std::uint32_t>(p.B) << 16) | 0xFF000000U;
+                    continue;
+                }
+                const std::uint32_t eva = static_cast<std::uint32_t>(p.Alpha) + 1;
+                const std::uint32_t evb = 32 - eva;
+                const auto mix = [&](std::uint32_t over, int shift)
+                {
+                    return (over * eva + ((under >> shift) & 0xFF) * evb + 16) / 32;
+                };
+                pixels[at] = mix(p.R, 0) | (mix(p.G, 8) << 8) | (mix(p.B, 16) << 16) | 0xFF000000U;
+            }
+        }
 
         // Textured, vertex-coloured triangles sampled at pixel centres with
         // the nearest texel (DS pixel art), composed as the DS composes the
@@ -729,132 +891,65 @@ namespace MphRead::Mods::ClassicMenu
         // alpha (a + 1) / 32 with the larger alpha kept -- never over a
         // translucent pixel of its own polygon ID. The 3D layer then goes
         // over the 2D one by its own alpha. A picture over a match has no 2D
-        // layer: the 3D one is the picture, alpha and all.
+        // layer: the 3D one is the picture, alpha and all. Bands of rows are
+        // drawn on as many threads as the machine has, up to eight.
         void Rasterize(const UiDrawList& list, const UiTextureCache& textures, int width, int height,
             std::vector<std::uint32_t>& pixels, bool clear = false)
         {
             const std::size_t count = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
             pixels.assign(count, clear ? 0x00000000U : 0xFF000000U);
-            static thread_local std::vector<Pixel3d> layer;
+            static std::vector<Pixel3d> layer;
             layer.assign(count, Pixel3d{});
-            for (const UiBatch& batch : list.Batches)
+            // looked up here, where an exception can still be answered
+            std::vector<const UiTexture*> resolved(list.Batches.size(), nullptr);
+            for (std::size_t i = 0; i < list.Batches.size(); ++i)
             {
-                const UiTexture* texture = batch.TextureId >= 0 ? &textures[batch.TextureId] : nullptr;
-                if (texture != nullptr && (texture->Width <= 0 || texture->Height <= 0)) texture = nullptr;
-                for (int v = batch.Start; v + 2 < batch.Start + batch.Count; v += 3)
+                const int id = list.Batches[i].TextureId;
+                if (id < 0) continue;
+                const UiTexture& texture = textures[id];
+                if (texture.Width > 0 && texture.Height > 0
+                    && texture.Pixels.size() >= static_cast<std::size_t>(texture.Width) * static_cast<std::size_t>(texture.Height))
                 {
-                    const UiVertex& a = list.Vertices[static_cast<std::size_t>(v)];
-                    const UiVertex& b = list.Vertices[static_cast<std::size_t>(v + 1)];
-                    const UiVertex& c = list.Vertices[static_cast<std::size_t>(v + 2)];
-                    const float area = (b.X - a.X) * (c.Y - a.Y) - (b.Y - a.Y) * (c.X - a.X);
-                    if (std::abs(area) < 1e-6F) continue;
-                    const int minX = std::max(0, static_cast<int>(std::floor(std::min({a.X, b.X, c.X}))));
-                    const int maxX = std::min(width - 1, static_cast<int>(std::ceil(std::max({a.X, b.X, c.X}))));
-                    const int minY = std::max(0, static_cast<int>(std::floor(std::min({a.Y, b.Y, c.Y}))));
-                    const int maxY = std::min(height - 1, static_cast<int>(std::ceil(std::max({a.Y, b.Y, c.Y}))));
-                    if (minX > maxX || minY > maxY) continue;
-                    const float inv = 1.0F / area;
-                    for (int y = minY; y <= maxY; ++y)
-                    {
-                        const float py = static_cast<float>(y) + 0.5F;
-                        const std::size_t row = static_cast<std::size_t>(y) * static_cast<std::size_t>(width);
-                        for (int x = minX; x <= maxX; ++x)
-                        {
-                            const float px = static_cast<float>(x) + 0.5F;
-                            const float w0 = ((b.X - px) * (c.Y - py) - (b.Y - py) * (c.X - px)) * inv;
-                            const float w1 = ((c.X - px) * (a.Y - py) - (c.Y - py) * (a.X - px)) * inv;
-                            const float w2 = 1.0F - w0 - w1;
-                            if (w0 < 0 || w1 < 0 || w2 < 0) continue;
-                            float r = a.R * w0 + b.R * w1 + c.R * w2;
-                            float g = a.G * w0 + b.G * w1 + c.G * w2;
-                            float bl = a.B * w0 + b.B * w1 + c.B * w2;
-                            float al = a.A * w0 + b.A * w1 + c.A * w2;
-                            if (texture != nullptr)
-                            {
-                                const float u = a.U * w0 + b.U * w1 + c.U * w2;
-                                const float t = a.V * w0 + b.V * w1 + c.V * w2;
-                                const int tx = WrapCoord(static_cast<int>(std::floor(u * static_cast<float>(texture->Width))),
-                                    texture->Width, batch.WrapS);
-                                const int ty = WrapCoord(static_cast<int>(std::floor(t * static_cast<float>(texture->Height))),
-                                    texture->Height, batch.WrapT);
-                                const std::size_t index = static_cast<std::size_t>(ty) * static_cast<std::size_t>(texture->Width)
-                                    + static_cast<std::size_t>(tx);
-                                if (index >= texture->Pixels.size()) continue;
-                                const ColorRgba& texel = texture->Pixels[index];
-                                r *= static_cast<float>(texel.Red) / 255.0F;
-                                g *= static_cast<float>(texel.Green) / 255.0F;
-                                bl *= static_cast<float>(texel.Blue) / 255.0F;
-                                al *= static_cast<float>(texel.Alpha) / 255.0F;
-                            }
-                            r = std::clamp(r, 0.0F, 1.0F);
-                            g = std::clamp(g, 0.0F, 1.0F);
-                            bl = std::clamp(bl, 0.0F, 1.0F);
-                            const std::size_t at = row + static_cast<std::size_t>(x);
-                            if (batch.Backdrop)
-                            {
-                                if (al <= 0.0F) continue;
-                                const auto byte = [](float value) { return static_cast<std::uint32_t>(value * 255.0F + 0.5F); };
-                                pixels[at] = byte(r) | (byte(g) << 8) | (byte(bl) << 16) | 0xFF000000U;
-                                continue;
-                            }
-                            const int alpha = std::min(31, static_cast<int>(al * 31.0F + 0.5F));
-                            if (alpha <= 0) continue;
-                            Pixel3d& dst = layer[at];
-                            if (alpha == 31)
-                            {
-                                dst = Pixel3d{r, g, bl, 31, -1};
-                                continue;
-                            }
-                            if (batch.PolyId >= 0 && dst.Translucent == batch.PolyId) continue;
-                            if (dst.Alpha == 0)
-                            {
-                                dst = Pixel3d{r, g, bl, alpha, batch.PolyId};
-                                continue;
-                            }
-                            const float s = static_cast<float>(alpha + 1) / 32.0F;
-                            dst.R = r * s + dst.R * (1.0F - s);
-                            dst.G = g * s + dst.G * (1.0F - s);
-                            dst.B = bl * s + dst.B * (1.0F - s);
-                            dst.Alpha = std::max(dst.Alpha, alpha);
-                            dst.Translucent = batch.PolyId;
-                        }
-                    }
+                    resolved[i] = &texture;
                 }
             }
-            for (std::size_t at = 0; at < count; ++at)
+            const unsigned hardware = std::max(1U, std::min(8U, std::thread::hardware_concurrency()));
+            const int bands = height >= 96 ? static_cast<int>(hardware) : 1;
+            const int rows = (height + bands - 1) / bands;
+            std::vector<std::thread> workers;
+            for (int band = 1; band < bands; ++band)
             {
-                const Pixel3d& p = layer[at];
-                if (p.Alpha == 0) continue;
-                const auto byte = [](float value) { return static_cast<std::uint32_t>(std::clamp(value, 0.0F, 1.0F) * 255.0F + 0.5F); };
-                if (clear)
-                {
-                    const float a = p.Alpha == 31 ? 1.0F : static_cast<float>(p.Alpha + 1) / 32.0F;
-                    pixels[at] = byte(p.R) | (byte(p.G) << 8) | (byte(p.B) << 16) | (byte(a) << 24);
-                    continue;
-                }
-                const std::uint32_t under = pixels[at];
-                const float s = p.Alpha == 31 ? 1.0F : static_cast<float>(p.Alpha + 1) / 32.0F;
-                const auto mix = [&](float over, int shift)
-                {
-                    return byte(over * s + static_cast<float>((under >> shift) & 0xFF) / 255.0F * (1.0F - s));
-                };
-                pixels[at] = mix(p.R, 0) | (mix(p.G, 8) << 8) | (mix(p.B, 16) << 16) | 0xFF000000U;
+                const int begin = band * rows;
+                const int end = std::min(height, begin + rows);
+                if (begin >= end) break;
+                workers.emplace_back(RasterizeRows, std::cref(list), std::cref(resolved), width, begin, end,
+                    pixels.data(), layer.data(), clear);
             }
+            RasterizeRows(list, resolved, width, 0, std::min(height, rows), pixels.data(), layer.data(), clear);
+            for (std::thread& worker : workers) worker.join();
         }
     }
 
-    bool Facade::Render(double seconds, int width, int height, std::vector<std::uint32_t>& pixels)
+    bool Facade::Render(double seconds, int width, int height, std::vector<std::uint32_t>& pixels, bool* changed)
     {
         if (!Active() || width <= 0 || height <= 0) return false;
         try
         {
             session->Advance(seconds);
+            if (changed != nullptr) *changed = true;
             // at most MaxPixelsPerUnit pixels a unit: the shell scales the picture up
             const float units = height > width ? 256.0F : UnitsHigh;
             const float shortSide = static_cast<float>(height > width ? width : height);
             const float per = std::clamp(std::floor(shortSide / units), 1.0F, static_cast<float>(MaxPixelsPerUnit));
             const int w = std::max(1, static_cast<int>(std::lround(static_cast<float>(width) * per * units / shortSide)));
             const int h = std::max(1, static_cast<int>(std::lround(static_cast<float>(height) * per * units / shortSide)));
+            // nothing moved and the size is the same: the last picture stands
+            if (!session->Dirty() && w == lastWidth && h == lastHeight && pixels.size() == static_cast<std::size_t>(w) * static_cast<std::size_t>(h))
+            {
+                shownWidth = width; shownHeight = height;
+                if (changed != nullptr) *changed = false;
+                return true;
+            }
             Rasterize(session->BuildCanvas(w, h), session->Textures(), w, h, pixels, session->OverGame());
             session->Clean();
             lastWidth = w; lastHeight = h; shownWidth = width; shownHeight = height;

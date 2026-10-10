@@ -107,7 +107,8 @@ namespace MphRead::Qt
         }
         const double seconds = static_cast<double>(_clock.restart()) / 1000.0;
         const QSize size = PixelSize();
-        if (!Menu::Render(seconds, size.width(), size.height(), _pixels))
+        bool changed = true;
+        if (!Menu::Render(seconds, size.width(), size.height(), _pixels, &changed))
         {
             if (!Menu::Active())
             {
@@ -116,6 +117,12 @@ namespace MphRead::Qt
                 _timer.stop();
                 emit runningChanged();
             }
+            return;
+        }
+        // no tick, no input: the picture on screen stands
+        if (!changed)
+        {
+            RunScript();
             return;
         }
         // the picture's own size: the shell scales it to the item

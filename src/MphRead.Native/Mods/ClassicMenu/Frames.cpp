@@ -5,6 +5,7 @@
 
 #include "../../NativeRuntime/System/IO.hpp"
 
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -106,6 +107,21 @@ namespace MphRead::Mods::ClassicMenu
                 Facade::Touch(std::strtof(parts[1].c_str(), nullptr), std::strtof(parts[2].c_str(), nullptr));
             }
             else if (action == "page" && parts.size() >= 2) Facade::Visit(parts[1]);
+            else if (action == "bench" && parts.size() >= 3)
+            {
+                // the one screen at W x H, as the shell draws it, a tick apart
+                const int width = std::atoi(parts[1].c_str());
+                const int height = std::atoi(parts[2].c_str());
+                const int calls = parts.size() >= 4 ? std::atoi(parts[3].c_str()) : 60;
+                std::vector<std::uint32_t> canvas;
+                const auto start = std::chrono::steady_clock::now();
+                for (int i = 0; i < calls; ++i) (void)Facade::Render(1.0 / 30.0, width, height, canvas);
+                const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+                int w = 0, h = 0;
+                Facade::DrawnSize(w, h);
+                std::printf("[classicframes] bench %dx%d (drawn %dx%d): %.2f ms a picture\n", width, height, w, h, ms / calls);
+                tick += calls * 2;
+            }
             else if (action == "describe")
             {
                 char name[32];
