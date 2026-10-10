@@ -128,6 +128,24 @@ namespace MphRead::Mods::Input
     void WindowsGamepadHaptics::Synchronize(const std::optional<std::string>& requested)
     {
 #if defined(_WIN32)
+        // Called every frame. With no XInput pad asked for and none bound
+        // the scan below can only end in "nothing to do", and
+        // XInputGetState on an empty slot is slow: four of them a frame
+        // were 3-4 % of the frame at 180 FPS. Otherwise rescan when the
+        // request changes, or once a second for a pad that moved slot.
+        if (!requested.has_value() && !_id.has_value())
+        {
+            return;
+        }
+        static std::optional<std::string> scannedFor;
+        static std::chrono::steady_clock::time_point scannedAt{};
+        const auto now = std::chrono::steady_clock::now();
+        if (requested == scannedFor && now - scannedAt < std::chrono::seconds(1))
+        {
+            return;
+        }
+        scannedFor = requested;
+        scannedAt = now;
         std::optional<std::string> uniqueId = requested;
         std::optional<std::uint32_t> index;
         if (Library().GetState == nullptr)

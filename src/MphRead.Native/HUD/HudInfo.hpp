@@ -167,6 +167,34 @@ namespace MphRead::Hud
         std::unordered_map<std::string, std::int32_t> _pictures;
         // Past the cap, pictures are rewritten in place here, as before.
         std::int32_t _overflowBinding = -1;
+        // The binding a decoded picture got, by what it was decoded from:
+        // the text instance is given every character of every string each
+        // frame, and decoding then keying the pixels again was ~10 % of a
+        // frame. The sheets are kept alive here so their addresses stay
+        // theirs.
+        struct SourceKey
+        {
+            const void* Characters = nullptr;
+            const void* Palette = nullptr;
+            std::int32_t Frame = 0;
+            std::int32_t PaletteIndex = 0;
+            std::uint32_t Color = 0;
+            bool HasColor = false;
+            std::int32_t Width = 0;
+            std::int32_t Height = 0;
+            bool operator==(const SourceKey&) const = default;
+        };
+        struct SourceKeyHash
+        {
+            std::size_t operator()(const SourceKey& key) const noexcept;
+        };
+        struct SourceEntry
+        {
+            ReadOnlyList<std::uint8_t> Characters;
+            ReadOnlyList<ColorRgba> Palette;
+            std::int32_t BindingId = -1;
+        };
+        std::unordered_map<SourceKey, SourceEntry, SourceKeyHash> _sources;
     };
 
     class LayerInfo

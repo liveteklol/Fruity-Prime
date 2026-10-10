@@ -397,10 +397,34 @@ namespace MphRead::Hud
         }
     }
 
+    std::size_t HudObjectInstance::SourceKeyHash::operator()(const SourceKey& key) const noexcept
+    {
+        std::size_t hash = std::hash<const void*>{}(key.Characters);
+        const auto mix = [&hash](std::size_t value) { hash ^= value + 0x9E3779B97F4A7C15ULL + (hash << 6) + (hash >> 2); };
+        mix(std::hash<const void*>{}(key.Palette));
+        mix(static_cast<std::size_t>(static_cast<std::uint32_t>(key.Frame)));
+        mix(static_cast<std::size_t>(static_cast<std::uint32_t>(key.PaletteIndex)));
+        mix(key.HasColor ? key.Color : 0x5A5A5A5AU);
+        mix(static_cast<std::size_t>(static_cast<std::uint32_t>(key.Width) << 16 ^ static_cast<std::uint32_t>(key.Height)));
+        return hash;
+    }
+
     void HudObjectInstance::DoTexture(Scene& scene)
     {
         assert(CharacterData);
         assert(PaletteData);
+        if (_pictureScene != &scene)
+        {
+            _sources.clear();
+        }
+        const SourceKey source{CharacterData.get(), Color.has_value() ? nullptr : PaletteData.get(), CurrentFrame,
+            Color.has_value() ? -1 : PaletteIndex, Color.has_value() ? Color->ToUint() : 0U, Color.has_value(),
+            Width, Height};
+        if (const auto found = _sources.find(source); found != _sources.end())
+        {
+            BindingId = found->second.BindingId;
+            return;
+        }
         const std::int32_t paletteOffset = UncheckedMultiply(PaletteIndex, 16);
         const std::int32_t width = Width / 8;
         const std::int32_t height = Height / 8;
@@ -447,6 +471,12 @@ namespace MphRead::Hud
             }
         }
         BindPicture(scene, Width, Height);
+        // A picture past the cache's cap shares the overflow binding, which
+        // the next one rewrites: only a binding of its own can be reused.
+        if (BindingId != _overflowBinding && _sources.size() < MaxCachedPictures)
+        {
+            _sources.emplace(source, SourceEntry{CharacterData, PaletteData, BindingId});
+        }
     }
 
     void HudObjectInstance::BindPicture(Scene& scene, std::int32_t width, std::int32_t height)
