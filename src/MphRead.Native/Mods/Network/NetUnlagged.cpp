@@ -2,6 +2,7 @@
 
 #include "NetPlayerBridge.hpp"
 #include "NetHitClaims.hpp"
+#include "NetShotEvents.hpp"
 #include "NetPlayerLifecycle.hpp"
 #include "NetSession.hpp"
 #include "NetShotDiagnostics.hpp"
@@ -303,6 +304,12 @@ namespace MphRead::Mods::Network
     std::uint32_t NetUnlagged::LaunchFrameFor(Entities::PlayerEntity& shooter)
     {
         const std::int32_t slot = shooter.SlotIndex();
+        // A copy firing a shot event: the world that shot was aimed in.
+        if (const auto event = NetShotEvents::FiringEvent(shooter); event.has_value() && event->AckFrame != 0
+            && event->AckFrame <= NetSession::NetFrame())
+        {
+            return event->AckFrame;
+        }
         if (Simulating() && slot != NetSession::LocalSlot() && !shooter.IsBot()
             && slot >= 0 && slot < Slots && NetSession::RemoteIntentValid[static_cast<std::size_t>(slot)])
         {

@@ -659,9 +659,12 @@ namespace MphRead::Mods::Launcher::Gui
         catch (const std::exception&)
         {
             const std::exception_ptr exception = std::current_exception();
+            // The log first: ExceptionMessage reads the exception by rethrowing
+            // it, which replaces the recorded throw site with its own stack --
+            // every crash then logs the same useless frames.
+            MphRead::Mods::DebugLog::Exception("launcher", exception);
             std::cout << "The window could not be opened: "
                       << MphRead::NativeRuntime::ExceptionMessage(exception) << '\n';
-            MphRead::Mods::DebugLog::Exception("launcher", exception);
         }
 
         g_host.reset();

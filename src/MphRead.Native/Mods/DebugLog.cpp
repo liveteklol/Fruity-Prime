@@ -1255,6 +1255,26 @@ namespace
 
     [[nodiscard]] bool ThrownByRethrowException(void* const* frames, USHORT count) noexcept
     {
+#if defined(_MSC_VER)
+        // MSVC's std::rethrow_exception is msvcp140's __ExceptionPtrRethrow:
+        // no function in this image to compare against, so look for a frame
+        // inside that DLL instead.
+        static const HMODULE msvcp = ::GetModuleHandleW(L"msvcp140.dll");
+        if (msvcp != nullptr)
+        {
+            for (USHORT index = 0; index < count && index < 12; ++index)
+            {
+                HMODULE module = nullptr;
+                if (::GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS
+                        | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                        static_cast<LPCWSTR>(frames[index]), &module)
+                    && module == msvcp)
+                {
+                    return true;
+                }
+            }
+        }
+#endif
 #if defined(_M_X64) || defined(__x86_64__)
         static const DWORD64 rethrowStart = []() -> DWORD64
         {

@@ -95,7 +95,9 @@ namespace MphRead::Mods::Network
             std::uint32_t launchFrame = 0,
             float flight = 0,
             std::optional<OpenTK::Mathematics::Vector3> impulse = std::nullopt,
-            ::MphRead::Affliction afflictions = ::MphRead::Affliction::None);
+            ::MphRead::Affliction afflictions = ::MphRead::Affliction::None,
+            std::uint32_t shotSequence = 0,
+            std::uint32_t turretDamage = 0);
 
         [[nodiscard]] static bool Confirm(std::int32_t slot, std::int32_t landed = 1, bool authorityHeadshot = false);
         [[nodiscard]] static Entities::PlayerEntity* OwnerOf(Entities::EntityBase* source);
@@ -160,6 +162,12 @@ namespace MphRead::Mods::Network
             bool lethal, bool headshot, ::MphRead::BeamType beam, bool self);
         static std::int32_t RetireHead(std::int32_t slot, bool confirmed);
         static void StampClaim(std::int32_t slot, std::int32_t at, std::uint16_t claimId);
+        // The authority's drain arrives as the health it reports for this
+        // machine's player rising: that much of the drain credited here has
+        // landed and is owed no longer, oldest first. Without it the credit
+        // stood on top of the drain it predicted until it expired -- the
+        // health shown rose twice and then fell back.
+        static void SettleDrain(std::int32_t authorityHealth);
 
         inline static bool _deathEnabled = true;
         inline static OpenTK::Mathematics::Vector3 _impact{};
@@ -194,6 +202,10 @@ namespace MphRead::Mods::Network
         inline static std::array<std::int32_t, HealCapacity> _healAmount{};
         inline static std::int32_t _healCount = 0;
         inline static std::int32_t _healHead = 0;
+        // The authority's health for this machine's player at the last
+        // snapshot SettleDrain read (0: none yet this life), and that frame.
+        inline static std::int32_t _drainBaseline = 0;
+        inline static std::uint32_t _drainSnapshotFrame = 0;
 
         inline static std::array<std::int64_t, BeamBuckets> _beamPredicted{};
         inline static std::array<std::int64_t, BeamBuckets> _beamConfirmed{};

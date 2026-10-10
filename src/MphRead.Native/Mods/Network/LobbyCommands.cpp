@@ -92,8 +92,9 @@ namespace MphRead::Mods::Network
         state.OwnerSlot = owner;
         state.MaxPlayers = static_cast<std::uint8_t>(_maxPlayers);
         state.Match = definition;
-        state.WorldProfile = _sessionPolicy == ServerSessionPolicy::Lobby && _phase != SessionPhase::Lobby
-            ? _frozenWorldProfile : LobbyRules::ResolveWorldProfile(definition, _maxPlayers);
+        state.WorldProfile = _sessionPolicy == ServerSessionPolicy::Lobby
+            ? (_phase != SessionPhase::Lobby ? _frozenWorldProfile : LobbyRules::ResolveWorldProfile(definition, _maxPlayers))
+            : _mapWorldProfile.IsValid() ? _mapWorldProfile : LobbyRules::ResolveWorldProfile(definition, 2);
         SessionRules rules = definition.Rules();
         if (_requireReady)
         {
@@ -330,7 +331,8 @@ namespace MphRead::Mods::Network
                 return start;
             }
             _frozenMatch = _lobbyMatch;
-            _frozenWorldProfile = LobbyRules::ResolveWorldProfile(_frozenMatch, _maxPlayers);
+            _frozenWorldProfile = LobbyRules::ResolveWorldProfile(_frozenMatch,
+                std::max<std::int32_t>(2, static_cast<std::int32_t>(_peers.size())));
             const double buildStarted = NetSession::Clock();
             const std::uint16_t previousMatch = _matchId;
             _matchId = NetLifecycleTracker::Next(_matchId);

@@ -1892,27 +1892,11 @@ namespace MphRead::Entities
         {
             RequireReference(_halfturret).OnTakeDamage(SharedFrom<EntityBase>(attacker), damage);
         }
+        std::uint32_t turretDamage = 0;
         if (TestFlag(flags, DamageFlags::Halfturret) && !ignoreDamage)
         {
-            std::uint32_t turretDamage;
-            HalfturretEntity& turret = RequireReference(_halfturret);
-            if (_health > turret.Health())
-            {
-                turretDamage = damage - damage / 2;
-            }
-            else
-            {
-                turretDamage = damage / 2;
-            }
-            if (ManagedInt32LessThanOrEqualUInt32(turret.Health(), turretDamage))
-            {
-                turret.Die();
-            }
-            else
-            {
-                turret.SetHealth(UncheckedSubtract(
-                    turret.Health(), std::bit_cast<std::int32_t>(turretDamage)));
-            }
+            turretDamage = HalfturretShare(damage);
+            DamageHalfturret(turretDamage);
             damage -= turretDamage;
             if (_isBot && GameState::SinglePlayer() && RequireReference(AiData).Flags1)
             {
@@ -1928,7 +1912,6 @@ namespace MphRead::Entities
             {
                 damage = static_cast<std::uint32_t>(UncheckedSubtract(_health, 1));
             }
-            turret.SetTimeSinceDamage(0);
             if (_isBot)
             {
                 RequireReference(AiData).DamageFromHalfturret = turretDamage;
@@ -1953,7 +1936,8 @@ namespace MphRead::Entities
             beam != nullptr ? beam->ModLaunchFrame
                 : TestFlag(flags, DamageFlags::Burn) ? _burnLaunchFrame : 0U,
             beam != nullptr ? beam->Age() : 0.0F,
-            direction, beam != nullptr ? beam->Afflictions() : MphRead::Affliction::None);
+            direction, beam != nullptr ? beam->Afflictions() : MphRead::Affliction::None,
+            beam != nullptr ? beam->ModShotSequence : 0U, turretDamage);
         if (attacker != this)
         {
             Mods::Input::AimAssist::AimAssistTelemetry::Hit(attacker,

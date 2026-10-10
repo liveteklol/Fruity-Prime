@@ -2,6 +2,7 @@
 
 #include "../../Formats/Types.hpp"
 
+#include <optional>
 #include <string>
 #include <array>
 #include <cstdint>
@@ -81,6 +82,14 @@ namespace MphRead::Mods::Network
 
     private:
         [[nodiscard]] static double ReadPhaseSeconds();
+        // MPHREAD_PHASE=MorphA holds the tour on that one phase: a scripted
+        // player doing one thing for as long as a live test needs it (a
+        // Weavel that stays a turret to be shot at).
+        [[nodiscard]] static std::optional<TestPhase> ReadPinnedPhase();
+        // The server's match clock, carried forward between the MatchState
+        // packets that set it (one a second, and lossy), so every client's
+        // tour turns the page on the same frame give or take a trip.
+        [[nodiscard]] static double ServerElapsed(float received) noexcept;
 
         static void Drive(const std::shared_ptr<Entities::PlayerEntity>& player);
         [[nodiscard]] static bool Settled(Entities::PlayerEntity& player);
@@ -112,12 +121,17 @@ namespace MphRead::Mods::Network
         static void Hold(Entities::Keybind& bind, bool down);
         static void SelfDestruct(Entities::PlayerEntity& player, Entities::PlayerControls& c);
         static constexpr ::MphRead::BeamType SelfDestructBeam = ::MphRead::BeamType::Magmaul;
+        // MPHREAD_FEET_MISSILE: the self-destruct phase walks forward firing
+        // uncharged Missiles at its own feet instead -- a splash on its own
+        // shooter the frame it is fired, which a Magmaul's bounce is not.
+        static void FeetMissile(Entities::PlayerEntity& player, Entities::PlayerControls& c, bool aimed);
 
         static constexpr float TurnRate = 6.0F;
         static constexpr float FiringCone = 6.0F;
         static constexpr float PreferredRange = 4.0F;
 
         static double _phaseSeconds;
+        static std::optional<TestPhase> _pinnedPhase;
         inline static const std::array<TestPhase, 16> _order{
             TestPhase::Idle,
             TestPhase::Walk,
@@ -138,6 +152,8 @@ namespace MphRead::Mods::Network
         };
 
         inline static bool _enabled = false;
+        inline static float _serverElapsed = -1.0F;
+        inline static std::uint32_t _serverElapsedFrame = 0;
         inline static std::int32_t _frame = 0;
         inline static std::int32_t _stuckFrames = 0;
         inline static bool _stuckDirection = false;

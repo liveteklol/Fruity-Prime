@@ -90,6 +90,12 @@ namespace MphRead::Mods::Network
 
         [[nodiscard]] static bool Suppress(Entities::PlayerEntity& victim,
             Entities::EntityBase* source, Entities::DamageFlags flags);
+        // Whether a hit by `source` on `victim` is applied on this machine,
+        // rather than left to its shooter's claim or refused: what Suppress
+        // lets through, and what a life-draining hit's heal follows -- a
+        // drain the hit is not resolved here would be this machine's guess.
+        [[nodiscard]] static bool ResolvedHere(Entities::PlayerEntity& victim,
+            Entities::EntityBase* source, Entities::DamageFlags flags);
 
         static void SetClaimedBeam(MphRead::BeamType beam) noexcept { _claimedBeam = beam; }
         [[nodiscard]] static bool ApplyingClaim() noexcept { return _applyingClaim; }
@@ -159,6 +165,8 @@ namespace MphRead::Mods::Network
         static void Replay(Entities::PlayerEntity& player, const PlayerState& state);
 
     private:
+        [[nodiscard]] static bool Refuses(Entities::PlayerEntity& victim,
+            Entities::EntityBase* source, Entities::DamageFlags flags, bool noting);
         static constexpr std::int32_t Slots = Entities::PlayerEntity::SlotCapacity;
         static constexpr std::int32_t RelayedFlags
             = static_cast<std::int32_t>(Entities::DamageFlags::Headshot)

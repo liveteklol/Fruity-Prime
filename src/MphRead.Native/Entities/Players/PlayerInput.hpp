@@ -336,6 +336,7 @@ private:                                                                        
     void ApplyTouchRoll(::OpenTK::Mathematics::Vector3& speedDelta);                           \
     void ProcessBoost(::OpenTK::Mathematics::Vector3& speedDelta);                             \
     void SpawnBomb();                                                                          \
+    std::shared_ptr<BombEntity> PlaceBomb(const ::OpenTK::Mathematics::Matrix4& transform, bool spend); \
     void EndAltAttack();                                                                       \
     void ProcessMovement();                                                                    \
     [[nodiscard]] static bool IsDown(                                                         \

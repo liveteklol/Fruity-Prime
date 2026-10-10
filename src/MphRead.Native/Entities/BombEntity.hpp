@@ -108,6 +108,13 @@ namespace MphRead::Entities
 
         void PlaySpawnSfx();
 
+        // Mods.Network.NetBombs: the bomb's sequence on its owner's machine;
+        // 0 for one nobody numbered, and again once destroyed (pooled).
+        std::uint32_t ModSequence = 0;
+        // Mods.Network.NetBombs: a copy's bomb moved toward where its owner
+        // has it, turned the way it moves as one homing in does.
+        void ModMoveTo(OpenTK::Mathematics::Vector3 position);
+
         [[nodiscard]] static std::shared_ptr<BombEntity> Spawn(
             PlayerEntity* owner,
             OpenTK::Mathematics::Matrix4 transform,

@@ -141,6 +141,10 @@ namespace MphRead::Entities
         // machines. Stamped by Mods.Network.NetUnlagged on every machine that
         // spawns it. Zero for anything nobody aimed.
         std::uint32_t ModLaunchFrame = 0;
+        // The shooter's shot event (Mods.Network.NetShotEvents) this
+        // projectile left with, on the shooter's own machine; 0 for none.
+        // What a hit claim names its shot by.
+        std::uint32_t ModShotSequence = 0;
         // A remote player's shot drawn on a third machine: the ack of the
         // intent that fired it, which is the shooter's own ModLaunchFrame for
         // the same shot (diagnostic only -- Mods.Network.HitLocation).

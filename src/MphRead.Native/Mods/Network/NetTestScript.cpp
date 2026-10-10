@@ -51,6 +51,7 @@ namespace
 namespace MphRead::Mods::Network
 {
     double NetTestScript::_phaseSeconds = NetTestScript::ReadPhaseSeconds();
+    std::optional<TestPhase> NetTestScript::_pinnedPhase = NetTestScript::ReadPinnedPhase();
     OpenTK::Mathematics::Vector3 NetTestScript::_lastPosition
         = OpenTK::Mathematics::Vector3::Zero;
 
@@ -109,11 +110,31 @@ namespace MphRead::Mods::Network
         return 5.0;
     }
 
+    std::optional<TestPhase> NetTestScript::ReadPinnedPhase()
+    {
+        const std::optional<std::string> value = NativeRuntime::EnvironmentGetVariable("MPHREAD_PHASE");
+        if (value.has_value())
+        {
+            for (const TestPhase phase : _order)
+            {
+                if (ToString(phase) == *value)
+                {
+                    return phase;
+                }
+            }
+        }
+        return std::nullopt;
+    }
+
     TestPhase NetTestScript::Phase()
     {
+        if (_pinnedPhase.has_value())
+        {
+            return *_pinnedPhase;
+        }
         const std::optional<MatchStatePacket> serverMatch = NetSession::ServerMatch();
         const double elapsed = serverMatch.has_value()
-            ? static_cast<double>(serverMatch->TimeElapsed)
+            ? ServerElapsed(serverMatch->TimeElapsed)
             : static_cast<double>(_frame) / 60.0;
         const std::int32_t quotient
             = ConvertToInt32Net9(elapsed / PhaseSeconds());
@@ -122,8 +143,28 @@ namespace MphRead::Mods::Network
         return _order[CheckedIndex(index, _order.size())];
     }
 
+    double NetTestScript::ServerElapsed(float received) noexcept
+    {
+        const std::uint32_t frame = NetSession::NetFrame();
+        const double carried = static_cast<double>(_serverElapsed)
+            + static_cast<double>(frame - _serverElapsedFrame) / 60.0;
+        // A packet re-anchors the clock forward. One a little behind it is
+        // the server a one-way trip ago, not a clock running backwards; one
+        // far behind is a new match.
+        constexpr double NewMatchStep = 2.0;
+        if (received != _serverElapsed
+            && (_serverElapsed < 0.0F || received >= carried || carried - received > NewMatchStep))
+        {
+            _serverElapsed = received;
+            _serverElapsedFrame = frame;
+            return received;
+        }
+        return carried;
+    }
+
     void NetTestScript::Reset()
     {
+        _serverElapsed = -1.0F;
         _frame = 0;
         _stuckFrames = 0;
         _lastPosition = OpenTK::Mathematics::Vector3::Zero;
@@ -372,9 +413,11 @@ namespace MphRead::Mods::Network
             Hold(c.Morph(), Settled(player) && _frame % 40 == 0);
             return;
         }
-        if (player.CurrentWeapon() != SelfDestructBeam)
+        static const bool feetMissile = NativeRuntime::EnvironmentGetVariable("MPHREAD_FEET_MISSILE").has_value();
+        const ::MphRead::BeamType beam = feetMissile ? ::MphRead::BeamType::Missile : SelfDestructBeam;
+        if (player.CurrentWeapon() != beam)
         {
-            player.ModArmWeapon(SelfDestructBeam);
+            player.ModArmWeapon(beam);
         }
         const OpenTK::Mathematics::Vector3 ahead(player.Field70(), 0.0F, player.Field74());
         const OpenTK::Mathematics::Vector3 position = player.Position;
@@ -387,6 +430,11 @@ namespace MphRead::Mods::Network
         _aimDeltaX = std::clamp(turnX, -TurnRate, TurnRate);
         _aimDeltaY = std::clamp(turnY, -TurnRate, TurnRate);
         const bool aimed = std::abs(turnX) < FiringCone && std::abs(turnY) < FiringCone;
+        if (feetMissile)
+        {
+            FeetMissile(player, c, aimed);
+            return;
+        }
         if (_releaseFrames > 0)
         {
             _releaseFrames--;
@@ -398,6 +446,14 @@ namespace MphRead::Mods::Network
             return;
         }
         Hold(c.Shoot(), true);
+    }
+
+    void NetTestScript::FeetMissile(Entities::PlayerEntity& player, Entities::PlayerControls& c, bool aimed)
+    {
+        static_cast<void>(player);
+        Hold(c.MoveUp(), true);
+        // A tap, so the Missile leaves uncharged.
+        Hold(c.Shoot(), aimed && _frame % 30 < 2);
     }
 
     bool NetTestScript::Settled(Entities::PlayerEntity& player)

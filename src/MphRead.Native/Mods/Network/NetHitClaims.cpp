@@ -1,9 +1,11 @@
 #include "NetHitClaims.hpp"
+#include "NetShotEvents.hpp"
 #include "HitLocation.hpp"
 #include "../../Formats/CollisionDetection.hpp"
 
 #include "NetDamage.hpp"
 #include "../Combat/SyluxMuzzleGuard.hpp"
+#include "../Multiplayer/TeamLayout.hpp"
 #include "NetHitPrediction.hpp"
 #include "NetLifecycleTracker.hpp"
 #include "NetLog.hpp"
@@ -13,6 +15,7 @@
 #include "NetSmoothing.hpp"
 #include "NetUnlagged.hpp"
 
+#include "../../Entities/Players/HalfturretEntity.hpp"
 #include "../../Entities/Players/PlayerEntity.hpp"
 #include "../../Metadata/Metadata.hpp"
 #include "../../Metadata/Weapons.hpp"
@@ -33,6 +36,19 @@ namespace MphRead::Mods::Network
         using ::MphRead::Entities::DamageFlags;
         using ::MphRead::Entities::LoadFlags;
         using ::MphRead::Entities::PlayerEntity;
+
+        // Where a victim's turret stands, if they have one still standing:
+        // what a claim's turret share is checked against and applied to.
+        [[nodiscard]] std::optional<OpenTK::Mathematics::Vector3> LiveTurretPosition(const PlayerEntity& victim)
+        {
+            const std::shared_ptr<::MphRead::Entities::HalfturretEntity> turret = victim.Halfturret();
+            if (!turret || !::MphRead::TestFlag(victim.Flags2(), ::MphRead::Entities::PlayerFlags2::Halfturret)
+                || turret->Health() <= 0)
+            {
+                return std::nullopt;
+            }
+            return static_cast<OpenTK::Mathematics::Vector3>(turret->Position);
+        }
 
         [[nodiscard]] bool HasDamageFlag(DamageFlags value, DamageFlags flag) noexcept
         {
@@ -159,9 +175,10 @@ namespace MphRead::Mods::Network
     std::uint16_t NetHitClaims::Declare(PlayerEntity& victim, PlayerEntity& attacker, ::MphRead::BeamType beam,
         std::uint32_t damage, DamageFlags flags, bool lethal, OpenTK::Mathematics::Vector3 hitPoint,
         std::uint32_t launchFrame, std::optional<OpenTK::Mathematics::Vector3> impulse, ::MphRead::Affliction afflictions,
-        std::optional<OpenTK::Mathematics::Vector3> impact, bool splash)
+        std::optional<OpenTK::Mathematics::Vector3> impact, bool splash, std::uint32_t shotSequence,
+        std::uint32_t turretDamage)
     {
-        if (!Claiming() || &victim == &attacker || damage == 0
+        if (!Claiming() || (damage == 0 && turretDamage == 0)
             || NetPlayerLifecycle::Get(victim.SlotIndex()) == 0 || NetPlayerLifecycle::Get(attacker.SlotIndex()) == 0)
         {
             return 0;
@@ -238,9 +255,11 @@ namespace MphRead::Mods::Network
         entry.Frame = NetSession::NetFrame();
         entry.AckFrame = ack;
         entry.LaunchFrame = launchFrame;
+        entry.ShotSequence = shotSequence;
         entry.VictimSlot = static_cast<std::uint8_t>(slot);
         entry.Beam = beam == ::MphRead::BeamType::None ? HitClaimPacket::NoBeam : static_cast<std::uint8_t>(beam);
         entry.Damage = static_cast<std::uint16_t>(std::min<std::uint32_t>(damage, 0xFFFFU));
+        entry.TurretDamage = static_cast<std::uint16_t>(std::min<std::uint32_t>(turretDamage, 0xFFFFU));
         entry.Flags = claimFlags;
         entry.HitPoint = hitPoint;
         entry.Impulse = impulse.value_or(OpenTK::Mathematics::Vector3::Zero);
@@ -298,9 +317,11 @@ namespace MphRead::Mods::Network
             packet.Frame = entry.Frame;
             packet.AckFrame = entry.AckFrame;
             packet.LaunchFrame = entry.LaunchFrame;
+            packet.ShotSequence = entry.ShotSequence;
             packet.VictimSlot = entry.VictimSlot;
             packet.Beam = entry.Beam;
             packet.Damage = entry.Damage;
+            packet.TurretDamage = entry.TurretDamage;
             packet.Flags = entry.Flags;
             packet.HitPoint = entry.HitPoint;
             packet.Impulse = entry.Impulse;
@@ -751,7 +772,7 @@ namespace MphRead::Mods::Network
     std::uint8_t NetHitClaims::Judge(std::int32_t shooterSlot, const HitClaimPacket& claim)
     {
         const std::int32_t victimSlot = claim.VictimSlot;
-        if (victimSlot < 0 || victimSlot >= Slots || victimSlot == shooterSlot
+        if (victimSlot < 0 || victimSlot >= Slots
             || victimSlot >= static_cast<std::int32_t>(PlayerEntity::Players().size()))
         {
             _refusedHere++;
@@ -775,16 +796,24 @@ namespace MphRead::Mods::Network
             ++_refusedHere;
             return HitVerdictPacket::ResultInvalidLaunch;
         }
-        if (claim.Damage > MaxDamageFor(shooterSlot, claim.Beam))
+        if (claim.Damage + claim.TurretDamage > MaxDamageFor(shooterSlot, claim.Beam))
         {
             _refusedHere++;
-            NetLog::Event("slot " + std::to_string(shooterSlot) + " claimed " + std::to_string(claim.Damage)
+            NetLog::Event("slot " + std::to_string(shooterSlot) + " claimed " + std::to_string(claim.Damage + claim.TurretDamage)
                 + " damage with beam " + std::to_string(claim.Beam) + ", which cannot deal more than "
                 + std::to_string(MaxDamageFor(shooterSlot, claim.Beam)));
             return HitVerdictPacket::ResultDamageLimit;
         }
+        // A hit on another player is checked against where the shooter saw
+        // them, the world it was looking at; one on itself against where it
+        // is now, as its intents have it -- its own screen was never a trip
+        // behind itself, and walking it would be units from that world.
         OpenTK::Mathematics::Vector3 was{};
-        if (!NetUnlagged::PositionAt(victimSlot, claim.AckFrame, claim.VictimGeneration, claim.VictimLifeId, was))
+        if (victimSlot == shooterSlot)
+        {
+            was = static_cast<OpenTK::Mathematics::Vector3>(PlayerAt(victimSlot).Position);
+        }
+        else if (!NetUnlagged::PositionAt(victimSlot, claim.AckFrame, claim.VictimGeneration, claim.VictimLifeId, was))
         {
             _tooOldHere++;
             return HitVerdictPacket::ResultTooOld;
@@ -922,6 +951,7 @@ namespace MphRead::Mods::Network
         entry.VictimSlot = claim.VictimSlot;
         entry.Beam = claim.Beam;
         entry.Damage = claim.Damage;
+        entry.TurretDamage = claim.TurretDamage;
         entry.Flags = claim.Flags;
         entry.AckFrame = claim.AckFrame;
         entry.LaunchFrame = claim.LaunchFrame;
@@ -958,6 +988,16 @@ namespace MphRead::Mods::Network
             index = beam + 9U;
         }
         return &Runtime::RequireReference((*current)[index]);
+    }
+
+    bool NetHitClaims::Drains(std::int32_t shooterSlot, std::uint8_t beam)
+    {
+        // Continuous fire is never charged, and the Shock Coil is the one
+        // weapon that drains; its claim carries no charge, so either flag.
+        const ::MphRead::WeaponInfo* fired = FiredWeapon(shooterSlot, beam);
+        return fired != nullptr
+            && (::MphRead::TestFlag(fired->Flags, ::MphRead::WeaponFlags::LifeDrainUncharged)
+                || ::MphRead::TestFlag(fired->Flags, ::MphRead::WeaponFlags::LifeDrainCharged));
     }
 
     std::int32_t NetHitClaims::MaxDamageFor(std::int32_t shooterSlot, std::uint8_t beam)
@@ -1087,6 +1127,12 @@ namespace MphRead::Mods::Network
             return true;
         }
         const PlayerEntity& victim = PlayerAt(victimSlot);
+        // A hit on a turret did not land on the body, which can stand metres
+        // away: ShotPlausible judges a straight one at the turret instead.
+        if (claim.TurretDamage > 0 && LiveTurretPosition(victim).has_value())
+        {
+            return true;
+        }
         const OpenTK::Mathematics::Vector3 at = claim.Impact.Value();
         if ((claim.Flags & HitClaimPacket::FlagSplash) != 0)
         {
@@ -1225,15 +1271,38 @@ namespace MphRead::Mods::Network
                 return false;
             }
         }
-        if (!claim.Impact.Known() || (claim.Flags & HitClaimPacket::FlagSplash) != 0 || !StraightWeapon(shooterSlot, claim.Beam))
+        const std::uint32_t launch = claim.LaunchFrame != 0 ? claim.LaunchFrame : claim.AckFrame;
+        std::optional<IntentPacket::ShotEvent> event{};
+        if (!NamedShotAgrees(shooterSlot, claim, launch, event))
+        {
+            return false;
+        }
+        // A hit on a turret is judged at the turret, which does not move once
+        // placed: the impact is an offset around the body, and a turret
+        // standing metres from it put every such hit off the ray.
+        const std::optional<OpenTK::Mathematics::Vector3> turret = claim.TurretDamage > 0
+            ? LiveTurretPosition(PlayerAt(claim.VictimSlot)) : std::nullopt;
+        if ((!claim.Impact.Known() && !turret.has_value()) || (claim.Flags & HitClaimPacket::FlagSplash) != 0
+            || !StraightWeapon(shooterSlot, claim.Beam))
         {
             return true;
         }
-        const std::uint32_t launch = claim.LaunchFrame != 0 ? claim.LaunchFrame : claim.AckFrame;
         const ClaimShotRay* ray = nullptr;
+        // The shot event the claim names: the exact ray of that shot.
+        ClaimShotRay named{};
+        if (event.has_value() && event->HasRay())
+        {
+            named = ClaimShotRay{event->AckFrame, event->Origin, event->Direction.Normalized()};
+            ray = &named;
+            _eventMatched++;
+        }
         std::uint32_t bestGap = 3;
         for (const ClaimShotRay& candidate : _shotRays[s])
         {
+            if (ray == &named)
+            {
+                break;
+            }
             const std::uint32_t gap = candidate.Ack > launch ? candidate.Ack - launch : launch - candidate.Ack;
             if (candidate.Ack != 0 && gap < bestGap)
             {
@@ -1245,7 +1314,7 @@ namespace MphRead::Mods::Network
         {
             return true;
         }
-        const OpenTK::Mathematics::Vector3 point = was + claim.Impact.Value();
+        const OpenTK::Mathematics::Vector3 point = turret.value_or(was + claim.Impact.Value());
         const OpenTK::Mathematics::Vector3 toPoint = point - ray->Origin;
         const float along = std::max(0.0F, OpenTK::Mathematics::Vector3::Dot(toPoint, ray->Direction));
         _lastRayDistance = OpenTK::Mathematics::Length(toPoint - OpenTK::Mathematics::Scale(ray->Direction, along));
@@ -1264,6 +1333,32 @@ namespace MphRead::Mods::Network
                 _losRefused++;
                 return false;
             }
+        }
+        return true;
+    }
+
+    // A claim naming a shot event must be that shot: the weapon it left with
+    // and the world it was aimed in, whatever kind of hit -- splash too. A
+    // shot not reported yet (its intent lost, the next not arrived) is judged
+    // the old way.
+    bool NetHitClaims::NamedShotAgrees(std::int32_t shooterSlot, const HitClaimPacket& claim, std::uint32_t launch,
+        std::optional<IntentPacket::ShotEvent>& named)
+    {
+        named = NetShotEvents::Find(shooterSlot, claim.ShotSequence);
+        if (!named.has_value())
+        {
+            if (claim.ShotSequence != 0)
+            {
+                _eventUnknown++;
+            }
+            return true;
+        }
+        _eventNamed++;
+        const std::uint32_t gap = named->AckFrame > launch ? named->AckFrame - launch : launch - named->AckFrame;
+        if (named->WeaponId != claim.Beam || (named->AckFrame != 0 && gap > NamedShotAckSlack))
+        {
+            _eventRefused++;
+            return false;
         }
         return true;
     }
@@ -1478,14 +1573,39 @@ namespace MphRead::Mods::Network
         _applyingImpact = entry.Impact;
         const bool lethal = victim.Health() <= entry.Damage;
         const auto before = static_cast<std::uint32_t>(victim.Health());
+        // The turret's share as the shooter's machine split it, on the
+        // authority's turret -- if it still has one to take it.
+        // A hit on a turret is applied whole, as the turret hit it was: the
+        // turret reacts to all of it (its target, its fire rate), the split
+        // follows this machine's health, and the turret still keeps its owner
+        // alive. A turret gone here leaves the body's share alone.
+        const bool turretHit = entry.TurretDamage > 0 && LiveTurretPosition(victim).has_value();
+        const std::uint32_t applied = turretHit
+            ? static_cast<std::uint32_t>(entry.Damage) + entry.TurretDamage : entry.Damage;
+        if (turretHit)
+        {
+            flags = static_cast<DamageFlags>(static_cast<std::int32_t>(flags)
+                | static_cast<std::int32_t>(DamageFlags::Halfturret));
+        }
         try
         {
             const NetDamage::ClaimScope scope(entry.Beam == HitClaimPacket::NoBeam
                 ? ::MphRead::BeamType::None : static_cast<::MphRead::BeamType>(entry.Beam));
-            victim.TakeDamage(static_cast<std::uint32_t>(entry.Damage), flags,
-                (entry.Flags & HitClaimPacket::FlagImpulse) != 0
-                    ? std::optional<OpenTK::Mathematics::Vector3>(entry.Impulse) : std::nullopt,
-                &shooter);
+            if (applied > 0)
+            {
+                victim.TakeDamage(applied, flags,
+                    (entry.Flags & HitClaimPacket::FlagImpulse) != 0
+                        ? std::optional<OpenTK::Mathematics::Vector3>(entry.Impulse) : std::nullopt,
+                    &shooter);
+                // A Shock Coil's drain comes with its hit, by the same rules as
+                // the projectile's: the shooter's machine credited it as the
+                // hit landed, and only this makes it last.
+                if (Drains(shooterSlot, entry.Beam) && &shooter != &victim && !shooter.IsPrimeHunter()
+                    && !Mods::Multiplayer::TeamRules::AreAllies(shooter.TeamIndex(), victim.TeamIndex()))
+                {
+                    shooter.GainDrainedHealth(applied);
+                }
+            }
         }
         catch (...)
         {
@@ -1495,7 +1615,7 @@ namespace MphRead::Mods::Network
         }
         _applyingClaim = false;
         _applyingImpact = ImpactOffset{};
-        if (static_cast<std::uint32_t>(victim.Health()) >= before)
+        if (static_cast<std::uint32_t>(victim.Health()) >= before && !turretHit)
         {
             _refusedHere++;
             Answer(shooterSlot, entry.Id, HitVerdictPacket::ResultNoDamage);
@@ -1684,6 +1804,10 @@ namespace MphRead::Mods::Network
         _afflictionsStripped = 0;
         _ackRefused = 0;
         _rayRefused = 0;
+        _eventRefused = 0;
+        _eventMatched = 0;
+        _eventNamed = 0;
+        _eventUnknown = 0;
         _losRefused = 0;
         _rateRefused = 0;
         for (auto& weapons : _recentLaunches) for (auto& launches : weapons) launches.fill(0);
@@ -1795,6 +1919,10 @@ namespace MphRead::Mods::Network
                 + std::to_string(_impactRefused) + " landing off the body, "
                 + std::to_string(_afflictionsStripped) + " afflictions dropped, " + std::to_string(_ackRefused)
                 + " resolved against a stale ack, " + std::to_string(_rayRefused) + " off the fired ray, "
+                + std::to_string(_eventNamed) + " naming a reported shot ("
+                + std::to_string(_eventMatched) + " ray-checked against it, "
+                + std::to_string(_eventRefused) + " contradicting it), "
+                + std::to_string(_eventUnknown) + " naming one not yet reported, "
                 + std::to_string(_losRefused) + " through a wall, " + std::to_string(_rateRefused)
                 + " faster than the weapon fires, " + (_shooterHits ? "shooter-authoritative (" + std::to_string(_serverCopiesSuppressed) + " server copies not applied), " : std::string())
                 + std::to_string(_voidedDeadShooter) + " from a shooter already dead, "

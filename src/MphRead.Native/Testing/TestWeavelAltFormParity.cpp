@@ -3,6 +3,8 @@
 #include "../Metadata/Metadata.hpp"
 #include "../Mods/Gameplay/NativeGameplayClock.hpp"
 #include "../Entities/Players/WeavelLungeInput.hpp"
+#include "../Entities/Players/WeavelOwnedTurret.hpp"
+#include "../Entities/Players/WeavelReplicaTransition.hpp"
 #include "../Mods/Network/NetProtocol.hpp"
 #include "../Mods/Network/NetHealthSync.hpp"
 #include "../Mods/Network/NetMatchTimeSync.hpp"
@@ -66,10 +68,62 @@ namespace
         Expect(!input.Consume(true), "hold or rejected edge never repeats");
         input.Capture(true); input.Reset();
         Expect(!input.Consume(true), "spawn reset discards previous input edge");
+
+        // The owner's own turret: the authority's health, and the authority's
+        // destruction -- never a turret it has not placed yet.
+        {
+            using Own = MphRead::Entities::WeavelOwnedTurret;
+            Own own;
+            Expect(own.Decide(true, true, true, false) == Own::Step::Keep,
+                "a turret the authority has not placed yet is kept");
+            Expect(own.Decide(true, true, true, true) == Own::Step::AdoptHealth, "a standing one takes its health");
+            Expect(own.Decide(true, true, false, false) == Own::Step::Keep, "unmorphing there is not destruction");
+            Expect(own.Decide(true, true, true, false) == Own::Step::Destroy, "gone while still alt is destroyed");
+            Expect(own.Decide(true, false, true, false) == Own::Step::Keep, "and once is enough");
+            Expect(own.Decide(false, false, false, false) == Own::Step::Keep
+                && own.Decide(true, true, true, false) == Own::Step::Keep,
+                "a new alt life waits for the authority's turret again");
+        }
+
+        // A remote Weavel's copy plays its transformations instead of snapping.
+        using Step = MphRead::Entities::WeavelReplicaTransition::Step;
+        MphRead::Entities::WeavelReplicaTransition replica;
+        Expect(replica.Decide(true, false, false, false, true, 100) == Step::StartMorph, "replica Alt starts the morph");
+        Expect(replica.Decide(true, false, true, false, true, 120) == Step::Wait, "and lets it play");
+        Expect(replica.Decide(true, true, false, false, true, 141) == Step::Finalize && replica.Started(),
+            "a finished morph is finalized and reported");
+        replica.Close();
+        Expect(replica.Decide(false, true, false, false, true, 300) == Step::StartUnmorph, "replica biped starts the unmorph");
+        Expect(replica.Decide(false, false, false, true, true, 330) == Step::Wait, "and lets it play");
+        Expect(replica.Decide(false, false, false, true, true, 390) == Step::Finalize, "a stalled unmorph snaps");
+        replica.Close();
+        Expect(replica.Decide(true, false, false, false, false, 500) == Step::Finalize, "a dead copy never starts one");
+        Expect(replica.Decide(true, true, false, false, true, 510) == Step::Finalize && !replica.Started(),
+            "an unchanged form is only finalized");
         // Protocol 17 added the 14 Weavel bytes; 19 adds 3 for the newest
-        // damage event's confirmed impact: 54 + 4 x 15 + 14 + 3.
-        Expect(NetConfig::ProtocolVersion == 19 && PlayerState::Size == 131
+        // damage event's confirmed impact: 54 + 4 x 15 + 14 + 3. 20 changes
+        // only the intent (shot events); 21 the shot events and the claims;
+        // 22 the meaning of two spare Weavel flag bits; 23 only the claim;
+        // 24 only the intent (bombs); 25 only what a claim may name (a
+        // player's hits on itself).
+        Expect(NetConfig::ProtocolVersion == 25 && PlayerState::Size == 131
             && PlayerState::Size - PlayerState::LegacySize == 17, "Weavel and the impact add 17 bytes per player");
+        {
+            // A transition under way on the authority is the form being
+            // entered, so a watcher's copy starts its animation with it.
+            PlayerState heading;
+            heading.Flags = PlayerState::FlagActive | PlayerState::FlagSpawned;
+            Expect(!heading.HeadingAlt(), "biped and still: biped");
+            heading.WeavelFlags = PlayerState::WeavelFlagMorphing;
+            Expect(heading.HeadingAlt(), "morphing: heading for Alt before FlagAltForm says so");
+            heading.Flags |= PlayerState::FlagAltForm;
+            heading.WeavelFlags = PlayerState::WeavelFlagUnmorphing;
+            Expect(!heading.HeadingAlt(), "unmorphing: heading for biped while FlagAltForm still holds");
+            std::vector<std::uint8_t> bytes(PlayerState::Size, 0);
+            heading.Write(bytes);
+            Expect(PlayerState::Read(bytes).WeavelFlags == PlayerState::WeavelFlagUnmorphing,
+                "the transition flags round trip");
+        }
         for (int mode = 0; mode < 3; ++mode)
         {
             PlayerState state;

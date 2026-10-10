@@ -2207,6 +2207,8 @@ namespace MphRead::Entities
             {
                 _weavelAltLife = true;
                 _flags2 |= PlayerFlags2::Halfturret;
+                // A new turret: the authority has yet to report it standing.
+                _weavelOwnedTurret = WeavelOwnedTurret{};
                 RequireReference(_halfturret).NodeRef = NodeRef;
                 // An exit/re-enter can precede the next scene removal pass.
                 scene().RemoveEntity(_halfturret);

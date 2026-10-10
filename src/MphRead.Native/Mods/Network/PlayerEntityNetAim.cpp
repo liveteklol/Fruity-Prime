@@ -724,7 +724,10 @@ namespace MphRead::Entities
     {
         const bool canZoom = ((*this).EquipInfo()->Weapon != nullptr)
             && (static_cast<std::uint32_t>((*this).EquipInfo()->Weapon->Flags) & WeaponFlagCanZoom) != 0;
-        const bool wanted = zoomed && canZoom;
+        // Dead here is unzoomed, whatever the owner or a snapshot not yet
+        // told of the kill still says: death unzooms, and nothing alive
+        // brings it back before the next life.
+        const bool wanted = zoomed && canZoom && (*this).Health() > 0;
         if ((*this).EquipInfo()->Zoomed != wanted)
         {
             (*this).UpdateZoom(wanted);
@@ -860,6 +863,32 @@ namespace MphRead::Entities
     void PlayerEntity::ModRefreshVolume()
     {
         (*this)._volume = CollisionVolume::Move((*this)._volumeUnxf, (*this).Position);
+    }
+
+    // The boost trail follows Position in the simulation step, which for a
+    // remote player runs before the network moves it: drawn from there it
+    // trails the ball by a step. Put it where the ball now is.
+    void PlayerEntity::ModRefreshAttachedEffects()
+    {
+        if ((*this)._boostEffect != nullptr)
+        {
+            (*this)._boostEffect->Transform((*this)._gunVec2, (*this)._facingVector, (*this).Position);
+        }
+    }
+
+    // A remote player's shot event, fired now. Its owner's machine already
+    // kept the cooldown and had the gun up, so neither this copy's cooldown
+    // nor its gun -- lowered for want of input, or still rising after an
+    // unmorph -- holds the shot back. Mods.Network.NetShotEvents.FireReady.
+    bool PlayerEntity::ModFireShotEvent()
+    {
+        SetTimeSinceShot(std::numeric_limits<std::uint16_t>::max());
+        _timeSinceInput = 0;
+        if (_gunAnimation == GunAnimation::UpDown)
+        {
+            SetGunAnimation(GunAnimation::Idle, AnimFlags::None);
+        }
+        return TryFireWeapon();
     }
 
     bool PlayerEntity::ModBurning() const
