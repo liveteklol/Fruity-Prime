@@ -15,8 +15,10 @@
 # and publishing them is a person pressing the button.
 name: release_cs
 
-# Not fired by a tag push any more (release_cpp.yml owns cpp_v* tags); the
-# C# packages are released by hand from the Actions tab.
+# Legacy. Not fired by a tag push any more: release_cpp.yml owns the v* tags
+# now, and its releases are what the servers update to. Building a new C#
+# release from here would publish a C# build as the latest, and every server
+# would update back to it -- only run this to rebuild an old tag.
 on:
   # push:
   #   tags: ["v*"]

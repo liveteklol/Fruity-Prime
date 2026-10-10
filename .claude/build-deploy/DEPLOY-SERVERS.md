@@ -29,6 +29,35 @@ Notes
 - The exe may be locked by a running game; write `MphRead.new.exe` then `mv`.
 - Any protocol change requires server and every client to be the same build. `NetConfig.ProtocolVersion` is **6** in this build (it was 5 in v0.6.0, 6 from v0.7.0) — a mismatched client is refused outright at Hello. Deploy the server before handing out a client built against a new version.
 
+## Releases reach the servers by themselves
+
+Since the C++ port took over the `v*` tags (`release_cpp.yml`), publishing a
+release is the whole deployment. Every relay, the Pi's game server and the
+directory check GitHub's latest release every ten minutes, download the
+`server-linux-x64` / `server-linux-arm64` package, and swap it in when they
+are empty; systemd restarts them into it. The first C++ release replaces the
+C# v0.10.0 binaries the same way: the C# updater accepts it because the tag is
+a plain `vX.Y.Z` newer than 0.10.0 and the package has a `FruityPrime` at its
+top (the launch script, see `tools/package-server-linux.sh`).
+
+What has to stay true for that to keep working:
+
+- The release is published (not a draft) and **not** a pre-release.
+- Its tag is newer than the running build's; `release_cpp.yml` refuses one
+  that is not.
+- The package names keep `server-linux-x64` / `server-linux-arm64`; the C++
+  updater picks them with `UpdateCheck::LatestServer`.
+- The units have no `-noautoupdate`, and two units never share a directory.
+
+Updated by hand on 2026-10-10: the Pi's game server (`fruityprime-sim.service`,
+27888) moved from `~/fruityprime-release-v0.10.0` with `-noautoupdate` to
+`~/fruityprime-server`, updating itself, listed as "Fruity Prime - France".
+`mphread-server.service` on the Pi is disabled: it shared `~/mphread-server`
+with the directory and the port with the game server.
+
+The C++ test units on the VMs (`fruityprime-pr109`, 27895, `/opt/fruityprime-nl`)
+keep `-noautoupdate` and are deployed by hand.
+
 ## The fleet
 
 Four boxes, not one. `deploy-server.sh` only ever touches the Pi -- the three

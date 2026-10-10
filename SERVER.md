@@ -88,10 +88,21 @@ sed -e 's|__USER__|youruser|' -e 's|__DIR__|/home/youruser/fruityprime-server|' 
 sudo systemctl enable --now mphread-server
 ```
 
-Stop the service before replacing the binary — systemd holds the file open, and .NET maps it into
-memory, so copying over a running one takes the process down in a way nothing explains.
+## The server package
 
-`deploy-server.sh` does build, upload, units and restart against a remote box in one go.
+Use the `server-linux-x64` or `server-linux-arm64` tarball from a release. Unpack it into the
+server's directory and run `./FruityPrime` there -- that file is a launch script. The game itself
+is `bin/FruityPrime`, and it starts through the C library and loader in `lib/`, so the package runs
+on any Linux with a kernel from the last ten years whatever its own glibc is. `paths.txt`,
+`maprotation.txt`, `maps/` and `logs/` stay at the top, beside the script.
+
+## Updates
+
+A server and a server list update themselves: at start, and every ten minutes after, they ask
+GitHub for the latest release, download its server package, and swap it in **once nobody is
+connected**. Under systemd (`Restart=always`) the old build then exits and systemd starts the new
+one; elsewhere it restarts itself. `-noautoupdate` turns this off. Two services sharing one
+directory must not both update it -- give each its own directory.
 
 ## Your own server list
 

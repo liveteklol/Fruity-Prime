@@ -27,18 +27,19 @@ def fetch(url):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--version', default='6.11.2')
-    parser.add_argument('--kit', required=True, choices=['msvc2022_64', 'gcc_64', 'clang_64', 'android_arm64_v8a', 'android_x86_64'])
+    parser.add_argument('--kit', required=True, choices=['msvc2022_64', 'gcc_64', 'gcc_arm64', 'clang_64', 'android_arm64_v8a', 'android_x86_64'])
     parser.add_argument('--root', type=Path, default=Path('C:/Qt'))
     parser.add_argument('--cache', type=Path, default=Path.home() / '.cache/fruity-qt')
     args = parser.parse_args()
     release = 'qt6_' + args.version.replace('.', '')
     android = args.kit.startswith('android_')
     suffix = args.kit.removeprefix('android_') if android else args.kit
-    host = 'linux_x64' if args.kit == 'gcc_64' else 'mac_x64' if args.kit == 'clang_64' else 'windows_x86'
+    hosts = {'gcc_64': 'linux_x64', 'gcc_arm64': 'linux_arm64', 'clang_64': 'mac_x64'}
+    host = hosts.get(args.kit, 'windows_x86')
     platform = 'all_os/android' if android else host + '/desktop'
     nested = release if host != 'windows_x86' and not android else release + '_' + suffix
     base = f'https://download.qt.io/online/qtsdkrepository/{platform}/{release}/{nested}'
-    package_suffix = 'win64_' + args.kit if args.kit == 'msvc2022_64' else 'linux_gcc_64' if args.kit == 'gcc_64' else args.kit
+    package_suffix = 'win64_' + args.kit if args.kit == 'msvc2022_64' else 'linux_' + args.kit if args.kit.startswith('gcc_') else args.kit
     package_name = 'qt.qt6.' + args.version.replace('.', '') + '.' + package_suffix
     metadata = ET.fromstring(fetch(base + '/Updates.xml'))
     package = next(p for p in metadata.findall('PackageUpdate') if p.findtext('Name') == package_name)

@@ -519,7 +519,11 @@ namespace MphRead::Mods::Update::Detail
 
     std::optional<UpdateInfo> ServerUpdateUpdaterCheck()
     {
-        return Updater::Check();
+        if (Updater::Disabled())
+        {
+            return std::nullopt;
+        }
+        return UpdateCheck::LatestServer();
     }
 
     std::string ServerUpdateUpdaterDescribe(UpdateInfo update)
