@@ -13,9 +13,20 @@ on:
         required: false
         type: string
         default: ""
+      release_version:
+        description: MAJOR.MINOR.PATCH to stamp into the build (empty for an unstamped build)
+        required: false
+        type: string
+        default: ""
   workflow_call:
     inputs:
       checkout_ref:
+        required: false
+        type: string
+        default: ""
+      # release_cpp.yml passes the tag's version. A build without one calls
+      # itself a local build, and its updater never replaces it.
+      release_version:
         required: false
         type: string
         default: ""
@@ -34,6 +45,7 @@ concurrency:
 
 env:
   VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.cache/vcpkg/archives
+  FRUITY_RELEASE_VERSION: ${{ inputs.release_version }}
 
 jobs:
   phase4_legacy_gl_audit:
@@ -202,6 +214,7 @@ jobs:
             -DQt6_ROOT="$env:QT_ROOT" `
             -DVCPKG_TARGET_TRIPLET=x64-windows `
             -DFRUITY_REQUIRE_VULKAN=ON `
+            -DFRUITY_RELEASE_VERSION="$env:FRUITY_RELEASE_VERSION" `
             -DCMAKE_C_COMPILER_LAUNCHER=sccache `
             -DCMAKE_CXX_COMPILER_LAUNCHER=sccache `
             -DCMAKE_POLICY_DEFAULT_CMP0141=NEW `
@@ -382,7 +395,8 @@ jobs:
         run: |
           set -euo pipefail
           cmake -S . -B build/native -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-            -DCMAKE_PREFIX_PATH="${QT_ROOT};${FRUITY_NATIVE_PREFIX}" -DFRUITY_REQUIRE_VULKAN=ON
+            -DCMAKE_PREFIX_PATH="${QT_ROOT};${FRUITY_NATIVE_PREFIX}" -DFRUITY_REQUIRE_VULKAN=ON \
+            -DFRUITY_RELEASE_VERSION="${FRUITY_RELEASE_VERSION}"
 
       - name: Build C++ FruityPrime
         shell: bash
@@ -481,6 +495,119 @@ jobs:
           if-no-files-found: error
           path: build/native/FruityPrime-linux.tar.gz
 
+      # What a dedicated server and the server directory run, and what they
+      # download when they update themselves: the binary with its whole
+      # library closure, glibc included, since the server boxes run older
+      # distributions than this runner. The script says more.
+      - name: Package the dedicated server
+        shell: bash
+        run: tools/package-server-linux.sh build/native/dist build/native/server/FruityPrime-server-linux-x64.tar.gz
+
+      - name: Dedicated server startup contract (from the package)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/server-x64"
+          tar -C "$RUNNER_TEMP/server-x64" -xzf build/native/server/FruityPrime-server-linux-x64.tar.gz
+          tools/check-dedicated-server.sh "$RUNNER_TEMP/server-x64"
+
+      - name: Upload Linux dedicated server
+        uses: actions/upload-artifact@v4
+        with:
+          name: FruityPrime-cpp-server-linux-x64-${{ github.run_number }}
+          if-no-files-found: error
+          path: build/native/server/FruityPrime-server-linux-x64.tar.gz
+
+  # The Pi runs the server directory (net.livetek.fr:27889) and a game server,
+  # and it is arm64. It only ever runs -server and -masterserver, so this is
+  # the Linux build without the GPU gates, packaged the same way as x64.
+  linux-arm64-server:
+    name: Linux arm64 / dedicated server
+    runs-on: ubuntu-24.04-arm
+
+    steps:
+      - name: Checkout C++ source
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
+
+      - name: Select compiler cache generation
+        shell: bash
+        run: echo "COMPILER_CACHE_WEEK=$(date -u +%G-%V)" >> "$GITHUB_ENV"
+
+      - name: Set up ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: native-ccache-${{ runner.os }}-${{ runner.arch }}-gcc-server-${{ env.COMPILER_CACHE_WEEK }}
+          max-size: 500M
+          append-timestamp: false
+
+      # The x64 job's list, less the Vulkan SDK: with no Vulkan found the
+      # optional backend is left out, and a server draws nothing.
+      - name: Install native dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            cmake \
+            p7zip-full \
+            libarchive-dev \
+            libcurl4-openssl-dev \
+            zlib1g-dev \
+            libgl-dev \
+            libglx-dev \
+            libopengl-dev \
+            libegl-dev \
+            libglfw3-dev \
+            libxcb1-dev \
+            libxkbcommon-dev \
+            libwayland-dev \
+            libfreetype-dev \
+            libfontconfig-dev \
+            libopenal-dev \
+            libicu-dev
+
+      - name: Install Qt Quick
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/qt/install-qt.py --kit gcc_arm64 --root "$RUNNER_TEMP/qt"
+          echo "QT_ROOT=$RUNNER_TEMP/qt/6.11.2/gcc_arm64" >> "$GITHUB_ENV"
+
+      - name: Configure
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S . -B build/native -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_TESTING=OFF \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_PREFIX_PATH="${QT_ROOT}" \
+            -DFRUITY_RELEASE_VERSION="${FRUITY_RELEASE_VERSION}"
+
+      - name: Build C++ FruityPrime
+        shell: bash
+        run: cmake --build build/native --config RelWithDebInfo --parallel "$(nproc)" --target fruity_package
+
+      - name: Package the dedicated server
+        shell: bash
+        run: tools/package-server-linux.sh build/native/dist build/native/server/FruityPrime-server-linux-arm64.tar.gz
+
+      - name: Dedicated server startup contract (from the package)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/server-arm64"
+          tar -C "$RUNNER_TEMP/server-arm64" -xzf build/native/server/FruityPrime-server-linux-arm64.tar.gz
+          tools/check-dedicated-server.sh "$RUNNER_TEMP/server-arm64"
+
+      - name: Upload arm64 dedicated server
+        uses: actions/upload-artifact@v4
+        with:
+          name: FruityPrime-cpp-server-linux-arm64-${{ github.run_number }}
+          if-no-files-found: error
+          path: build/native/server/FruityPrime-server-linux-arm64.tar.gz
+
   macos:
     name: macOS / Clang
     runs-on: macos-15
@@ -574,7 +701,8 @@ jobs:
         run: |
           set -euo pipefail
           cmake -S . -B build/native -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-            -DCMAKE_PREFIX_PATH="${QT_ROOT};${FRUITY_NATIVE_PREFIX};$CMAKE_PREFIX_PATH"
+            -DCMAKE_PREFIX_PATH="${QT_ROOT};${FRUITY_NATIVE_PREFIX};$CMAKE_PREFIX_PATH" \
+            -DFRUITY_RELEASE_VERSION="${FRUITY_RELEASE_VERSION}"
 
       - name: Build C++ FruityPrime
         shell: bash

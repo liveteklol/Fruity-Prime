@@ -310,6 +310,23 @@ if(FRUITY_NEW_TELEMETRY)
     set_property(SOURCE "${FRUITY_MPHREAD_ROOT}/NativeRuntime/FrameTelemetry.cpp"
         APPEND PROPERTY COMPILE_DEFINITIONS FRUITY_NEW_TELEMETRY)
 endif()
+# A release is stamped with its tag's version (release_cpp.yml passes
+# -DFRUITY_RELEASE_VERSION=0.11.0). Without one the build calls itself a local
+# build, and the updater -- a dedicated server's included -- leaves it alone.
+set(FRUITY_RELEASE_VERSION "" CACHE STRING
+    "MAJOR.MINOR.PATCH stamped into a release build; empty for a local build")
+if(FRUITY_RELEASE_VERSION)
+    if(NOT FRUITY_RELEASE_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
+        message(FATAL_ERROR
+            "FRUITY_RELEASE_VERSION must be MAJOR.MINOR.PATCH, not '${FRUITY_RELEASE_VERSION}'")
+    endif()
+    set_property(SOURCE
+            "${FRUITY_MPHREAD_ROOT}/Mods/Update/BuildVersion.cpp"
+            "${FRUITY_MPHREAD_ROOT}/Mods/ThumbnailLog.cpp"
+        APPEND PROPERTY COMPILE_DEFINITIONS
+            "MPHREAD_ENTRY_ASSEMBLY_INFORMATIONAL_VERSION=\"${FRUITY_RELEASE_VERSION}\"")
+    message(STATUS "Release version: ${FRUITY_RELEASE_VERSION}")
+endif()
 if(FRUITY_STOP_TOKEN_OPTIONS)
     target_compile_options(fruity_mphread_native PUBLIC ${FRUITY_STOP_TOKEN_OPTIONS})
     target_link_options(fruity_mphread_native PUBLIC ${FRUITY_STOP_TOKEN_OPTIONS})

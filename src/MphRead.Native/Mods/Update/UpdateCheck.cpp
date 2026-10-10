@@ -953,6 +953,44 @@ namespace MphRead::Mods::Update
         return !json.has_value() ? std::nullopt : Parse(*json);
     }
 
+    std::optional<UpdateInfo> UpdateCheck::LatestServer(CancellationToken cancel)
+    {
+        SetLastReason(std::nullopt);
+        if (!BuildVersion::IsRelease())
+        {
+            SetLastReason("this is a local build, so it is left alone");
+            return std::nullopt;
+        }
+        const std::optional<std::string> json = FetchLatest(cancel);
+        if (!json.has_value())
+        {
+            return std::nullopt;
+        }
+        // Parse is what decides whether the release is newer than this build,
+        // but the package it picks is the player's: a server is the same
+        // binary as the game, so Rid() cannot tell them apart. A server swaps
+        // in the server package, which carries its own loader and libraries.
+        const std::optional<UpdateInfo> newer = Parse(std::string_view(*json));
+        if (!newer.has_value())
+        {
+            return std::nullopt;
+        }
+        const std::optional<UpdateInfo> server = ServerAsset(std::string_view(*json));
+        if (!server.has_value())
+        {
+            return std::nullopt;
+        }
+        return UpdateInfo{
+            .Tag = newer->Tag.Get(),
+            .Version = newer->Version.Get(),
+            .AssetName = server->AssetName.Get(),
+            .AssetUrl = server->AssetUrl.Get(),
+            .AssetSize = server->AssetSize.Get(),
+            .PageUrl = newer->PageUrl.Get(),
+            .Notes = newer->Notes.Get()
+        };
+    }
+
     std::optional<std::string> UpdateCheck::FetchLatest(CancellationToken cancel)
     {
         std::string json;

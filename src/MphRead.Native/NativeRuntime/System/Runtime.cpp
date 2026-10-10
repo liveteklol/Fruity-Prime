@@ -118,6 +118,26 @@ namespace MphRead::NativeRuntime
 #elif defined(__linux__)
             if (std::optional<std::string> path = RealPath("/proc/self/exe"))
             {
+                // The dedicated-server package starts the game through its own
+                // dynamic loader (lib/ld-linux-*.so.*), because a server box's
+                // glibc can be older than the one the build needs. The running
+                // image is then the loader, which would put the base directory
+                // in lib/. The package's launch script names itself in
+                // FRUITY_LAUNCHER; it is believed only when the loader really
+                // is what is running.
+                const std::string_view name = std::string_view(*path).substr(
+                    path->find_last_of('/') + 1);
+                if (name.starts_with("ld-linux") && name.find(".so") != std::string_view::npos)
+                {
+                    const char* launcher = std::getenv("FRUITY_LAUNCHER");
+                    if (launcher != nullptr && *launcher != '\0')
+                    {
+                        if (std::optional<std::string> script = RealPath(launcher))
+                        {
+                            return script;
+                        }
+                    }
+                }
                 return path;
             }
 #if defined(AT_EXECFN)

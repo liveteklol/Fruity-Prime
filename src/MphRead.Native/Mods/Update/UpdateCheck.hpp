@@ -91,6 +91,12 @@ namespace MphRead::Mods::Update
             CancellationToken cancel = nullptr);
         [[nodiscard]] static std::optional<UpdateInfo> ServerAsset(std::string_view json);
 
+        // What a running dedicated server or directory updates to: a release
+        // newer than this build, carrying the server package for this machine
+        // rather than the player's one. nullopt with LastReason otherwise.
+        [[nodiscard]] static std::optional<UpdateInfo> LatestServer(
+            CancellationToken cancel = nullptr);
+
         // Which server package this machine would run, or "" where none is
         // published.
         [[nodiscard]] static std::string ServerRid();
