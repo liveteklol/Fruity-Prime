@@ -1,4 +1,5 @@
 #pragma once
+#include <array>
 #include "FrameStatistics.hpp"
 #include "../../NativeRuntime/Rhi/GpuDiagnostics.hpp"
 #include "../../NativeRuntime/FrameTelemetry.hpp"
@@ -27,6 +28,11 @@ namespace MphRead::Mods::Diagnostics
             NativeRuntime::Rhi::GraphicsDevice& device, NativeRuntime::Rhi::CommandList& commands);
         static void EndGpu(std::unique_ptr<NativeRuntime::Rhi::TimestampQuerySet> sample,
             NativeRuntime::Rhi::CommandList& commands);
+        // FRUITY_GPU_PASSES=1 with -gpuprofile: a timestamp after each scene
+        // pass, reported as the mean GPU time of each one.
+        static constexpr std::uint32_t PassMarks = 6;
+        static void MarkGpu(NativeRuntime::Rhi::TimestampQuerySet* sample,
+            NativeRuntime::Rhi::CommandList& commands, std::uint32_t pass);
     private:
         FramePerformance(std::string path, bool gpu);
         void PollGpu();
@@ -47,6 +53,7 @@ namespace MphRead::Mods::Diagnostics
         std::optional<Conditions> _conditions;
         std::size_t _segment = 0, _draws = 0, _gpuSamples = 0, _gpuDrops = 0;
         double _gpuMs = 0;
+        std::array<double, PassMarks> _passMs{};
         std::chrono::steady_clock::time_point _start{}, _warmup{};
         std::optional<std::chrono::steady_clock::time_point> _previous;
         FrameStatistics _statistics;

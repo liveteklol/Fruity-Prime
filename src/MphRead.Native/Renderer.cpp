@@ -2256,11 +2256,13 @@ namespace MphRead
         SetPauseMenuUniforms();
         BeginScenePass(ScenePass::Opaque);
         for (const auto& item : _nonDecalItems) RenderItem(item);
+        Mods::Diagnostics::FramePerformance::MarkGpu(gpuSample.get(), Commands(), 0);
         // The depth the rebuild pass below would draw again, kept aside.
         const bool opaqueDepthSaved = !Mods::RenderOptions::PerformanceMode() && SaveOpaqueDepth()
             && Commands().SaveAttachmentDepth();
         BeginScenePass(ScenePass::Decal);
         for (const auto& item : _decalItems) RenderItem(item);
+        Mods::Diagnostics::FramePerformance::MarkGpu(gpuSample.get(), Commands(), 1);
         if (Mods::RenderOptions::PerformanceMode())
         {
             // Performance mode: each translucent item once, blended over the
@@ -2302,6 +2304,7 @@ namespace MphRead
                 Commands().SetStencilReference(static_cast<std::uint32_t>(item->PolygonId)); RenderItem(item);
             }
         }
+        Mods::Diagnostics::FramePerformance::MarkGpu(gpuSample.get(), Commands(), 2);
         BeginScenePass(ScenePass::AfterScene);
         ModDrawPreview();
         auto main = Entities::PlayerEntity::Main();
@@ -2314,6 +2317,7 @@ namespace MphRead
             SetHudLayerUniforms(); main->DrawHudModels(); UnsetHudLayerUniforms();
         }
         DrawCelOutline();
+        Mods::Diagnostics::FramePerformance::MarkGpu(gpuSample.get(), Commands(), 3);
         const auto& composite = ScenePipeline(ScenePass::Composite, NativeRuntime::Rhi::CullMode::None,
             NativeRuntime::Rhi::FillMode::Solid, 1);
         Commands().SetPipeline(composite);
@@ -2340,6 +2344,7 @@ namespace MphRead
         TransientTexCoord3(1,1,0); TransientVertex3(1,1,0); TransientTexCoord3(0,1,0); TransientVertex3(-1,1,0);
         TransientTexCoord3(1,0,0); TransientVertex3(1,-1,0); TransientTexCoord3(0,0,0); TransientVertex3(-1,-1,0); EndTransient();
         UnbindSceneTexture(0);
+        Mods::Diagnostics::FramePerformance::MarkGpu(gpuSample.get(), Commands(), 4);
         if (main->HudDisruptedState() != 0 || main->HudWhiteoutState() != -1) Commands().SetPipeline(composite);
         _shaderConstants->SetFadeColor(Vector4(_fadeColor, _fadeColor, _fadeColor, 0.0F));
         if (((main->LoadFlags() & LoadFlags::Active) == LoadFlags::Active) && CameraMode() == MphRead::CameraMode::Player)

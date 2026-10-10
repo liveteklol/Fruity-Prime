@@ -8,7 +8,9 @@
 #include "../RenderOptions.hpp"
 #include "../DebugLog.hpp"
 #include "../../GameState.hpp"
+#include <cstdlib>
 #include <filesystem>
+#include <span>
 #include <iomanip>
 #include <iostream>
 #include <locale>
@@ -22,6 +24,12 @@ namespace MphRead::Mods::Diagnostics
         bool configuredGpu = false;
         std::optional<int> configuredCap;
         FramePerformance* active = nullptr;
+        bool Passes()
+        {
+            static const bool on = [] { const char* v = std::getenv("FRUITY_GPU_PASSES"); return v && *v == '1'; }();
+            return on;
+        }
+        constexpr const char* PassNames[] = {"opaque", "decal", "translucent", "hud3d+cel", "composite", "hud2d"};
         namespace Rhi = NativeRuntime::Rhi;
         double Seconds(std::chrono::steady_clock::duration value) { return std::chrono::duration<double>(value).count(); }
     }
@@ -72,7 +80,7 @@ namespace MphRead::Mods::Diagnostics
         if (_telemetry) _telemetry->Eligible(false);
         if (_cpuSampling) _cpuSampling->SetActive(false);
         _pending.clear(); _context.clear(); _conditions.reset(); _previous.reset(); _statistics.Reset();
-        _draws = _gpuSamples = _gpuDrops = 0; _gpuMs = 0;
+        _draws = _gpuSamples = _gpuDrops = 0; _gpuMs = 0; _passMs = {};
     }
     void FramePerformance::BeginFrame(const RenderWindow& window, const Rhi::Swapchain& swapchain)
     {
@@ -105,9 +113,9 @@ namespace MphRead::Mods::Diagnostics
     }
     std::unique_ptr<Rhi::TimestampQuerySet> FramePerformance::BeginGpu(Rhi::GraphicsDevice& device, Rhi::CommandList& commands)
     {
-        if (!active || !active->_gpu || active->_draws % 64 || std::chrono::steady_clock::now() < active->_warmup
+        if (!active || !active->_gpu || active->_draws % (Passes() ? 8 : 64) || std::chrono::steady_clock::now() < active->_warmup
             || !device.GetCapabilities().supportsTimestampQueries) return {};
-        auto sample = device.CreateTimestampQuerySet(2, "Scene frame");
+        auto sample = device.CreateTimestampQuerySet(Passes() ? PassMarks + 1 : 2, "Scene frame");
         if (!sample) { ++active->_gpuDrops; return {}; }
         commands.EndRendering(); commands.InitializeTimestamps(*sample); commands.WriteTimestamp(*sample, 0);
         commands.BeginDebugLabel({"Scene frame"});
@@ -116,18 +124,29 @@ namespace MphRead::Mods::Diagnostics
     void FramePerformance::EndGpu(std::unique_ptr<Rhi::TimestampQuerySet> sample, Rhi::CommandList& commands)
     {
         if (!sample) return;
-        commands.EndDebugLabel(); commands.WriteTimestamp(*sample, 1);
+        commands.EndDebugLabel(); commands.WriteTimestamp(*sample, Passes() ? PassMarks : 1);
         active->_pending.push_back(std::move(sample));
+    }
+    void FramePerformance::MarkGpu(Rhi::TimestampQuerySet* sample, Rhi::CommandList& commands, std::uint32_t pass)
+    {
+        // Marks 1..PassMarks-1 end passes 0..PassMarks-2; EndGpu ends the last.
+        if (sample && Passes() && pass + 1 < PassMarks) commands.WriteTimestamp(*sample, pass + 1);
     }
     void FramePerformance::PollGpu()
     {
         for (auto it = _pending.begin(); it != _pending.end();)
         {
-            std::array<std::uint64_t, 2> values{};
-            const auto status = (*it)->ReadResults(values);
+            std::array<std::uint64_t, PassMarks + 1> values{};
+            const std::size_t count = Passes() ? values.size() : 2;
+            const auto status = (*it)->ReadResults(std::span<std::uint64_t>(values.data(), count));
             if (status == Rhi::TimestampStatus::Pending) { ++it; continue; }
             if (status == Rhi::TimestampStatus::Ready)
-            { _gpuMs += Rhi::TimestampNanoseconds(values[0], values[1], (*it)->Properties()) / 1e6; ++_gpuSamples; }
+            {
+                _gpuMs += Rhi::TimestampNanoseconds(values[0], values[count - 1], (*it)->Properties()) / 1e6; ++_gpuSamples;
+                if (Passes())
+                    for (std::uint32_t pass = 0; pass < PassMarks; ++pass)
+                        _passMs[pass] += Rhi::TimestampNanoseconds(values[pass], values[pass + 1], (*it)->Properties()) / 1e6;
+            }
             it = _pending.erase(it);
         }
     }
@@ -143,7 +162,10 @@ namespace MphRead::Mods::Diagnostics
         text << _context << "; fps=" << result.fps << "; p95_ms=" << result.p95Ms
             << "; loop_ms=" << result.meanLoopMs << "; present_ms=" << result.meanPresentMs << "; gpu_samples=" << _gpuSamples;
         if (_gpuSamples) text << "; gpu_scene_ms=" << _gpuMs / _gpuSamples;
+        if (_gpuSamples && Passes())
+            for (std::uint32_t pass = 0; pass < PassMarks; ++pass)
+                text << "; " << PassNames[pass] << '=' << _passMs[pass] / _gpuSamples;
         std::cout << "[fps measure] " << text.str() << '\n'; DebugLog::Line("fps measure", text.str());
-        _statistics.Reset(); _gpuSamples = _gpuDrops = 0; _gpuMs = 0;
+        _statistics.Reset(); _gpuSamples = _gpuDrops = 0; _gpuMs = 0; _passMs = {};
     }
 }
