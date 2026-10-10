@@ -382,6 +382,16 @@ namespace
 
     QtWindow::~QtWindow()
     {
+        // The exclusive monitor belongs to this window. Left behind, the
+        // window a renderer switch makes next built its first swapchain for
+        // exclusive fullscreen while still windowed, and the Intel driver
+        // refused it: OpenGL to Vulkan in exclusive fullscreen ended on
+        // "vkCreateSwapchainKHR failed: -3".
+        if (_exclusiveMonitor != nullptr)
+        {
+            _exclusiveMonitor = nullptr;
+            Rhi::FullscreenExclusive::Request(nullptr);
+        }
 #if defined(_WIN32)
         ConfineCursor(false);
         _rawMouse.reset(); // Detach while the native HWND still exists.
