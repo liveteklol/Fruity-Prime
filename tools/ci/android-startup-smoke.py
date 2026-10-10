@@ -54,6 +54,17 @@ def adb(*args, check=True, binary=False, timeout=120):
     return result.stdout if binary else result.stdout.decode(errors="replace")
 
 
+def reconnect(timeout=60):
+    """Re-establish a dropped adb transport and wait until the device is back."""
+    adb("reconnect", "offline", check=False, timeout=30)
+    try:
+        adb("wait-for-device", check=False, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        print("  device still missing after %ds" % timeout)
+        return
+    time.sleep(2)
+
+
 def logcat():
     return adb("logcat", "-d", "-v", "brief", "FruityStartup:V", "FruityQt:V", "AndroidRuntime:E",
                "ActivityManager:E", "DEBUG:V", "libc:F", "*:S")
@@ -68,7 +79,17 @@ def screenshot_variance(path):
     """
     last_error = "screencap returned no data"
     for attempt in range(1, 6):
-        raw = adb("exec-out", "screencap", binary=True)
+        result = subprocess.run([ADB, "exec-out", "screencap"], capture_output=True, timeout=120)
+        if result.returncode != 0:
+            # The API 35 emulator sometimes drops its adb transport right after
+            # an empty capture ("device 'emulator-5554' not found") while the
+            # emulator itself stays up: reconnect and wait instead of failing.
+            last_error = "adb exec-out screencap failed: " + result.stderr.decode(errors="replace").strip()
+            if attempt < 5:
+                print("  screencap attempt %d failed: %s; reconnecting" % (attempt, last_error))
+                reconnect()
+            continue
+        raw = result.stdout
         with open(path, "wb") as out:
             out.write(raw)
 

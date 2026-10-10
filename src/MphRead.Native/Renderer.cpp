@@ -2669,21 +2669,15 @@ namespace MphRead
 
     void Scene::UnlinkBeamEffect(Entities::BeamEffectEntity* entry)
     {
-        std::shared_ptr<Entities::BeamEffectEntity> owner;
-        for (auto enumerator = GetBeamEffectEntities().GetEnumerator(); enumerator.MoveNext();)
-        {
-            auto current = enumerator.Current();
-            if (current.get() == entry)
-            {
-                owner = std::move(current);
-                break;
-            }
-        }
-        if (!owner)
+        // Not looked up in the scene: RoomEntity::StartTransition removes every
+        // entity before destroying it, so an effect still alive when the room
+        // changes is no longer there -- and the lookup threw on every map
+        // rotation that followed a shot.
+        if (entry == nullptr)
         {
             throw System::NullReferenceException();
         }
-        UnlinkBeamEffect(owner);
+        UnlinkBeamEffect(Entities::SharedFrom(entry));
     }
 
     std::shared_ptr<Entities::BombEntity> Scene::InitBomb()
@@ -2706,21 +2700,13 @@ namespace MphRead
 
     void Scene::UnlinkBomb(Entities::BombEntity* entry)
     {
-        std::shared_ptr<Entities::BombEntity> owner;
-        for (auto enumerator = GetBombEntities().GetEnumerator(); enumerator.MoveNext();)
-        {
-            auto current = enumerator.Current();
-            if (current.get() == entry)
-            {
-                owner = std::move(current);
-                break;
-            }
-        }
-        if (!owner)
+        // As UnlinkBeamEffect: a bomb destroyed by a room change has already
+        // been removed from the scene.
+        if (entry == nullptr)
         {
             throw System::NullReferenceException();
         }
-        UnlinkBomb(owner);
+        UnlinkBomb(Entities::SharedFrom(entry));
     }
 
     void Scene::AddSingleParticle(SingleType type, Vector3 position, Vector3 color, float alpha, float scale)
