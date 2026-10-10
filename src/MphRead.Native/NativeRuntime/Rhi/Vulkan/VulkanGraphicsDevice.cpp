@@ -1187,12 +1187,12 @@ namespace MphRead::NativeRuntime::Rhi::Vulkan
             // Vulkan takes in binding order.
             std::vector<std::uint8_t> DynamicSlot;
 
-            // Performance mode's main_fast (main only): the same body over
-            // the same blocks, read as storage-buffer records. Layouts: set 0
-            // the records, set 1 the texture. FastBlocks: the Frame, Light,
-            // Fog, Material and Draw blocks in record order; the Draw record
-            // stops where its matrix stack starts (FastMatrixOffset), which
-            // goes to its own buffer.
+            // Performance mode's main_fast (main only): main's body and
+            // blocks, all five in set 0 as dynamic uniform buffers into a
+            // per-slot record ring, the texture in set 1. FastBlocks: the
+            // Frame, Light, Fog, Material and Draw blocks in binding order;
+            // a Draw record is the block up to and through the matrices the
+            // draw's vertices use (FastMatrixOffset onwards).
             std::unique_ptr<VulkanShader> FastVertex;
             std::unique_ptr<VulkanShader> FastFragment;
             std::array<std::unique_ptr<VulkanBindingLayout>, 2> FastLayouts;

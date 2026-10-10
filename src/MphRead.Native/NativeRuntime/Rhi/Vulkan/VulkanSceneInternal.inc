@@ -245,11 +245,11 @@ private:
             [](const auto& member) { return member.name == "mtx_stack"; });
         if (!small || std::find(found.begin(), found.end(), false) != found.end() || matrices == uniforms.end()
             || matrices->block != program.FastBlocks[4] || matrices->offset % 16 || textures.size() != 1
-            || textures[0].group != 1 || blocks[program.FastSmall].size + 32 > 128)
+            || textures[0].group != 1)
             return;
         program.FastMatrixOffset = matrices->offset;
         program.FastDrawBytes = matrices->offset;
-        program.FastPushBytes = blocks[program.FastSmall].size + 32;
+        program.FastPushBytes = blocks[program.FastSmall].size;
         const auto shader = [&](const auto& words, ShaderStage stage) {
             ShaderDesc desc{};
             desc.stage = stage;
@@ -259,8 +259,8 @@ private:
             return std::make_unique<VulkanShader>(_device, desc);
         };
         BindingLayoutDesc recordLayout{};
-        for (std::uint32_t binding = 0; binding <= records.size(); ++binding)
-            recordLayout.entries.push_back({binding, BindingType::StorageBuffer, ShaderStage::AllGraphics, 1});
+        for (std::uint32_t binding = 0; binding < records.size(); ++binding)
+            recordLayout.entries.push_back({binding, BindingType::UniformBuffer, ShaderStage::AllGraphics, 1, true});
         BindingLayoutDesc textureLayout{};
         textureLayout.entries.push_back({textures[0].image, BindingType::SampledTexture, ShaderStage::AllGraphics, 1});
         textureLayout.entries.push_back({textures[0].sampler, BindingType::Sampler, ShaderStage::AllGraphics, 1});
