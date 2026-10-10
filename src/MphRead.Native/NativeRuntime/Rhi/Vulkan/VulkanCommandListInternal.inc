@@ -228,6 +228,10 @@
             VulkanTimestampSet& CheckedTimestamp(TimestampQuerySet& set);
             bool _autoRestart = false;
             const VulkanGraphicsPipeline* _pipeline = nullptr;
+            // The scene program _pipeline's fragment shader names, resolved
+            // once in SetPipeline instead of a dynamic_cast every draw.
+            bool _pipelineNamesProgram = false;
+            VulkanSceneProgram* _pipelineProgram = nullptr;
 
             bool _renderingOpen = false;
             bool _renderingActive = false;
@@ -803,11 +807,17 @@
                     it = _genericSets.erase(it);
                 else ++it;
             _pipeline = native;
+            _pipelineNamesProgram = false;
+            _pipelineProgram = nullptr;
             if (native->IsDeferred())
             {
                 // glUseProgram: a pass naming no program leaves the last one current.
                 if (const auto* fragment = dynamic_cast<const VulkanShader*>(native->Desc().fragmentShader))
+                {
                     _device->CurrentSceneProgram = fragment->SceneProgram;
+                    _pipelineNamesProgram = true;
+                    _pipelineProgram = static_cast<VulkanSceneProgram*>(fragment->SceneProgram);
+                }
                 return;
             }
             auto& vk = *_device->ContextPointer->_impl;
@@ -1166,9 +1176,8 @@
             if (!_renderingOpen) throw std::logic_error("Vulkan RHI: scene draw outside rendering.");
             if (!_pipeline || !_pipeline->IsDeferred())
                 throw std::logic_error("Vulkan RHI: scene draw needs a scene pass pipeline.");
-            auto* program = static_cast<VulkanSceneProgram*>(_device->CurrentSceneProgram);
-            if (const auto* fragment = dynamic_cast<const VulkanShader*>(_pipeline->Desc().fragmentShader))
-                program = static_cast<VulkanSceneProgram*>(fragment->SceneProgram);
+            auto* program = _pipelineNamesProgram ? _pipelineProgram
+                : static_cast<VulkanSceneProgram*>(_device->CurrentSceneProgram);
             if (!program) throw std::logic_error("Vulkan RHI: scene draw with no program.");
             auto& vk = *_device->ContextPointer->_impl;
 
