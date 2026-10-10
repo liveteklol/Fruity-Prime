@@ -574,6 +574,11 @@ jobs:
         run: |
           set -euo pipefail
           python3 tools/qt/install-qt.py --kit gcc_arm64 --root "$RUNNER_TEMP/qt"
+          # This kit's ICU archive brings the unversioned libicu*.so link
+          # names too, so FindICU would pair the system's ICU 74 headers with
+          # Qt's older ICU libraries and the link fails. Qt itself loads its
+          # copy by soname; the game links the system's, as on x64.
+          rm -f "$RUNNER_TEMP"/qt/6.11.2/gcc_arm64/lib/libicu*.so
           echo "QT_ROOT=$RUNNER_TEMP/qt/6.11.2/gcc_arm64" >> "$GITHUB_ENV"
 
       - name: Configure
