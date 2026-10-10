@@ -442,10 +442,14 @@ namespace MphRead::Mods::ClassicMenu
             {
                 const MenuPage* page = _menu.Page();
                 if (item < 0 || static_cast<std::size_t>(item) >= page->Items.size()) return false;
-                const MenuItemState* s = page->Items.at(static_cast<std::size_t>(item)).GetState(_menu.ItemCode(item));
-                if (s == nullptr || s->WidgetIndex < 0) return false;
-                const std::string& path = _file.Widgets.at(static_cast<std::size_t>(s->WidgetIndex)).ModelPath;
-                return path.rfind("main menu\\wifi", 0) == 0 || path.rfind("main menu\\wireless", 0) == 0;
+                // any of its looks: one left on screen as the page goes is still the icon
+                for (const MenuItemState& s : page->Items.at(static_cast<std::size_t>(item)).States)
+                {
+                    if (s.WidgetIndex < 0) continue;
+                    const std::string& path = _file.Widgets.at(static_cast<std::size_t>(s.WidgetIndex)).ModelPath;
+                    if (path.rfind("main menu\\wifi", 0) == 0 || path.rfind("main menu\\wireless", 0) == 0) return true;
+                }
+                return false;
             }
 
             // A frame in the menus' orange around the item in focus, pulsing,

@@ -103,6 +103,7 @@ namespace MphRead::Mods::ClassicMenu
                     text.WrapWidth = r.U16(style + 8);
                     text.Duration = r.Fx(style + 12);
                     text.Size = static_cast<std::uint8_t>(format);
+                    text.LineSpacing = static_cast<std::int8_t>(static_cast<std::uint8_t>(format >> 16));
                     text.Align = static_cast<std::uint8_t>(format >> 24);
                     state.Text = text;
                 }
@@ -598,7 +599,7 @@ namespace MphRead::Mods::ClassicMenu
     }
 
     void MenuFont::Emit(const std::string& text, float x, float y, int align, int wrapWidth, float lineHeight,
-        float r, float g, float b, float a, float z, std::vector<WidgetTri>& output) const
+        float r, float g, float b, float a, float z, std::vector<WidgetTri>& output, float lineSpacing) const
     {
         // The anchor is the bottom of the first line, in text coordinates (Y
         // up from the bottom of the touch screen): menu-space y = textY - 192.
@@ -630,7 +631,7 @@ namespace MphRead::Mods::ClassicMenu
                 }
                 penX += static_cast<float>(Advance(glyph));
             }
-            top -= lineHeight;
+            top -= lineHeight + lineSpacing;
         }
     }
 
@@ -833,8 +834,30 @@ namespace MphRead::Mods::ClassicMenu
     {
     }
 
-    void MenuEngine::Enter(int page)
+    namespace
     {
+        // Two pages' items that look the same: the same looks for the same
+        // codes, at the same place.
+        [[nodiscard]] bool SameLook(const MenuItem& a, const MenuItem& b)
+        {
+            if (a.X != b.X || a.Y != b.Y || a.Depth != b.Depth || a.States.size() != b.States.size()) return false;
+            for (std::size_t i = 0; i < a.States.size(); ++i)
+            {
+                const MenuItemState& s = a.States[i];
+                const MenuItemState& t = b.States[i];
+                if (s.Code != t.Code || s.Kind != t.Kind || s.WidgetIndex != t.WidgetIndex
+                    || s.Text.has_value() != t.Text.has_value()) return false;
+                if (s.Text.has_value() && (s.Text->StringId != t.Text->StringId || s.Text->StartColor != t.Text->StartColor
+                    || s.Text->EndColor != t.Text->EndColor || s.Text->Duration != t.Text->Duration)) return false;
+            }
+            return true;
+        }
+    }
+
+    void MenuEngine::Enter(int page, bool carry)
+    {
+        const MenuPage* previous = _page;
+        const std::vector<ItemRuntime> before = carry ? _items : std::vector<ItemRuntime>{};
         _page = &_file.Pages.at(static_cast<std::size_t>(page));
         ++_generation;
         _pageFrame = 0;
@@ -843,6 +866,37 @@ namespace MphRead::Mods::ClassicMenu
         _focus = -1;
         _items.assign(_page->Items.size(), ItemRuntime{});
         for (std::size_t i = 0; i < _items.size(); ++i) _items[i].Delay = _page->Items[i].Delay;
+        // The game keeps an item the next page has unchanged at the same place
+        // in its list (the logo, the description box, the black band, the
+        // back arrow): it goes on as it was, where entering again would play
+        // its way in from nothing.
+        if (previous != nullptr && carry)
+        {
+            for (std::size_t i = 0; i < _items.size() && i < before.size() && i < previous->Items.size(); ++i)
+            {
+                const ItemRuntime& old = before[i];
+                if (!old.Started || !SameLook(previous->Items[i], _page->Items[i])) continue;
+                ItemRuntime& rt = _items[i];
+                if (old.Linger != -1 && old.State == MenuState::Hidden)
+                {
+                    rt.Code = old.Linger;
+                    rt.State = StateCode::To(old.Linger);
+                    rt.Frame = old.LingerFrame;
+                }
+                else if (old.State != MenuState::Hidden)
+                {
+                    rt.Code = old.Code;
+                    rt.State = old.State;
+                    rt.Frame = old.Frame;
+                }
+                else
+                {
+                    continue;
+                }
+                rt.Started = true;
+                rt.Delay = 0;
+            }
+        }
         if (OnPageEntered) OnPageEntered(page);
         StartItems();
     }
@@ -856,7 +910,28 @@ namespace MphRead::Mods::ClassicMenu
         }
         _pendingPage = page;
         _exitFrames = 0;
-        for (std::size_t i = 0; i < _items.size(); ++i) SetState(static_cast<int>(i), MenuState::Hidden);
+        for (std::size_t i = 0; i < _items.size(); ++i)
+        {
+            // An item the data gives no hidden look and no way to hide stays
+            // as it is while the others play out -- a widget (the logo, the
+            // description box, the black band, the back arrow), or a text
+            // that is animating (the pulsing "SELECT A GAME MODE"): the game
+            // draws the main menu's frame on until the next page's. A still
+            // text with no way to hide goes at once (the icons' labels).
+            ItemRuntime& rt = _items[i];
+            const int item = static_cast<int>(i);
+            const bool canHide = Visual(item, static_cast<int>(MenuState::Hidden)) != nullptr
+                || Visual(item, StateCode::Transition(rt.State, MenuState::Hidden)) != nullptr
+                || Visual(item, StateCode::Transition(MenuState::Any, MenuState::Hidden)) != nullptr;
+            const MenuItemState* look = rt.Started ? Visual(item, rt.Code) : nullptr;
+            const bool stays = look != nullptr && (!look->Text.has_value() || look->Text->Duration > 0);
+            if (rt.State != MenuState::Hidden && !canHide && stays)
+            {
+                rt.Linger = rt.Code;
+                rt.LingerFrame = rt.Frame;
+            }
+            SetState(item, MenuState::Hidden);
+        }
     }
 
     void MenuEngine::StartItems()
@@ -884,6 +959,7 @@ namespace MphRead::Mods::ClassicMenu
                 continue;
             }
             rt.Frame++;
+            if (rt.Linger != -1) rt.LingerFrame++;
             if (StateCode::IsTransition(rt.Code) && rt.Frame >= CodeLength(static_cast<int>(i), rt.Code))
             {
                 Arrive(static_cast<int>(i));
@@ -908,7 +984,7 @@ namespace MphRead::Mods::ClassicMenu
             {
                 if (StateCode::IsTransition(rt.Code)) done = false;
             }
-            if (done || _exitFrames > 120) Enter(_pendingPage);
+            if (done || _exitFrames > 120) Enter(_pendingPage, true);
         }
     }
 
@@ -1283,18 +1359,21 @@ namespace MphRead::Mods::ClassicMenu
             const ItemRuntime& rt = _items[i];
             if (!rt.Started) continue;
             const MenuItem& item = _page->Items[i];
-            const MenuItemState* visual = Visual(static_cast<int>(i), rt.Code);
+            const bool lingering = rt.Linger != -1 && rt.State == MenuState::Hidden && _pendingPage != -1;
+            const int code = lingering ? rt.Linger : rt.Code;
+            const int frame = lingering ? rt.LingerFrame : rt.Frame;
+            const MenuItemState* visual = Visual(static_cast<int>(i), code);
             if (visual == nullptr) continue;
-            const bool steady = !StateCode::IsTransition(rt.Code);
+            const bool steady = !StateCode::IsTransition(code);
             const std::size_t first = output.size();
             if (visual->Text.has_value())
             {
-                EmitText(item, *visual->Text, rt.Frame, steady, output);
+                EmitText(item, *visual->Text, frame, steady, output);
             }
             else if (visual->WidgetIndex >= 0)
             {
                 const std::size_t before = output.size();
-                _widgets.Evaluate(visual->WidgetIndex, rt.Frame, steady, 1.0F, output);
+                _widgets.Evaluate(visual->WidgetIndex, frame, steady, 1.0F, output);
                 if (item.X != 0 || item.Y != 0)
                 {
                     for (std::size_t t = before; t < output.size(); ++t)
@@ -1331,7 +1410,7 @@ namespace MphRead::Mods::ClassicMenu
             lerp(Channel(style.StartColor, 0), Channel(style.EndColor, 0)),
             lerp(Channel(style.StartColor, 8), Channel(style.EndColor, 8)),
             lerp(Channel(style.StartColor, 16), Channel(style.EndColor, 16)),
-            a, 1000.0F + item.Depth, output);
+            a, 1000.0F + item.Depth, output, static_cast<float>(style.LineSpacing));
     }
 
     // ---- MenuLayout ----

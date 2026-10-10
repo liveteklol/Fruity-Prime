@@ -83,6 +83,9 @@ namespace MphRead::Mods::ClassicMenu
         std::uint16_t WrapWidth = 0;
         float Duration = 0;
         std::uint8_t Size = 0;
+        // Added to Size between lines (the format's third byte, signed): the
+        // main menu's descriptions run at 9, its two-line labels at 7.
+        std::int8_t LineSpacing = 0;
         std::uint8_t Align = 0; // 0 left, 1 right, 2 centre
     };
 
@@ -257,8 +260,10 @@ namespace MphRead::Mods::ClassicMenu
     {
     public:
         explicit MenuFont(UiTextureCache& textures);
+        // lineHeight places the first line under the anchor; each next one
+        // is lineHeight + lineSpacing further down.
         void Emit(const std::string& text, float x, float y, int align, int wrapWidth, float lineHeight,
-            float r, float g, float b, float a, float z, std::vector<WidgetTri>& output) const;
+            float r, float g, float b, float a, float z, std::vector<WidgetTri>& output, float lineSpacing = 0) const;
 
     private:
         [[nodiscard]] static int Glyph(const std::string& text, std::size_t& i);
@@ -316,7 +321,9 @@ namespace MphRead::Mods::ClassicMenu
         [[nodiscard]] int ItemCode(int item) const { return _items.at(static_cast<std::size_t>(item)).Code; }
         [[nodiscard]] std::string ItemModelPath(int item) const;
 
-        void Enter(int page);
+        // carry: coming from the page being left (GoTo), whose items the new
+        // page has unchanged go on as they were instead of coming in again.
+        void Enter(int page, bool carry = false);
         void GoTo(int page);
         void Tick();
         void SetState(int item, MenuState target);
@@ -337,6 +344,10 @@ namespace MphRead::Mods::ClassicMenu
             int Frame = 0;
             float Delay = 0;
             bool Started = false;
+            // Leaving the page, an item with no way of hiding keeps the look
+            // it had (this code, at this frame) until the next page comes in.
+            int Linger = -1;
+            int LingerFrame = 0;
         };
 
         [[nodiscard]] const MenuItemState* Visual(int item, int code) const;
