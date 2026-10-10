@@ -211,22 +211,30 @@ namespace MphRead::Mods::ClassicMenu
         int TextureId = -1; // -1: vertex colour only
         UiWrap WrapS = UiWrap::Clamp;
         UiWrap WrapT = UiWrap::Clamp;
+        // The DS layer: the backdrop bitmaps are the 2D one, drawn first;
+        // everything else is the 3D layer, laid over it by its own alpha.
+        bool Backdrop = false;
+        // The DS polygon ID: a translucent pixel is not drawn over a
+        // translucent pixel of its own ID (-1: none).
+        int PolyId = -1;
         int Start = 0;
         int Count = 0;
     };
 
     // Textured, vertex-coloured triangles in canvas pixels (origin top-left,
-    // Y down), grouped by texture and wrap.
+    // Y down), grouped by texture, wrap, layer and polygon ID.
     struct UiDrawList final
     {
         std::vector<UiVertex> Vertices;
         std::vector<UiBatch> Batches;
+        // Triangles added while this is set go to the 2D backdrop layer.
+        bool Backdrop = false;
 
-        void Clear() { Vertices.clear(); Batches.clear(); }
+        void Clear() { Vertices.clear(); Batches.clear(); Backdrop = false; }
         void Triangle(int textureId, UiWrap wrapS, UiWrap wrapT,
-            const UiVertex& a, const UiVertex& b, const UiVertex& c);
+            const UiVertex& a, const UiVertex& b, const UiVertex& c, int polyId = -1);
         void Quad(int textureId, float x0, float y0, float x1, float y1,
-            float u0, float v0, float u1, float v1, float r, float g, float b, float a);
+            float u0, float v0, float u1, float v1, float r, float g, float b, float a, int polyId = -1);
     };
 
     // A triangle in MENU SPACE: DS pixels, X right, Y up, origin on the seam
@@ -239,6 +247,10 @@ namespace MphRead::Mods::ClassicMenu
         int TextureId = -1;
         UiWrap WrapS = UiWrap::Clamp;
         UiWrap WrapT = UiWrap::Clamp;
+        // The material's polygon mode: 0 modulate, 1 decal, 2 toon, 3 shadow.
+        std::uint8_t Mode = 0;
+        // The material's lights (POLYGON_ATTR bits 0-3).
+        std::uint8_t Lights = 0;
     };
 
     class MenuFont final

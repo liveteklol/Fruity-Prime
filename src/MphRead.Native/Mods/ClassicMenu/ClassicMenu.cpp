@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdio>
 #include <exception>
 #include <limits>
 #include <map>
@@ -31,10 +32,19 @@ namespace MphRead::Mods::ClassicMenu
 
         // The menus behind the logo sit on the game's Samus art under a
         // translucent colour cycling green -> teal -> orange (510 ticks, three
-        // keys 170 apart, drawn at 21/32).
+        // keys 170 apart): 3D at polygon alpha 20, flat over the top screen
+        // and, over the touch screen, from that colour at its top edge to
+        // half of it (>> 1) at its bottom.
         constexpr float TintKeys[3][3] = {{0, 31, 0}, {4, 16, 16}, {19, 9, 6}};
         constexpr int TintKeyFrames = 170;
-        constexpr float TintWeight = 21.0F / 32.0F;
+        constexpr float TintAlpha = 20.0F / 31.0F;
+
+        // The DS polygon IDs the game gives the tint and the grooves; items
+        // take theirs past the game's 6 bits, one an item.
+        constexpr int TintId = 1;
+        constexpr int SlotsId = 5;
+        constexpr int LinesId = 6;
+        [[nodiscard]] constexpr int ItemId(int item) noexcept { return 64 + item; }
 
         // The game's own two models behind every menu page: the dark channels
         // at alpha 30 and the light running through them, faded on a page
@@ -208,6 +218,41 @@ namespace MphRead::Mods::ClassicMenu
                 _dirty = true;
             }
             [[nodiscard]] bool OverGame() const { return _menu.Page() != nullptr && _compose.OverGame(_menu.Page()->Index); }
+
+            [[nodiscard]] std::string Describe() const
+            {
+                const MenuPage* page = _menu.Page();
+                if (page == nullptr) return "no page\n";
+                std::string out = "page " + std::to_string(page->Index) + " pending " + std::to_string(_menu.PendingPage())
+                    + " tick " + std::to_string(_frame) + "\n";
+                for (std::size_t i = 0; i < page->Items.size(); ++i)
+                {
+                    const int item = static_cast<int>(i);
+                    out += "item " + std::to_string(i) + " state " + std::to_string(static_cast<int>(_menu.ItemState(item)))
+                        + " code " + std::to_string(_menu.ItemCode(item)) + " " + _menu.ItemModelPath(item) + "\n";
+                    std::map<std::string, int> looks;
+                    float x0 = 1e9F, y0 = 1e9F, x1 = -1e9F, y1 = -1e9F;
+                    for (const WidgetTri& t : _tris)
+                    {
+                        if (t.Item != item) continue;
+                        for (const UiVertex* v : {&t.A, &t.B, &t.C})
+                        {
+                            x0 = std::min(x0, v->X); x1 = std::max(x1, v->X);
+                            y0 = std::min(y0, 192.0F - v->Y); y1 = std::max(y1, 192.0F - v->Y);
+                        }
+                        char look[96];
+                        std::snprintf(look, sizeof(look), "tex %d mode %d lights %d rgba %.3f %.3f %.3f %.3f z %.1f", t.TextureId,
+                            t.Mode, t.Lights, t.A.R, t.A.G, t.A.B, t.A.A, t.Z);
+                        ++looks[look];
+                    }
+                    if (looks.empty()) continue;
+                    char box[96];
+                    std::snprintf(box, sizeof(box), "  box %.1f %.1f .. %.1f %.1f\n", x0, y0, x1, y1);
+                    out += box;
+                    for (const auto& [look, count] : looks) out += "  " + std::to_string(count) + "x " + look + "\n";
+                }
+                return out;
+            }
             [[nodiscard]] bool Dirty() const { return _dirty; }
             void Clean() { _dirty = false; }
 
@@ -237,7 +282,7 @@ namespace MphRead::Mods::ClassicMenu
                     _screen.Layout(page->Index, w, h);
                     _layoutPage = page->Index; _layoutW = width; _layoutH = height;
                 }
-                if (!_compose.OverGame(page->Index)) DrawBackdrop(page->Index);
+                if (!_compose.OverGame(page->Index)) DrawBackdrop(page->Index, _screen.Backdrop(), _screen.Width(), _screen.Height());
 
                 // every item through its group, an item wider than the ROM made it stretched
                 std::map<int, std::pair<float, float>> centres;
@@ -264,32 +309,41 @@ namespace MphRead::Mods::ClassicMenu
                     if (const Stretch* s = _compose.StretchOf(page->Index, t.Item)) { pivot = s->Pivot; scale = s->Scale; }
                     const auto place = [&](UiVertex v)
                     {
-                        const float x = pivot + (v.X - pivot) * scale;
-                        const float y = 192.0F - v.Y;
+                        // the DS truncates a vertex to the pixel it falls in
+                        const float x = pivot + (std::floor(v.X) - pivot) * scale;
+                        const float y = std::floor(192.0F - v.Y);
                         v.X = (g->Ox + x * g->S) * _unit;
                         v.Y = (g->Oy + y * g->S) * _unit;
                         return v;
                     };
-                    _draw.Triangle(t.TextureId, t.WrapS, t.WrapT, place(t.A), place(t.B), place(t.C));
+                    _draw.Triangle(t.TextureId, t.WrapS, t.WrapT, place(t.A), place(t.B), place(t.C), ItemId(t.Item));
                 }
                 return _draw;
             }
 
-            // The two screens as the DS shows them (the check script's shots).
-            const UiDrawList& BuildScreen(int screen)
+            // One tick at a time, with no clock (-classicframes).
+            void Step(int ticks)
+            {
+                for (int i = 0; i < ticks; ++i) Tick();
+                _dirty = true;
+                _tris.clear();
+                _menu.Collect(_tris);
+                AddFocusFrame();
+            }
+
+            // The two screens as the DS shows them, the top one above.
+            const UiDrawList& BuildDs()
             {
                 _draw.Clear();
                 const MenuPage* page = _menu.Page();
                 if (page == nullptr) return _draw;
-                Placement p;
-                p.SrcX = 0;
-                p.SrcY = screen == 0 ? 192.0F : 0.0F;
-                p.Scale = 1;
+                _unit = 1;
+                if (!_compose.OverGame(page->Index)) DrawBackdrop(page->Index, GroupPlace{}, 256, 384);
+                const auto place = [](UiVertex v) { v.X = std::floor(v.X); v.Y = std::floor(192.0F - v.Y); return v; };
                 for (const WidgetTri& t : _tris)
                 {
                     if (Hidden(t.Item)) continue;
-                    const auto place = [&](UiVertex v) { const auto [x, y] = p.ToCanvas(v.X, v.Y); v.X = x; v.Y = y; return v; };
-                    _draw.Triangle(t.TextureId, t.WrapS, t.WrapT, place(t.A), place(t.B), place(t.C));
+                    _draw.Triangle(t.TextureId, t.WrapS, t.WrapT, place(t.A), place(t.B), place(t.C), ItemId(t.Item));
                 }
                 return _draw;
             }
@@ -450,26 +504,53 @@ namespace MphRead::Mods::ClassicMenu
             // Behind the menus: the game's Samus art (main1 over main2, one
             // column, cover-fitted on the visor) under the cycling tint, then
             // the grooves. The logos and the credits are on black.
-            void DrawBackdrop(int page)
+            void DrawBackdrop(int page, const GroupPlace& b, float width, float height)
             {
                 if (page <= 12) return;
-                const GroupPlace b = _screen.Backdrop();
                 const auto quad = [&](int texture, float y0, float y1)
                 {
                     _draw.Quad(texture, b.Ox * _unit, (b.Oy + y0 * b.S) * _unit, (b.Ox + 256 * b.S) * _unit, (b.Oy + y1 * b.S) * _unit,
                         0, 0, 1, 1, 1, 1, 1, 1);
                 };
+                _draw.Backdrop = true;
                 quad(BackgroundTexture(0), 0, 192);
                 quad(BackgroundTexture(1), 192, 384);
+                _draw.Backdrop = false;
                 if (_tintStart < 0) _tintStart = _frame;
                 const long long f = (_frame - _tintStart) % (TintKeyFrames * 3);
                 const int k = static_cast<int>(f / TintKeyFrames);
                 const float t = static_cast<float>(f % TintKeyFrames) / TintKeyFrames;
                 const float* c0 = TintKeys[k];
                 const float* c1 = TintKeys[(k + 1) % 3];
-                _draw.Quad(-1, 0, 0, _screen.Width() * _unit, _screen.Height() * _unit, 0, 0, 0, 0,
-                    (c0[0] + (c1[0] - c0[0]) * t) / 31, (c0[1] + (c1[1] - c0[1]) * t) / 31,
-                    (c0[2] + (c1[2] - c0[2]) * t) / 31, TintWeight);
+                int top[3];
+                for (int i = 0; i < 3; ++i) top[i] = static_cast<int>(c0[i] + (c1[i] - c0[i]) * t);
+                const auto colour = [&](float x, float y, int shift)
+                {
+                    return UiVertex{x, y, 0, 0, static_cast<float>(top[0] >> shift) / 31, static_cast<float>(top[1] >> shift) / 31,
+                        static_cast<float>(top[2] >> shift) / 31, TintAlpha};
+                };
+                const float x1 = width * _unit;
+                for (int screen = 0; screen < 2; ++screen)
+                {
+                    const float y0 = (b.Oy + static_cast<float>(screen) * 192.0F * b.S) * _unit;
+                    const float y1 = (b.Oy + static_cast<float>(screen + 1) * 192.0F * b.S) * _unit;
+                    // the canvas above the first screen and below the second takes their edge colours
+                    const float top0 = screen == 0 ? std::min(y0, 0.0F) : y0;
+                    const float bottom1 = screen == 1 ? std::max(y1, height * _unit) : y1;
+                    if (top0 < y0)
+                    {
+                        _draw.Triangle(-1, UiWrap::Clamp, UiWrap::Clamp, colour(0, top0, 0), colour(x1, top0, 0), colour(x1, y0, 0), TintId);
+                        _draw.Triangle(-1, UiWrap::Clamp, UiWrap::Clamp, colour(0, top0, 0), colour(x1, y0, 0), colour(0, y0, 0), TintId);
+                    }
+                    const int fade = screen;
+                    _draw.Triangle(-1, UiWrap::Clamp, UiWrap::Clamp, colour(0, y0, 0), colour(x1, y0, 0), colour(x1, y1, fade), TintId);
+                    _draw.Triangle(-1, UiWrap::Clamp, UiWrap::Clamp, colour(0, y0, 0), colour(x1, y1, fade), colour(0, y1, fade), TintId);
+                    if (bottom1 > y1)
+                    {
+                        _draw.Triangle(-1, UiWrap::Clamp, UiWrap::Clamp, colour(0, y1, fade), colour(x1, y1, fade), colour(x1, bottom1, fade), TintId);
+                        _draw.Triangle(-1, UiWrap::Clamp, UiWrap::Clamp, colour(0, y1, fade), colour(x1, bottom1, fade), colour(0, bottom1, fade), TintId);
+                    }
+                }
                 DrawGrooves(page, b);
             }
 
@@ -486,9 +567,11 @@ namespace MphRead::Mods::ClassicMenu
             {
                 if (_groovesFailed || page == 49 || page == 50 || page == 65) return;
                 _grooveTris.clear();
+                std::size_t slots = 0;
                 try
                 {
                     _widgets.Evaluate(_widgets.Instance(SlotsModel, SlotsAnim), 0, true, 30.0F / 31.0F, _grooveTris);
+                    slots = _grooveTris.size();
                     const int alpha = _grooveCounter < 0 ? 30 : std::clamp(_grooveCounter * 3, 1, 30);
                     _widgets.Evaluate(_widgets.Instance(LinesModel, LinesAnim), _grooveFrame, true,
                         static_cast<float>(alpha) / 31.0F, _grooveTris);
@@ -505,9 +588,10 @@ namespace MphRead::Mods::ClassicMenu
                     v.Y = (b.Oy + (192.0F - v.Y) * b.S) * _unit;
                     return v;
                 };
-                for (const WidgetTri& t : _grooveTris)
+                for (std::size_t i = 0; i < _grooveTris.size(); ++i)
                 {
-                    _draw.Triangle(t.TextureId, t.WrapS, t.WrapT, place(t.A), place(t.B), place(t.C));
+                    const WidgetTri& t = _grooveTris[i];
+                    _draw.Triangle(t.TextureId, t.WrapS, t.WrapT, place(t.A), place(t.B), place(t.C), i < slots ? SlotsId : LinesId);
                 }
             }
 
@@ -623,13 +707,32 @@ namespace MphRead::Mods::ClassicMenu
             }
         }
 
-        // Textured, vertex-coloured triangles, alpha blended over the target,
-        // sampled at pixel centres with the nearest texel (DS pixel art). A
-        // picture over a match starts clear, so the game shows through.
+        // A pixel of the DS's 3D layer: colour, polygon alpha (0..31) and the
+        // ID of the translucent polygon that drew it last (-1: none).
+        struct Pixel3d final
+        {
+            float R = 0, G = 0, B = 0;
+            int Alpha = 0;
+            int Translucent = -1;
+        };
+
+        // Textured, vertex-coloured triangles sampled at pixel centres with
+        // the nearest texel (DS pixel art), composed as the DS composes the
+        // menus (GPU3D_Soft, GPU2D ColorBlend5): the backdrop bitmaps are the
+        // 2D layer; everything else is drawn into a 3D layer that starts
+        // clear, where an opaque pixel is written, a translucent one over
+        // nothing is written as it is, and over something is mixed by its
+        // alpha (a + 1) / 32 with the larger alpha kept -- never over a
+        // translucent pixel of its own polygon ID. The 3D layer then goes
+        // over the 2D one by its own alpha. A picture over a match has no 2D
+        // layer: the 3D one is the picture, alpha and all.
         void Rasterize(const UiDrawList& list, const UiTextureCache& textures, int width, int height,
             std::vector<std::uint32_t>& pixels, bool clear = false)
         {
-            pixels.assign(static_cast<std::size_t>(width) * static_cast<std::size_t>(height), clear ? 0x00000000U : 0xFF000000U);
+            const std::size_t count = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
+            pixels.assign(count, clear ? 0x00000000U : 0xFF000000U);
+            static thread_local std::vector<Pixel3d> layer;
+            layer.assign(count, Pixel3d{});
             for (const UiBatch& batch : list.Batches)
             {
                 const UiTexture* texture = batch.TextureId >= 0 ? &textures[batch.TextureId] : nullptr;
@@ -650,7 +753,7 @@ namespace MphRead::Mods::ClassicMenu
                     for (int y = minY; y <= maxY; ++y)
                     {
                         const float py = static_cast<float>(y) + 0.5F;
-                        std::uint32_t* row = pixels.data() + static_cast<std::size_t>(y) * static_cast<std::size_t>(width);
+                        const std::size_t row = static_cast<std::size_t>(y) * static_cast<std::size_t>(width);
                         for (int x = minX; x <= maxX; ++x)
                         {
                             const float px = static_cast<float>(x) + 0.5F;
@@ -679,35 +782,59 @@ namespace MphRead::Mods::ClassicMenu
                                 bl *= static_cast<float>(texel.Blue) / 255.0F;
                                 al *= static_cast<float>(texel.Alpha) / 255.0F;
                             }
-                            if (al <= 0.0F) continue;
-                            al = std::min(al, 1.0F);
-                            std::uint32_t& dst = row[x];
-                            const float keep = 1.0F - al;
-                            const auto mix = [&](float src, int shift)
+                            r = std::clamp(r, 0.0F, 1.0F);
+                            g = std::clamp(g, 0.0F, 1.0F);
+                            bl = std::clamp(bl, 0.0F, 1.0F);
+                            const std::size_t at = row + static_cast<std::size_t>(x);
+                            if (batch.Backdrop)
                             {
-                                const float d = static_cast<float>((dst >> shift) & 0xFF);
-                                return static_cast<std::uint32_t>(std::clamp(src * 255.0F * al + d * keep, 0.0F, 255.0F) + 0.5F);
-                            };
-                            const float da = static_cast<float>(dst >> 24) / 255.0F;
-                            const std::uint32_t outA = static_cast<std::uint32_t>(std::clamp((al + da * keep) * 255.0F + 0.5F, 0.0F, 255.0F));
-                            if (clear && da < 1.0F)
-                            {
-                                // over a clear picture: keep colour and coverage apart
-                                const float oa = al + da * keep;
-                                const auto un = [&](float src, int shift)
-                                {
-                                    const float d = static_cast<float>((dst >> shift) & 0xFF) / 255.0F;
-                                    return static_cast<std::uint32_t>(std::clamp((src * al + d * da * keep) / std::max(oa, 1e-4F) * 255.0F + 0.5F, 0.0F, 255.0F));
-                                };
-                                dst = un(r, 0) | (un(g, 8) << 8) | (un(bl, 16) << 16) | (outA << 24);
+                                if (al <= 0.0F) continue;
+                                const auto byte = [](float value) { return static_cast<std::uint32_t>(value * 255.0F + 0.5F); };
+                                pixels[at] = byte(r) | (byte(g) << 8) | (byte(bl) << 16) | 0xFF000000U;
+                                continue;
                             }
-                            else
+                            const int alpha = std::min(31, static_cast<int>(al * 31.0F + 0.5F));
+                            if (alpha <= 0) continue;
+                            Pixel3d& dst = layer[at];
+                            if (alpha == 31)
                             {
-                                dst = mix(r, 0) | (mix(g, 8) << 8) | (mix(bl, 16) << 16) | 0xFF000000U;
+                                dst = Pixel3d{r, g, bl, 31, -1};
+                                continue;
                             }
+                            if (batch.PolyId >= 0 && dst.Translucent == batch.PolyId) continue;
+                            if (dst.Alpha == 0)
+                            {
+                                dst = Pixel3d{r, g, bl, alpha, batch.PolyId};
+                                continue;
+                            }
+                            const float s = static_cast<float>(alpha + 1) / 32.0F;
+                            dst.R = r * s + dst.R * (1.0F - s);
+                            dst.G = g * s + dst.G * (1.0F - s);
+                            dst.B = bl * s + dst.B * (1.0F - s);
+                            dst.Alpha = std::max(dst.Alpha, alpha);
+                            dst.Translucent = batch.PolyId;
                         }
                     }
                 }
+            }
+            for (std::size_t at = 0; at < count; ++at)
+            {
+                const Pixel3d& p = layer[at];
+                if (p.Alpha == 0) continue;
+                const auto byte = [](float value) { return static_cast<std::uint32_t>(std::clamp(value, 0.0F, 1.0F) * 255.0F + 0.5F); };
+                if (clear)
+                {
+                    const float a = p.Alpha == 31 ? 1.0F : static_cast<float>(p.Alpha + 1) / 32.0F;
+                    pixels[at] = byte(p.R) | (byte(p.G) << 8) | (byte(p.B) << 16) | (byte(a) << 24);
+                    continue;
+                }
+                const std::uint32_t under = pixels[at];
+                const float s = p.Alpha == 31 ? 1.0F : static_cast<float>(p.Alpha + 1) / 32.0F;
+                const auto mix = [&](float over, int shift)
+                {
+                    return byte(over * s + static_cast<float>((under >> shift) & 0xFF) / 255.0F * (1.0F - s));
+                };
+                pixels[at] = mix(p.R, 0) | (mix(p.G, 8) << 8) | (mix(p.B, 16) << 16) | 0xFF000000U;
             }
         }
     }
@@ -727,6 +854,25 @@ namespace MphRead::Mods::ClassicMenu
             Rasterize(session->BuildCanvas(w, h), session->Textures(), w, h, pixels, session->OverGame());
             session->Clean();
             lastWidth = w; lastHeight = h; shownWidth = width; shownHeight = height;
+            return true;
+        }
+        catch (const std::exception& ex)
+        {
+            lastError = ex.what();
+            DebugLog::Line("classicmenu", std::string("the DS menus stopped: ") + ex.what());
+            active = false;
+            return false;
+        }
+    }
+
+    bool Facade::RenderDs(int ticks, std::vector<std::uint32_t>& pixels)
+    {
+        if (!Active()) return false;
+        try
+        {
+            session->Step(ticks);
+            Rasterize(session->BuildDs(), session->Textures(), ScreenWidth, ScreenHeight * 2, pixels);
+            session->Clean();
             return true;
         }
         catch (const std::exception& ex)
@@ -780,6 +926,11 @@ namespace MphRead::Mods::ClassicMenu
     void Facade::Show(const std::string& what)
     {
         if (Active()) session->Show(what);
+    }
+
+    std::string Facade::Describe()
+    {
+        return Active() ? session->Describe() : std::string("inactive\n");
     }
 
     void Facade::Visit(const std::string& page)

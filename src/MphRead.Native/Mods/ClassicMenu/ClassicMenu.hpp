@@ -40,6 +40,11 @@ namespace MphRead::Mods::ClassicMenu
         // (RGBA8, row-major, top row first) at `width` x `height`. False when
         // inactive.
         static bool Render(double seconds, int width, int height, std::vector<std::uint32_t>& pixels);
+        // Advance `ticks` menu ticks (two DS frames each), then draw the two
+        // DS screens as the DS shows them: 256 x 384, the top screen above,
+        // backdrop and all. The frames compared against the game itself
+        // (-classicframes). False when inactive.
+        static bool RenderDs(int ticks, std::vector<std::uint32_t>& pixels);
         // The size the last picture was drawn at (the shell scales it to the item).
         static void DrawnSize(int& width, int& height);
         // The pointer, in the last picture's pixels: moved, or pressed.
@@ -58,5 +63,8 @@ namespace MphRead::Mods::ClassicMenu
         static void Touch(float x, float y);
         // Straight to a page (the check script); "servers", "settings", ... or a number.
         static void Visit(const std::string& page);
+        // The page, every item's state and what it drew in the last picture,
+        // as text (-classicframes' describe step).
+        [[nodiscard]] static std::string Describe();
     };
 }

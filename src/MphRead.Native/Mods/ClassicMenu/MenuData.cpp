@@ -154,6 +154,32 @@ namespace MphRead::Mods::ClassicMenu
 
         constexpr int Stride = 13;
         constexpr float MaterialColor = 2.0F;
+        // color.a NormalColor: a NORMAL command came last, so the DS lit the
+        // vertex (or, with the material unlit, gave it the emission).
+        constexpr float NormalColor = 3.0F;
+
+        // The vertex colour the DS works out at a NORMAL command for a lit
+        // material (GPU3D::CalculateLighting) under the menus' own lights:
+        // 0 and 1, both white and straight into the screen (LIGHT_VECTOR
+        // 0, 0, -1), no specular or emission. Two lights at full strength
+        // take a 25/31 diffuse past 31: a widget facing the screen is drawn
+        // white, not at its diffuse.
+        [[nodiscard]] float Lit(float diffuse, float ambient, float normalZ, int lights)
+        {
+            constexpr long long LightColor = 31;
+            const long long d = std::lround(std::clamp(diffuse, 0.0F, 1.0F) * 31.0F);
+            const long long a = std::lround(std::clamp(ambient, 0.0F, 1.0F) * 31.0F);
+            // 1.0 is 512; the dot is an 11-bit signed value
+            const long long dot = std::clamp(std::lround(normalZ * 512.0F), -1024L, 1023L);
+            long long sum = 0;
+            for (int i = 0; i < 2; ++i)
+            {
+                if ((lights & (1 << i)) == 0) continue;
+                if (dot > 0) sum += (d * LightColor * dot) & 0xFFFFF;
+                sum += (a << 9) * LightColor;
+            }
+            return static_cast<float>(std::min(31LL, sum >> 14)) / 31.0F;
+        }
 
         // One mesh's display list as a flat triangle list, reproducing
         // Scene.DoDlist's immediate-mode state machine. Per vertex:
@@ -252,6 +278,7 @@ namespace MphRead::Mods::ClassicMenu
                     nx = static_cast<float>(Sign10(xyz & 0x3FF)) / 512.0F;
                     ny = static_cast<float>(Sign10((xyz >> 10) & 0x3FF)) / 512.0F;
                     nz = static_cast<float>(Sign10((xyz >> 20) & 0x3FF)) / 512.0F;
+                    ca = NormalColor;
                     break;
                 }
                 case InstructionCode::TEXCOORD:
@@ -443,12 +470,13 @@ namespace MphRead::Mods::ClassicMenu
     }
 
     void UiDrawList::Triangle(int textureId, UiWrap wrapS, UiWrap wrapT,
-        const UiVertex& a, const UiVertex& b, const UiVertex& c)
+        const UiVertex& a, const UiVertex& b, const UiVertex& c, int polyId)
     {
         if (Batches.empty() || Batches.back().TextureId != textureId
-            || Batches.back().WrapS != wrapS || Batches.back().WrapT != wrapT)
+            || Batches.back().WrapS != wrapS || Batches.back().WrapT != wrapT
+            || Batches.back().Backdrop != Backdrop || Batches.back().PolyId != polyId)
         {
-            Batches.push_back(UiBatch{textureId, wrapS, wrapT, static_cast<int>(Vertices.size()), 0});
+            Batches.push_back(UiBatch{textureId, wrapS, wrapT, Backdrop, polyId, static_cast<int>(Vertices.size()), 0});
         }
         Vertices.push_back(a);
         Vertices.push_back(b);
@@ -457,14 +485,14 @@ namespace MphRead::Mods::ClassicMenu
     }
 
     void UiDrawList::Quad(int textureId, float x0, float y0, float x1, float y1,
-        float u0, float v0, float u1, float v1, float r, float g, float b, float a)
+        float u0, float v0, float u1, float v1, float r, float g, float b, float a, int polyId)
     {
         const UiVertex p0{x0, y0, u0, v0, r, g, b, a};
         const UiVertex p1{x1, y0, u1, v0, r, g, b, a};
         const UiVertex p2{x1, y1, u1, v1, r, g, b, a};
         const UiVertex p3{x0, y1, u0, v1, r, g, b, a};
-        Triangle(textureId, UiWrap::Clamp, UiWrap::Clamp, p0, p1, p2);
-        Triangle(textureId, UiWrap::Clamp, UiWrap::Clamp, p0, p2, p3);
+        Triangle(textureId, UiWrap::Clamp, UiWrap::Clamp, p0, p1, p2, polyId);
+        Triangle(textureId, UiWrap::Clamp, UiWrap::Clamp, p0, p2, p3, polyId);
     }
 
     // ---- MenuFont ----
@@ -723,6 +751,10 @@ namespace MphRead::Mods::ClassicMenu
                     tri.TextureId = textureId;
                     tri.WrapS = static_cast<UiWrap>(material.XRepeat);
                     tri.WrapT = static_cast<UiWrap>(material.YRepeat);
+                    tri.Mode = static_cast<std::uint8_t>(material.PolygonMode);
+                    // a lit material is lit by lights 0 and 1 (POLYGON_ATTR 3), whatever its byte says
+                    tri.Lights = material.Lighting != 0 ? 3 : 0;
+                    const auto ambient = material.CurrentAmbient;
                     float zSum = 0;
                     for (std::size_t v = 0; v < count; ++v)
                     {
@@ -743,10 +775,20 @@ namespace MphRead::Mods::ClassicMenu
                         Transform(m, p[0], p[1], p[2], x, y, z);
                         float u, w, unused;
                         Transform(texMatrix, p[10], p[11], 0, u, w, unused);
-                        const bool useMaterial = p[9] == MaterialColor;
-                        UiVertex vertex{x * scale, y * scale, u, w,
-                            useMaterial ? diffuse.X : p[6], useMaterial ? diffuse.Y : p[7],
-                            useMaterial ? diffuse.Z : p[8], matAlpha};
+                        float r = p[6], g = p[7], b = p[8];
+                        if (p[9] == MaterialColor || (p[9] == NormalColor && material.Lighting == 0))
+                        {
+                            r = diffuse.X; g = diffuse.Y; b = diffuse.Z;
+                        }
+                        else if (p[9] == NormalColor)
+                        {
+                            // the normal through the node's matrix, as the DS's vector matrix takes it
+                            const float normalZ = p[3] * m.M13 + p[4] * m.M23 + p[5] * m.M33;
+                            r = Lit(diffuse.X, ambient.X, normalZ, tri.Lights);
+                            g = Lit(diffuse.Y, ambient.Y, normalZ, tri.Lights);
+                            b = Lit(diffuse.Z, ambient.Z, normalZ, tri.Lights);
+                        }
+                        UiVertex vertex{x * scale, y * scale, u, w, r, g, b, matAlpha};
                         zSum += z * scale;
                         switch (v % 3)
                         {
@@ -1280,7 +1322,9 @@ namespace MphRead::Mods::ClassicMenu
             t = steady ? 1 - std::abs(std::fmod(f, 2.0F) - 1) : std::min(1.0F, f);
         }
         const auto lerp = [t](float s, float e) { return (s + (e - s) * t) / 31.0F; };
-        const float a = lerp(Channel(style.StartColor, 24), Channel(style.EndColor, 24));
+        // the game draws text at polygon alpha 30 at most (translucent, so
+        // over the backdrop by 31/32)
+        const float a = std::min(lerp(Channel(style.StartColor, 24), Channel(style.EndColor, 24)), 30.0F / 31.0F);
         if (a <= 0) return;
         _font.Emit(_strings[style.StringId], item.X, item.Y, style.Align, style.WrapWidth,
             style.Size == 0 ? 8.0F : static_cast<float>(style.Size),
