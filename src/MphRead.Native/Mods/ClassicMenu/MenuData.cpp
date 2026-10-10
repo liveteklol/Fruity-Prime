@@ -103,6 +103,7 @@ namespace MphRead::Mods::ClassicMenu
                     text.WrapWidth = r.U16(style + 8);
                     text.Duration = r.Fx(style + 12);
                     text.Size = static_cast<std::uint8_t>(format);
+                    text.LetterSpacing = static_cast<std::uint8_t>(format >> 8);
                     text.LineSpacing = static_cast<std::int8_t>(static_cast<std::uint8_t>(format >> 16));
                     text.Align = static_cast<std::uint8_t>(format >> 24);
                     state.Text = text;
@@ -156,7 +157,7 @@ namespace MphRead::Mods::ClassicMenu
         constexpr int Stride = 13;
         constexpr float MaterialColor = 2.0F;
         // color.a NormalColor: a NORMAL command came last, so the DS lit the
-        // vertex (or, with the material unlit, gave it the emission).
+        // vertex (an unlit material keeps its diffuse).
         constexpr float NormalColor = 3.0F;
 
         // The vertex colour the DS works out at a NORMAL command for a lit
@@ -475,9 +476,9 @@ namespace MphRead::Mods::ClassicMenu
     {
         if (Batches.empty() || Batches.back().TextureId != textureId
             || Batches.back().WrapS != wrapS || Batches.back().WrapT != wrapT
-            || Batches.back().Backdrop != Backdrop || Batches.back().PolyId != polyId)
+            || Batches.back().Backdrop != Backdrop || Batches.back().PolyId != polyId || Batches.back().Pixel != Pixel)
         {
-            Batches.push_back(UiBatch{textureId, wrapS, wrapT, Backdrop, polyId, static_cast<int>(Vertices.size()), 0});
+            Batches.push_back(UiBatch{textureId, wrapS, wrapT, Backdrop, polyId, Pixel, static_cast<int>(Vertices.size()), 0});
         }
         Vertices.push_back(a);
         Vertices.push_back(b);
@@ -549,14 +550,14 @@ namespace MphRead::Mods::ClassicMenu
         return glyph >= 0 && static_cast<std::size_t>(glyph) < _widths.size() ? _widths[static_cast<std::size_t>(glyph)] : Cell;
     }
 
-    float MenuFont::Measure(const std::string& line) const
+    float MenuFont::Measure(const std::string& line, int spacing) const
     {
         float width = 0;
-        for (std::size_t i = 0; i < line.size(); ++i) width += static_cast<float>(Advance(Glyph(line, i)));
+        for (std::size_t i = 0; i < line.size(); ++i) width += static_cast<float>(Advance(Glyph(line, i)) + spacing);
         return width;
     }
 
-    std::vector<std::string> MenuFont::Lines(const std::string& text, int wrapWidth) const
+    std::vector<std::string> MenuFont::Lines(const std::string& text, int wrapWidth, int spacing) const
     {
         std::vector<std::string> lines;
         std::size_t start = 0;
@@ -564,7 +565,7 @@ namespace MphRead::Mods::ClassicMenu
         {
             const std::size_t end = text.find('\n', start);
             const std::string raw = text.substr(start, end == std::string::npos ? std::string::npos : end - start);
-            if (wrapWidth <= 0 || Measure(raw) <= static_cast<float>(wrapWidth))
+            if (wrapWidth <= 0 || Measure(raw, spacing) <= static_cast<float>(wrapWidth))
             {
                 lines.push_back(raw);
             }
@@ -578,7 +579,7 @@ namespace MphRead::Mods::ClassicMenu
                     const std::string word = raw.substr(wordStart,
                         space == std::string::npos ? std::string::npos : space - wordStart);
                     const std::string candidate = current.empty() ? word : current + " " + word;
-                    if (!current.empty() && Measure(candidate) > static_cast<float>(wrapWidth))
+                    if (!current.empty() && Measure(candidate, spacing) > static_cast<float>(wrapWidth))
                     {
                         lines.push_back(current);
                         current = word;
@@ -599,14 +600,15 @@ namespace MphRead::Mods::ClassicMenu
     }
 
     void MenuFont::Emit(const std::string& text, float x, float y, int align, int wrapWidth, float lineHeight,
-        float r, float g, float b, float a, float z, std::vector<WidgetTri>& output, float lineSpacing) const
+        float r, float g, float b, float a, float z, std::vector<WidgetTri>& output, float lineSpacing,
+        int letterSpacing) const
     {
         // The anchor is the bottom of the first line, in text coordinates (Y
         // up from the bottom of the touch screen): menu-space y = textY - 192.
         float top = y - 192.0F + lineHeight;
-        for (const std::string& line : Lines(text, wrapWidth))
+        for (const std::string& line : Lines(text, wrapWidth, letterSpacing))
         {
-            const float width = Measure(line);
+            const float width = Measure(line, letterSpacing);
             float penX = align == 1 ? x - width : align == 2 ? x - std::floor(width / 2.0F) : x;
             for (std::size_t i = 0; i < line.size(); ++i)
             {
@@ -629,7 +631,7 @@ namespace MphRead::Mods::ClassicMenu
                     output.push_back(WidgetTri{p0, p1, p2, z, 0, _textureId});
                     output.push_back(WidgetTri{p0, p2, p3, z, 0, _textureId});
                 }
-                penX += static_cast<float>(Advance(glyph));
+                penX += static_cast<float>(Advance(glyph) + letterSpacing);
             }
             top -= lineHeight + lineSpacing;
         }
@@ -1410,7 +1412,7 @@ namespace MphRead::Mods::ClassicMenu
             lerp(Channel(style.StartColor, 0), Channel(style.EndColor, 0)),
             lerp(Channel(style.StartColor, 8), Channel(style.EndColor, 8)),
             lerp(Channel(style.StartColor, 16), Channel(style.EndColor, 16)),
-            a, 1000.0F + item.Depth, output, static_cast<float>(style.LineSpacing));
+            a, 1000.0F + item.Depth, output, static_cast<float>(style.LineSpacing), style.LetterSpacing);
     }
 
     // ---- MenuLayout ----

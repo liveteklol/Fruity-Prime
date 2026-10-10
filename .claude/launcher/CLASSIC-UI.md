@@ -39,11 +39,13 @@ title, a minute.
   4,16,16 -> orange 19,9,6, 170 ticks each, from the title's first tick.
 - **Grooves.** `frontend2d/slots` (polygon alpha 21) and `lines` (fading in
   to 24 over 10 ticks on a page, out over 10 leaving it); lit like widgets.
-- **Vertices** are truncated to the pixel they fall in. **Text** is drawn at
-  polygon alpha 30 at most. A text style's format bytes are size, ?, line
-  spacing (signed, added between lines: descriptions +1, two-line labels -1),
-  alignment; the second byte (1-4 on "START GAME", "BEGIN GAME", "PLAYER")
-  is not understood yet.
+- **Vertices** are truncated to the pixel they fall in, and a polygon
+  thinner than a pixel is still drawn a pixel wide a row (a flat one, one
+  row): the BEGIN GAME bar's squares collapse into black lines.
+- **Text** is drawn at polygon alpha 30 at most. A text style's format bytes
+  are size, letter spacing (added to every advance: "BEGIN GAME" 3,
+  "PLAYER" 4), line spacing (signed, added between lines: descriptions +1,
+  two-line labels -1) and alignment.
 - **Leaving a page.** Items with a way to hide play it. An item with no hidden
   look and no hide transition stays as it is until the next page comes in if
   it is a widget or an animating text ("SELECT A GAME MODE" keeps pulsing);

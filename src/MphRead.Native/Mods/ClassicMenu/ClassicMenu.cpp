@@ -320,6 +320,7 @@ namespace MphRead::Mods::ClassicMenu
                         v.Y = (g->Oy + y * g->S) * _unit;
                         return v;
                     };
+                    _draw.Pixel = g->S * _unit;
                     _draw.Triangle(t.TextureId, t.WrapS, t.WrapT, place(t.A), place(t.B), place(t.C), ItemId(t.Item));
                 }
                 return _draw;
@@ -538,6 +539,7 @@ namespace MphRead::Mods::ClassicMenu
                     return UiVertex{x, y, 0, 0, static_cast<float>(top[0] >> shift) / 31, static_cast<float>(top[1] >> shift) / 31,
                         static_cast<float>(top[2] >> shift) / 31, TintAlpha};
                 };
+                _draw.Pixel = b.S * _unit;
                 const float x1 = width * _unit;
                 for (int screen = 0; screen < 2; ++screen)
                 {
@@ -742,18 +744,112 @@ namespace MphRead::Mods::ClassicMenu
                 const UiTexture* texture = textures[bi];
                 const int tw = texture != nullptr ? texture->Width : 0;
                 const int th = texture != nullptr ? texture->Height : 0;
+                // one pixel's colour (interpolated vertex colour, texture coordinates) into its layer
+                const auto plot = [&](int x, int y, float r, float g, float bl, float al, float u, float t)
+                {
+                    if (texture != nullptr)
+                    {
+                        const int tx = WrapCoord(static_cast<int>(std::floor(u * static_cast<float>(tw))), tw, batch.WrapS);
+                        const int ty = WrapCoord(static_cast<int>(std::floor(t * static_cast<float>(th))), th, batch.WrapT);
+                        const ColorRgba& texel = texture->Pixels[static_cast<std::size_t>(ty) * static_cast<std::size_t>(tw)
+                            + static_cast<std::size_t>(tx)];
+                        constexpr float Unit = 1.0F / 255.0F;
+                        r *= static_cast<float>(texel.Red) * Unit;
+                        g *= static_cast<float>(texel.Green) * Unit;
+                        bl *= static_cast<float>(texel.Blue) * Unit;
+                        al *= static_cast<float>(texel.Alpha) * Unit;
+                    }
+                    const std::size_t at = static_cast<std::size_t>(y) * static_cast<std::size_t>(width) + static_cast<std::size_t>(x);
+                    if (batch.Backdrop)
+                    {
+                        if (al <= 0.0F) return;
+                        pixels[at] = Byte(r) | (static_cast<std::uint32_t>(Byte(g)) << 8)
+                            | (static_cast<std::uint32_t>(Byte(bl)) << 16) | 0xFF000000U;
+                        return;
+                    }
+                    const int alpha = std::min(31, static_cast<int>(al * 31.0F + 0.5F));
+                    if (alpha <= 0) return;
+                    Pixel3d& dst = layer[at];
+                    if (alpha == 31)
+                    {
+                        dst = Pixel3d{Byte(r), Byte(g), Byte(bl), 31, -1};
+                        return;
+                    }
+                    if (batch.PolyId >= 0 && dst.Translucent == batch.PolyId) return;
+                    if (dst.Alpha == 0)
+                    {
+                        dst = Pixel3d{Byte(r), Byte(g), Byte(bl), static_cast<std::uint8_t>(alpha), batch.PolyId};
+                        return;
+                    }
+                    const float s = static_cast<float>(alpha + 1) / 32.0F;
+                    constexpr float Unit = 1.0F / 255.0F;
+                    dst.R = Byte(r * s + static_cast<float>(dst.R) * Unit * (1.0F - s));
+                    dst.G = Byte(g * s + static_cast<float>(dst.G) * Unit * (1.0F - s));
+                    dst.B = Byte(bl * s + static_cast<float>(dst.B) * Unit * (1.0F - s));
+                    dst.Alpha = static_cast<std::uint8_t>(std::max<int>(dst.Alpha, alpha));
+                    dst.Translucent = batch.PolyId;
+                };
+                const int pixel = std::max(1, static_cast<int>(std::ceil(batch.Pixel - 1e-3F)));
                 for (int v = batch.Start; v + 2 < batch.Start + batch.Count; v += 3)
                 {
                     const UiVertex& a = list.Vertices[static_cast<std::size_t>(v)];
                     const UiVertex& b = list.Vertices[static_cast<std::size_t>(v + 1)];
                     const UiVertex& c = list.Vertices[static_cast<std::size_t>(v + 2)];
+                    const float fx0 = std::min({a.X, b.X, c.X}), fx1 = std::max({a.X, b.X, c.X});
+                    const float fy0 = std::min({a.Y, b.Y, c.Y}), fy1 = std::max({a.Y, b.Y, c.Y});
+                    // Thinner than a DS pixel: the DS still draws a pixel a row (a
+                    // span is never empty) and a row for a flat one -- a square
+                    // squeezed to nothing is a line, as the BEGIN GAME bar's are.
+                    const bool thinX = fx1 - fx0 < batch.Pixel - 1e-3F;
+                    const bool thinY = fy1 - fy0 < batch.Pixel - 1e-3F;
+                    if (thinX || thinY)
+                    {
+                        // along the long side, between the two vertices furthest apart on it
+                        const UiVertex* lo = &a;
+                        const UiVertex* hi = &a;
+                        for (const UiVertex* p : {&b, &c})
+                        {
+                            const float k = thinX ? p->Y : p->X;
+                            if (k < (thinX ? lo->Y : lo->X)) lo = p;
+                            if (k > (thinX ? hi->Y : hi->X)) hi = p;
+                        }
+                        const float from = thinX ? lo->Y : lo->X;
+                        const float span = (thinX ? hi->Y : hi->X) - from;
+                        const auto range = [&](float f0, float f1, bool thin, int& i0, int& i1)
+                        {
+                            i0 = static_cast<int>(std::ceil(f0 - 0.5F));
+                            i1 = static_cast<int>(std::floor(f1 - 0.5F));
+                            if (thin || i0 > i1)
+                            {
+                                i0 = static_cast<int>(std::floor(f0));
+                                i1 = i0 + pixel - 1;
+                            }
+                        };
+                        int x0, x1, y0, y1;
+                        range(fx0, fx1, thinX, x0, x1);
+                        range(fy0, fy1, thinY, y0, y1);
+                        x0 = std::max(x0, 0); x1 = std::min(x1, width - 1);
+                        y0 = std::max(y0, rowBegin); y1 = std::min(y1, rowEnd - 1);
+                        for (int y = y0; y <= y1; ++y)
+                        {
+                            for (int x = x0; x <= x1; ++x)
+                            {
+                                const float along = (thinX ? static_cast<float>(y) : static_cast<float>(x)) + 0.5F;
+                                const float t = span > 1e-6F ? std::clamp((along - from) / span, 0.0F, 1.0F) : 0.0F;
+                                const auto mix = [t](float p, float q) { return p + (q - p) * t; };
+                                plot(x, y, mix(lo->R, hi->R), mix(lo->G, hi->G), mix(lo->B, hi->B), mix(lo->A, hi->A),
+                                    mix(lo->U, hi->U), mix(lo->V, hi->V));
+                            }
+                        }
+                        continue;
+                    }
                     const float area = (b.X - a.X) * (c.Y - a.Y) - (b.Y - a.Y) * (c.X - a.X);
                     if (std::abs(area) < 1e-6F) continue;
-                    const int minY = std::max(rowBegin, static_cast<int>(std::floor(std::min({a.Y, b.Y, c.Y}))));
-                    const int maxY = std::min(rowEnd - 1, static_cast<int>(std::ceil(std::max({a.Y, b.Y, c.Y}))));
+                    const int minY = std::max(rowBegin, static_cast<int>(std::floor(fy0)));
+                    const int maxY = std::min(rowEnd - 1, static_cast<int>(std::ceil(fy1)));
                     if (minY > maxY) continue;
-                    const int minX = std::max(0, static_cast<int>(std::floor(std::min({a.X, b.X, c.X}))));
-                    const int maxX = std::min(width - 1, static_cast<int>(std::ceil(std::max({a.X, b.X, c.X}))));
+                    const int minX = std::max(0, static_cast<int>(std::floor(fx0)));
+                    const int maxX = std::min(width - 1, static_cast<int>(std::ceil(fx1)));
                     if (minX > maxX) continue;
                     const float inv = 1.0F / area;
                     // the barycentric weights as planes over pixel centres: w = (A x + B y + C) * inv
@@ -790,8 +886,6 @@ namespace MphRead::Mods::ClassicMenu
                         edge(-a0 - a1, -b0 - b1, 1.0F - c0 - c1);
                         const int x0 = std::max(minX, static_cast<int>(std::floor(lo)));
                         const int x1 = std::min(maxX, static_cast<int>(std::ceil(hi)));
-                        if (x0 > x1) continue;
-                        const std::size_t row = static_cast<std::size_t>(y) * static_cast<std::size_t>(width);
                         for (int x = x0; x <= x1; ++x)
                         {
                             const float px = static_cast<float>(x) + 0.5F;
@@ -802,53 +896,9 @@ namespace MphRead::Mods::ClassicMenu
                             // again over its own polygon ID), never dropped by both
                             constexpr float Inside = -1e-4F;
                             if (w0 < Inside || w1 < Inside || 1.0F - w0 - w1 < Inside) continue;
-                            float r = pr.Dx * px + pr.Dy * py + pr.At;
-                            float g = pg.Dx * px + pg.Dy * py + pg.At;
-                            float bl = pb.Dx * px + pb.Dy * py + pb.At;
-                            float al = pa.Dx * px + pa.Dy * py + pa.At;
-                            if (texture != nullptr)
-                            {
-                                const float u = pu.Dx * px + pu.Dy * py + pu.At;
-                                const float t = pv.Dx * px + pv.Dy * py + pv.At;
-                                const int tx = WrapCoord(static_cast<int>(std::floor(u * static_cast<float>(tw))), tw, batch.WrapS);
-                                const int ty = WrapCoord(static_cast<int>(std::floor(t * static_cast<float>(th))), th, batch.WrapT);
-                                const ColorRgba& texel = texture->Pixels[static_cast<std::size_t>(ty) * static_cast<std::size_t>(tw)
-                                    + static_cast<std::size_t>(tx)];
-                                constexpr float Unit = 1.0F / 255.0F;
-                                r *= static_cast<float>(texel.Red) * Unit;
-                                g *= static_cast<float>(texel.Green) * Unit;
-                                bl *= static_cast<float>(texel.Blue) * Unit;
-                                al *= static_cast<float>(texel.Alpha) * Unit;
-                            }
-                            const std::size_t at = row + static_cast<std::size_t>(x);
-                            if (batch.Backdrop)
-                            {
-                                if (al <= 0.0F) continue;
-                                pixels[at] = Byte(r) | (static_cast<std::uint32_t>(Byte(g)) << 8)
-                                    | (static_cast<std::uint32_t>(Byte(bl)) << 16) | 0xFF000000U;
-                                continue;
-                            }
-                            const int alpha = std::min(31, static_cast<int>(al * 31.0F + 0.5F));
-                            if (alpha <= 0) continue;
-                            Pixel3d& dst = layer[at];
-                            if (alpha == 31)
-                            {
-                                dst = Pixel3d{Byte(r), Byte(g), Byte(bl), 31, -1};
-                                continue;
-                            }
-                            if (batch.PolyId >= 0 && dst.Translucent == batch.PolyId) continue;
-                            if (dst.Alpha == 0)
-                            {
-                                dst = Pixel3d{Byte(r), Byte(g), Byte(bl), static_cast<std::uint8_t>(alpha), batch.PolyId};
-                                continue;
-                            }
-                            const float s = static_cast<float>(alpha + 1) / 32.0F;
-                            constexpr float Unit = 1.0F / 255.0F;
-                            dst.R = Byte(r * s + static_cast<float>(dst.R) * Unit * (1.0F - s));
-                            dst.G = Byte(g * s + static_cast<float>(dst.G) * Unit * (1.0F - s));
-                            dst.B = Byte(bl * s + static_cast<float>(dst.B) * Unit * (1.0F - s));
-                            dst.Alpha = static_cast<std::uint8_t>(std::max<int>(dst.Alpha, alpha));
-                            dst.Translucent = batch.PolyId;
+                            plot(x, y, pr.Dx * px + pr.Dy * py + pr.At, pg.Dx * px + pg.Dy * py + pg.At,
+                                pb.Dx * px + pb.Dy * py + pb.At, pa.Dx * px + pa.Dy * py + pa.At,
+                                pu.Dx * px + pu.Dy * py + pu.At, pv.Dx * px + pv.Dy * py + pv.At);
                         }
                     }
                 }

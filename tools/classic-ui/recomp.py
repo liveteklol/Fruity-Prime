@@ -20,7 +20,8 @@ The title, settled:  run:2421 tap:128,96:4 run:275   (frame ~2700)
 Main menu, settled:  ... tap:128,96:4 run:296         (frame ~3000)
 
 Environment: MPH_RECOMP_RUNNER (nds_runner path), MPH_ROM (the USA rev 0
-.nds), MPH_SAVE (a save file to use -- copy one, the runner writes it).
+.nds), MPH_SAVE (a save file to use -- copy one, the runner writes it),
+MPH_RECOMP_LOG (the runner's output; recomp-runner.log in the working folder).
 NDS_3D_RENDERER=soft is set: the software renderer is the deterministic one.
 """
 import collections
@@ -52,7 +53,7 @@ class Recomp:
                 "--freebios", "--generated-firmware"]
         save = os.environ.get("MPH_SAVE")
         args += ["--save-path", save] if save else ["--no-save"]
-        self.log = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "runner.log"), "w")
+        self.log = open(os.environ.get("MPH_RECOMP_LOG", "recomp-runner.log"), "w")
         self.proc = subprocess.Popen(args, cwd=os.path.dirname(runner), stdout=self.log, stderr=subprocess.STDOUT,
                                      env=dict(os.environ, NDS_3D_RENDERER="soft"))
         deadline = time.time() + 60
@@ -62,7 +63,7 @@ class Recomp:
                 break
             except OSError:
                 if time.time() > deadline or self.proc.poll() is not None:
-                    raise RuntimeError("the runner did not start: see runner.log")
+                    raise RuntimeError("the runner did not start: see its log (MPH_RECOMP_LOG)")
                 time.sleep(0.25)
         self.buf = b""
         self.vblank = self.cmd(cmd="event_counts")["vblank9"]

@@ -83,6 +83,9 @@ namespace MphRead::Mods::ClassicMenu
         std::uint16_t WrapWidth = 0;
         float Duration = 0;
         std::uint8_t Size = 0;
+        // Added to every letter's advance (the format's second byte): "BEGIN
+        // GAME" is spread 3 apart, "PLAYER" and "CONGRATULATIONS" 4.
+        std::uint8_t LetterSpacing = 0;
         // Added to Size between lines (the format's third byte, signed): the
         // main menu's descriptions run at 9, its two-line labels at 7.
         std::int8_t LineSpacing = 0;
@@ -220,6 +223,9 @@ namespace MphRead::Mods::ClassicMenu
         // The DS polygon ID: a translucent pixel is not drawn over a
         // translucent pixel of its own ID (-1: none).
         int PolyId = -1;
+        // A DS pixel's size in the picture's pixels: what a polygon thinner
+        // than one is still drawn as.
+        float Pixel = 1;
         int Start = 0;
         int Count = 0;
     };
@@ -232,8 +238,10 @@ namespace MphRead::Mods::ClassicMenu
         std::vector<UiBatch> Batches;
         // Triangles added while this is set go to the 2D backdrop layer.
         bool Backdrop = false;
+        // A DS pixel's size in the picture's pixels, for the triangles added now.
+        float Pixel = 1;
 
-        void Clear() { Vertices.clear(); Batches.clear(); Backdrop = false; }
+        void Clear() { Vertices.clear(); Batches.clear(); Backdrop = false; Pixel = 1; }
         void Triangle(int textureId, UiWrap wrapS, UiWrap wrapT,
             const UiVertex& a, const UiVertex& b, const UiVertex& c, int polyId = -1);
         void Quad(int textureId, float x0, float y0, float x1, float y1,
@@ -261,15 +269,17 @@ namespace MphRead::Mods::ClassicMenu
     public:
         explicit MenuFont(UiTextureCache& textures);
         // lineHeight places the first line under the anchor; each next one
-        // is lineHeight + lineSpacing further down.
+        // is lineHeight + lineSpacing further down. letterSpacing is added to
+        // every letter's advance, measuring included.
         void Emit(const std::string& text, float x, float y, int align, int wrapWidth, float lineHeight,
-            float r, float g, float b, float a, float z, std::vector<WidgetTri>& output, float lineSpacing = 0) const;
+            float r, float g, float b, float a, float z, std::vector<WidgetTri>& output, float lineSpacing = 0,
+            int letterSpacing = 0) const;
 
     private:
         [[nodiscard]] static int Glyph(const std::string& text, std::size_t& i);
         [[nodiscard]] int Advance(int glyph) const;
-        [[nodiscard]] float Measure(const std::string& line) const;
-        [[nodiscard]] std::vector<std::string> Lines(const std::string& text, int wrapWidth) const;
+        [[nodiscard]] float Measure(const std::string& line, int spacing) const;
+        [[nodiscard]] std::vector<std::string> Lines(const std::string& text, int wrapWidth, int spacing) const;
 
         std::vector<int> _widths;
         std::vector<int> _offsets;
