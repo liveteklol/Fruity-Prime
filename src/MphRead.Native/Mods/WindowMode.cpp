@@ -36,6 +36,7 @@ namespace
     constexpr std::int32_t F11Key = 300;
 
     WindowStartMode startupState = WindowStartMode::Windowed;
+    WindowStartMode fullscreenKindState = WindowStartMode::ExclusiveFullscreen;
     bool startupForcedState = false;
     bool fullscreenState = false;
     WindowStartMode activeState = WindowStartMode::Windowed;
@@ -58,6 +59,15 @@ namespace MphRead::Mods
     void WindowMode::Startup(WindowStartMode value) noexcept
     {
         startupState = value;
+        FullscreenKind(value);
+    }
+
+    void WindowMode::FullscreenKind(WindowStartMode kind) noexcept
+    {
+        if (kind != WindowStartMode::Windowed)
+        {
+            fullscreenKindState = kind;
+        }
     }
 
     bool WindowMode::StartupForced() noexcept
@@ -68,6 +78,7 @@ namespace MphRead::Mods
     void WindowMode::ForceStartup(WindowStartMode mode) noexcept
     {
         startupState = mode;
+        FullscreenKind(mode);
         startupForcedState = true;
     }
 
@@ -83,9 +94,7 @@ namespace MphRead::Mods
 
     WindowStartMode WindowMode::PreferredFullscreen() noexcept
     {
-        return startupState == WindowStartMode::ExclusiveFullscreen
-            ? WindowStartMode::ExclusiveFullscreen
-            : WindowStartMode::BorderlessFullscreen;
+        return startupState != WindowStartMode::Windowed ? startupState : fullscreenKindState;
     }
 
     OpenTK::Mathematics::Vector2i WindowMode::WindowedSize() noexcept

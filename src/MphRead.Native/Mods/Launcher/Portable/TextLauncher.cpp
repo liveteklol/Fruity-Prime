@@ -589,11 +589,11 @@ namespace
         LauncherPrefs::LastHunter(AskHunter());
         const MphRead::Mods::WindowStartMode current = LauncherPrefs::WindowMode();
         const bool fullscreen = current != MphRead::Mods::WindowStartMode::Windowed;
-        // A yes keeps the fullscreen kind already chosen (exclusive stays
-        // exclusive); this prompt only asks whether, not which.
+        // A yes is the fullscreen kind already chosen; this prompt only asks
+        // whether, not which.
         LauncherPrefs::WindowMode(
             AskYesNo("  Start fullscreen", fullscreen)
-                ? (fullscreen ? current : MphRead::Mods::WindowStartMode::BorderlessFullscreen)
+                ? LauncherPrefs::FullscreenKind()
                 : MphRead::Mods::WindowStartMode::Windowed);
 
         const std::string endpoint = Ask("  Default server",
@@ -1072,6 +1072,7 @@ namespace MphRead::Mods::Launcher
             std::shared_ptr<MenuSettings> settings = MphRead::GameState::LoadSettings();
             MphRead::Mods::GameSettings::Apply(settings);
             LauncherPrefs::Load();
+            MphRead::Mods::WindowMode::FullscreenKind(LauncherPrefs::FullscreenKind());
             if (!MphRead::Mods::WindowMode::StartupForced())
             {
                 MphRead::Mods::WindowMode::Startup(LauncherPrefs::WindowMode());

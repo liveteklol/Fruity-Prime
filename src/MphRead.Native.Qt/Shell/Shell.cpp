@@ -607,6 +607,7 @@ namespace MphRead::Mods::Launcher::Gui
             Portable::GameFiles::ApplyPaths();
             MphRead::Mods::ThumbnailGenerator::EnsureCustomPreviews();
         }
+        MphRead::Mods::WindowMode::FullscreenKind(Portable::LauncherPrefs::FullscreenKind());
         if (!MphRead::Mods::WindowMode::StartupForced())
         {
             MphRead::Mods::WindowMode::Startup(Portable::LauncherPrefs::WindowMode());

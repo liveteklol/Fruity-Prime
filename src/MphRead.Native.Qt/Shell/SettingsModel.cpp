@@ -411,12 +411,24 @@ namespace MphRead::Qt
     {
         std::vector<Row> rows;
 #if !defined(__ANDROID__)
+        // Windowed or fullscreen; how fullscreen is done is a checkbox under
+        // it, not a third mode: exclusive unless asked otherwise, since the
+        // borderless kind is drawn through the desktop compositor. Always
+        // shown -- it is also what the pause menu's Fullscreen and F11 enter
+        // from a windowed start.
         rows.push_back(Heading(QStringLiteral("Window")));
         rows.push_back(Choice(QStringLiteral("window"), QStringLiteral("Mode"),
-            {QStringLiteral("Windowed"), QStringLiteral("Fullscreen (borderless)"),
-                QStringLiteral("Fullscreen (exclusive)")},
-            LauncherPrefs::WindowMode() == Mods::WindowStartMode::ExclusiveFullscreen ? 2
-                : LauncherPrefs::WindowMode() == Mods::WindowStartMode::BorderlessFullscreen ? 1 : 0));
+            {QStringLiteral("Windowed"), QStringLiteral("Fullscreen")},
+            LauncherPrefs::WindowMode() == Mods::WindowStartMode::Windowed ? 0 : 1));
+        rows.push_back(Toggle(QStringLiteral("windowedFullscreen"), QStringLiteral("When fullscreen, use a borderless fullscreen window"),
+            LauncherPrefs::WindowedFullscreen()));
+        // Shown from the start, not only once the box is ticked: what the box
+        // costs is part of what it means, and a warning that appears as it is
+        // ticked reads as something having gone wrong.
+        rows.push_back(NoteRow(QStringLiteral(
+            "On: a borderless fullscreen window, drawn through the desktop compositor, which adds "
+            "display latency. Off: exclusive fullscreen, the lowest latency."),
+            QColor(0xc0, 0x8a, 0x3e))); // Theme.warn
 #endif
         // Switched in place on save: the window is remade on the chosen
         // renderer and the match and these menus carry on. A preference never
@@ -2124,10 +2136,11 @@ namespace MphRead::Qt
         }
         if (_display.Find(QStringLiteral("window")) != nullptr)
         {
-            const int choice = index(_display, "window");
-            const Mods::WindowStartMode mode = choice == 2 ? Mods::WindowStartMode::ExclusiveFullscreen
-                : choice == 1 ? Mods::WindowStartMode::BorderlessFullscreen
-                : Mods::WindowStartMode::Windowed;
+            const Row* windowed = _display.Find(QStringLiteral("windowedFullscreen"));
+            LauncherPrefs::WindowedFullscreen(windowed != nullptr && windowed->On);
+            Mods::WindowMode::FullscreenKind(LauncherPrefs::FullscreenKind());
+            const Mods::WindowStartMode mode = index(_display, "window") == 0 ? Mods::WindowStartMode::Windowed
+                : LauncherPrefs::FullscreenKind();
             LauncherPrefs::WindowMode(mode);
             Mods::WindowMode::Startup(mode);
             if (mode != Mods::WindowMode::Active())
