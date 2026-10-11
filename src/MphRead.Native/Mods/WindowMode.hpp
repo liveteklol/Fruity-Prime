@@ -66,9 +66,13 @@ namespace MphRead::Mods
         // window that cannot do it).
         [[nodiscard]] static WindowStartMode Active() noexcept;
 
-        // The fullscreen kind F11 and the pause menu enter: the preferred one
-        // when that is a fullscreen mode, borderless otherwise.
+        // The fullscreen kind F11 and the pause menu enter: the one the window
+        // started in when it started fullscreen, else FullscreenKind's.
         [[nodiscard]] static WindowStartMode PreferredFullscreen() noexcept;
+        // What fullscreen means for a window that starts windowed: exclusive
+        // unless the player chose the borderless kind. A fullscreen Startup
+        // sets it too.
+        static void FullscreenKind(WindowStartMode kind) noexcept;
 
         // The shape the window had before fullscreen took it, for whoever
         // needs the *windowed* geometry while the window is reporting the

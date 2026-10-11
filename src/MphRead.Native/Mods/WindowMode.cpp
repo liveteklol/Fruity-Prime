@@ -38,6 +38,7 @@ namespace
     constexpr std::int32_t F11Key = 300;
 
     WindowStartMode startupState = WindowStartMode::Windowed;
+    WindowStartMode fullscreenKindState = WindowStartMode::ExclusiveFullscreen;
     bool startupForcedState = false;
     bool fullscreenState = false;
     WindowStartMode activeState = WindowStartMode::Windowed;
@@ -60,6 +61,15 @@ namespace MphRead::Mods
     void WindowMode::Startup(WindowStartMode value) noexcept
     {
         startupState = value;
+        FullscreenKind(value);
+    }
+
+    void WindowMode::FullscreenKind(WindowStartMode kind) noexcept
+    {
+        if (kind != WindowStartMode::Windowed)
+        {
+            fullscreenKindState = kind;
+        }
     }
 
     bool WindowMode::StartupForced() noexcept
@@ -70,6 +80,7 @@ namespace MphRead::Mods
     void WindowMode::ForceStartup(WindowStartMode mode) noexcept
     {
         startupState = mode;
+        FullscreenKind(mode);
         startupForcedState = true;
     }
 
@@ -85,9 +96,7 @@ namespace MphRead::Mods
 
     WindowStartMode WindowMode::PreferredFullscreen() noexcept
     {
-        return startupState == WindowStartMode::ExclusiveFullscreen
-            ? WindowStartMode::ExclusiveFullscreen
-            : WindowStartMode::BorderlessFullscreen;
+        return startupState != WindowStartMode::Windowed ? startupState : fullscreenKindState;
     }
 
     OpenTK::Mathematics::Vector2i WindowMode::WindowedSize() noexcept
@@ -197,31 +206,34 @@ namespace MphRead::Mods
         activeState = WindowStartMode::BorderlessFullscreen;
 
         window.WindowStateNormal();
-        window.WindowBorder(HiddenWindowBorder);
-        RendererPlatform::ProcessEvents();
-        window.Location(monitor.Min);
-
-        // The monitor is in physical pixels, the client size in the
-        // toolkit's own units: logical ones under Qt. At 150 % scaling the
-        // physical size given as is made a 3840x2399 window on a 2560x1600
-        // screen, and only its top-left two thirds were visible.
-        const OpenTK::Mathematics::Vector2i client = window.ClientSize();
-        const OpenTK::Mathematics::Vector2i framebuffer = window.FramebufferSize();
-        // The width is rounded to the nearest unit; the height is rounded
-        // down so the window stays shorter than the monitor, as it must for
-        // borderless rather than exclusive.
-        const auto logical = [](std::int32_t physical, std::int32_t clientUnits, std::int32_t pixels, bool down)
+        if (!window.WindowStateBorderless())
         {
-            if (clientUnits <= 0 || pixels <= 0)
+            window.WindowBorder(HiddenWindowBorder);
+            RendererPlatform::ProcessEvents();
+            window.Location(monitor.Min);
+
+            // The monitor is in physical pixels, the client size in the
+            // toolkit's own units: logical ones under Qt. At 150 % scaling the
+            // physical size given as is made a 3840x2399 window on a 2560x1600
+            // screen, and only its top-left two thirds were visible.
+            const OpenTK::Mathematics::Vector2i client = window.ClientSize();
+            const OpenTK::Mathematics::Vector2i framebuffer = window.FramebufferSize();
+            // The width is rounded to the nearest unit; the height is rounded
+            // down so the window stays shorter than the monitor, as it must for
+            // borderless rather than exclusive.
+            const auto logical = [](std::int32_t physical, std::int32_t clientUnits, std::int32_t pixels, bool down)
             {
-                return physical;
-            }
-            const double units = static_cast<double>(physical) * clientUnits / pixels;
-            return std::max<std::int32_t>(1, static_cast<std::int32_t>(down ? std::floor(units) : std::round(units)));
-        };
-        window.ClientSize(OpenTK::Mathematics::Vector2i{
-            logical(monitor.Size.X, client.X, framebuffer.X, false),
-            logical(UncheckedDecrement(monitor.Size.Y), client.Y, framebuffer.Y, true)});
+                if (clientUnits <= 0 || pixels <= 0)
+                {
+                    return physical;
+                }
+                const double units = static_cast<double>(physical) * clientUnits / pixels;
+                return std::max<std::int32_t>(1, static_cast<std::int32_t>(down ? std::floor(units) : std::round(units)));
+            };
+            window.ClientSize(OpenTK::Mathematics::Vector2i{
+                logical(monitor.Size.X, client.X, framebuffer.X, false),
+                logical(UncheckedDecrement(monitor.Size.Y), client.Y, framebuffer.Y, true)});
+        }
 
         SetTopmost(window, true);
         // And written down, so the next session opens this way. See

@@ -183,6 +183,11 @@ namespace MphRead
             const std::string& name, bool firstHunt = false,
             MetaDir dir = static_cast<MetaDir>(0), bool noCache = false);
         [[nodiscard]] static std::shared_ptr<ModelInstance> GetRoomModelInstance(const std::string& name);
+        // A model by file path (and its animation file, if any), outside the
+        // metadata: the front end's menu widgets name their files directly.
+        // Not cached; the caller keeps what it reads.
+        [[nodiscard]] static std::shared_ptr<Model> ReadModelFile(const std::string& name,
+            const std::string& modelPath, const std::optional<std::string>& animationPath);
         static void RemoveModel(const std::string& name, bool firstHunt = false);
         [[nodiscard]] static std::pair<std::int32_t, std::vector<std::uint8_t>> ReadKanjiFont(bool singlePlayer);
 

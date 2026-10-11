@@ -2,6 +2,7 @@
 // authority can run the same touch roll and touch/shoulder boost branches.
 #include "../Mods/Network/NetProtocol.hpp"
 #include "../Mods/Network/LocalShotLog.hpp"
+#include "../Mods/Network/DeathaltWitness.hpp"
 #include "../Mods/Network/RemoteBombState.hpp"
 #include "../Mods/Network/RemoteShotQueue.hpp"
 #include "../Mods/Network/ShotEventLedger.hpp"
@@ -89,6 +90,27 @@ namespace
         Expect(HitClaimPacket::Read(claimBytes).ShotSequence == 0xA1B2C3D4U, "a claim names its shot");
         Expect(HitClaimPacket::Read(claimBytes).Damage == 9 && HitClaimPacket::Read(claimBytes).TurretDamage == 10,
             "and splits a hit on a turret into the body's share and the turret's");
+        claim.Flags = HitClaimPacket::FlagSplash;
+        claim.Cause = HitClaimPacket::CauseDeathalt;
+        claim.Write(claimBytes);
+        Expect(HitClaimPacket::Read(claimBytes).Cause == HitClaimPacket::CauseDeathalt
+            && HitClaimPacket::Read(claimBytes).Flags == HitClaimPacket::FlagSplash,
+            "a claim says what did the damage, beside its flags");
+        claimBytes[70] = 0x7F;
+        Expect(HitClaimPacket::Read(claimBytes).Cause == HitClaimPacket::CauseHit, "a cause nobody knows is a plain hit");
+
+        // A shooter's Death Alt is taken from what the authority saw of it.
+        MphRead::Mods::Network::DeathaltWitness witness;
+        Expect(!witness.Vouches(2, 100), "nobody seen with one: not vouched for");
+        witness.Observe(2, true, 100);
+        witness.Observe(2, false, 140);
+        Expect(witness.Vouches(2, 100 + MphRead::Mods::Network::DeathaltWitness::SlackFrames),
+            "a claim a trip behind the power-up running out is still its");
+        Expect(!witness.Vouches(2, 101 + MphRead::Mods::Network::DeathaltWitness::SlackFrames),
+            "past the slack it is not");
+        Expect(!witness.Vouches(3, 100), "and one player's Death Alt is not another's");
+        witness.Forget(2);
+        Expect(!witness.Vouches(2, 100), "a new life starts unseen");
 
         shot.HasShot = true;
         shot.ShotOrigin = OpenTK::Mathematics::Vector3(1, 2, 3);

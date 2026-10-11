@@ -290,8 +290,11 @@ namespace MphRead::Mods::Network
                 Entities::PlayerEntity* owner = NetHitPrediction::OwnerOf(source);
                 // Both ends human: a bot has no machine of its own to resolve
                 // hits on it, so hits on bots stay the authority's.
-                // A remote player's hits on itself are its claims too.
+                // A remote player's hits on itself are its claims too. A burn's
+                // ticks are not anybody's claims: applied here, credited to
+                // the burner the claim that lit it named.
                 if (owner != nullptr && !owner->IsBot() && !victim.IsBot()
+                    && !Runtime::HasFlag(flags, Entities::DamageFlags::Burn)
                     && owner->SlotIndex() != NetSession::LocalSlot() && owner->SlotIndex() >= 0
                     && static_cast<std::size_t>(owner->SlotIndex()) < NetSession::SlotOccupied.size()
                     && NetSession::SlotOccupied[static_cast<std::size_t>(owner->SlotIndex())])

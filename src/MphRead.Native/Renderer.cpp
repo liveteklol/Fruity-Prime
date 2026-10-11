@@ -681,7 +681,8 @@ namespace MphRead
                 << ", " << Mods::RenderOptions::CelBands() << " bands, outline "
                 << NativeRuntime::ToStringInvariant(Mods::RenderOptions::CelEdge(), "0.00")
                 << ", fog " << BoolOnOff(Mods::RenderOptions::Fog())
-                << ", performance mode " << BoolOnOff(Mods::RenderOptions::PerformanceMode()) << '\n';
+                << ", performance mode " << BoolOnOff(Mods::RenderOptions::PerformanceMode()
+                    || Mods::ThumbnailMode::Active()) << '\n';
             InitShaders();
             _transientGeometry
                 = NativeRuntime::Rhi::CreateSceneTransientGeometry(Gpu(), Commands());
@@ -2257,11 +2258,14 @@ namespace MphRead
         BeginScenePass(ScenePass::Opaque);
         for (const auto& item : _nonDecalItems) RenderItem(item);
         // The depth the rebuild pass below would draw again, kept aside.
-        const bool opaqueDepthSaved = !Mods::RenderOptions::PerformanceMode() && SaveOpaqueDepth()
+        // Map thumbnails are always drawn in performance mode, whatever the
+        // player chose, so a preview looks the same on every machine.
+        const bool performance = Mods::RenderOptions::PerformanceMode() || Mods::ThumbnailMode::Active();
+        const bool opaqueDepthSaved = !performance && SaveOpaqueDepth()
             && Commands().SaveAttachmentDepth();
         BeginScenePass(ScenePass::Decal);
         for (const auto& item : _decalItems) RenderItem(item);
-        if (Mods::RenderOptions::PerformanceMode())
+        if (performance)
         {
             // Performance mode: each translucent item once, blended over the
             // opaque depth. No stencil pass, depth clear or depth rebuild.
@@ -2571,17 +2575,45 @@ namespace MphRead
         }
     }
 
-    void Scene::UpdateCameraRotation(float stepH, float stepV)
+    void Scene::UpdateCameraRotation(float stepH, float stepV, float limitV)
     {
         const float angleH = std::atan2(_cameraFacing.X, -_cameraFacing.Z) + stepH;
-        float angleV = std::asin(_cameraFacing.Y) + stepV;
-        angleV = std::clamp(angleV, -_almostHalfPi, _almostHalfPi);
+        float angleV = std::asin(std::clamp(_cameraFacing.Y, -1.0F, 1.0F)) + stepV;
+        angleV = std::clamp(angleV, -limitV, limitV);
         _cameraFacing = Vector3(
             std::cos(angleV) * std::sin(angleH),
             std::sin(angleV),
             -(std::cos(angleV) * std::cos(angleH))).Normalized();
-        _cameraRight = Vector3::Cross(_cameraFacing, Vector3(0.0F, 1.0F, 0.0F));
-        _cameraUp = Vector3::Cross(_cameraRight, _cameraFacing);
+        UpdateCameraBasis();
+    }
+
+    // The camera's right and up from where it faces, each of length one. The
+    // world's up crossed with a facing near straight up or down is a vector
+    // near zero, and the free camera's sideways step was that short; there
+    // the last right is kept.
+    void Scene::UpdateCameraBasis()
+    {
+        const Vector3 right = Vector3::Cross(_cameraFacing, Vector3(0.0F, 1.0F, 0.0F));
+        if (right.LengthSquared() > 1.0e-8F)
+        {
+            _cameraRight = right.Normalized();
+        }
+        _cameraUp = Vector3::Cross(_cameraRight, _cameraFacing).Normalized();
+    }
+
+    // What holds the free camera still, written to the debug log as it
+    // changes: a camera that will not move has several reasons and looks the
+    // same for all of them.
+    void Scene::NoteRoamCameraHeld(const char* reason)
+    {
+        static const char* last = nullptr;
+        if (reason == last || (reason != nullptr && last != nullptr && std::string_view(reason) == last))
+        {
+            return;
+        }
+        last = reason;
+        Mods::DebugLog::Line("camera", reason != nullptr
+            ? std::string("free camera held: ") + reason : std::string("free camera moving"));
     }
 
     void Scene::StartCutscene(std::int32_t id)
@@ -2602,8 +2634,7 @@ namespace MphRead
             _activeCutscene = -1;
             _cameraPosition = _priorCameraPos;
             _cameraFacing = _priorCameraFacing;
-            _cameraRight = Vector3::Cross(_cameraFacing, Vector3(0.0F, 1.0F, 0.0F));
-            _cameraUp = Vector3::Cross(_cameraRight, _cameraFacing);
+            UpdateCameraBasis();
             _cameraFov = _priorCameraFov;
         }
         if (resetFade)
@@ -3773,6 +3804,11 @@ namespace MphRead
     void Scene::UpdateUniforms()
     {
         UseRoomLights();
+        // Every frame, as the lights: written only when the room was set, the
+        // fog went to whichever program was bound then, and the scene program
+        // kept the previous room's -- the launcher backdrop's warm Alinos fog
+        // over a Data Shrine match on one renderer, its own green on the other.
+        SetShaderFog();
         _shaderConstants->SetFogEnabled(_hasFog && FogOn());
         _shaderConstants->SetCelBands(Mods::RenderOptions::CelShading() ? Mods::RenderOptions::CelBands() : 0);
         _shaderConstants->SetShowColors(_showColors);
@@ -4878,8 +4914,7 @@ namespace MphRead
             _cameraFacing = Vector3(0.0F, 0.0F, -1.0F);
         }
         _cameraFacing = _cameraFacing.Normalized();
-        _cameraRight = Vector3::Cross(_cameraFacing, Vector3(0.0F, 1.0F, 0.0F));
-        _cameraUp = Vector3::Cross(_cameraRight, _cameraFacing);
+        UpdateCameraBasis();
         _cameraMode = MphRead::CameraMode::Roam;
         _inputMode = InputMode::CameraOnly;
         _freeCam = true;
@@ -5005,21 +5040,33 @@ namespace MphRead
         using RendererPlatform::Key;
         const float mouseX = _roamMouseX, mouseY = _roamMouseY;
         _roamMouseX = _roamMouseY = 0.0F;
-        if (_cameraMode != MphRead::CameraMode::Roam || !AllowCameraMovement() || _inputMode == InputMode::PlayerOnly
-            || Mods::PauseMenu::Open() || Mods::Chat::ChatBox::Composing())
+        if (_cameraMode != MphRead::CameraMode::Roam)
+        {
+            return;
+        }
+        const bool alt = _keyboardState->IsKeyDown(RendererPlatform::LeftAltKey)
+            || _keyboardState->IsKeyDown(RendererPlatform::RightAltKey);
+        const char* blocked = !AllowCameraMovement() ? "cutscene"
+            : _inputMode == InputMode::PlayerOnly ? "player-only input"
+            : Mods::PauseMenu::Open() ? "pause menu"
+            : Mods::Chat::ChatBox::Composing() ? "chat" : nullptr;
+        NoteRoamCameraHeld(blocked != nullptr ? blocked : alt ? "Alt held (keys only)" : nullptr);
+        if (blocked != nullptr)
         {
             return;
         }
         constexpr float steps = 1.0F;
-        const bool keys = !(_keyboardState->IsKeyDown(RendererPlatform::LeftAltKey) || _keyboardState->IsKeyDown(RendererPlatform::RightAltKey));
+        const bool keys = !alt;
         const bool shift = keys && (_keyboardState->IsKeyDown(Key::LeftShift) || _keyboardState->IsKeyDown(RendererPlatform::RightShiftKey));
         // The death camera's speed (PlayerEntity::UpdateCameraFree: 0.4 / 2 a step).
         constexpr float DeathCameraStep = 0.4F / 2.0F;
         const float moveStep = (shift ? DeathCameraStep * 5.0F : DeathCameraStep) * steps;
         const float rotStep = DegreesToRadians(shift ? 3.0F : 1.5F) * steps;
         float forward = _roamPadMoveY * DeathCameraStep * steps, right = _roamPadMoveX * DeathCameraStep * steps, rise = _roamPadRise * DeathCameraStep * steps;
-        float stepH = DegreesToRadians(_roamPadLookX + mouseX / 1.5F) * steps;
-        float stepV = DegreesToRadians(_roamPadLookY - mouseY / 1.5F) * steps;
+        // The mouse turns it as it turns a hunter: a quarter of a degree a
+        // count at sensitivity 1 (PlayerEntity::ApplyMouseAim, unzoomed).
+        float stepH = DegreesToRadians(_roamPadLookX + mouseX / 4.0F) * steps;
+        float stepV = DegreesToRadians(_roamPadLookY - mouseY / 4.0F) * steps;
         if (keys)
         {
             if (_keyboardState->IsKeyDown(Key::W)) forward += moveStep;
@@ -5035,7 +5082,13 @@ namespace MphRead
         }
         _cameraPosition = _cameraPosition + Multiply(_cameraFacing, forward) + Multiply(_cameraRight, right);
         _cameraPosition.Y += rise;
-        if (stepH != 0.0F || stepV != 0.0F) UpdateCameraRotation(stepH, stepV);
+        // A hunter's limit (PlayerEntity::UpdateAimY), not the debug camera's
+        // almost-vertical one: within a few thousandths of a degree of the
+        // pole the camera's right is kept rather than derived
+        // (UpdateCameraBasis), so a turn there moved nothing on screen and
+        // landed all at once on the way back down.
+        constexpr float PitchLimit = 85.0F * 3.14159265F / 180.0F;
+        if (stepH != 0.0F || stepV != 0.0F) UpdateCameraRotation(stepH, stepV, PitchLimit);
     }
 
     void Scene::UpdatePointModule()
@@ -6894,6 +6947,21 @@ namespace MphRead
                 _scene->OnMouseClick(true);
             }
         }
+        else if (e.Button == RendererPlatform::MouseButton::Button2
+            && (Mods::Network::DemoPlayback::IsActive() || Mods::SpectatorMode::IsSpectating()))
+        {
+            // The view, beside left click's next player. It was Space, which
+            // is also the free camera's rise: rising out of a player's view
+            // switched back into one, whenever somebody was there to follow.
+            if (Mods::Network::DemoPlayback::IsActive())
+            {
+                _scene->ToggleFreeCamera();
+            }
+            else
+            {
+                Mods::SpectatorMode::ToggleView();
+            }
+        }
         _window->BaseOnMouseDown(e);
     }
 
@@ -7066,20 +7134,6 @@ namespace MphRead
             _window->BaseOnKeyDown(e);
             return;
         }
-        if (e.Key == Key::Space
-            && (Mods::Network::DemoPlayback::IsActive() || Mods::SpectatorMode::IsSpectating()))
-        {
-            if (Mods::Network::DemoPlayback::IsActive())
-            {
-                _scene->ToggleFreeCamera();
-            }
-            else
-            {
-                Mods::SpectatorMode::ToggleView();
-            }
-            _window->BaseOnKeyDown(e);
-            return;
-        }
         if (e.Key == RendererPlatform::EscapeKey
             && (_scene->CameraMode() == MphRead::CameraMode::Player || _scene->IsFreeCam())
             && Mods::PauseMenu::HandleEscape(*this))
@@ -7230,6 +7284,11 @@ namespace MphRead
     bool RenderWindow::WindowStateFullscreen()
     {
         return _window->WindowStateFullscreen();
+    }
+
+    bool RenderWindow::WindowStateBorderless()
+    {
+        return _window->WindowStateBorderless();
     }
 
     double RenderWindow::RefreshRate() const

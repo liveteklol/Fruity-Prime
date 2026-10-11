@@ -1,5 +1,6 @@
 #include "QmlTypes.hpp"
 
+#include "ClassicMenuItem.hpp"
 #include "GamepadMonitorItem.hpp"
 #include "HunterStandItem.hpp"
 #include "PlayModel.hpp"
@@ -35,6 +36,7 @@ namespace MphRead::Qt
             });
         qmlRegisterType<PlayModel>(uri, 1, 0, "PlayModel");
         qmlRegisterType<HunterStandItem>(uri, 1, 0, "HunterStand");
+        qmlRegisterType<ClassicMenuItem>(uri, 1, 0, "ClassicMenu");
         qmlRegisterType<GamepadMonitorItem>(uri, 1, 0, "GamepadMonitor");
         qmlRegisterType<ServerBadgeItem>(uri, 1, 0, "ServerBadge");
         qmlRegisterType<SettingsModel>(uri, 1, 0, "SettingsModel");

@@ -217,6 +217,7 @@ namespace MphRead::Mods::Network
         {
             claimFlags = static_cast<std::uint8_t>(claimFlags | HitClaimPacket::FlagSplash);
         }
+
         std::int32_t index = -1;
         for (std::int32_t i = 0; i < OutboxCapacity; i++)
         {
@@ -260,6 +261,7 @@ namespace MphRead::Mods::Network
         entry.Beam = beam == ::MphRead::BeamType::None ? HitClaimPacket::NoBeam : static_cast<std::uint8_t>(beam);
         entry.Damage = static_cast<std::uint16_t>(std::min<std::uint32_t>(damage, 0xFFFFU));
         entry.TurretDamage = static_cast<std::uint16_t>(std::min<std::uint32_t>(turretDamage, 0xFFFFU));
+        entry.Cause = CauseOf(flags);
         entry.Flags = claimFlags;
         entry.HitPoint = hitPoint;
         entry.Impulse = impulse.value_or(OpenTK::Mathematics::Vector3::Zero);
@@ -322,6 +324,7 @@ namespace MphRead::Mods::Network
             packet.Beam = entry.Beam;
             packet.Damage = entry.Damage;
             packet.TurretDamage = entry.TurretDamage;
+            packet.Cause = entry.Cause;
             packet.Flags = entry.Flags;
             packet.HitPoint = entry.HitPoint;
             packet.Impulse = entry.Impulse;
@@ -952,6 +955,7 @@ namespace MphRead::Mods::Network
         entry.Beam = claim.Beam;
         entry.Damage = claim.Damage;
         entry.TurretDamage = claim.TurretDamage;
+        entry.Cause = claim.Cause;
         entry.Flags = claim.Flags;
         entry.AckFrame = claim.AckFrame;
         entry.LaunchFrame = claim.LaunchFrame;
@@ -1032,6 +1036,13 @@ namespace MphRead::Mods::Network
         }
         TrackDeaths();
         const std::uint32_t now = NetSession::NetFrame();
+        for (std::int32_t slot = 0; slot < Slots && static_cast<std::size_t>(slot) < PlayerEntity::Players().size(); ++slot)
+        {
+            if (const auto& player = PlayerEntity::Players()[static_cast<std::size_t>(slot)])
+            {
+                _deathalt.Observe(slot, player->DeathaltRunning(), now);
+            }
+        }
         while (true)
         {
             std::int32_t next = -1;
@@ -1463,6 +1474,31 @@ namespace MphRead::Mods::Network
     // weapon. The shooter already watched this player die, and the claim has
     // passed every test a rescue has, so the kill is made real rather than
     // taken back: what the shooter saw is what happened.
+    std::uint8_t NetHitClaims::CauseOf(DamageFlags flags) noexcept
+    {
+        return HasDamageFlag(flags, DamageFlags::Deathalt) ? HitClaimPacket::CauseDeathalt : HitClaimPacket::CauseHit;
+    }
+
+    DamageFlags NetHitClaims::CauseFlags(const Pending& entry)
+    {
+        auto flags = static_cast<std::int32_t>(DamageFlags::NoDmgInvuln);
+        if ((entry.Flags & HitClaimPacket::FlagHeadshot) != 0)
+        {
+            flags |= static_cast<std::int32_t>(DamageFlags::Headshot);
+        }
+        if (entry.Cause == HitClaimPacket::CauseDeathalt && CauseVouched(entry))
+        {
+            flags |= static_cast<std::int32_t>(DamageFlags::Deathalt);
+        }
+        return static_cast<DamageFlags>(flags);
+    }
+
+    bool NetHitClaims::CauseVouched(const Pending& entry)
+    {
+        return entry.Cause == HitClaimPacket::CauseDeathalt
+            && _deathalt.Vouches(entry.ShooterSlot, NetSession::NetFrame());
+    }
+
     void NetHitClaims::FinishLethal(const Pending& entry)
     {
         if ((entry.Flags & HitClaimPacket::FlagLethal) == 0
@@ -1489,7 +1525,7 @@ namespace MphRead::Mods::Network
         {
             const NetDamage::ClaimScope scope(entry.Beam == HitClaimPacket::NoBeam
                 ? ::MphRead::BeamType::None : static_cast<::MphRead::BeamType>(entry.Beam));
-            victim.TakeDamage(static_cast<std::uint32_t>(left), DamageFlags::NoDmgInvuln, std::nullopt, &shooter);
+            victim.TakeDamage(static_cast<std::uint32_t>(left), CauseFlags(entry), std::nullopt, &shooter);
         }
         catch (...)
         {
@@ -1561,11 +1597,12 @@ namespace MphRead::Mods::Network
             Answer(shooterSlot, entry.Id, HitVerdictPacket::ResultGeometry);
             return;
         }
-        DamageFlags flags = DamageFlags::NoDmgInvuln;
-        if ((entry.Flags & HitClaimPacket::FlagHeadshot) != 0)
+        DamageFlags flags = CauseFlags(entry);
+        if (entry.Cause != HitClaimPacket::CauseHit)
         {
-            flags = static_cast<DamageFlags>(static_cast<std::int32_t>(flags)
-                | static_cast<std::int32_t>(DamageFlags::Headshot));
+            // A cause this machine cannot vouch for: the hit stands, its
+            // cause does not.
+            ++(CauseVouched(entry) ? _causesVouched : _causesStripped);
         }
         _applyingClaim = true;
         _applyingClaimAck = entry.AckFrame;
@@ -1573,8 +1610,6 @@ namespace MphRead::Mods::Network
         _applyingImpact = entry.Impact;
         const bool lethal = victim.Health() <= entry.Damage;
         const auto before = static_cast<std::uint32_t>(victim.Health());
-        // The turret's share as the shooter's machine split it, on the
-        // authority's turret -- if it still has one to take it.
         // A hit on a turret is applied whole, as the turret hit it was: the
         // turret reacts to all of it (its target, its fire rate), the split
         // follows this machine's health, and the turret still keeps its owner
@@ -1656,7 +1691,8 @@ namespace MphRead::Mods::Network
         }
         if ((entry.Flags & HitClaimPacket::FlagBurning) != 0 && victim.Health() > 0)
         {
-            victim.ModSetBurning(true);
+            // Burning, and by whom: the burn's damage is the shooter's.
+            victim.ModIgnite(shooter, entry.LaunchFrame);
         }
         if ((entry.Flags & HitClaimPacket::FlagDisrupted) != 0 && victim.Health() > 0)
         {
@@ -1802,6 +1838,8 @@ namespace MphRead::Mods::Network
         _finishedHere = 0;
         _impactRefused = 0;
         _afflictionsStripped = 0;
+        _causesVouched = 0;
+        _causesStripped = 0;
         _ackRefused = 0;
         _rayRefused = 0;
         _eventRefused = 0;
@@ -1840,6 +1878,7 @@ namespace MphRead::Mods::Network
         {
             return;
         }
+        _deathalt.Forget(slot);
         const auto s = static_cast<std::size_t>(slot);
         _muzzleObstructions.ForgetSlot(slot);
         for (Outgoing& entry : _outbox)
@@ -1917,7 +1956,9 @@ namespace MphRead::Mods::Network
                 + std::to_string(_rescuedKills) + " kills, " + std::to_string(_rescuedHeadshots)
                 + " headshots rescued), " + std::to_string(_duplicateHere) + " already resolved (" + std::to_string(_finishedHere) + " finished as kills), "
                 + std::to_string(_impactRefused) + " landing off the body, "
-                + std::to_string(_afflictionsStripped) + " afflictions dropped, " + std::to_string(_ackRefused)
+                + std::to_string(_afflictionsStripped) + " afflictions dropped, "
+                + std::to_string(_causesVouched) + " Death Alts vouched for ("
+                + std::to_string(_causesStripped) + " not seen here), " + std::to_string(_ackRefused)
                 + " resolved against a stale ack, " + std::to_string(_rayRefused) + " off the fired ray, "
                 + std::to_string(_eventNamed) + " naming a reported shot ("
                 + std::to_string(_eventMatched) + " ray-checked against it, "

@@ -794,14 +794,17 @@ namespace MphRead::Mods::Network
             Tell(peer, "not enough players to hold a vote");
             return;
         }
+        // The cooldowns keep one player from spamming the others with votes;
+        // nobody is spammed by a player who is alone.
+        const bool alone = _peers.size() == 1;
         const double sinceVote = now - _voteResolvedAt;
-        if (sinceVote < VoteCooldownSeconds)
+        if (!alone && sinceVote < VoteCooldownSeconds)
         {
             Tell(peer, "another vote may be called in " + Runtime::ToString(VoteCooldownSeconds - sinceVote, "0") + " s");
             return;
         }
         const double sinceMine = now - peer->LastProposal;
-        if (sinceMine < ProposalCooldownSeconds)
+        if (!alone && sinceMine < ProposalCooldownSeconds)
         {
             Tell(peer, "you may propose again in " + Runtime::ToString(ProposalCooldownSeconds - sinceMine, "0") + " s");
             return;

@@ -81,7 +81,15 @@ namespace MphRead::Mods::Launcher
         [[nodiscard]] static NativeRuntime::Rhi::LowLatencyMode LowLatency() noexcept;
         static void LowLatency(NativeRuntime::Rhi::LowLatencyMode value) noexcept;
         [[nodiscard]] static MphRead::Mods::WindowStartMode WindowMode() noexcept;
+        // A fullscreen mode also sets the kind (WindowedFullscreen).
         static void WindowMode(MphRead::Mods::WindowStartMode value) noexcept;
+        // Whether fullscreen is the borderless kind ("Windowed fullscreen"),
+        // whichever way the window starts: it is what the pause menu and F11
+        // enter from a windowed start too. A file from before reads it off
+        // window_mode.
+        [[nodiscard]] static bool WindowedFullscreen() noexcept;
+        static void WindowedFullscreen(bool value) noexcept;
+        [[nodiscard]] static MphRead::Mods::WindowStartMode FullscreenKind() noexcept;
 
         // The size and corner the game window last had, or zeroes for a
         // first run.
@@ -161,6 +169,8 @@ namespace MphRead::Mods::Launcher
         static std::int32_t _windowX;
         static std::int32_t _windowY;
         static bool _windowMaximized;
+        static bool _windowedFullscreen;
+        static bool _windowedFullscreenRead;
         static bool _debugLogs;
     };
 }

@@ -10,6 +10,8 @@
 #include <array>
 #include <cstdint>
 #include <functional>
+#include "DeathaltWitness.hpp"
+
 #include <optional>
 #include <span>
 #include <string>
@@ -190,6 +192,7 @@ namespace MphRead::Mods::Network
             std::uint8_t Beam = 0;
             std::uint16_t Damage = 0;
             std::uint16_t TurretDamage = 0;
+            std::uint8_t Cause = HitClaimPacket::CauseHit;
             std::uint8_t Flags = 0;
             OpenTK::Mathematics::Vector3 HitPoint{};
             OpenTK::Mathematics::Vector3 Impulse{};
@@ -213,6 +216,7 @@ namespace MphRead::Mods::Network
             std::uint8_t Beam = 0;
             std::uint16_t Damage = 0;
             std::uint16_t TurretDamage = 0;
+            std::uint8_t Cause = HitClaimPacket::CauseHit;
             std::uint8_t Flags = 0;
             std::uint32_t AckFrame = 0;
             std::uint32_t LaunchFrame = 0;
@@ -309,6 +313,9 @@ namespace MphRead::Mods::Network
         inline static ImpactOffset _applyingImpact{};
         inline static std::int64_t _impactRefused = 0;
         inline static std::int64_t _afflictionsStripped = 0;
+        inline static std::int64_t _causesVouched = 0;
+        inline static std::int64_t _causesStripped = 0;
+        inline static DeathaltWitness _deathalt{};
         inline static MphRead::Scene* _scene = nullptr;
         inline static std::array<std::array<ClaimShotRay, 32>, 8> _shotRays{};
         inline static std::array<std::size_t, 8> _shotRayNext{};
@@ -342,6 +349,11 @@ namespace MphRead::Mods::Network
             OpenTK::Mathematics::Vector3 was);
         [[nodiscard]] static bool StraightWeapon(std::int32_t shooterSlot, std::uint8_t beam);
         [[nodiscard]] static bool ImpactPlausible(const HitClaimPacket& claim, std::int32_t victimSlot);
+        // The damage flags a claim's hit carries when applied here: its
+        // headshot, and its cause when the authority can vouch for it.
+        [[nodiscard]] static ::MphRead::Entities::DamageFlags CauseFlags(const Pending& entry);
+        [[nodiscard]] static bool CauseVouched(const Pending& entry);
+        [[nodiscard]] static std::uint8_t CauseOf(::MphRead::Entities::DamageFlags flags) noexcept;
         // Whether the weapon a claim names heals its shooter by the hit.
         [[nodiscard]] static bool Drains(std::int32_t shooterSlot, std::uint8_t beam);
         inline static bool _shooterHits = true;

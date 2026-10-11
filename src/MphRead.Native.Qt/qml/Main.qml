@@ -109,7 +109,11 @@ Item {
             if (ShellHost.page === "front" && !ShellHost.gameFilesReady)
                 root.openSetup()
         }
-        function onLobbyOpened() { root.openLobby() }
+        function onLobbyOpened() {
+            // the DS menus have a room of their own
+            if (root.classic && classicMenu.running) classicMenu.show("room")
+            else root.openLobby()
+        }
         function onKeyboardDriving() { Theme.keyboardDriving = true }
         function onScreenRequested(url, props) {
             if (url.length > 0) {
@@ -125,9 +129,9 @@ Item {
         id: base
         parent: stage
         anchors.fill: parent
-        visible: !root.stacked
+        visible: !root.stacked && !classicMenu.running
         enabled: visible
-        focus: !root.stacked
+        focus: !root.stacked && !classicMenu.running
         sourceComponent: ShellHost.page === "front" ? start
                        : ShellHost.page === "pause" ? pause
                        : ShellHost.page === "end" ? end
@@ -170,6 +174,65 @@ Item {
             }
         }
         onLoaded: item.forceActiveFocus()
+    }
+
+    // Debug: the DS game's own title and menus in place of the launcher's
+    // pages, from the player's files (Mods/ClassicMenu, after Second Hunt),
+    // on one screen: the front screen, the rooms, the pause menu and the
+    // results panel all stay in the DS's menus while this is on.
+    property bool classic: false
+    ClassicMenu {
+        id: classicMenu
+        parent: stage
+        anchors.fill: parent
+        z: 500
+        visible: running
+        running: root.classic && !root.stacked && ShellHost.gameFilesReady
+            && (ShellHost.page === "front" || ShellHost.page === "pause" || ShellHost.page === "end")
+        focus: running
+        onRunningChanged: {
+            if (!running && error.length > 0) {
+                root.classic = false
+                ShellHost.systemMessage("The DS menus could not run: " + error)
+            }
+        }
+        onQuitRequested: ShellHost.quit()
+        Component.onCompleted: if (scripted) root.classic = true
+        Connections {
+            target: ShellHost
+            function onPageChanged() {
+                if (!root.classic) return
+                classicMenu.show(ShellHost.page === "pause" ? "pause" : ShellHost.page === "end" ? "end" : "front")
+            }
+        }
+    }
+    Rectangle {
+        id: classicSwitch
+        parent: stage
+        z: 600
+        visible: ShellHost.page === "front" && !root.stacked && ShellHost.gameFilesReady
+            && ShellHost.startupState === "FrontReady"
+        anchors.top: parent.top
+        anchors.right: parent.right
+        anchors.margins: 8
+        width: classicLabel.implicitWidth + 16
+        height: classicLabel.implicitHeight + 8
+        radius: 4
+        color: classicArea.containsMouse ? "#c0303848" : "#a0181c24"
+        border.color: "#60e8ecf4"
+        Text {
+            id: classicLabel
+            anchors.centerIn: parent
+            color: "#e8ecf4"
+            font.pixelSize: 12
+            text: root.classic ? "DEBUG: FRUITY UI" : "DEBUG: DS UI"
+        }
+        MouseArea {
+            id: classicArea
+            anchors.fill: parent
+            hoverEnabled: true
+            onClicked: root.classic = !root.classic
+        }
     }
 
     ControllerKeyboard {

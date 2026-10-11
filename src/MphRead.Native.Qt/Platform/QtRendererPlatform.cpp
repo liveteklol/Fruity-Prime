@@ -223,6 +223,7 @@ namespace
             _window->showNormal();
         }
         bool WindowStateFullscreen() override;
+        bool WindowStateBorderless() override;
         [[nodiscard]] double RefreshRate() const override
         {
             const QScreen* const screen = _window->screen();
@@ -243,6 +244,8 @@ namespace
         [[nodiscard]] qreal Scale() const { return _window->devicePixelRatio(); }
         [[nodiscard]] QScreen* ScreenOf() const;
         void Key(QKeyEvent* event, bool down);
+        // Every key still down, released as if let go: focus is leaving.
+        void ReleaseHeldKeys();
         void MouseButton(QMouseEvent* event, bool down);
         void MouseMove(QMouseEvent* event);
         void Wheel(QWheelEvent* event);
@@ -846,6 +849,40 @@ namespace
 #endif
     }
 
+    bool QtWindow::WindowStateBorderless()
+    {
+        _window->setFlag(Qt::FramelessWindowHint, true);
+        _window->setMaximumSize(QSize(16777215, 16777215));
+#if defined(_WIN32)
+        // In the monitor's own pixels, as the exclusive path above: the
+        // logical rectangle Qt would take is the physical one divided by the
+        // scale, and at 175 % that does not land on whole pixels.
+        _window->show();
+        const HWND hwnd = reinterpret_cast<HWND>(_window->winId());
+        const HMONITOR monitor = ::MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+        MONITORINFO info{};
+        info.cbSize = sizeof(info);
+        if (monitor == nullptr || !::GetMonitorInfoW(monitor, &info))
+        {
+            return false;
+        }
+        const RECT& r = info.rcMonitor;
+        ::SetWindowPos(hwnd, HWND_TOP, r.left, r.top, r.right - r.left, r.bottom - r.top - 1,
+            SWP_FRAMECHANGED | SWP_SHOWWINDOW | SWP_NOOWNERZORDER);
+        return true;
+#else
+        const QScreen* const screen = ScreenOf();
+        if (screen == nullptr)
+        {
+            return false;
+        }
+        const QRect area = screen->geometry();
+        _window->show();
+        _window->setGeometry(area.x(), area.y(), area.width(), area.height() - 1);
+        return true;
+#endif
+    }
+
     QScreen* QtWindow::ScreenOf() const
     {
         QScreen* screen = _window->screen();
@@ -966,6 +1003,10 @@ namespace
                 // frame loop stalled.
                 Rhi::FullscreenExclusive::Active(event->type() == QEvent::FocusIn);
             }
+            if (event->type() == QEvent::FocusOut)
+            {
+                ReleaseHeldKeys();
+            }
             if (_events != nullptr)
             {
                 _events->OnFocusedChanged(event->type() == QEvent::FocusIn);
@@ -1000,6 +1041,30 @@ namespace
             return true;
         default:
             return false;
+        }
+    }
+
+    void QtWindow::ReleaseHeldKeys()
+    {
+        // A key let go while another window had focus never reaches this one:
+        // without this it stays down here for good. Alt+Tab is the usual one,
+        // and a held Alt silences the free camera's keys. Each is released as
+        // a real key-up would be, so whatever counts presses sees one.
+        using MphRead::RendererPlatform::Key;
+        for (std::int32_t code = 0; code < MphRead::RendererPlatform::KeyboardState::KeyCount; ++code)
+        {
+            const auto key = static_cast<Key>(code);
+            if (!_keyboard.IsKeyDown(key))
+            {
+                continue;
+            }
+            _keyboard.SetKeyDown(key, false);
+            if (_events != nullptr)
+            {
+                KeyboardKeyEventArgs args;
+                args.Key = key;
+                _events->OnKeyUp(args);
+            }
         }
     }
 

@@ -1063,7 +1063,7 @@ namespace MphRead::Entities
                     && _timeSinceJumpPad > 5 * 2)
                 {
                     std::int32_t damage = ConvertToInt32Net9(
-                        Fixed::ToFloat(Values().FallDamageMax)
+                        static_cast<float>(Values().FallDamageMax)
                         * -(Speed().Y + damageSpeed) / 0.8F);
                     assert(damage >= 0);
                     if (damage == 0)

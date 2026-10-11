@@ -107,6 +107,10 @@ public: \
     [[nodiscard]] bool ModDisrupted() const; \
     void ModSetDisrupted(bool disrupted); \
     void ModSetBurning(bool burning); \
+    /* Set on fire by a claimed hit: burning as ModSetBurning(true), and the */ \
+    /* burner recorded, so the burn's damage is theirs -- their kill, their */ \
+    /* claims -- and not a burn with nobody behind it. */ \
+    void ModIgnite(PlayerEntity& by, std::uint32_t launchFrame); \
     [[nodiscard]] bool ModCanZoom() const; \
  \
     [[nodiscard]] std::string ModFormState() const; \

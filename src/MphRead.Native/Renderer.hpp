@@ -537,6 +537,15 @@ namespace MphRead
             // A window that cannot do it answers false and WindowMode
             // falls back to borderless.
             [[nodiscard]] virtual bool WindowStateFullscreen() { return false; }
+            // Borderless fullscreen: no frame, covering the window's monitor
+            // one pixel row short of its height (so the driver never treats
+            // it as exclusive), sized in the toolkit's own units. A window
+            // that answers false is placed by WindowMode from
+            // CurrentMonitorClientArea instead -- which is in physical
+            // pixels, while a Qt window's ClientSize is in logical ones, and
+            // at 150 % scaling that made a window 1.5x the monitor showing
+            // only its top-left corner.
+            [[nodiscard]] virtual bool WindowStateBorderless() { return false; }
             // The refresh rate of the screen the window is on, in Hz, or 0
             // when the toolkit does not say. Diagnostics only.
             [[nodiscard]] virtual double RefreshRate() const { return 0.0; }
@@ -698,6 +707,7 @@ namespace MphRead
         void WindowStateMaximized();
         void WindowStateNormal();
         [[nodiscard]] bool WindowStateFullscreen();
+        [[nodiscard]] bool WindowStateBorderless();
         [[nodiscard]] double RefreshRate() const;
         void Floating(bool value);
         [[nodiscard]] bool IsFocused() const;
@@ -1076,7 +1086,9 @@ private: \
     void TransformCamera(); \
     void UpdateCameraPosition(); \
     void ResetCamera(); \
-    void UpdateCameraRotation(float stepH, float stepV); \
+    void UpdateCameraRotation(float stepH, float stepV, float limitV = _almostHalfPi); \
+    void UpdateCameraBasis(); \
+    void NoteRoamCameraHeld(const char* reason); \
     void AllocateEffects(); \
     std::shared_ptr<MphRead::Effects::EffectEntry> InitEffectEntry(); \
     std::shared_ptr<MphRead::Effects::EffectElementEntry> InitEffectElement(const std::shared_ptr<MphRead::Effect>& effect, \

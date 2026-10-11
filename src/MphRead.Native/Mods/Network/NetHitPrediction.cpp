@@ -227,6 +227,14 @@ namespace MphRead::Mods::Network
         {
             return victim.SlotIndex() == local && HasFlag(flags, Entities::DamageFlags::Death);
         }
+        // A burn's damage over time is the authority's, which knows the
+        // burner: a tick predicted here only fought the snapshots, which put
+        // out this machine's fire until the authority had lit its own, and
+        // then nobody's ticks landed at all.
+        if (HasFlag(flags, Entities::DamageFlags::Burn))
+        {
+            return false;
+        }
         Entities::PlayerEntity* owner = OwnerOf(source);
         if (owner == nullptr || owner->SlotIndex() != local)
         {

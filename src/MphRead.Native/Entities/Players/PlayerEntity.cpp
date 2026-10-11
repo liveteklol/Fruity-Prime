@@ -28,6 +28,7 @@
 #include "../../Metadata/Weapons.hpp"
 #include "../../Mods/Network/NetDamage.hpp"
 #include "../../Mods/Network/NetHitPrediction.hpp"
+#include "../../Mods/Network/NetLog.hpp"
 #include "../../Mods/Network/NetPlayerBridge.hpp"
 #include "../../Mods/Network/NetPlayerLifecycle.hpp"
 #include "../../Mods/Network/NetSession.hpp"
@@ -2353,6 +2354,13 @@ namespace MphRead::Entities
                             {
                                 killedBy = _altAttackNames[static_cast<std::size_t>(MphRead::Hunter::Sylux)];
                             }
+                        }
+                        if (Mods::Network::NetLog::Enabled())
+                        {
+                            // What killed this player, as their screen names it: the
+                            // one way to tell a kill's cause reached a machine.
+                            Mods::Network::NetLog::Event("[death] killed by " + std::to_string(attacker->_slotIndex)
+                                + " (" + killedBy.value_or("no cause") + ")");
                         }
                         if (killedBy.has_value())
                         {

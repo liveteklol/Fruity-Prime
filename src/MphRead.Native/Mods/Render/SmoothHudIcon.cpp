@@ -3,6 +3,7 @@
 #include "../../Scene.hpp"
 #include "../../NativeRuntime/System/Managed.hpp"
 
+#include <algorithm>
 #include <bit>
 #include <cstddef>
 #include <cstdint>
@@ -39,6 +40,8 @@ namespace MphRead::Mods::Render
             UncheckedMultiply(sheet->Width, Factor), UncheckedMultiply(sheet->Height, Factor));
         inst->Smooth = true;
         inst->Enabled = true;
+        // Kept for Build's shading only; nothing is bound from it.
+        inst->PaletteData = sheet->PaletteData;
         return inst;
     }
 
@@ -80,7 +83,18 @@ namespace MphRead::Mods::Render
         const std::int32_t tilesX = width / 8;
         const std::int32_t image = UncheckedMultiply(UncheckedMultiply(frame, width), height);
         const ColorRgba transparent{};
-        const ColorRgba ink(color.Red, color.Green, color.Blue, 255);
+        // Each pixel keeps the brightness its own palette colour has against
+        // the brightest one in the picture. The DS draws these icons as a lit
+        // outline round a dark body; one flat tint for every non-transparent
+        // pixel filled the body in, and the icons read as fat blobs.
+        float brightest = 0.0F;
+        for (std::int32_t y = 0; y < height; ++y)
+        {
+            for (std::int32_t x = 0; x < width; ++x)
+            {
+                brightest = std::max(brightest, Shade(inst, data, image, tilesX, width, height, x, y));
+            }
+        }
         for (std::int32_t y = 0; y < outHeight; ++y)
         {
             const std::int32_t sourceY = y / Factor;
@@ -88,21 +102,48 @@ namespace MphRead::Mods::Render
             {
                 ColorRgba& target = TextureAt(
                     texture, UncheckedAdd(UncheckedMultiply(y, outWidth), x));
-                target = Ink(data, image, tilesX, width, height, x / Factor, sourceY) > 0.0F
-                    ? ink
-                    : transparent;
+                const float shade = Shade(inst, data, image, tilesX, width, height, x / Factor, sourceY);
+                if (shade <= 0.0F)
+                {
+                    target = transparent;
+                    continue;
+                }
+                const float level = brightest > 0.0F ? std::min(1.0F, shade / brightest) : 1.0F;
+                const auto channel = [level](std::uint8_t value)
+                { return static_cast<std::uint8_t>(static_cast<float>(value) * level + 0.5F); };
+                target = ColorRgba(channel(color.Red), channel(color.Green), channel(color.Blue), 255);
             }
         }
         inst.BindPicture(scene, outWidth, outHeight);
     }
 
-    float SmoothHudIcon::Ink(const Hud::ReadOnlyList<std::uint8_t>& data,
+    float SmoothHudIcon::Shade(const Hud::HudObjectInstance& inst,
+        const Hud::ReadOnlyList<std::uint8_t>& data, std::int32_t image,
+        std::int32_t tilesX, std::int32_t width, std::int32_t height,
+        std::int32_t x, std::int32_t y)
+    {
+        const std::int32_t index = Index(data, image, tilesX, width, height, x, y);
+        if (index <= 0)
+        {
+            return 0.0F;
+        }
+        // Without a palette every inked pixel is full strength, as before.
+        if (!inst.PaletteData || static_cast<std::size_t>(index) >= inst.PaletteData->size())
+        {
+            return 1.0F;
+        }
+        const ColorRgba& colour = inst.PaletteData->at(static_cast<std::size_t>(index));
+        // Never fully dark: a black pixel inside the icon is still the icon.
+        return static_cast<float>(std::max<int>({colour.Red, colour.Green, colour.Blue, 24}));
+    }
+
+    std::int32_t SmoothHudIcon::Index(const Hud::ReadOnlyList<std::uint8_t>& data,
         std::int32_t image, std::int32_t tilesX, std::int32_t width,
         std::int32_t height, std::int32_t x, std::int32_t y)
     {
         if (x < 0 || y < 0 || x >= width || y >= height)
         {
-            return 0.0F;
+            return 0;
         }
         std::int32_t index = image;
         index = UncheckedAdd(index, UncheckedMultiply(UncheckedMultiply(y / 8, tilesX), 64));
@@ -111,7 +152,7 @@ namespace MphRead::Mods::Render
         index = UncheckedAdd(index, x % 8);
         if (index < 0)
         {
-            return 0.0F;
+            return 0;
         }
         if (!data)
         {
@@ -119,8 +160,8 @@ namespace MphRead::Mods::Render
         }
         if (static_cast<std::size_t>(index) >= data->size())
         {
-            return 0.0F;
+            return 0;
         }
-        return data->at(static_cast<std::size_t>(index)) == 0 ? 0.0F : 1.0F;
+        return data->at(static_cast<std::size_t>(index));
     }
 }

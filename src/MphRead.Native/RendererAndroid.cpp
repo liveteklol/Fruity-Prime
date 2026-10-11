@@ -347,6 +347,11 @@ namespace MphRead
         return false;
     }
 
+    bool RenderWindow::WindowStateBorderless()
+    {
+        return false;
+    }
+
     double RenderWindow::RefreshRate() const
     {
         return 0.0;

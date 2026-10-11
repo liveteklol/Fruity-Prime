@@ -673,8 +673,9 @@ namespace MphRead::Mods::Network
         std::uint16_t ShooterLifeId = 0;
         std::uint16_t VictimGeneration = 0;
         std::uint16_t VictimLifeId = 0;
-        // + 4: protocol 21's ShotSequence; + 2: protocol 23's TurretDamage.
-        static constexpr std::int32_t Size = 2 + 4 + 4 + 4 + 1 + 1 + 2 + 1 + 12 + 18 + 12 + 3 + 4 + 2;
+        // + 4: protocol 21's ShotSequence; + 2: protocol 23's TurretDamage;
+        // + 1: protocol 26's Cause.
+        static constexpr std::int32_t Size = 2 + 4 + 4 + 4 + 1 + 1 + 2 + 1 + 12 + 18 + 12 + 3 + 4 + 2 + 1;
 
         static constexpr std::int32_t MaxPerPacket = 6;
 
@@ -691,6 +692,14 @@ namespace MphRead::Mods::Network
         // The hit was the projectile's splash, not its body: Impact is then
         // the blast's centre relative to the victim.
         static constexpr std::uint8_t FlagSplash = 1U << 6;
+        // What did the damage, past the weapon (protocol 26): what the
+        // victim's screen names a kill after, and what the authority
+        // applies it as. Taken only when the authority can vouch for it --
+        // a Death Alt its own copy of the shooter had running
+        // (DeathaltWitness). A burn's ticks are never claimed: the
+        // authority applies them itself.
+        static constexpr std::uint8_t CauseHit = 0;
+        static constexpr std::uint8_t CauseDeathalt = 1;
 
         std::uint16_t ClaimId = 0;
         std::uint32_t Frame = 0;
@@ -712,6 +721,7 @@ namespace MphRead::Mods::Network
         // split by its own health. Without it the authority applied only the
         // body's share, and nobody but the authority could destroy a turret.
         std::uint16_t TurretDamage = 0;
+        std::uint8_t Cause = CauseHit;
 
         void Write(std::span<std::uint8_t> dest) const;
         [[nodiscard]] static HitClaimPacket Read(std::span<const std::uint8_t> src);
@@ -750,7 +760,7 @@ namespace MphRead::Mods::Network
     public:
         static constexpr std::uint16_t DefaultPort = 27888;
         static constexpr std::int32_t MaxPacketSize = 1232;
-        static constexpr std::int32_t ProtocolVersion = 25;
+        static constexpr std::int32_t ProtocolVersion = 26;
         static constexpr std::int32_t IntentSendInterval = 1;
         static constexpr double TimeoutSeconds = 30.0;
 
