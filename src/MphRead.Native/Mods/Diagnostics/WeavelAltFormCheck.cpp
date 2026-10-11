@@ -347,7 +347,7 @@ namespace MphRead::Mods::Diagnostics
             check((dead.Flags & PlayerState::FlagAltForm) != 0 && dead.WeavelFlags == 0, "publisher preserves Alt with dead turret");
             owner.ModForceForm(false); owner.SetHealth(100);
             NetPlayerBridge::ApplyState(owner, active, false);
-            check(owner.Health() == 51 && turret->Health() == 50 && owner.IsAltForm() && turret->Grounded(),
+            check(owner.Health() == 51 && turret->Health() == 50 && (owner.IsAltForm() || owner.IsMorphing()) && turret->Grounded(),
                 "replica activation uses authority HP without a second split");
             const Vector3 replicaPosition = owner.Position;
             NetPlayerBridge::ApplyState(owner, active, false);
@@ -360,7 +360,7 @@ namespace MphRead::Mods::Diagnostics
             check(owner.Health() == 51 && turret->Health() == 47 && !turret->Grounded()
                 && OpenTK::Mathematics::Equal(turret->Position, airborne.HalfturretPosition), "active replica updates airborne physical report and HP separately from player");
             NetPlayerBridge::ApplyState(owner, dead, false); NetPlayerBridge::ApplyState(owner, dead, false);
-            check(owner.IsAltForm() && turret->Health() == 0 && owner.Health() == 51, "replica Alt plus dead turret never respawns");
+            check((owner.IsAltForm() || owner.IsMorphing()) && turret->Health() == 0 && owner.Health() == 51, "replica Alt plus dead turret never respawns");
             auto biped = dead; biped.Flags &= ~PlayerState::FlagAltForm; biped.Health = 100;
             NetPlayerBridge::ApplyState(owner, biped, false); NetPlayerBridge::ApplyState(owner, biped, false);
             check(!owner.IsAltForm() && owner.Health() == 100 && turret->Health() == 0, "biped snapshots do not merge authority HP twice");
@@ -381,7 +381,7 @@ namespace MphRead::Mods::Diagnostics
             check(NetSession::RemoteStateValid[0] && NetSession::RemoteStates[0].WeavelFlags == 0
                 && NetSession::LastSnapshotFrame() == 501, "receiver rejects duplicated and reordered snapshots");
             NetPlayerBridge::ApplyState(owner, NetSession::RemoteStates[0], false);
-            check(owner.IsAltForm() && turret->Health() == 0, "reordered old active packet cannot revive dead replica");
+            check((owner.IsAltForm() || owner.IsMorphing()) && turret->Health() == 0, "reordered old active packet cannot revive dead replica");
 
             // Eight active players plus the maximum 56 health spawners must all fit.
             roster.Count = 8; roster.Revision = 2; NetSession::ApplyRoster(roster);
@@ -394,18 +394,32 @@ namespace MphRead::Mods::Diagnostics
                 auto spawn = std::make_shared<ItemSpawnEntity>(spawns[0]->Data(), "", &scene);
                 spawn->Id = i; spawn->Active = true; NetHealthSync::Register(*spawn);
             }
+            // The health subset takes whatever room eight players leave in a
+            // snapshot, so how many snapshots a full rotation takes follows
+            // from the player state's size -- it is derived, not assumed.
             std::set<int> reported;
-            for (int i = 0; i < 4; ++i)
+            std::size_t perSnapshot = 0;
+            int snapshots = 0;
+            for (; snapshots < NetHealthSync::MaxSpawns
+                && reported.size() < static_cast<std::size_t>(NetHealthSync::MaxSpawns); ++snapshots)
             {
-                const auto bytes = publish(800 + i);
+                const auto bytes = publish(800 + static_cast<std::uint32_t>(snapshots));
                 check(SnapshotHeader::Read(bytes).PlayerCount == 8, "maximum snapshot retains every player");
+                check(bytes.size() + 1 <= static_cast<std::size_t>(NetConfig::MaxPacketSize),
+                    "maximum snapshot fits MaxPacketSize");
                 const auto tail = std::span(bytes).subspan(SnapshotHeader::Size + 8 * PlayerState::Size + NetMatchTimeSync::Size);
                 check(NetHealthSync::Validate(tail), "bounded health subset validates");
                 NetHealthSync::Receive(tail);
+                perSnapshot = (tail.size() - NetHealthSync::HeaderSize) / NetHealthSync::EntrySize;
                 for (std::size_t off = NetHealthSync::HeaderSize; off < tail.size(); off += NetHealthSync::EntrySize)
                     reported.insert(Runtime::ReadInt16LittleEndian(tail.subspan(off)));
             }
-            check(reported.size() == NetHealthSync::MaxSpawns, "rotating health reports cover all56 without exceeding MaxPacketSize");
+            const std::size_t expected = perSnapshot == 0 ? 0
+                : (static_cast<std::size_t>(NetHealthSync::MaxSpawns) + perSnapshot - 1) / perSnapshot;
+            check(reported.size() == static_cast<std::size_t>(NetHealthSync::MaxSpawns)
+                && static_cast<std::size_t>(snapshots) == expected,
+                "rotating health reports cover all 56 in " + std::to_string(expected) + " snapshots of "
+                    + std::to_string(perSnapshot));
             for (int i = 0; i < NetHealthSync::MaxSpawns; ++i)
             {
                 HealthSpawnState state;

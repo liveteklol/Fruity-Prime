@@ -2978,14 +2978,16 @@ namespace MphRead::Entities
                 if (ch >= u' ')
                 {
                     std::int32_t index = ch;
-                    if ((ch & 0x80) != 0)
+                    if ((ch & 0x80) != 0 && i + 1 < static_cast<std::int32_t>(text.size()))
                     {
                         const char16_t next = ManagedAt(text, ++i);
                         ManagedAt(dest, ++c) = next;
                         index = (next & 0x3F) | ((ch & 0x1F) << 6);
                     }
-                    index -= font.MinCharacter();
-                    const std::int32_t width = ManagedAt(widths, index);
+                    // The same clamp DrawText2D uses: a string table in another
+                    // language than the cartridge's (Japanese on an EU ROM) holds
+                    // characters this font has no width for.
+                    const std::int32_t width = ManagedAt(widths, GlyphIndex(font, index));
                     lineWidth += width;
                     if (ch != u' ')
                     {

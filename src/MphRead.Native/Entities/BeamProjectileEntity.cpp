@@ -156,47 +156,6 @@ namespace
             Index(static_cast<std::int32_t>(MphRead::BeamSfx::AffinityChargeShot))));
     }
 
-    void GainPlayerHealth(MphRead::Entities::PlayerEntity& player, std::uint32_t health)
-    {
-        const std::int32_t amount = UInt32ToInt32(health);
-        std::int32_t playerHealth = player.Health();
-        if (playerHealth <= 0)
-        {
-            return;
-        }
-
-        if (TestFlag(player.Flags2(), MphRead::Entities::PlayerFlags2::Halfturret))
-        {
-            MphRead::Entities::HalfturretEntity& halfturret = RequireReference(player.Halfturret());
-            std::int32_t turretHealth = halfturret.Health();
-            if (playerHealth <= turretHealth)
-            {
-                playerHealth = UncheckedAdd(playerHealth, UncheckedSubtract(amount, amount / 2));
-                turretHealth = UncheckedAdd(turretHealth, amount / 2);
-            }
-            else
-            {
-                playerHealth = UncheckedAdd(playerHealth, amount / 2);
-                turretHealth = UncheckedAdd(turretHealth, UncheckedSubtract(amount, amount / 2));
-            }
-            if (turretHealth > 100)
-            {
-                turretHealth = 100;
-            }
-            halfturret.SetHealth(turretHealth);
-        }
-        else
-        {
-            playerHealth = UncheckedAdd(playerHealth, amount);
-        }
-
-        if (playerHealth > player.HealthMax())
-        {
-            playerHealth = player.HealthMax();
-        }
-        player.SetHealth(playerHealth);
-    }
-
     [[nodiscard]] EntityBase* CollisionEntity(
         const std::shared_ptr<MphRead::Formats::Collision::EntityCollision>& collision) noexcept
     {
@@ -1011,14 +970,17 @@ namespace MphRead::Entities
                         player->TakeDamage(wholeDamage, damageFlags, damageDir, this);
                         Mods::Network::NetHitPrediction::ClearImpact();
                     }
-                    if (TestFlag(_flags, BeamFlags::LifeDrain) && owner.Type == EntityType::Player)
+                    // The drain follows the hit: none for a hit this machine
+                    // leaves to its shooter's claim (Mods.Network.NetDamage).
+                    if (TestFlag(_flags, BeamFlags::LifeDrain) && owner.Type == EntityType::Player
+                        && Mods::Network::NetDamage::ResolvedHere(*player, this, damageFlags))
                     {
                         PlayerEntity* ownerPlayer = static_cast<PlayerEntity*>(_owner.get());
                         if (ownerPlayer != player && !ownerPlayer->IsPrimeHunter()
                             && !Mods::Multiplayer::TeamRules::AreAllies(ownerPlayer->TeamIndex(), player->TeamIndex()))
                         {
                             const std::int32_t before = ownerPlayer->Health();
-                            GainPlayerHealth(*ownerPlayer, wholeDamage);
+                            ownerPlayer->GainDrainedHealth(wholeDamage);
                             Mods::Network::NetHitPrediction::NoteDrain(
                                 *ownerPlayer, ownerPlayer->Health() - before);
                         }

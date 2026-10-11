@@ -3,7 +3,11 @@
 #include "../../Scene.hpp"
 #include "../../Mods/Gameplay/NativeGameplayClock.hpp"
 #include "../../NativeRuntime/System/Managed.hpp"
+#include "../../Mods/Network/NetLog.hpp"
 
+#include <string>
+
+#include <algorithm>
 #include <limits>
 
 namespace MphRead::Entities
@@ -43,6 +47,57 @@ namespace MphRead::Entities
         _weavelNativeAttackPress = false;
     }
 
+    std::uint32_t PlayerEntity::HalfturretShare(std::uint32_t damage) const
+    {
+        const HalfturretEntity& turret = NativeRuntime::RequireReference(_halfturret);
+        return _health > turret.Health() ? damage - damage / 2 : damage / 2;
+    }
+
+    void PlayerEntity::GainDrainedHealth(std::uint32_t health)
+    {
+        const auto amount = static_cast<std::int32_t>(std::min<std::uint32_t>(health, 0x7FFFFFFFU));
+        std::int32_t playerHealth = _health;
+        if (playerHealth <= 0)
+        {
+            return;
+        }
+        if (TypeExtensions::TestFlag(_flags2, PlayerFlags2::Halfturret))
+        {
+            HalfturretEntity& halfturret = NativeRuntime::RequireReference(_halfturret);
+            std::int32_t turretHealth = halfturret.Health();
+            if (playerHealth <= turretHealth)
+            {
+                playerHealth += amount - amount / 2;
+                turretHealth += amount / 2;
+            }
+            else
+            {
+                playerHealth += amount / 2;
+                turretHealth += amount - amount / 2;
+            }
+            halfturret.SetHealth(std::min(turretHealth, 100));
+        }
+        else
+        {
+            playerHealth += amount;
+        }
+        SetHealth(std::min(playerHealth, HealthMax()));
+    }
+
+    void PlayerEntity::DamageHalfturret(std::uint32_t damage)
+    {
+        HalfturretEntity& turret = NativeRuntime::RequireReference(_halfturret);
+        if (turret.Health() <= 0 || static_cast<std::uint32_t>(turret.Health()) <= damage)
+        {
+            turret.Die();
+        }
+        else
+        {
+            turret.SetHealth(turret.Health() - static_cast<std::int32_t>(damage));
+        }
+        turret.SetTimeSinceDamage(0);
+    }
+
     void PlayerEntity::ModForceWeavelState(bool desiredAlt, bool desiredTurretActive,
         std::optional<std::int32_t> desiredTurretHealth)
     {
@@ -75,11 +130,65 @@ namespace MphRead::Entities
         FinalizeWeavelForm(desiredAlt);
     }
 
+    void PlayerEntity::ModApplyOwnWeavelTurret(bool authorityHeadingAlt, bool authorityTurretActive,
+        std::int32_t turretHealth)
+    {
+        if (_hunter != Hunter::Weavel) return;
+        const bool alive = TypeExtensions::TestFlag(_flags2, PlayerFlags2::Halfturret)
+            && _halfturret && _halfturret->Health() > 0;
+        switch (_weavelOwnedTurret.Decide(IsAltForm() || IsMorphing(), alive, authorityHeadingAlt, authorityTurretActive))
+        {
+        case WeavelOwnedTurret::Step::AdoptHealth:
+            if (turretHealth > 0 && turretHealth < _halfturret->Health())
+            {
+                _halfturret->SetHealth(turretHealth);
+            }
+            break;
+        case WeavelOwnedTurret::Step::Destroy:
+            Mods::Network::NetLog::Event("slot " + std::to_string(SlotIndex())
+                + " own turret destroyed on the authority: destroyed here too");
+            _halfturret->Die();
+            break;
+        case WeavelOwnedTurret::Step::Keep:
+            break;
+        }
+    }
+
     void PlayerEntity::ModApplyWeavelState(bool desiredAlt, bool turretActive, std::int32_t turretHealth,
         Vector3 turretPosition, bool turretGrounded)
     {
         if (_hunter != Hunter::Weavel) return;
-        FinalizeWeavelForm(desiredAlt);
+        // WeavelReplicaTransition decides; the turret flags are arranged here
+        // so the copy neither spawns a turret of its own nor merges one's
+        // health -- the turret below, and the health, are the authority's.
+        const auto frame = static_cast<std::uint64_t>(
+            ::MphRead::NativeRuntime::RequireReference(_scene).FrameCount());
+        switch (_weavelReplicaTransition.Decide(desiredAlt, IsAltForm(), IsMorphing(), IsUnmorphing(),
+            _health > 0, frame))
+        {
+        case WeavelReplicaTransition::Step::StartMorph:
+            _weavelAltLife = true;
+            EnterAltForm();
+            Mods::Network::NetLog::Event("slot " + std::to_string(SlotIndex()) + " replica Weavel morph started");
+            break;
+        case WeavelReplicaTransition::Step::StartUnmorph:
+            _flags2 &= ~PlayerFlags2::Halfturret;
+            ExitAltForm();
+            Mods::Network::NetLog::Event("slot " + std::to_string(SlotIndex()) + " replica Weavel unmorph started");
+            break;
+        case WeavelReplicaTransition::Step::Wait:
+            break;
+        case WeavelReplicaTransition::Step::Finalize:
+            if (_weavelReplicaTransition.Started())
+            {
+                Mods::Network::NetLog::Event("slot " + std::to_string(SlotIndex()) + " replica Weavel "
+                    + (IsMorphing() || IsUnmorphing() ? "transition stalled, snapped" : "transition finished")
+                    + " after " + std::to_string(frame - _weavelReplicaTransition.StartFrame()) + " frames");
+                _weavelReplicaTransition.Close();
+            }
+            FinalizeWeavelForm(desiredAlt);
+            break;
+        }
         _weavelAltLife = desiredAlt;
         if (!desiredAlt)
         {

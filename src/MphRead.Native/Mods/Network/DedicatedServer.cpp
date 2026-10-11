@@ -16,6 +16,7 @@
 #include "MapRotation.hpp"
 #include "NetHealthSync.hpp"
 #include "NetHitClaims.hpp"
+#include "NetShotEvents.hpp"
 #include "NetLifecycleTracker.hpp"
 #include "NetMaster.hpp"
 #include "NetMatchTimeSync.hpp"
@@ -224,6 +225,10 @@ namespace MphRead::Mods::Network
                             Log("sim: " + *claimLine);
                         }
                         Log("sim: " + _sim->DescribeShots());
+                        if (const std::optional<std::string> events = NetShotEvents::Describe(); events.has_value())
+                        {
+                            Log("sim: " + *events);
+                        }
                         for (const std::string& agreement : Runtime::StringSplit(_sim->DescribeAgreement(), '\n'))
                         {
                             Log("sim: " + agreement);
@@ -300,6 +305,7 @@ namespace MphRead::Mods::Network
     {
         const std::shared_ptr<const RotationEntry> entry = _rotation->Advance();
         _phase = SessionPhase::InMatch;
+        FreezeMapWorldProfile();
         NormalizeTeams();
         _matchStarted = now;
         _matchEndedAt = -1;
@@ -327,7 +333,15 @@ namespace MphRead::Mods::Network
         }
         CloseBallot();
         BroadcastMapChoices();
-        Log("rotating to " + entry->ToString());
+        Log("rotating to " + entry->ToString() + ", resources "
+            + Multiplayer::ToString(_mapWorldProfile.Resources) + " for " + std::to_string(_peers.size()) + " player(s)");
+        // The new world before the map change, here and to every client, so
+        // the room is loaded with it on both ends.
+        if (_sim != nullptr)
+        {
+            NetSession::ApplySessionState(BuildSessionState());
+        }
+        BroadcastSessionState();
         MatchStatePacket state = BuildState(now);
         if (_sim != nullptr)
         {
@@ -391,6 +405,14 @@ namespace MphRead::Mods::Network
                 _transport->Send(peer->EndPoint, PacketType::MatchState, First(_scratch, MatchStatePacket::Size));
             }
         }
+    }
+
+    void DedicatedServer::FreezeMapWorldProfile()
+    {
+        // The pickups follow the people actually playing, not the server's
+        // capacity: an 8-slot server with three in it is a three-player map.
+        _mapWorldProfile = LobbyRules::ResolveWorldProfile(CurrentDefinition(),
+            std::max<std::int32_t>(2, static_cast<std::int32_t>(_peers.size())));
     }
 
     void DedicatedServer::StartSimulation()
@@ -772,14 +794,17 @@ namespace MphRead::Mods::Network
             Tell(peer, "not enough players to hold a vote");
             return;
         }
+        // The cooldowns keep one player from spamming the others with votes;
+        // nobody is spammed by a player who is alone.
+        const bool alone = _peers.size() == 1;
         const double sinceVote = now - _voteResolvedAt;
-        if (sinceVote < VoteCooldownSeconds)
+        if (!alone && sinceVote < VoteCooldownSeconds)
         {
             Tell(peer, "another vote may be called in " + Runtime::ToString(VoteCooldownSeconds - sinceVote, "0") + " s");
             return;
         }
         const double sinceMine = now - peer->LastProposal;
-        if (sinceMine < ProposalCooldownSeconds)
+        if (!alone && sinceMine < ProposalCooldownSeconds)
         {
             Tell(peer, "you may propose again in " + Runtime::ToString(ProposalCooldownSeconds - sinceMine, "0") + " s");
             return;
@@ -1458,7 +1483,7 @@ namespace MphRead::Mods::Network
         }
         const std::span<const std::uint8_t> payload = packet.Payload();
         if (payload.size() < static_cast<std::size_t>(IntentPacket::Size)
-            || payload.size() > static_cast<std::size_t>(IntentPacket::ShotFullSize))
+            || payload.size() > static_cast<std::size_t>(IntentPacket::BombFullSize))
         {
             return;
         }

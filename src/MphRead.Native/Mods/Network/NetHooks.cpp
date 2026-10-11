@@ -1,4 +1,5 @@
 #include "NetHooks.hpp"
+#include "NetBombs.hpp"
 #include "HitRig.hpp"
 #include "NetHitPrediction.hpp"
 
@@ -9,6 +10,7 @@
 #include "NetMatchEnd.hpp"
 #include "NetMatchSync.hpp"
 #include "NetPlayerBridge.hpp"
+#include "NetShotEvents.hpp"
 #include "NetPlayerSetup.hpp"
 #include "NetProtocol.hpp"
 #include "NetRoomChange.hpp"
@@ -55,6 +57,11 @@ namespace MphRead::Mods::Network
     {
         return (NetSession::Active() || DemoPlayback::IsActive())
             && player.SlotIndex() != LocalSlot();
+    }
+
+    bool NetHooks::ZoomIsReported(Entities::PlayerEntity& player)
+    {
+        return IsPuppet(player) && !player.IsBot();
     }
 
     bool NetHooks::KeepSlotAlive(Entities::PlayerEntity&)
@@ -118,6 +125,11 @@ namespace MphRead::Mods::Network
         {
             return current;
         }
+        // The shot event being fired: its own ray, however late it arrived.
+        if (const auto event = NetShotEvents::FiringRay(player); event.has_value())
+        {
+            return event->Origin;
+        }
         const IntentPacket& intent = NetSession::RemoteIntents.at(static_cast<std::size_t>(player.SlotIndex()));
         // The shooter's own ray, when the intent that pulled this trigger
         // carries it -- but never one far from where the authority has them.
@@ -167,6 +179,10 @@ namespace MphRead::Mods::Network
             && static_cast<std::size_t>(player.SlotIndex()) < NetSession::RemoteIntents.size()
             && NetPlayerBridge::AimTrusted(player.SlotIndex()))
         {
+            if (const auto event = NetShotEvents::FiringRay(player); event.has_value())
+            {
+                return event->Direction.Normalized();
+            }
             const IntentPacket& intent = NetSession::RemoteIntents.at(static_cast<std::size_t>(player.SlotIndex()));
             if (intent.HasShot && OpenTK::Mathematics::LengthSquared(intent.ShotOrigin - intent.Position) < 9.0F)
             {
@@ -318,6 +334,8 @@ namespace MphRead::Mods::Network
         {
             _intentPending = false;
             NetPlayerBridge::AttachLocalShot(_pendingIntent);
+            NetShotEvents::Attach(_pendingIntent);
+            NetBombs::Attach(_pendingIntent);
             NetSession::SendIntent(_pendingIntent);
         }
         if (!NetSession::IsAuthority() && !NetSession::IsHost())

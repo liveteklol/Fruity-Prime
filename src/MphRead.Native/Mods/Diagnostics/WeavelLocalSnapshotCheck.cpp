@@ -120,13 +120,19 @@ namespace MphRead::Mods::Diagnostics
                 check(OpenTK::Mathematics::Equal(turret.Position, Vector3(2, 20, 3)) && turret.Grounded(),
                     paths[path] + " stale inactive report cannot rewind turret physics");
 
+                // Other players' hits on the turret land on the authority only:
+                // a lower health is damage taken there, a higher one only an
+                // older report. Position and footing stay the owner's.
                 state.WeavelFlags = PlayerState::WeavelFlagTurretActive; // stale airborne report
                 state.HalfturretHealth = 47;
                 state.HalfturretPosition = Vector3(4, 23, 5);
                 apply(state, true);
-                check(turret.Health() == 50 && turret.Grounded()
+                check(turret.Health() == 47 && turret.Grounded()
                     && OpenTK::Mathematics::Equal(turret.Position, Vector3(2, 20, 3)),
-                    paths[path] + " stale active report cannot overwrite local turret HP/position/grounded");
+                    paths[path] + " active report lowers local turret HP, never its position/grounded");
+                state.HalfturretHealth = 49;
+                apply(state, true);
+                check(turret.Health() == 47, paths[path] + " an older, higher turret HP cannot raise it");
 
                 turret.Die();
                 apply(state, true);
@@ -143,13 +149,13 @@ namespace MphRead::Mods::Diagnostics
                 state.HalfturretHealth = 47;
                 state.HalfturretPosition = Vector3(4, 23, 5);
                 apply(state, false);
-                check(owner.IsAltForm() && turret.Health() == 47 && turret.Grounded()
+                check((owner.IsAltForm() || owner.IsMorphing()) && turret.Health() == 47 && turret.Grounded()
                     && OpenTK::Mathematics::Equal(turret.Position, state.HalfturretPosition),
                     paths[path] + " remote active turret is reconciled without splitting HP");
                 check(owner.Health() == state.Health, paths[path] + " remote activation does not split authority HP");
                 state.WeavelFlags = 0; state.HalfturretHealth = 0;
                 apply(state, false);
-                check(owner.IsAltForm() && turret.Health() == 0,
+                check((owner.IsAltForm() || owner.IsMorphing()) && turret.Health() == 0,
                     paths[path] + " remote Alt with dead turret remains dead");
                 state.Flags &= ~PlayerState::FlagAltForm;
                 apply(state, false);

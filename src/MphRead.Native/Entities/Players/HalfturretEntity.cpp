@@ -206,6 +206,12 @@ namespace MphRead::Entities
     void HalfturretEntity::InitializeFromNetworkState(std::int32_t health, Vector3 position, bool grounded)
     {
         InitializeSpawn(false);
+        // Placed where the authority has it, not walked there from its owner:
+        // a Weavel in its alt form is often in no room part at all, and a
+        // turret walked from nowhere is placed nowhere -- drawn by nobody and
+        // still firing.
+        Position = position;
+        NodeRef = RequireReference(_scene).GetNodeRefByPosition(position);
         ApplyNetworkState(health, position, grounded);
     }
 

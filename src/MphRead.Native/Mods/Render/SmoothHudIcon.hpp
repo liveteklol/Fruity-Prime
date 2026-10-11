@@ -33,7 +33,12 @@ namespace MphRead::Mods::Render
         static void Build(Hud::HudObjectInstance& inst,
             const Hud::ReadOnlyList<std::uint8_t>& data, std::int32_t frame,
             ColorRgba color, Scene& scene);
-        [[nodiscard]] static float Ink(const Hud::ReadOnlyList<std::uint8_t>& data,
+        // The pixel's palette brightness (0 for transparent), 0-255.
+        [[nodiscard]] static float Shade(const Hud::HudObjectInstance& inst,
+            const Hud::ReadOnlyList<std::uint8_t>& data, std::int32_t image,
+            std::int32_t tilesX, std::int32_t width, std::int32_t height,
+            std::int32_t x, std::int32_t y);
+        [[nodiscard]] static std::int32_t Index(const Hud::ReadOnlyList<std::uint8_t>& data,
             std::int32_t image, std::int32_t tilesX, std::int32_t width,
             std::int32_t height, std::int32_t x, std::int32_t y);
     };

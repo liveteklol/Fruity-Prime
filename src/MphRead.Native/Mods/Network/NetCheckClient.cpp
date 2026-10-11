@@ -4,6 +4,7 @@
 #include "HitLocation.hpp"
 #include "HitRig.hpp"
 #include "NetHitClaims.hpp"
+#include "NetShotEvents.hpp"
 #include "NetShotDiagnostics.hpp"
 #include "NetSmoothing.hpp"
 #include "NetTimingDiagnostics.hpp"
@@ -735,6 +736,30 @@ namespace MphRead::Mods::Network
         {
             std::cout << "  " << *claims << '\n';
         }
+        if (const std::optional<std::string> events = NetShotEvents::Describe(); events.has_value())
+        {
+            std::cout << "  " << *events << '\n';
+        }
+        // Per shooter, for tools/netcheck/compare-reports.py: every event
+        // received here has to have been fired.
+        const std::int32_t me = std::max(NetSession::LocalSlot(), 0);
+        for (std::int32_t slot = 0; slot < NetShotEvents::Slots; ++slot)
+        {
+            const ShotQueueStats shots = NetShotEvents::Stats(slot);
+            if (slot == me || (shots.Received == 0 && shots.Gaps == 0))
+            {
+                continue;
+            }
+            std::cout << "  netcheck-shots " << GameState::Nicknames().at(static_cast<std::size_t>(me))
+                << " from " << GameState::Nicknames().at(static_cast<std::size_t>(slot))
+                << " received " << shots.Received << " fired " << shots.Fired
+                << " stale " << shots.Stale << " pushed " << shots.Overflow
+                << " abandoned " << shots.Abandoned << " waiting " << shots.Waiting
+                << " overdue " << shots.Overdue
+                << " gaps " << shots.Gaps << " recovered " << shots.Recovered
+                << " lost " << shots.Lost << " pending " << shots.Pending
+                << " late " << shots.OutOfOrder << '\n';
+        }
         if (const std::optional<std::string> smoothing = NetSmoothing::Describe(); smoothing.has_value())
         {
             std::cout << "  " << *smoothing << '\n';
@@ -954,7 +979,7 @@ namespace MphRead::Mods::Network
             {
                 std::cout << "no other player was on the map and moving; ";
             }
-            std::cout << featureFailures << " feature(s) did not cross\n";
+            std::cout << featureFailures << " check(s) failed\n";
         }
     }
 

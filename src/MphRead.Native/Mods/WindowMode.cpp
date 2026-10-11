@@ -195,13 +195,15 @@ namespace MphRead::Mods
         activeState = WindowStartMode::BorderlessFullscreen;
 
         window.WindowStateNormal();
-        window.WindowBorder(HiddenWindowBorder);
-        RendererPlatform::ProcessEvents();
-        window.Location(monitor.Min);
-        
+        if (!window.WindowStateBorderless())
+        {
+            window.WindowBorder(HiddenWindowBorder);
+            RendererPlatform::ProcessEvents();
+            window.Location(monitor.Min);
             window.ClientSize(OpenTK::Mathematics::Vector2i{
                 monitor.Size.X,
                 UncheckedDecrement(monitor.Size.Y)});
+        }
 
         SetTopmost(window, true);
         // And written down, so the next session opens this way. See

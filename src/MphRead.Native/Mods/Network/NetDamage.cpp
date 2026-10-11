@@ -257,6 +257,18 @@ namespace MphRead::Mods::Network
     bool NetDamage::Suppress(Entities::PlayerEntity& victim,
         Entities::EntityBase* source, Entities::DamageFlags flags)
     {
+        return Refuses(victim, source, flags, true);
+    }
+
+    bool NetDamage::ResolvedHere(Entities::PlayerEntity& victim,
+        Entities::EntityBase* source, Entities::DamageFlags flags)
+    {
+        return !Refuses(victim, source, flags, false);
+    }
+
+    bool NetDamage::Refuses(Entities::PlayerEntity& victim,
+        Entities::EntityBase* source, Entities::DamageFlags flags, bool noting)
+    {
         if (!NetSession::Active() || _replaying)
         {
             return false;
@@ -278,12 +290,16 @@ namespace MphRead::Mods::Network
                 Entities::PlayerEntity* owner = NetHitPrediction::OwnerOf(source);
                 // Both ends human: a bot has no machine of its own to resolve
                 // hits on it, so hits on bots stay the authority's.
-                if (owner != nullptr && owner != &victim && !owner->IsBot() && !victim.IsBot()
+                // A remote player's hits on itself are its claims too.
+                if (owner != nullptr && !owner->IsBot() && !victim.IsBot()
                     && owner->SlotIndex() != NetSession::LocalSlot() && owner->SlotIndex() >= 0
                     && static_cast<std::size_t>(owner->SlotIndex()) < NetSession::SlotOccupied.size()
                     && NetSession::SlotOccupied[static_cast<std::size_t>(owner->SlotIndex())])
                 {
-                    NetHitClaims::NoteServerCopySuppressed();
+                    if (noting)
+                    {
+                        NetHitClaims::NoteServerCopySuppressed();
+                    }
                     return true;
                 }
             }

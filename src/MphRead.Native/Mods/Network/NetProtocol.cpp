@@ -797,15 +797,64 @@ namespace MphRead::Mods::Network
             dest[Size + 3] = TouchFlags;
             W32(Slice(dest, static_cast<std::size_t>(Size + StateSize + LegacyTouchSize)), TouchSampleSequence);
         }
-        if (HasShot && dest.size() >= static_cast<std::size_t>(ShotFullSize))
+        if (dest.size() >= static_cast<std::size_t>(ShotFullSize))
         {
             const auto at = static_cast<std::size_t>(FullSize);
-            WF(Slice(dest, at), ShotOrigin.X);
-            WF(Slice(dest, at + 4), ShotOrigin.Y);
-            WF(Slice(dest, at + 8), ShotOrigin.Z);
-            WF(Slice(dest, at + 12), ShotDirection.X);
-            WF(Slice(dest, at + 16), ShotDirection.Y);
-            WF(Slice(dest, at + 20), ShotDirection.Z);
+            const ::OpenTK::Mathematics::Vector3 origin = HasShot ? ShotOrigin : ::OpenTK::Mathematics::Vector3::Zero;
+            const ::OpenTK::Mathematics::Vector3 direction = HasShot ? ShotDirection : ::OpenTK::Mathematics::Vector3::Zero;
+            WF(Slice(dest, at), origin.X);
+            WF(Slice(dest, at + 4), origin.Y);
+            WF(Slice(dest, at + 8), origin.Z);
+            WF(Slice(dest, at + 12), direction.X);
+            WF(Slice(dest, at + 16), direction.Y);
+            WF(Slice(dest, at + 20), direction.Z);
+            const auto history = static_cast<std::size_t>(FullSize + ShotSize);
+            const std::uint8_t count = std::min<std::uint8_t>(ShotHistoryLength, ShotHistoryCount);
+            At(dest, history) = count;
+            At(dest, history + 1) = 0;
+            At(dest, history + 2) = 0;
+            At(dest, history + 3) = 0;
+            for (std::size_t i = 0; i < static_cast<std::size_t>(ShotHistoryCount); ++i)
+            {
+                const ShotEvent event = i < count ? ShotHistory[i] : ShotEvent{};
+                const std::size_t entry = history + 4 + i * static_cast<std::size_t>(ShotEventSize);
+                W32(Slice(dest, entry), event.Sequence);
+                W32(Slice(dest, entry + 4), event.Frame);
+                W32(Slice(dest, entry + 8), event.AckFrame);
+                At(dest, entry + 12) = event.WeaponId;
+                At(dest, entry + 13) = event.Charge;
+                At(dest, entry + 14) = 0;
+                At(dest, entry + 15) = 0;
+                WF(Slice(dest, entry + 16), event.Origin.X);
+                WF(Slice(dest, entry + 20), event.Origin.Y);
+                WF(Slice(dest, entry + 24), event.Origin.Z);
+                WF(Slice(dest, entry + 28), event.Direction.X);
+                WF(Slice(dest, entry + 32), event.Direction.Y);
+                WF(Slice(dest, entry + 36), event.Direction.Z);
+            }
+        }
+        if (dest.size() >= static_cast<std::size_t>(BombFullSize))
+        {
+            const auto at = static_cast<std::size_t>(ShotFullSize);
+            const std::uint8_t count = HasBombs ? std::min<std::uint8_t>(BombsLength, BombCount) : 0;
+            std::uint8_t gone = 0;
+            for (std::size_t i = 0; i < count; ++i)
+            {
+                gone = static_cast<std::uint8_t>(gone | (Bombs[i].Gone ? 1U << i : 0U));
+            }
+            At(dest, at) = count;
+            At(dest, at + 1) = HasBombs ? 1 : 0;
+            At(dest, at + 2) = gone;
+            At(dest, at + 3) = 0;
+            for (std::size_t i = 0; i < static_cast<std::size_t>(BombCount); ++i)
+            {
+                const Bomb bomb = i < count ? Bombs[i] : Bomb{};
+                const std::size_t entry = at + 4 + i * static_cast<std::size_t>(BombSize);
+                W32(Slice(dest, entry), bomb.Sequence);
+                WF(Slice(dest, entry + 4), bomb.Position.X);
+                WF(Slice(dest, entry + 8), bomb.Position.Y);
+                WF(Slice(dest, entry + 12), bomb.Position.Z);
+            }
         }
     }
     void IntentPacket::SetTouchReport(const ::MphRead::Mods::Input::NativeTouchState::Reported& touch) noexcept
@@ -874,6 +923,45 @@ namespace MphRead::Mods::Network
                 && std::isfinite(packet.ShotOrigin.Z) && std::isfinite(packet.ShotDirection.X)
                 && std::isfinite(packet.ShotDirection.Y) && std::isfinite(packet.ShotDirection.Z)
                 && packet.ShotDirection.LengthSquared() > 0.25F && packet.ShotDirection.LengthSquared() < 4.0F;
+            const auto history = static_cast<std::size_t>(FullSize + ShotSize);
+            const std::uint8_t count = std::min<std::uint8_t>(At(src, history), ShotHistoryCount);
+            packet.ShotHistoryLength = count;
+            for (std::size_t i = 0; i < count; ++i)
+            {
+                const std::size_t entry = history + 4 + i * static_cast<std::size_t>(ShotEventSize);
+                IntentPacket::ShotEvent& event = packet.ShotHistory[i];
+                event.Sequence = R32(Slice(src, entry));
+                event.Frame = R32(Slice(src, entry + 4));
+                event.AckFrame = R32(Slice(src, entry + 8));
+                event.WeaponId = At(src, entry + 12);
+                event.Charge = At(src, entry + 13);
+                event.Origin = ::OpenTK::Mathematics::Vector3(
+                    RF(Slice(src, entry + 16)), RF(Slice(src, entry + 20)), RF(Slice(src, entry + 24)));
+                event.Direction = ::OpenTK::Mathematics::Vector3(
+                    RF(Slice(src, entry + 28)), RF(Slice(src, entry + 32)), RF(Slice(src, entry + 36)));
+                const bool finite = std::isfinite(event.Origin.X) && std::isfinite(event.Origin.Y)
+                    && std::isfinite(event.Origin.Z) && std::isfinite(event.Direction.X)
+                    && std::isfinite(event.Direction.Y) && std::isfinite(event.Direction.Z)
+                    && event.Direction.LengthSquared() < 4.0F;
+                if (!finite)
+                {
+                    event.Origin = event.Direction = ::OpenTK::Mathematics::Vector3::Zero;
+                }
+            }
+        }
+        if (src.size() >= static_cast<std::size_t>(BombFullSize))
+        {
+            const auto at = static_cast<std::size_t>(ShotFullSize);
+            packet.HasBombs = At(src, at + 1) != 0;
+            packet.BombsLength = std::min<std::uint8_t>(At(src, at), BombCount);
+            for (std::size_t i = 0; i < packet.BombsLength; ++i)
+            {
+                const std::size_t entry = at + 4 + i * static_cast<std::size_t>(BombSize);
+                packet.Bombs[i].Sequence = R32(Slice(src, entry));
+                packet.Bombs[i].Position = ::OpenTK::Mathematics::Vector3(
+                    RF(Slice(src, entry + 4)), RF(Slice(src, entry + 8)), RF(Slice(src, entry + 12)));
+                packet.Bombs[i].Gone = (At(src, at + 2) & (1U << i)) != 0;
+            }
         }
         return packet;
     }
@@ -1118,6 +1206,8 @@ namespace MphRead::Mods::Network
         At(dest, 61) = static_cast<std::uint8_t>(Impact.X);
         At(dest, 62) = static_cast<std::uint8_t>(Impact.Y);
         At(dest, 63) = static_cast<std::uint8_t>(Impact.Z);
+        W32(Slice(dest, 64), ShotSequence);
+        W16(Slice(dest, 68), TurretDamage);
     }
     HitClaimPacket HitClaimPacket::Read(std::span<const std::uint8_t> src)
     {
@@ -1148,6 +1238,8 @@ namespace MphRead::Mods::Network
             packet.Impulse = ::OpenTK::Mathematics::Vector3::Zero;
             packet.Flags = static_cast<std::uint8_t>(packet.Flags & ~FlagImpulse);
         }
+        packet.ShotSequence = R32(Slice(src, 64));
+        packet.TurretDamage = R16(Slice(src, 68));
         return packet;
     }
     void HitVerdictPacket::Write(std::span<std::uint8_t> dest,

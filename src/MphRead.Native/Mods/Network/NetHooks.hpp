@@ -24,6 +24,12 @@ namespace MphRead::Mods::Network
 
         [[nodiscard]] static std::int32_t LocalSlot();
         [[nodiscard]] static bool IsPuppet(Entities::PlayerEntity& player);
+        // A remote player's zoom is the state their owner reports (the
+        // intent's ZoomedState, the snapshot's FlagZoomed), never toggled
+        // here by their replayed press: a press is a toggle, so one replayed
+        // against a state that already took it -- a press recovered late, a
+        // frame with no intent -- zooms a copy its owner never zoomed.
+        [[nodiscard]] static bool ZoomIsReported(Entities::PlayerEntity& player);
         [[nodiscard]] static bool KeepSlotAlive(Entities::PlayerEntity& player);
         [[nodiscard]] static bool PinPuppetsOnClients() noexcept { return _pinPuppetsOnClients; }
         static void PinPuppetsOnClients(bool value) noexcept { _pinPuppetsOnClients = value; }

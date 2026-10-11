@@ -8,6 +8,7 @@
 #include "NetHooks.hpp"
 #include "NetLog.hpp"
 #include "NetPlayerLifecycle.hpp"
+#include "NetShotEvents.hpp"
 #include "NetRoomChange.hpp"
 #include "NetSession.hpp"
 #include "NetShotDiagnostics.hpp"
@@ -412,7 +413,9 @@ namespace MphRead::Mods::Network
         }
         if (!Sane(state.Position) || !Sane(state.Speed) || !Sane(state.Facing)
             || (player.Hunter() == Hunter::Weavel
-                && ((state.WeavelFlags & ~(PlayerState::WeavelFlagTurretActive | PlayerState::WeavelFlagTurretGrounded)) != 0
+                && ((state.WeavelFlags & ~PlayerState::WeavelFlagsKnown) != 0
+                    || ((state.WeavelFlags & PlayerState::WeavelFlagMorphing) != 0
+                        && (state.WeavelFlags & PlayerState::WeavelFlagUnmorphing) != 0)
                     || ((state.WeavelFlags & PlayerState::WeavelFlagTurretActive) != 0
                         && (!Sane(state.HalfturretPosition) || state.HalfturretHealth == 0)))))
         {
@@ -472,7 +475,7 @@ namespace MphRead::Mods::Network
             player.SetHealth(NetHitPrediction::HealthFor(slot, state.Health));
             player.ModSetFacing(state.Facing);
             player.ModSetWeapon(static_cast<BeamType>(state.CurrentWeapon));
-            player.EquipInfo()->Zoomed = (state.Flags & PlayerState::FlagZoomed) != 0;
+            player.ModSetZoom((state.Flags & PlayerState::FlagZoomed) != 0);
             if (player.Hunter() != Hunter::Weavel)
                 ApplyForm(player, (state.Flags & PlayerState::FlagAltForm) != 0);
             player.ModSetSpectating((state.Flags & PlayerState::FlagSpectating) != 0);
@@ -496,12 +499,18 @@ namespace MphRead::Mods::Network
             }
         }
         // Explicit turret reconciliation owns remote replicas. A local owner
-        // predicts form and turret lifecycle; an older snapshot has no form ack.
+        // predicts form and turret placement, and takes the authority's word
+        // on the turret's health and destruction (WeavelOwnedTurret).
         if (player.Hunter() == Hunter::Weavel && !isLocal)
         {
-            player.ModApplyWeavelState((state.Flags & PlayerState::FlagAltForm) != 0,
+            player.ModApplyWeavelState(state.HeadingAlt(),
                 (state.WeavelFlags & PlayerState::WeavelFlagTurretActive) != 0, state.HalfturretHealth,
                 state.HalfturretPosition, (state.WeavelFlags & PlayerState::WeavelFlagTurretGrounded) != 0);
+        }
+        else if (player.Hunter() == Hunter::Weavel && !NetSession::IsAuthority())
+        {
+            player.ModApplyOwnWeavelTurret(state.HeadingAlt(),
+                (state.WeavelFlags & PlayerState::WeavelFlagTurretActive) != 0, state.HalfturretHealth);
         }
         player.ModSetFrozen((state.Flags & PlayerState::FlagFrozen) != 0);
         ApplyAfflictions(player, state);
@@ -945,6 +954,15 @@ namespace MphRead::Mods::Network
         {
             return;
         }
+        // The shot event being fired: its own ray and the world it was aimed
+        // in, however late it arrived.
+        if (const auto event = NetShotEvents::FiringRay(shooter); event.has_value())
+        {
+            from = event->Origin;
+            direction = event->Direction;
+            ackFrame = event->AckFrame;
+            return;
+        }
         const IntentPacket& intent = NetSession::RemoteIntents[static_cast<std::size_t>(slot)];
         ackFrame = intent.AckFrame;
         if (intent.HasShot)
@@ -1195,6 +1213,7 @@ namespace MphRead::Mods::Network
         _lastPressFrame[s] = 0;
         _pressSeen[s] = false;
         _aimHeld[s] = false;
+        NetShotEvents::BeginLife(slot);
         SpawnFrame[s] = 0;
         ShootPressAge[s] = 0;
         _respawnRequested[s] = false;
@@ -1330,5 +1349,6 @@ namespace MphRead::Mods::Network
         player.SetPrevPosition(position);
         player.ModRefreshNodeRef(previous);
         player.ModRefreshVolume();
+        player.ModRefreshAttachedEffects();
     }
 }

@@ -681,7 +681,8 @@ namespace MphRead
                 << ", " << Mods::RenderOptions::CelBands() << " bands, outline "
                 << NativeRuntime::ToStringInvariant(Mods::RenderOptions::CelEdge(), "0.00")
                 << ", fog " << BoolOnOff(Mods::RenderOptions::Fog())
-                << ", performance mode " << BoolOnOff(Mods::RenderOptions::PerformanceMode()) << '\n';
+                << ", performance mode " << BoolOnOff(Mods::RenderOptions::PerformanceMode()
+                    || Mods::ThumbnailMode::Active()) << '\n';
             InitShaders();
             _transientGeometry
                 = NativeRuntime::Rhi::CreateSceneTransientGeometry(Gpu(), Commands());
@@ -2257,11 +2258,14 @@ namespace MphRead
         BeginScenePass(ScenePass::Opaque);
         for (const auto& item : _nonDecalItems) RenderItem(item);
         // The depth the rebuild pass below would draw again, kept aside.
-        const bool opaqueDepthSaved = !Mods::RenderOptions::PerformanceMode() && SaveOpaqueDepth()
+        // Map thumbnails are always drawn in performance mode, whatever the
+        // player chose, so a preview looks the same on every machine.
+        const bool performance = Mods::RenderOptions::PerformanceMode() || Mods::ThumbnailMode::Active();
+        const bool opaqueDepthSaved = !performance && SaveOpaqueDepth()
             && Commands().SaveAttachmentDepth();
         BeginScenePass(ScenePass::Decal);
         for (const auto& item : _decalItems) RenderItem(item);
-        if (Mods::RenderOptions::PerformanceMode())
+        if (performance)
         {
             // Performance mode: each translucent item once, blended over the
             // opaque depth. No stencil pass, depth clear or depth rebuild.
@@ -2669,21 +2673,15 @@ namespace MphRead
 
     void Scene::UnlinkBeamEffect(Entities::BeamEffectEntity* entry)
     {
-        std::shared_ptr<Entities::BeamEffectEntity> owner;
-        for (auto enumerator = GetBeamEffectEntities().GetEnumerator(); enumerator.MoveNext();)
-        {
-            auto current = enumerator.Current();
-            if (current.get() == entry)
-            {
-                owner = std::move(current);
-                break;
-            }
-        }
-        if (!owner)
+        // Not looked up in the scene: RoomEntity::StartTransition removes every
+        // entity before destroying it, so an effect still alive when the room
+        // changes is no longer there -- and the lookup threw on every map
+        // rotation that followed a shot.
+        if (entry == nullptr)
         {
             throw System::NullReferenceException();
         }
-        UnlinkBeamEffect(owner);
+        UnlinkBeamEffect(Entities::SharedFrom(entry));
     }
 
     std::shared_ptr<Entities::BombEntity> Scene::InitBomb()
@@ -2706,21 +2704,13 @@ namespace MphRead
 
     void Scene::UnlinkBomb(Entities::BombEntity* entry)
     {
-        std::shared_ptr<Entities::BombEntity> owner;
-        for (auto enumerator = GetBombEntities().GetEnumerator(); enumerator.MoveNext();)
-        {
-            auto current = enumerator.Current();
-            if (current.get() == entry)
-            {
-                owner = std::move(current);
-                break;
-            }
-        }
-        if (!owner)
+        // As UnlinkBeamEffect: a bomb destroyed by a room change has already
+        // been removed from the scene.
+        if (entry == nullptr)
         {
             throw System::NullReferenceException();
         }
-        UnlinkBomb(owner);
+        UnlinkBomb(Entities::SharedFrom(entry));
     }
 
     void Scene::AddSingleParticle(SingleType type, Vector3 position, Vector3 color, float alpha, float scale)
@@ -3787,6 +3777,11 @@ namespace MphRead
     void Scene::UpdateUniforms()
     {
         UseRoomLights();
+        // Every frame, as the lights: written only when the room was set, the
+        // fog went to whichever program was bound then, and the scene program
+        // kept the previous room's -- the launcher backdrop's warm Alinos fog
+        // over a Data Shrine match on one renderer, its own green on the other.
+        SetShaderFog();
         _shaderConstants->SetFogEnabled(_hasFog && FogOn());
         _shaderConstants->SetCelBands(Mods::RenderOptions::CelShading() ? Mods::RenderOptions::CelBands() : 0);
         _shaderConstants->SetShowColors(_showColors);
@@ -7244,6 +7239,11 @@ namespace MphRead
     bool RenderWindow::WindowStateFullscreen()
     {
         return _window->WindowStateFullscreen();
+    }
+
+    bool RenderWindow::WindowStateBorderless()
+    {
+        return _window->WindowStateBorderless();
     }
 
     double RenderWindow::RefreshRate() const

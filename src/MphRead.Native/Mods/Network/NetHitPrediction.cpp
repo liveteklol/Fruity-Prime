@@ -265,7 +265,7 @@ namespace MphRead::Mods::Network
     void NetHitPrediction::NoteHit(Entities::PlayerEntity& victim, Entities::PlayerEntity* attacker,
         Entities::DamageFlags& flags, std::uint32_t& damage, ::MphRead::BeamType beam,
         std::uint32_t launchFrame, float flight, std::optional<OpenTK::Mathematics::Vector3> impulse,
-        ::MphRead::Affliction afflictions)
+        ::MphRead::Affliction afflictions, std::uint32_t shotSequence, std::uint32_t turretDamage)
     {
         const std::int32_t local = NetHooks::LocalSlot();
         if (local < 0)
@@ -337,12 +337,15 @@ namespace MphRead::Mods::Network
                 _pendingHeld[Index(victimSlot)][Index(at)] = claimedLethal && !self;
                 _pendingTravelled[Index(victimSlot)][Index(at)] = !self && flight > TravelFlight;
             }
-            if (!self && attacker != nullptr)
+            // Hits on itself too: its own shot and its own body are both on
+            // this machine, exactly where they are -- the authority's copy is
+            // a trip behind and walking somewhere else.
+            if (attacker != nullptr)
             {
                 const std::uint16_t claimId = NetHitClaims::Declare(victim, *attacker, beam, claimedDamage,
                     flags, claimedLethal, victim.Position, launchFrame, impulse, afflictions,
                     _impactKnown ? std::optional<OpenTK::Mathematics::Vector3>(_impact) : std::nullopt,
-                    _impactSplash);
+                    _impactSplash, shotSequence, turretDamage);
                 StampClaim(victimSlot, at, claimId);
             }
             if (headshot && !self)
@@ -477,6 +480,7 @@ namespace MphRead::Mods::Network
         {
             _healCount = 0;
             _healHead = 0;
+            _drainBaseline = 0;
         }
         _pendingCount[s] = 0;
         _pendingHead[s] = 0;
@@ -678,9 +682,35 @@ namespace MphRead::Mods::Network
             + std::to_string(_healthOverPoints) + " (worst " + std::to_string(_healthOverWorst) + ")";
     }
 
+    void NetHitPrediction::SettleDrain(std::int32_t authorityHealth)
+    {
+        const std::uint32_t frame = NetSession::AppliedSnapshotFrame();
+        if (frame == _drainSnapshotFrame)
+        {
+            return;
+        }
+        _drainSnapshotFrame = frame;
+        std::int32_t landed = _drainBaseline > 0 && authorityHealth > _drainBaseline
+            ? authorityHealth - _drainBaseline : 0;
+        _drainBaseline = authorityHealth;
+        while (landed > 0 && _healCount > 0)
+        {
+            std::int32_t& owed = _healAmount[Index(_healHead)];
+            const std::int32_t taken = std::min(owed, landed);
+            owed -= taken;
+            landed -= taken;
+            if (owed == 0)
+            {
+                _healHead = (_healHead + 1) % HealCapacity;
+                _healCount--;
+            }
+        }
+    }
+
     std::int32_t NetHitPrediction::LocalHealthFor(Entities::PlayerEntity& player, std::int32_t authorityHealth)
     {
         EnsureLife(player.SlotIndex());
+        SettleDrain(authorityHealth);
         if (!_enabled || authorityHealth <= 0)
         {
             return authorityHealth;
@@ -895,7 +925,12 @@ namespace MphRead::Mods::Network
                     _beamDenied[Index(bucket)]++;
                 }
             }
-            if (confirmed)
+            if (confirmed && _pendingSelf[s][a])
+            {
+                // A hit on itself, claimed and applied.
+                _selfConfirmed++;
+            }
+            else if (confirmed)
             {
                 _confirmed++;
                 if (_settledCredit[s] < SettledCreditMax)

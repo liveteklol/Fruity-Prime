@@ -66,6 +66,11 @@ public: \
         std::optional<std::int32_t> desiredTurretHealth = std::nullopt); \
     void ModApplyWeavelState(bool desiredAlt, bool turretActive, std::int32_t turretHealth, \
         OpenTK::Mathematics::Vector3 turretPosition, bool turretGrounded); \
+    /* The authority's word on this machine's own turret: WeavelOwnedTurret. */ \
+    /* A bomb its owner reports, placed where it stands: NetBombs. Null when it */ \
+    /* cannot be placed yet (a Lockjaw chain of three still going off). */ \
+    std::shared_ptr<BombEntity> ModPlaceReportedBomb(OpenTK::Mathematics::Vector3 position); \
+    void ModApplyOwnWeavelTurret(bool authorityHeadingAlt, bool authorityTurretActive, std::int32_t turretHealth); \
 private: \
     void FinalizeWeavelForm(bool desiredAlt); \
 public: \
@@ -96,6 +101,8 @@ public: \
     [[nodiscard]] bool ModFrozen() const; \
     void ModSetFrozen(bool frozen); \
     void ModRefreshVolume(); \
+    void ModRefreshAttachedEffects(); \
+    [[nodiscard]] bool ModFireShotEvent(); \
     [[nodiscard]] bool ModBurning() const; \
     [[nodiscard]] bool ModDisrupted() const; \
     void ModSetDisrupted(bool disrupted); \

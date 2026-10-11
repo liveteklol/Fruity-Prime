@@ -81,7 +81,9 @@ namespace MphRead::Mods::Network
         static constexpr double VoteSeconds = 30.0;
         static constexpr double VoteCooldownSeconds = 90.0;
         static constexpr double ProposalCooldownSeconds = 180.0;
-        static constexpr std::int32_t VoteMinimumPlayers = 2;
+        // One: a player alone on a server can vote the map they want, and
+        // the vote passes on their own ballot.
+        static constexpr std::int32_t VoteMinimumPlayers = 1;
         static constexpr double ReadyWaitSeconds = 30.0;
         static constexpr double AllReadySeconds = 5.0;
 
@@ -200,6 +202,10 @@ namespace MphRead::Mods::Network
         MatchDefinition _lobbyMatch{};
         MatchDefinition _frozenMatch{};
         Multiplayer::MatchWorldProfile _frozenWorldProfile{};
+        // Continuous rotation: the world a map was loaded with, from the
+        // people connected when it started, kept until the next map. Which
+        // pickups exist must not change under a running map.
+        Multiplayer::MatchWorldProfile _mapWorldProfile{};
         bool _lockTeams = false;
         std::uint16_t _sessionRevision = 1;
         std::uint32_t _lobbyOwnerClientId = 0;
@@ -211,6 +217,7 @@ namespace MphRead::Mods::Network
         void Shutdown(std::uint16_t listenPort);
         void EndMatch(double now, const std::string& reason);
         void AdvanceMap(double now);
+        void FreezeMapWorldProfile();
         [[nodiscard]] MatchStatePacket BuildState(double now) const;
         void BroadcastMatchState(double now);
         void StartSimulation();

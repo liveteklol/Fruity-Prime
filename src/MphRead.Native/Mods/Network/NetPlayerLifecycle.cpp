@@ -1,4 +1,6 @@
 #include "NetPlayerLifecycle.hpp"
+#include "NetBombs.hpp"
+#include "NetShotEvents.hpp"
 
 #include "NetDamage.hpp"
 #include "NetHitClaims.hpp"
@@ -113,6 +115,7 @@ namespace MphRead::Mods::Network
             beam.ModLaunchLife = parent->ModLaunchLife;
             beam.ModLaunchFrame = parent->ModLaunchFrame;
             beam.ModShooterAck = parent->ModShooterAck;
+            beam.ModShotSequence = parent->ModShotSequence;
             return;
         }
         beam.ModLaunchMatch = NetSession::CurrentMatchId();
@@ -120,6 +123,9 @@ namespace MphRead::Mods::Network
         beam.ModLaunchGeneration = owner == nullptr ? static_cast<std::uint16_t>(0) : Generation(owner->SlotIndex());
         beam.ModLaunchLife = owner == nullptr ? static_cast<std::uint16_t>(0) : Get(owner->SlotIndex());
         beam.ModLaunchFrame = owner == nullptr ? 0U : NetUnlagged::LaunchFrameFor(*owner);
+        // A turret's shot is not its owner's shot event.
+        beam.ModShotSequence = owner != nullptr && beam.Owner().get() == owner
+            ? NetShotEvents::SequenceOfShotFired(*owner) : 0U;
         beam.ModShooterAck = 0;
         if (owner != nullptr && NetSession::Active() && !NetSession::IsAuthority() && !NetSession::IsHost()
             && owner->SlotIndex() != NetSession::LocalSlot() && !owner->IsBot() && owner->SlotIndex() >= 0
@@ -159,6 +165,8 @@ namespace MphRead::Mods::Network
     void NetPlayerLifecycle::OnSlotChanged(std::int32_t slot)
     {
         NetPlayerBridge::ForgetSlot(slot);
+        NetShotEvents::Forget(slot);
+        NetBombs::Forget(slot);
         NetDamage::ForgetSlot(slot);
         NetHitPrediction::ForgetSlot(slot);
         NetHitClaims::ForgetSlot(slot);
