@@ -4422,7 +4422,11 @@ namespace MphRead
 
     void Scene::DrawHudLayer(const std::shared_ptr<LayerInfo>& info)
     {
-        if (info->BindingId == -1)
+        // At alpha 0 the layer shader writes nothing a blend keeps, yet the
+        // quad still covers the whole screen. Pro mode HUD sets the helmet and
+        // visor to 0 every frame, so that was three full-screen blended passes
+        // of fill for no pixel, which a phone's GPU pays for in frame time.
+        if (info->BindingId == -1 || info->Alpha <= 0.0F)
         {
             return;
         }
