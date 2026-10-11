@@ -2575,11 +2575,11 @@ namespace MphRead
         }
     }
 
-    void Scene::UpdateCameraRotation(float stepH, float stepV)
+    void Scene::UpdateCameraRotation(float stepH, float stepV, float limitV)
     {
         const float angleH = std::atan2(_cameraFacing.X, -_cameraFacing.Z) + stepH;
-        float angleV = std::asin(_cameraFacing.Y) + stepV;
-        angleV = std::clamp(angleV, -_almostHalfPi, _almostHalfPi);
+        float angleV = std::asin(std::clamp(_cameraFacing.Y, -1.0F, 1.0F)) + stepV;
+        angleV = std::clamp(angleV, -limitV, limitV);
         _cameraFacing = Vector3(
             std::cos(angleV) * std::sin(angleH),
             std::sin(angleV),
@@ -5063,8 +5063,10 @@ namespace MphRead
         const float moveStep = (shift ? DeathCameraStep * 5.0F : DeathCameraStep) * steps;
         const float rotStep = DegreesToRadians(shift ? 3.0F : 1.5F) * steps;
         float forward = _roamPadMoveY * DeathCameraStep * steps, right = _roamPadMoveX * DeathCameraStep * steps, rise = _roamPadRise * DeathCameraStep * steps;
-        float stepH = DegreesToRadians(_roamPadLookX + mouseX / 1.5F) * steps;
-        float stepV = DegreesToRadians(_roamPadLookY - mouseY / 1.5F) * steps;
+        // The mouse turns it as it turns a hunter: a quarter of a degree a
+        // count at sensitivity 1 (PlayerEntity::ApplyMouseAim, unzoomed).
+        float stepH = DegreesToRadians(_roamPadLookX + mouseX / 4.0F) * steps;
+        float stepV = DegreesToRadians(_roamPadLookY - mouseY / 4.0F) * steps;
         if (keys)
         {
             if (_keyboardState->IsKeyDown(Key::W)) forward += moveStep;
@@ -5080,7 +5082,13 @@ namespace MphRead
         }
         _cameraPosition = _cameraPosition + Multiply(_cameraFacing, forward) + Multiply(_cameraRight, right);
         _cameraPosition.Y += rise;
-        if (stepH != 0.0F || stepV != 0.0F) UpdateCameraRotation(stepH, stepV);
+        // A hunter's limit (PlayerEntity::UpdateAimY), not the debug camera's
+        // almost-vertical one: within a few thousandths of a degree of the
+        // pole the camera's right is kept rather than derived
+        // (UpdateCameraBasis), so a turn there moved nothing on screen and
+        // landed all at once on the way back down.
+        constexpr float PitchLimit = 85.0F * 3.14159265F / 180.0F;
+        if (stepH != 0.0F || stepV != 0.0F) UpdateCameraRotation(stepH, stepV, PitchLimit);
     }
 
     void Scene::UpdatePointModule()

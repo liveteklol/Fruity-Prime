@@ -1086,7 +1086,7 @@ private: \
     void TransformCamera(); \
     void UpdateCameraPosition(); \
     void ResetCamera(); \
-    void UpdateCameraRotation(float stepH, float stepV); \
+    void UpdateCameraRotation(float stepH, float stepV, float limitV = _almostHalfPi); \
     void UpdateCameraBasis(); \
     void NoteRoamCameraHeld(const char* reason); \
     void AllocateEffects(); \
