@@ -721,6 +721,7 @@ namespace MphRead::Entities
         void SetRespawnTimer(std::uint16_t value) noexcept { _respawnTimer = value; }
         [[nodiscard]] float DeathCountdown() const noexcept { return _deathCountdown; }
         [[nodiscard]] bool DoubleDamage() const noexcept { return _doubleDmgTimer > 0; }
+        [[nodiscard]] bool DeathaltRunning() const noexcept { return _deathaltTimer > 0; }
         [[nodiscard]] std::uint16_t ShockCoilTimer() const noexcept { return _shockCoilTimer; }
         [[nodiscard]] float CurAlpha() const noexcept { return _curAlpha; }
         [[nodiscard]] bool IgnoreItemPickups() const noexcept { return _ignoreItemPickups; }
