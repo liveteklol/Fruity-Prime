@@ -957,6 +957,17 @@ namespace MphRead::Entities
         }
     }
 
+    void PlayerEntity::ModIgnite(PlayerEntity& by, std::uint32_t launchFrame)
+    {
+        if ((*this).Health() <= 0)
+        {
+            return;
+        }
+        (*this).ModSetBurning(true);
+        (*this)._burnedBy = SharedFrom<EntityBase>(&by);
+        (*this)._burnLaunchFrame = launchFrame;
+    }
+
     bool PlayerEntity::ModCanZoom() const
     {
         return ((*this).EquipInfo()->Weapon != nullptr)
