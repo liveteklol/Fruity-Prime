@@ -37,8 +37,6 @@
 #include "../SceneShaderAbi.hpp"
 #include "../../../Mods/Platform/AppPaths.hpp"
 #include "FruityVulkanSceneShaders.hpp"
-#include "FruityVulkanFastShaders.hpp"
-#include "../FastScene.hpp"
 #include <vk_mem_alloc.h>
 
 namespace MphRead::NativeRuntime::Rhi::Vulkan
@@ -1186,39 +1184,9 @@ namespace MphRead::NativeRuntime::Rhi::Vulkan
             // Per block: its place among its group's dynamic offsets, which
             // Vulkan takes in binding order.
             std::vector<std::uint8_t> DynamicSlot;
-
-            // Performance mode's main_fast (main only): main's body and
-            // blocks, all five in set 0 as dynamic uniform buffers into a
-            // per-slot record ring, the texture in set 1. FastBlocks: the
-            // Frame, Light, Fog, Material and Draw blocks in binding order;
-            // a Draw record is the block up to and through the matrices the
-            // draw's vertices use (FastMatrixOffset onwards).
-            std::unique_ptr<VulkanShader> FastVertex;
-            std::unique_ptr<VulkanShader> FastFragment;
-            std::array<std::unique_ptr<VulkanBindingLayout>, 2> FastLayouts;
-            std::array<std::size_t, 5> FastBlocks{};
-            std::size_t FastSmall = 0;
-            std::uint32_t FastDrawBytes = 0, FastMatrixOffset = 0, FastPushBytes = 0;
-
-            // main_fast2, the cpp-port renderer's layout for meshes in the
-            // global geometry buffer: set 0 the Frame, Light, Fog and toon
-            // blocks (dynamic) with the draw records and matrices (storage),
-            // set 1 the texture (FastLayouts[1]). The copies say where each
-            // member of main's blocks goes in the push constants or record.
-            struct FastCopy final
-            {
-                enum class From : std::uint8_t { Small, Material, Draw } Source = From::Material;
-                std::uint32_t Offset = 0, Size = 0, Dest = 0;
-            };
-            std::unique_ptr<VulkanShader> Fast2Vertex;
-            std::unique_ptr<VulkanShader> Fast2Fragment;
-            std::unique_ptr<VulkanBindingLayout> Fast2Records;
-            std::vector<FastCopy> Fast2Push, Fast2Record;
         };
 
 #include "VulkanCommandListInternal.inc"
-
-        class FastGeometryArena;
 
         class VulkanGraphicsDevice final : public GraphicsDevice
         {
@@ -1229,11 +1197,7 @@ namespace MphRead::NativeRuntime::Rhi::Vulkan
                 _state->CloseNative();
                 _retained.clear();
                 _pipelines.clear();
-                _fastGeometry.reset();
             }
-
-            // Performance mode's global geometry buffer (FastGeometryArena).
-            [[nodiscard]] std::shared_ptr<FastGeometryArena>& FastGeometry() noexcept { return _fastGeometry; }
 
             [[nodiscard]] GraphicsBackend GetBackend() const noexcept override { return GraphicsBackend::Vulkan; }
             [[nodiscard]] LowLatencyCapabilities LowLatencyCaps() const noexcept override
@@ -1643,7 +1607,6 @@ namespace MphRead::NativeRuntime::Rhi::Vulkan
             std::mutex _pipelineMutex;
             std::unordered_multimap<std::size_t,
                 std::pair<VulkanPipelineKey, std::shared_ptr<VulkanGraphicsPipeline>>> _pipelines;
-            std::shared_ptr<FastGeometryArena> _fastGeometry;
             std::vector<std::unique_ptr<Texture>> _retained{};
             std::atomic<unsigned> _reportedValidationErrors{0};
         };

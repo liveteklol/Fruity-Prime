@@ -222,184 +222,12 @@ private:
         }
         for (std::uint32_t group = 0; group < SceneShaderAbi::GroupCount; ++group)
             program->Layouts[group] = std::make_unique<VulkanBindingLayout>(_device, layouts[group]);
-        if (id == SceneProgram::Main) AddFast(*program, uniforms, textures, blocks);
-        if (id == SceneProgram::Composite) AddFastComposite(*program, textures, blocks);
         _programs.push_back(std::move(program));
-    }
-
-    // composite_fast (performance mode's HUD): its one block, Hud, is the
-    // push constants; its textures are set 0 at their own bindings.
-    template <typename Textures, typename Blocks>
-    void AddFastComposite(VulkanSceneProgram& program, const Textures& textures, const Blocks& blocks)
-    {
-        if (blocks.size() != 1 || blocks[0].small || blocks[0].size > 128 || textures.size() != 2) return;
-        program.FastBlocks[0] = 0;
-        program.FastPushBytes = blocks[0].size;
-        BindingLayoutDesc layout{};
-        for (const auto& texture : textures)
-        {
-            layout.entries.push_back({texture.image, BindingType::SampledTexture, ShaderStage::AllGraphics, 1});
-            layout.entries.push_back({texture.sampler, BindingType::Sampler, ShaderStage::AllGraphics, 1});
-        }
-        program.FastLayouts[0] = std::make_unique<VulkanBindingLayout>(_device, layout);
-        const auto shader = [&](const auto& words, ShaderStage stage) {
-            ShaderDesc desc{};
-            desc.stage = stage;
-            desc.format = ShaderCodeFormat::SpirV;
-            desc.code.resize(words.size() * sizeof(std::uint32_t));
-            std::memcpy(desc.code.data(), words.data(), desc.code.size());
-            return std::make_unique<VulkanShader>(_device, desc);
-        };
-        program.FastVertex = shader(Generated::composite_fast_vert, ShaderStage::Vertex);
-        program.FastFragment = shader(Generated::composite_fast_frag, ShaderStage::Fragment);
-    }
-
-    // main_fast's modules and layouts, and where its records are in main's
-    // blocks. Left out (FastVertex null) when main's blocks are not the ones
-    // main_fast was generated for, so the ordinary path draws.
-    template <typename Uniforms, typename Textures, typename Blocks>
-    void AddFast(VulkanSceneProgram& program, const Uniforms& uniforms, const Textures& textures, const Blocks& blocks)
-    {
-        constexpr std::array<std::string_view, 5> records{"Frame", "Light", "Fog", "Material", "Draw"};
-        std::array<bool, 5> found{};
-        bool small = false;
-        for (std::size_t i = 0; i < blocks.size(); ++i)
-        {
-            if (blocks[i].small) { program.FastSmall = i; small = true; continue; }
-            for (std::size_t k = 0; k < records.size(); ++k)
-                if (blocks[i].semantic == records[k]) { program.FastBlocks[k] = i; found[k] = true; }
-        }
-        const auto matrices = std::find_if(uniforms.begin(), uniforms.end(),
-            [](const auto& member) { return member.name == "mtx_stack"; });
-        if (!small || std::find(found.begin(), found.end(), false) != found.end() || matrices == uniforms.end()
-            || matrices->block != program.FastBlocks[4] || matrices->offset % 16 || textures.size() != 1
-            || textures[0].group != 1)
-            return;
-        program.FastMatrixOffset = matrices->offset;
-        program.FastDrawBytes = matrices->offset;
-        program.FastPushBytes = blocks[program.FastSmall].size;
-        const auto shader = [&](const auto& words, ShaderStage stage) {
-            ShaderDesc desc{};
-            desc.stage = stage;
-            desc.format = ShaderCodeFormat::SpirV;
-            desc.code.resize(words.size() * sizeof(std::uint32_t));
-            std::memcpy(desc.code.data(), words.data(), desc.code.size());
-            return std::make_unique<VulkanShader>(_device, desc);
-        };
-        BindingLayoutDesc recordLayout{};
-        for (std::uint32_t binding = 0; binding < records.size(); ++binding)
-            recordLayout.entries.push_back({binding, BindingType::UniformBuffer, ShaderStage::AllGraphics, 1, true});
-        BindingLayoutDesc textureLayout{};
-        textureLayout.entries.push_back({textures[0].image, BindingType::SampledTexture, ShaderStage::AllGraphics, 1});
-        textureLayout.entries.push_back({textures[0].sampler, BindingType::Sampler, ShaderStage::AllGraphics, 1});
-        program.FastLayouts[0] = std::make_unique<VulkanBindingLayout>(_device, recordLayout);
-        program.FastLayouts[1] = std::make_unique<VulkanBindingLayout>(_device, textureLayout);
-        program.FastVertex = shader(Generated::main_fast_vert, ShaderStage::Vertex);
-        program.FastFragment = shader(Generated::main_fast_frag, ShaderStage::Fragment);
-
-        // main_fast2: the copy tables name main's blocks by semantic.
-        using From = VulkanSceneProgram::FastCopy::From;
-        const auto copies = [&](const auto& table, std::vector<VulkanSceneProgram::FastCopy>& out) {
-            for (const auto& entry : table)
-            {
-                const From source = entry.block == "DrawSmall" ? From::Small
-                    : entry.block == "Material" ? From::Material : From::Draw;
-                if (entry.block != "DrawSmall" && entry.block != "Material" && entry.block != "Draw") return false;
-                out.push_back({source, entry.offset, entry.size, entry.dest});
-            }
-            return true;
-        };
-        if (!copies(Generated::main_fast2_push, program.Fast2Push) || !copies(Generated::main_fast2_record, program.Fast2Record))
-            return;
-        BindingLayoutDesc fast2Layout{};
-        for (std::uint32_t binding = 0; binding < 4; ++binding)
-            fast2Layout.entries.push_back({binding, BindingType::UniformBuffer, ShaderStage::AllGraphics, 1, true});
-        fast2Layout.entries.push_back({4, BindingType::StorageBuffer, ShaderStage::AllGraphics, 1});
-        fast2Layout.entries.push_back({5, BindingType::StorageBuffer, ShaderStage::AllGraphics, 1});
-        program.Fast2Records = std::make_unique<VulkanBindingLayout>(_device, fast2Layout);
-        program.Fast2Vertex = shader(Generated::main_fast2_vert, ShaderStage::Vertex);
-        program.Fast2Fragment = shader(Generated::main_fast2_frag, ShaderStage::Fragment);
     }
 
     std::shared_ptr<VulkanDeviceState> _device;
     std::vector<std::unique_ptr<VulkanSceneProgram>> _programs;
     VulkanSceneConstants _constants;
-};
-
-// Performance mode's global geometry buffer, the cpp-port renderer's
-// m_vertexBuffer: GPU meshes are copied into large shared vertex and index
-// buffers as they are made, so a fast draw binds neither and draws a range.
-// Chunks are bump-allocated; one whose meshes are all gone starts over once
-// the GPU is done with them.
-class FastGeometryArena final
-{
-public:
-    struct Chunk final
-    {
-        VulkanCommandList::FastGeometryView View{};
-        std::unique_ptr<VulkanBuffer> Vertices, Indices;
-        std::uint32_t VertexCursor = 0, IndexCursor = 0, Live = 0;
-        std::uint64_t Epoch = 0;
-    };
-    struct Range final
-    {
-        std::shared_ptr<Chunk> Owner;
-        std::uint32_t FirstIndex = 0;
-        std::int32_t VertexOffset = 0;
-    };
-    static constexpr std::uint32_t VertexCapacity = 1U << 18, IndexCapacity = 1U << 20;
-
-    explicit FastGeometryArena(std::shared_ptr<VulkanDeviceState> device) : _device(std::move(device)) {}
-
-    std::optional<Range> Add(VulkanGraphicsDevice& device, std::span<const float> vertices, std::span<const std::uint32_t> indices)
-    {
-        const auto count = static_cast<std::uint32_t>(vertices.size() / 13U);
-        if (!count || indices.empty() || count > VertexCapacity || indices.size() > IndexCapacity) return std::nullopt;
-        std::shared_ptr<Chunk> chunk;
-        for (const auto& candidate : _chunks)
-            if (candidate->VertexCursor + count <= VertexCapacity
-                && candidate->IndexCursor + indices.size() <= IndexCapacity)
-            { chunk = candidate; break; }
-        if (!chunk)
-        {
-            const auto make = [&](VkDeviceSize size, BufferUsage usage) {
-                BufferDesc desc{};
-                desc.size = size;
-                desc.usage = usage | BufferUsage::TransferDst;
-                desc.memoryUsage = MemoryUsage::GpuOnly;
-                desc.initialState = usage == BufferUsage::Index ? ResourceState::IndexBuffer : ResourceState::VertexBuffer;
-                return std::make_unique<VulkanBuffer>(device.State(), desc);
-            };
-            chunk = std::make_shared<Chunk>();
-            chunk->Vertices = make(VkDeviceSize{VertexCapacity} * 13U * sizeof(float), BufferUsage::Vertex);
-            chunk->Indices = make(VkDeviceSize{IndexCapacity} * sizeof(std::uint32_t), BufferUsage::Index);
-            chunk->View = {chunk->Vertices->Native(), chunk->Indices->Native()};
-            _chunks.push_back(chunk);
-        }
-        device.WriteBuffer(*chunk->Vertices, VkDeviceSize{chunk->VertexCursor} * 13U * sizeof(float), std::as_bytes(vertices));
-        device.WriteBuffer(*chunk->Indices, VkDeviceSize{chunk->IndexCursor} * sizeof(std::uint32_t), std::as_bytes(indices));
-        Range range{chunk, chunk->IndexCursor, static_cast<std::int32_t>(chunk->VertexCursor)};
-        chunk->VertexCursor += count;
-        chunk->IndexCursor += static_cast<std::uint32_t>(indices.size());
-        ++chunk->Live;
-        ++chunk->Epoch;
-        return range;
-    }
-
-    void Release(const Range& range)
-    {
-        auto& chunk = *range.Owner;
-        if (chunk.Live == 0 || --chunk.Live != 0) return;
-        const auto epoch = chunk.Epoch;
-        _device->Retire([weak = std::weak_ptr<Chunk>(range.Owner), epoch] {
-            if (const auto chunk = weak.lock(); chunk && chunk->Live == 0 && chunk->Epoch == epoch)
-                chunk->VertexCursor = chunk->IndexCursor = 0;
-        });
-    }
-
-private:
-    std::shared_ptr<VulkanDeviceState> _device;
-    std::vector<std::shared_ptr<Chunk>> _chunks;
 };
 
 class VulkanGpuMesh final : public MphRead::GpuMeshResource
@@ -420,7 +248,6 @@ public:
             _vertices.insert(_vertices.end(), {v.Position.X, v.Position.Y, v.Position.Z,
                 v.Normal.X, v.Normal.Y, v.Normal.Z, v.Color.X, v.Color.Y, v.Color.Z, v.Color.W,
                 v.TexCoord.X, v.TexCoord.Y, static_cast<float>(v.MatrixIndex)});
-            _matrices = std::max(_matrices, std::min<std::uint32_t>(v.MatrixIndex, 31U) + 1U);
             const bool color = MphRead::HasSceneVertexAttributeState(_states[i], SceneVertexAttributeState::Color);
             const bool normal = MphRead::HasSceneVertexAttributeState(_states[i], SceneVertexAttributeState::Normal);
             anyColor |= color; allColor &= color; anyNormal |= normal; allNormal &= normal;
@@ -433,22 +260,6 @@ public:
             _vertexBuffer = Upload(device, std::as_bytes(std::span(_vertices)), BufferUsage::Vertex);
         if (!indices.empty())
             _indexBuffer = Upload(device, std::as_bytes(std::span(indices)), BufferUsage::Index);
-        // Also in the global geometry buffer, unless some vertices carry a
-        // colour or normal and others inherit it (those keep their streams).
-        if (!_vertices.empty() && !indices.empty() && _colorMode != Mode::Mixed && _normalMode != Mode::Mixed)
-        {
-            auto& arena = device.FastGeometry();
-            if (!arena) arena = std::make_shared<FastGeometryArena>(device.State());
-            _fastRange = arena->Add(device, std::span<const float>(_vertices), std::span<const std::uint32_t>(indices));
-            if (_fastRange) _fastArena = arena;
-        }
-    }
-
-    ~VulkanGpuMesh() override
-    {
-        if (!_fastRange) return;
-        if (const auto arena = _fastArena.lock())
-            try { arena->Release(*_fastRange); } catch (...) {}
     }
 
     void Draw() override
@@ -467,16 +278,6 @@ public:
                 _device->CurrentNormal.data());
             draw.IndexBuffer = _indexBuffer->Native();
             draw.IndexCount = _indexCount;
-            draw.Matrices = _matrices;
-            if (_fastRange)
-            {
-                draw.Geometry = &_fastRange->Owner->View;
-                draw.FirstIndex = _fastRange->FirstIndex;
-                draw.VertexOffset = _fastRange->VertexOffset;
-                draw.InheritFlags = (_colorMode == Mode::Inherited ? 1U : 0U) | (_normalMode == Mode::Inherited ? 2U : 0U);
-                draw.InheritedColor = _device->CurrentColor;
-                draw.InheritedNormal = _device->CurrentNormal;
-            }
             _commands.DrawScene(draw);
         }
         // The current attributes the display list leaves behind.
@@ -490,10 +291,6 @@ public:
 
 private:
     enum class Mode : std::uint8_t { Inherited, Static, Mixed };
-    // Matrix-stack entries the vertices index (performance mode copies these).
-    std::uint32_t _matrices = 1;
-    std::optional<FastGeometryArena::Range> _fastRange;
-    std::weak_ptr<FastGeometryArena> _fastArena;
 
     static std::unique_ptr<VulkanBuffer> Upload(VulkanGraphicsDevice& device, std::span<const std::byte> data,
         BufferUsage usage)
@@ -713,9 +510,7 @@ public:
         MphRead::AppendTransientDrawIndices(indices, sequence, topology);
         if (indices.capacity() != previousCapacity) FrameTelemetry::Count(FrameTelemetry::Counter::VectorGrowth);
         if (indices.empty()) return;
-        // 48: the ring's 16 and the 24-byte stride, so the slice is a whole
-        // vertex offset into its page and fast draws can share one binding.
-        auto positions = _commands.Allocate(n * 24U, 48);
+        auto positions = _commands.Allocate(n * 24U);
         auto* out = reinterpret_cast<float*>(positions.Data);
         for (std::size_t i = 0; i < n; ++i)
         {
@@ -740,12 +535,6 @@ public:
         draw.IndexOffset = index.Offset;
         draw.IndexCount = static_cast<std::uint32_t>(indices.size());
         draw.Lines = lines;
-        if (hasTexCoords)
-        {
-            draw.TransientVertices = positions.Buffer;
-            draw.TransientVertexOffset = static_cast<std::int32_t>(positions.Offset / 24U);
-            draw.TransientFirstIndex = static_cast<std::uint32_t>(index.Offset / 4U);
-        }
         _commands.DrawScene(draw);
     }
 
