@@ -556,7 +556,8 @@ namespace
             Vector2 t2,
             Vector3 normal,
             std::int32_t material,
-            float shade)
+            float shade,
+            std::vector<Vector3> colors = {})
             : Points(std::make_unique<ManagedArray<Vector3>>(3)),
               Texcoords(std::make_unique<ManagedArray<Vector2>>(3))
         {
@@ -572,6 +573,7 @@ namespace
                 normal,
                 material,
                 shade);
+            Face->Colors = std::move(colors);
         }
     };
 
@@ -597,8 +599,13 @@ namespace
             const Vector3 normal = face->Normal();
             const std::int32_t material = face->Material();
             const float shade = face->Shade();
+            std::vector<Vector3> colors;
+            if (face->Colors.size() == length)
+            {
+                colors = {face->Colors[0], face->Colors[i], face->Colors[i + 1]};
+            }
             result.push_back(std::make_unique<FanFaceOwner>(
-                p0, p1, p2, t0, t1, t2, normal, material, shade));
+                p0, p1, p2, t0, t1, t2, normal, material, shade, std::move(colors)));
         }
         return result;
     }
@@ -629,6 +636,8 @@ namespace
     void FitTriangle(
         const std::array<Vector3, 3>& points,
         const std::array<Vector2, 3>& texcoords,
+        const std::array<Vector3, 3>& colors,
+        bool colored,
         BuiltFace* face,
         float width,
         float height,
@@ -652,7 +661,8 @@ namespace
                 Vector2(texcoords[0].X - offset.X, texcoords[0].Y - offset.Y),
                 Vector2(texcoords[1].X - offset.X, texcoords[1].Y - offset.Y),
                 Vector2(texcoords[2].X - offset.X, texcoords[2].Y - offset.Y),
-                face->Normal(), face->Material(), face->Shade()));
+                face->Normal(), face->Material(), face->Shade(),
+                colored ? std::vector<Vector3>{colors[0], colors[1], colors[2]} : std::vector<Vector3>{}));
             return;
         }
 
@@ -680,10 +690,14 @@ namespace
         const Vector2 middleUv(
             (texcoords[a].X + texcoords[b].X) * 0.5F,
             (texcoords[a].Y + texcoords[b].Y) * 0.5F);
+        const Vector3 middleColor(
+            (colors[a].X + colors[b].X) * 0.5F,
+            (colors[a].Y + colors[b].Y) * 0.5F,
+            (colors[a].Z + colors[b].Z) * 0.5F);
         FitTriangle({points[a], middle, points[c]}, {texcoords[a], middleUv, texcoords[c]},
-            face, width, height, depth + 1, result);
+            {colors[a], middleColor, colors[c]}, colored, face, width, height, depth + 1, result);
         FitTriangle({middle, points[b], points[c]}, {middleUv, texcoords[b], texcoords[c]},
-            face, width, height, depth + 1, result);
+            {middleColor, colors[b], colors[c]}, colored, face, width, height, depth + 1, result);
     }
 
     void FitTexcoords(
@@ -696,11 +710,23 @@ namespace
         ManagedArray<Vector2>* texcoords = FaceTexcoords(face);
         for (std::size_t i = 1; i + 1 < points->Length(); ++i)
         {
+            const bool colored = face->Colors.size() == points->Length();
+            const Vector3 none(1.0F, 1.0F, 1.0F);
             FitTriangle(
                 {(*points)[0], (*points)[i], (*points)[i + 1]},
                 {(*texcoords)[0], (*texcoords)[i], (*texcoords)[i + 1]},
-                face, width, height, 0, result);
+                {colored ? face->Colors[0] : none, colored ? face->Colors[i] : none, colored ? face->Colors[i + 1] : none},
+                colored, face, width, height, 0, result);
         }
+    }
+
+    [[nodiscard]] std::uint32_t PackColor(Vector3 light) noexcept
+    {
+        const auto channel = [](float value) noexcept -> std::uint32_t
+        {
+            return static_cast<std::uint32_t>(std::clamp(RoundedInt32(31.0F * value), 0, 31));
+        };
+        return channel(light.X) | (channel(light.Y) << 5U) | (channel(light.Z) << 10U);
     }
 
     [[nodiscard]] std::uint32_t PackColor(float shade) noexcept
@@ -785,8 +811,15 @@ namespace
             instructions.push_back(
                 Instruction(InstructionCode::NORMAL, {PackNormal(face->Normal())}));
             ManagedArray<Vector3>* points = FacePoints(face);
+            const bool colored = face->Colors.size() == points->Length();
             for (std::size_t i = 0; i < points->Length(); ++i)
             {
+                // Light at each corner, where the face has it.
+                if (colored)
+                {
+                    instructions.push_back(
+                        Instruction(InstructionCode::COLOR, {PackColor(face->Colors[i])}));
+                }
                 ManagedArray<Vector2>* texcoords = FaceTexcoords(face);
                 const Vector2 texcoord = ManagedAt(texcoords, i);
                 instructions.push_back(Instruction(

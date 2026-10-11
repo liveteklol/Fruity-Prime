@@ -163,65 +163,20 @@ namespace MphRead::Mods::MapGen
             MathMax(
                 ManagedAt(max.get(), 1) - ManagedAt(min.get(), 1),
                 ManagedAt(max.get(), 2) - ManagedAt(min.get(), 2)));
-        // The scale is for the part of the level anybody plays in. A level
-        // may stand in a vista many times its arena's size -- acid3dm12's
-        // floor and water run 16384 units across round an arena of 1500 --
-        // and measured on that it came out at 126 units each, a room a
-        // hunter crosses in two steps. Where the level places enough things
-        // to say where play happens, their extent (and a margin) is what is
-        // measured; the vista is still drawn.
-        float measured = widest;
         std::optional<std::string> title;
+        for (const std::shared_ptr<Q3Entity>& entityRef : RequireReference(bsp).Entities())
         {
-            std::vector<std::shared_ptr<std::vector<float>>> placed;
-            for (const std::shared_ptr<Q3Entity>& entityRef : RequireReference(bsp).Entities())
+            const Q3Entity* entity = &RequireReference(entityRef);
+            const std::string* classname = EntityValue(entity, "classname");
+            if (classname != nullptr && StringEqualsOrdinalIgnoreCase(*classname, "worldspawn"))
             {
-                const Q3Entity* entity = &RequireReference(entityRef);
-                const std::string* classname = EntityValue(entity, "classname");
-                if (classname == nullptr)
+                if (const std::string* message = EntityValue(entity, "message"))
                 {
-                    continue;
+                    title = Title(*message);
                 }
-                if (StringEqualsOrdinalIgnoreCase(*classname, "worldspawn"))
-                {
-                    if (const std::string* message = EntityValue(entity, "message"))
-                    {
-                        title = Title(*message);
-                    }
-                    continue;
-                }
-                const std::string* origin = EntityValue(entity, "origin");
-                if (origin == nullptr)
-                {
-                    continue;
-                }
-                using ::MphRead::NativeRuntime::StringStartsWithOrdinalIgnoreCase;
-                if (StringStartsWithOrdinalIgnoreCase(*classname, "info_player_deathmatch")
-                    || StringStartsWithOrdinalIgnoreCase(*classname, "item_")
-                    || StringStartsWithOrdinalIgnoreCase(*classname, "weapon_")
-                    || StringStartsWithOrdinalIgnoreCase(*classname, "ammo_"))
-                {
-                    placed.push_back(ParseVector(*origin));
-                }
-            }
-            if (placed.size() >= 8)
-            {
-                float playWidest = 0.0F;
-                for (std::size_t axis = 0; axis < 3; ++axis)
-                {
-                    float low = std::numeric_limits<float>::max();
-                    float high = std::numeric_limits<float>::lowest();
-                    for (const auto& position : placed)
-                    {
-                        low = MathMin(low, ManagedAt(position.get(), axis));
-                        high = MathMax(high, ManagedAt(position.get(), axis));
-                    }
-                    playWidest = MathMax(playWidest, high - low);
-                }
-                measured = MathMin(widest, playWidest + 1024.0F);
             }
         }
-        const float unit = AutoScale(measured);
+        const float unit = UnitsPerUnit;
 
         std::shared_ptr<std::vector<float>> reachMin;
         std::shared_ptr<std::vector<float>> reachMax;
@@ -256,6 +211,17 @@ namespace MphRead::Mods::MapGen
         definition->Import(import);
 
         AddSpawns(&RequireReference(definition), &RequireReference(bsp), unit);
+
+        std::vector<MapDefinition::Portal> portals;
+        for (const Q3Import::Q3Portal& portal : Q3Import::Portals(bsp.get()))
+        {
+            const OpenTK::Mathematics::Vector3 camera = Q3Import::WorldPoint(portal.Camera, unit);
+            const OpenTK::Mathematics::Vector3 aim = Q3Import::WorldPoint(portal.Aim, unit);
+            const OpenTK::Mathematics::Vector3 up = Q3Import::WorldPoint(portal.Up, 1.0F);
+            portals.push_back(MapDefinition::Portal{
+                {camera.X, camera.Y, camera.Z}, {aim.X, aim.Y, aim.Z}, portal.Roll, {up.X, up.Y, up.Z}});
+        }
+        definition->Portals(std::move(portals));
         return definition;
     }
 
@@ -295,7 +261,8 @@ namespace MphRead::Mods::MapGen
 
     float Q3Convert::AutoScale(float widestExtent)
     {
-        return RoundToEven(MathMax(35.0F, widestExtent / TargetExtent));
+        (void)widestExtent;
+        return UnitsPerUnit;
     }
 
     float Q3Convert::WidestExtent(Q3Bsp* bsp)
@@ -473,7 +440,7 @@ namespace MphRead::Mods::MapGen
 
         std::vector<std::shared_ptr<std::vector<float>>> concatenated;
         const std::vector<std::shared_ptr<std::vector<float>>>* chosen;
-        if (starts.size() >= 4)
+        if (!starts.empty())
         {
             chosen = &starts;
         }
@@ -505,7 +472,7 @@ namespace MphRead::Mods::MapGen
         {
             throw System::NullReferenceException();
         }
-        import->KeepSpawns(starts.size() >= 4);
+        import->KeepSpawns(!starts.empty());
 
         import = definition->Import();
         if (import == nullptr)

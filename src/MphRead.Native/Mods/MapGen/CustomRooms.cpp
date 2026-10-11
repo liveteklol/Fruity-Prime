@@ -4,6 +4,7 @@
 #include "MapBundle.hpp"
 #include <fstream>
 #include "Q3Convert.hpp"
+#include "../../Metadata/Metadata.hpp"
 #include "Q3Bsp.hpp"
 #include "MapDefinition.hpp"
 #include "MapPacker.hpp"
@@ -436,6 +437,58 @@ namespace MphRead::Mods::MapGen
         }
     }
 
+    std::string CustomRooms::PortalImagePath(MapDefinition* def, std::size_t portal)
+    {
+        return PathCombine(ArchiveDirectory(def), "portal_" + std::to_string(portal) + ".png");
+    }
+
+    std::vector<std::string> CustomRooms::RoomsWithoutPortalViews()
+    {
+        std::vector<std::string> rooms;
+        for (const std::shared_ptr<MapDefinition>& definition : Definitions())
+        {
+            if (!definition->Translated() || NeedsGenerating(definition.get()))
+            {
+                continue;
+            }
+            for (std::size_t i = 0; i < definition->Portals().size(); ++i)
+            {
+                if (!FileExists(PortalImagePath(definition.get(), i)))
+                {
+                    rooms.push_back(definition->Name());
+                    break;
+                }
+            }
+        }
+        return rooms;
+    }
+
+    float CustomRooms::Q3StepHeight(std::int32_t roomId)
+    {
+        static std::int32_t cachedRoom = -1;
+        static float cachedHeight = 0.0F;
+        if (roomId == cachedRoom)
+        {
+            return cachedHeight;
+        }
+        float height = 0.0F;
+        if (const ::MphRead::RoomMetadata* meta = ::MphRead::Metadata::GetRoomById(roomId, true))
+        {
+            for (const std::shared_ptr<MapDefinition>& definition : Definitions())
+            {
+                if (definition->Translated()
+                    && ::MphRead::NativeRuntime::StringCompareOrdinalIgnoreCase(definition->Name(), meta->Name) == 0)
+                {
+                    height = 18.0F / Q3Convert::UnitsPerUnit;
+                    break;
+                }
+            }
+        }
+        cachedRoom = roomId;
+        cachedHeight = height;
+        return height;
+    }
+
     std::string CustomRooms::TranslatorStamp(MapDefinition* def)
     {
         const std::string& source = ::MphRead::NativeRuntime::RequireReference(def).SourcePath().value();
@@ -451,7 +504,7 @@ namespace MphRead::Mods::MapGen
         return PathCombine(ArchiveDirectory(def), "translated.txt");
     }
 
-    void CustomRooms::Build(MapDefinition* def, bool verbose)
+    void CustomRooms::Build(MapDefinition* def, bool verbose, bool keepPortalViews)
     {
         if (def == nullptr)
         {
@@ -468,6 +521,15 @@ namespace MphRead::Mods::MapGen
             std::filesystem::remove(PathFromUtf8(TranslatorStampPath(def)), ignored);
             std::filesystem::remove(PathFromUtf8(textures), ignored);
             std::filesystem::create_directories(PathFromUtf8(archiveDirectory), ignored);
+            // The views through its portals belong to the level as it was:
+            // rendered again unless this build is the one that uses them.
+            if (!keepPortalViews)
+            {
+                for (std::size_t i = 0; i < def->Portals().size(); ++i)
+                {
+                    std::filesystem::remove(PathFromUtf8(PortalImagePath(def, i)), ignored);
+                }
+            }
         }
         MapPacker::Generate(def, archiveDirectory, EntityDirectory(), NodeDirectory(), verbose);
         if (def->Translated())

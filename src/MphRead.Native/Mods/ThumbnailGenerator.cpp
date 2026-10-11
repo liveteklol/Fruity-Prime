@@ -272,6 +272,61 @@ namespace MphRead::Mods
         }
     }
 
+    void ThumbnailGenerator::EnsurePortalViews(std::function<void(const std::string&)> report)
+    {
+        if (!Launcher::GameFiles::Ready() || !ThumbnailBatch::CanRun())
+        {
+            return;
+        }
+        std::vector<std::string> rooms;
+        try
+        {
+            rooms = MapGen::CustomRooms::RoomsWithoutPortalViews();
+        }
+        catch (...)
+        {
+            return;
+        }
+        if (rooms.empty())
+        {
+            return;
+        }
+        if (!report)
+        {
+            report = [](const std::string& line) { std::cout << "  " << line << std::endl; };
+        }
+        report("Rendering the portals of " + std::to_string(rooms.size()) + " map(s)...");
+        std::vector<std::string> keys;
+        for (const std::string& room : rooms)
+        {
+            keys.push_back(room + "#portals");
+        }
+        try
+        {
+            (void)ThumbnailBatch::Run(keys, 1, PortalViewSize, PortalViewSize, report);
+        }
+        catch (const std::exception& ex)
+        {
+            report("could not render portals: " + std::string(ex.what()));
+            return;
+        }
+        for (const auto& definition : MapGen::CustomRooms::Definitions())
+        {
+            if (std::find(rooms.begin(), rooms.end(), definition->Name()) == rooms.end())
+            {
+                continue;
+            }
+            try
+            {
+                MapGen::CustomRooms::Build(definition.get(), false, true);
+            }
+            catch (const std::exception& ex)
+            {
+                report(definition->Name() + " could not be built with its portals: " + ex.what());
+            }
+        }
+    }
+
     void ThumbnailGenerator::EnsureCacheDirectory()
     {
         std::filesystem::create_directories(PathFromUtf8(CacheDirectory()));

@@ -31,6 +31,7 @@
 #include "InputSettings.hpp"
 #include "MapGen/AltFormProbe.hpp"
 #include "MapGen/PadProbe.hpp"
+#include "MapGen/MphTextures.hpp"
 #include "MapGen/MapCheck.hpp"
 #include "Multiplayer/ResourceAudit.hpp"
 #if defined(MPHREAD_QT) && !defined(__ANDROID__)
@@ -2005,6 +2006,79 @@ namespace MphRead::Mods
                     : std::nullopt);
             SetExitCode(MapGen::AltFormProbe::Run(*altProbe,
                 OpenTK::Mathematics::Vector3(atX, atY, atZ), ParseHunter(args)));
+            return true;
+        }
+
+        // -portalviews ["ROOM"|all]: render the views through a translated
+        // level's portals here and now, and build the room again with them.
+        if (::HasFlag(args, "portalviews"))
+        {
+            const std::optional<std::string> only = ValueAfter(args, "portalviews");
+            std::int32_t failed = 0;
+            for (const auto& definition : MapGen::CustomRooms::Definitions())
+            {
+                if (definition->Portals().empty()
+                    || (only.has_value() && !StringEqualsOrdinalIgnoreCase(*only, "all")
+                        && !StringEqualsOrdinalIgnoreCase(*only, definition->Name())))
+                {
+                    continue;
+                }
+                const bool ok = ThumbnailCapture::CaptureRoom(definition->Name() + "#portals",
+                    ThumbnailGenerator::PortalViewSize, ThumbnailGenerator::PortalViewSize);
+                WriteLine(definition->Name() + ": " + std::to_string(definition->Portals().size()) + " portal views "
+                    + (ok ? "rendered" : "NOT rendered"));
+                if (ok)
+                {
+                    MapGen::CustomRooms::Build(definition.get(), true, true);
+                }
+                else
+                {
+                    failed++;
+                }
+            }
+            SetExitCode(failed == 0 ? 0 : 1);
+            return true;
+        }
+
+        // -shotat "ROOM" -at X,Y,Z -look X,Y,Z -out FILE.png [-size W,H]: the
+        // room from one camera, for comparing with the level it came from.
+        if (const std::optional<std::string> shotRoom = ValueAfter(args, "shotat"); shotRoom.has_value())
+        {
+            const auto vector = [&](const char* name, OpenTK::Mathematics::Vector3& value) -> bool
+            {
+                const std::vector<std::string> parts = NativeRuntime::StringSplit(ValueAfter(args, name).value_or(""), ',');
+                return parts.size() == 3
+                    && TryParseFloatInvariant(std::optional<std::string>(parts[0]), value.X, false)
+                    && TryParseFloatInvariant(std::optional<std::string>(parts[1]), value.Y, false)
+                    && TryParseFloatInvariant(std::optional<std::string>(parts[2]), value.Z, false);
+            };
+            ThumbnailCapture::View view;
+            const std::optional<std::string> out = ValueAfter(args, "out");
+            if (!vector("at", view.Position) || !vector("look", view.Target) || !out.has_value())
+            {
+                WriteLine("-shotat needs -at X,Y,Z -look X,Y,Z -out FILE.png");
+                SetExitCode(1);
+                return true;
+            }
+            view.Path = *out;
+            std::int32_t width = 960;
+            std::int32_t height = 540;
+            if (const std::optional<std::string> size = ValueAfter(args, "size"))
+            {
+                const std::vector<std::string> parts = NativeRuntime::StringSplit(*size, ',');
+                if (parts.size() == 2)
+                {
+                    (void)Int32TryParseCurrentCulture(parts[0], width);
+                    (void)Int32TryParseCurrentCulture(parts[1], height);
+                }
+            }
+            SetExitCode(ThumbnailCapture::CaptureViews(*shotRoom, {view}, width, height) ? 0 : 1);
+            return true;
+        }
+
+        if (const std::optional<std::string> texDump = ValueAfter(args, "mphtexdump"); texDump.has_value())
+        {
+            SetExitCode(MapGen::MphTextures::Dump(*texDump));
             return true;
         }
 

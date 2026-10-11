@@ -49,6 +49,25 @@ namespace MphRead::Mods::MapGen
 
         [[nodiscard]] static std::vector<Q3Pickup> Pickups(Q3Bsp* bsp, float unitsPerUnit);
 
+        // A portal of the level, in Quake's units and axes: where its
+        // surface entity stands, where its camera is and what it looks at,
+        // and the camera's roll in degrees.
+        struct Q3Portal
+        {
+            OpenTK::Mathematics::Vector3 Surface{};
+            OpenTK::Mathematics::Vector3 Camera{};
+            OpenTK::Mathematics::Vector3 Aim{};
+            float Roll = 0.0F;
+            // Up in the view through it, seen from straight in front.
+            OpenTK::Mathematics::Vector3 Up{0.0F, 0.0F, 1.0F};
+        };
+        [[nodiscard]] static std::vector<Q3Portal> Portals(Q3Bsp* bsp);
+        [[nodiscard]] static bool IsPortalShader(const std::string& shader);
+        [[nodiscard]] static OpenTK::Mathematics::Vector3 PortalUp(Q3Bsp* bsp, const Q3Portal& portal);
+        // A point in Quake's units and axes, in this game's.
+        [[nodiscard]] static OpenTK::Mathematics::Vector3 WorldPoint(
+            OpenTK::Mathematics::Vector3 position, float unit) noexcept { return ToWorld(position, unit); }
+
         // The top of the highest solid world brush below (x, y, z), in Quake
         // units and axes; none when nothing is under it.
         [[nodiscard]] static std::optional<float> Floor(Q3Bsp* bsp, float x, float y, float z);
@@ -125,6 +144,7 @@ namespace MphRead::Mods::MapGen
             const std::vector<OpenTK::Mathematics::Vector2>& uvs,
             const std::vector<OpenTK::Mathematics::Vector3>& normals,
             const std::vector<float>& shades,
+            const std::vector<OpenTK::Mathematics::Vector3>& lights,
             std::int32_t dimension,
             std::int32_t material,
             bool sky,
@@ -132,6 +152,10 @@ namespace MphRead::Mods::MapGen
             GridPoint p1,
             GridPoint p2);
 
+        // A Quake vertex colour as the light it gives: brightened as
+        // R_ColorShiftLightingBytes does (mapOverBrightBits 2, no hardware
+        // gamma), a channel past full bringing the others down with it.
+        [[nodiscard]] static OpenTK::Mathematics::Vector3 Light(const std::vector<std::uint8_t>* color);
         [[nodiscard]] static float Shade(float baked, bool sky) noexcept;
 
         [[nodiscard]] static BuiltFace* MakeFace(
@@ -139,7 +163,8 @@ namespace MphRead::Mods::MapGen
             std::vector<OpenTK::Mathematics::Vector2> uvs,
             OpenTK::Mathematics::Vector3 normal,
             std::int32_t material,
-            float shade);
+            float shade,
+            std::vector<OpenTK::Mathematics::Vector3> colors = {});
 
         static void ProjectSky(BuiltFace* face, float texelsPerUnit);
 
@@ -207,6 +232,10 @@ namespace MphRead::Mods::MapGen
 
         [[nodiscard]] static std::vector<OpenTK::Mathematics::Vector3> Weld(
             const std::vector<OpenTK::Mathematics::Vector3>& points);
+
+        static void AddPortalFace(
+            BuiltMap* map, Q3Bsp* bsp, Q3Face* face, float unit,
+            std::int32_t material, std::int32_t width, std::int32_t height);
 
         static void AddEntities(
             BuiltMap* map, MapDefinition* def, Q3Bsp* bsp,

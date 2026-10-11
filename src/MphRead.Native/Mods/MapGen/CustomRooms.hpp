@@ -38,9 +38,17 @@ namespace MphRead::Mods::MapGen
         [[nodiscard]] static std::string EntityDirectory();
         [[nodiscard]] static std::string NodeDirectory();
 
+        // Quake's STEPSIZE in this game's units for a room read from a Quake 3
+        // level, 0 for any other: how high a hunter steps up there.
+        [[nodiscard]] static float Q3StepHeight(std::int32_t roomId);
+        // Where portal i of a translated level's room keeps the view from its
+        // camera, and the rooms still without one (ThumbnailGenerator renders
+        // them, then they are built again with them).
+        [[nodiscard]] static std::string PortalImagePath(MapDefinition* def, std::size_t portal);
+        [[nodiscard]] static std::vector<std::string> RoomsWithoutPortalViews();
         // Generates the room's files: MapPacker::Generate, and for a level
         // read from its archive the stamp NeedsGenerating compares.
-        static void Build(MapDefinition* def, bool verbose);
+        static void Build(MapDefinition* def, bool verbose, bool keepPortalViews = false);
         [[nodiscard]] static std::int32_t GenerateAll(
             bool force = false, bool verbose = true);
         static void GenerateMissing();

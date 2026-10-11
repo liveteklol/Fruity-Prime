@@ -15,6 +15,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <iterator>
 #include <fstream>
 #include <limits>
 #include <memory>
@@ -920,7 +921,8 @@ namespace MphRead::Mods::MapGen
         const std::optional<std::string>& outputPath,
         std::int32_t size,
         bool sky,
-        const std::vector<std::pair<std::string, std::string>>* aliases)
+        const std::vector<std::pair<std::string, std::string>>* aliases,
+        const std::vector<std::string>* portalImages)
     {
         using namespace MapTextureBakeInterop;
 
@@ -1158,6 +1160,48 @@ namespace MphRead::Mods::MapGen
                 }
             }
             break;
+        }
+
+        // Each portal's view as its camera sees it, once it has been
+        // rendered; until then a dark glass, which is what a portal looks
+        // like from afar.
+        if (portalImages != nullptr)
+        {
+            for (std::size_t i = 0; i < portalImages->size(); ++i)
+            {
+                DecodedImage image;
+                if (FileExists((*portalImages)[i]))
+                {
+                    std::ifstream file(PathFromUtf8((*portalImages)[i]), std::ios::binary);
+                    const std::vector<std::uint8_t> bytes(
+                        (std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+                    image = LoadRgb(bytes);
+                }
+                if (image.Width <= 0 || image.Height <= 0)
+                {
+                    image.Width = 8;
+                    image.Height = 8;
+                    image.Pixels.assign(8 * 8 * 3, 0);
+                    for (std::size_t p = 0; p < image.Pixels.size(); p += 3)
+                    {
+                        image.Pixels[p] = 40;
+                        image.Pixels[p + 1] = 52;
+                        image.Pixels[p + 2] = 70;
+                    }
+                }
+                const std::int32_t width = NativeSide(image.Width);
+                const std::int32_t height = NativeSide(image.Height);
+                const std::vector<std::uint8_t> decoded = Resample(image, width, height);
+                auto [palette, pixels] = Quantize(decoded, UncheckedMultiply(width, height));
+                entries.push_back(BakedEntry{
+                    PortalSourceIndex + static_cast<std::int32_t>(i),
+                    "portal#" + std::to_string(i),
+                    std::move(palette),
+                    std::move(pixels),
+                    width,
+                    height
+                });
+            }
         }
 
         EnsureOutputDirectory(outputPath);

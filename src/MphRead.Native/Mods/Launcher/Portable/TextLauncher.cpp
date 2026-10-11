@@ -1063,6 +1063,7 @@ namespace MphRead::Mods::Launcher
         if (GameFiles::Ready())
         {
             GameFiles::ApplyPaths();
+            MphRead::Mods::ThumbnailGenerator::EnsurePortalViews();
             MphRead::Mods::ThumbnailGenerator::EnsureCustomPreviews();
         }
         std::vector<std::string> rooms;

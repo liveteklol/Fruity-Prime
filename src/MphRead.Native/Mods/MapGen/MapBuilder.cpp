@@ -615,6 +615,7 @@ namespace MphRead::Mods::MapGen
             entity->Active = true;
             entity->ModelId = pad->ModelId();
             entity->Padding81 = pad->Q3Kind();
+            entity->Padding82 = pad->Q3Unit();
             entity->Unused28 = std::bit_cast<std::uint32_t>(pad->Q3Value());
             entity->BeamType = 0;
             entity->TriggerFlags = Entities::TriggerFlags::PlayerBiped

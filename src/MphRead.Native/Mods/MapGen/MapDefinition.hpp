@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -126,6 +127,17 @@ namespace MphRead::Mods::MapGen
         // recipe; SourcePath is the level's archive.
         [[nodiscard]] bool Translated() const noexcept;
         void Translated(bool value) noexcept;
+        // A translated level's portals: where each one's camera stands and
+        // what it looks at, in world units, and its roll in degrees.
+        struct Portal
+        {
+            std::array<float, 3> Camera{};
+            std::array<float, 3> Aim{};
+            float Roll = 0.0F;
+            std::array<float, 3> Up{0.0F, 1.0F, 0.0F};
+        };
+        [[nodiscard]] const std::vector<Portal>& Portals() const noexcept;
+        void Portals(std::vector<Portal> value) noexcept;
 
         [[nodiscard]] static std::shared_ptr<MapDefinition> Load(const std::string& path);
         void Save(const std::string& path) const;
@@ -163,6 +175,7 @@ namespace MphRead::Mods::MapGen
         std::optional<std::string> _bundlePath{};
         std::optional<std::string> _sourcePath{};
         bool _translated = false;
+        std::vector<Portal> _portals{};
     };
 
     // Collision read from a Wavefront OBJ rather than derived from the
@@ -442,6 +455,8 @@ namespace MphRead::Mods::MapGen
         void Q3Kind(std::uint8_t value) noexcept;
         [[nodiscard]] float Q3Value() const noexcept;
         void Q3Value(float value) noexcept;
+        [[nodiscard]] std::uint16_t Q3Unit() const noexcept;
+        void Q3Unit(std::uint16_t value) noexcept;
 
     private:
         friend class MapDefinitionJson;
@@ -456,6 +471,7 @@ namespace MphRead::Mods::MapGen
         std::shared_ptr<std::vector<float>> _box{};
         std::uint8_t _q3Kind = 0;
         float _q3Value = 0.0F;
+        std::uint16_t _q3Unit = 0;
     };
 
     class MapItem

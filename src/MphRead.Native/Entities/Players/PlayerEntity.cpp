@@ -1171,7 +1171,7 @@ namespace MphRead::Entities
     void PlayerEntity::Teleport(Vector3 position, Vector3 facing,
         MphRead::Formats::Culling::NodeRef nodeRef)
     {
-        _soundSource.PlaySfx(SfxId::TELEPORT_OUT, true);
+        _soundSource.PlaySfx(SfxId::TELEPORT_OUT, false, true);
         Reposition(position, facing, nodeRef);
         if (IsAltForm() || IsMorphing() || IsUnmorphing())
         {

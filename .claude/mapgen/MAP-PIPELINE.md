@@ -385,12 +385,24 @@ What the level holds comes across by rule, never by hand:
   editor image -- in the level's own archive, and baked **at the size it was
   painted at** (each side down to a power of two, up to 512, as
   `r_roundImagesDown` does: `MapTextureBake::NativeSize`). A shader the level
-  carries no image for is painted with **the cartridge's own art of the same
-  kind** (`MphTextures`): its name and surfaceparms put it in a family -- sky,
-  lava, ice for slime and water, glass, grate, pipe, light, trim, metal, rock,
-  sand, floor, wall -- and a hash of the name picks one of that family's
-  materials from the multiplayer rooms (MP7's `lava2`, MP8's `floor_metroid`,
-  AD2's `rock_reg`...), so the same level always comes out the same. The log
+  carries no image for is painted with **the cartridge texture that looks
+  most like Quake's own** (`Q3TextureMatches.inc`, 2425 shaders): Quake 3's
+  paks (pak0-pak8, every texture they hold) and the 796 community levels in a
+  DeFRaG `baseq3`, compared image against image with every texture of every
+  room of the cartridge -- colour in CIE Lab, its spread, how much and which
+  way it changes texel to texel; a sky is matched with the cartridge's skies,
+  on colour, its cloud layers added together as Quake draws them. Names only
+  are committed, never id's images:
+
+  ```
+  FruityPrime -mphtexdump DUMP
+  tools/q3-texture-match.py BASEQ3 DUMP src/MphRead.Native/Mods/MapGen/Q3TextureMatches.inc --sheet S.png
+  ```
+
+  A shader the table does not know falls back on `MphTextures`' families: its
+  name and surfaceparms put it in one -- sky, lava, ice for slime and water,
+  glass, grate, pipe, light, trim, metal, rock, sand, floor, wall -- and a hash
+  of the name picks one of that family's materials. The log
   says `stand-in: shader <- ROOM/material`. Left out instead: a shader with no
   lightmap that is not the sky (a flare, a glow), a see-through effect
   (energy, fog, flames, beams), and `textures/common`'s editor markers --
@@ -402,6 +414,20 @@ What the level holds comes across by rule, never by hand:
   converted floor past sixteen repeats was clamped and smeared.
 - **The sky** is the level's sky box, six sides at their own size, drawn as a
   box round the level's sky (`tr_sky.c`'s `st_to_vec`).
+- **Light** is Quake's own: each vertex's colour from the .bsp (what
+  `r_vertexLight` draws with), brightened as `R_ColorShiftLightingBytes` does,
+  drawn as a COLOR per vertex. Lightmaps are not: their detail between
+  vertices is lost.
+- **Portals** (`misc_portal_surface` and its `misc_portal_camera`) show the
+  view from their camera: rendered by the thumbnail pass once the room is
+  built (`ThumbnailGenerator::EnsurePortalViews`, or `-portalviews ROOM`),
+  kept as `portal_N.png` beside the room, and the room built again with them.
+  The camera's up is Quake's -- `PerpendicularVector`s of the surface and the
+  camera, the camera's side rolled after the renderer turns it round
+  (`CG_Portal`, `R_GetPortalOrientations`) -- so a view Quake shows upside
+  down is upside down here too. A still picture: it does not follow the
+  viewer, nor fade in as Quake's `alphaGen portal` does. Mirrors (no camera)
+  are left out.
 - **Pickups**, by what they do (`Q3Import::MapItemType`): the railgun is the
   Imperialist, rockets the Magmaul, the plasma gun the Battlehammer, the
   lightning gun the Shock Coil, grenades the Judicator, the shotgun the Volt
@@ -425,15 +451,17 @@ What the level holds comes across by rule, never by hand:
   stands in a 16384-unit vista and would otherwise come out at 126 units each.
 - **No fog**: the cartridge's fog colours belong to its rooms.
 
-**How the scale is chosen.** `TargetExtent` is 130 units and 35 is the floor.
-The floor is the architecture matching exactly -- a 56-unit Quake player
-against Samus's 1.6 -- and it is not the answer, because a level built for a
-player who covers 216 units in a jump, converted for one who covers 7.7, is a
-correct model of a map nobody can cross. Nor is the level's own player a
-guide: df_dust2's crates are 128 and 192 units, which are de_dust2's 64 and 96
-*doubled*, so that level is built at twice the scale of the map it copies. 130
-was arrived at by measuring the crates. It puts the small one at 1.56 units
-against Samus's 1.6 -- waist-high, which is what a crate is.
+**The scale is 35 Quake units to one** (`Q3Convert::UnitsPerUnit`): a Quake
+player is 56 tall and a hunter 1.6, so the level is the size it was built for
+-- a run at 320 a second is 9.1 units here against a hunter's 7.2. Scaling
+big levels down made the hunters giants in them. At this scale a 16-unit
+stair is half a unit, which a hunter's round collision does not ride over, so
+in a translated room a hunter **steps up** what a Quake player would
+(`PlayerEntity::TryQ3StepUp`, `PM_StepSlideMove`'s 18): stopped against
+something on the ground, the same move raised a step must touch no wall or
+ceiling, and the top it comes down onto is found by halving the drop. No ramp
+and no hop. A collision grid that outgrows the format's 16-bit face list at
+this scale shares one run of it between the cells that hold the same faces.
 
 ### Jump pads and teleporters fly Quake's flight
 
@@ -467,9 +495,16 @@ cartridge leaves zero (`Padding81` the kind, `Unused28` a float).
   the volume is the trigger grown by that box.
 - Neither draws anything: the level's own pad and teleporter surfaces are
   what you see.
+- **Air control** in a pad's flight is Quake's (`PM_AirMove`,
+  `pm_airaccelerate` 1, towards 320 a second along the controls): a nudge,
+  not a stop, and kept as the pad's own speed.
+- **A pad on the ground reaches 18 units higher** than its trigger: Quake
+  players drop into the hollow a pad is set in and a hunter's round body rides
+  over one narrower than itself.
 
 `-padprobe ROOM [-hunter H] [-alt]` proves it in the real engine: it stands a
-hunter on every push pad, then runs one across it, and compares each flight,
+hunter on every push pad, runs one across it and walks one onto it from up to
+four sides, and compares each flight,
 frame by frame, with the parabola of the velocity the pad set. It stops where
 another trigger throws on (`chained`, a pad in mid-air) or the level is
 touched on the way (`hit`, a ledge's lip), and checks every teleporter's
@@ -483,6 +518,15 @@ collision, and a hunter is not Quake's 30-unit box, so a flight that grazes a
 ledge may graze it differently. And Quake rounds the velocity to whole units
 every client frame (`trap_SnapVector`), so a pad there throws a little
 differently at 125 and at 333 frames a second: This is the parabola that rounding wobbles about.
+
+### Comparing with Quake 3 itself
+
+`~/fprd-q3shot.sh` (WSL) takes screenshots in ioquake3 (`apt install
+ioquake3`, a `baseq3` of pak0-pak8 and the level) from `setviewpos`
+positions, `noclip` so triggers do not teleport the camera; `-shotat ROOM -at
+X,Y,Z -look X,Y,Z -out F.png` takes the same view here. `~/fprd-compare.sh`
+puts them side by side; `q3spawnviews.py` and `q3portals.py` (in `~/fp-tmp`)
+write the views from a level's starts and in front of each portal.
 
 ## Collision a person edits: the OBJ round trip
 

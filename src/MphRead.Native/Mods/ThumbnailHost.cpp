@@ -1,4 +1,5 @@
 #include "ThumbnailHost.hpp"
+#include "MapGen/CustomRooms.hpp"
 
 #include "ThumbnailBatch.hpp"
 #include "ThumbnailGenerator.hpp"
@@ -48,6 +49,18 @@ namespace MphRead::Mods
     {
         try
         {
+            // The views through a Quake 3 level's portals first: the room is
+            // built again with them, and its preview is taken after.
+            if (ThumbnailBatch::CanRun() && !MapGen::CustomRooms::RoomsWithoutPortalViews().empty())
+            {
+                return std::async(std::launch::async,
+                    [report]
+                    {
+                        ThumbnailGenerator::EnsurePortalViews(report);
+                        return RenderMissingAsync(report).get();
+                    }).share();
+            }
+
             std::vector<std::string> missing = ThumbnailGenerator::MissingThumbnails();
             if (missing.empty())
             {

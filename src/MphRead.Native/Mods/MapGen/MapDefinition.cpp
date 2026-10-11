@@ -1681,6 +1681,8 @@ namespace MphRead::Mods::MapGen
     const std::optional<std::string>& MapDefinition::SourcePath() const noexcept { return _sourcePath; }
     void MapDefinition::SourcePath(std::optional<std::string> value) noexcept { _sourcePath = std::move(value); }
     bool MapDefinition::Translated() const noexcept { return _translated; }
+    const std::vector<MapDefinition::Portal>& MapDefinition::Portals() const noexcept { return _portals; }
+    void MapDefinition::Portals(std::vector<Portal> value) noexcept { _portals = std::move(value); }
     void MapDefinition::Translated(bool value) noexcept { _translated = value; }
 
     std::shared_ptr<MapDefinition> MapDefinition::Load(const std::string& path)
@@ -2076,6 +2078,8 @@ namespace MphRead::Mods::MapGen
     void MapJumpPad::Q3Kind(std::uint8_t value) noexcept { _q3Kind = value; }
     float MapJumpPad::Q3Value() const noexcept { return _q3Value; }
     void MapJumpPad::Q3Value(float value) noexcept { _q3Value = value; }
+    std::uint16_t MapJumpPad::Q3Unit() const noexcept { return _q3Unit; }
+    void MapJumpPad::Q3Unit(std::uint16_t value) noexcept { _q3Unit = value; }
 
     MapItem::MapItem()
         : _position(std::make_shared<std::vector<float>>(3)),

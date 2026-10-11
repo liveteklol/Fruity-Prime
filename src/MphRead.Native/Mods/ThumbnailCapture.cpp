@@ -1,4 +1,9 @@
 #include "ThumbnailCapture.hpp"
+#include "../NativeRuntime/Stb/Image.hpp"
+#include <cmath>
+#include <iterator>
+#include <fstream>
+#include <filesystem>
 #include "../NativeRuntime/Rhi/SceneBackend.hpp"
 
 #include "Branding.hpp"
@@ -551,6 +556,56 @@ namespace
         return OpenTK::Graphics::OpenGL::ToString(value);
     }
 
+    // A picture turned by a camera's roll, in quarter turns: Quake rolls a
+    // portal camera, the view through it turned the other way.
+    void Roll(const std::string& path, float degrees)
+    {
+        const std::int32_t turns = ((static_cast<std::int32_t>(std::lround(degrees / 90.0F)) % 4) + 4) % 4;
+        if (turns == 0)
+        {
+            return;
+        }
+        std::ifstream file(std::filesystem::u8path(path), std::ios::binary);
+        const std::vector<std::uint8_t> bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        file.close();
+        MphRead::NativeRuntime::Image image = MphRead::NativeRuntime::LoadPng(bytes, 4);
+        if (image.Width <= 0 || image.Height <= 0)
+        {
+            return;
+        }
+        std::int32_t width = image.Width;
+        std::int32_t height = image.Height;
+        std::vector<std::uint8_t> pixels = image.Pixels;
+        for (std::int32_t turn = 0; turn < turns; turn++)
+        {
+            // A quarter turn anticlockwise.
+            std::vector<std::uint8_t> turned(pixels.size());
+            for (std::int32_t y = 0; y < height; y++)
+            {
+                for (std::int32_t x = 0; x < width; x++)
+                {
+                    const std::int32_t nx = y;
+                    const std::int32_t ny = width - 1 - x;
+                    std::copy_n(&pixels[(static_cast<std::size_t>(y) * width + x) * 4], 4,
+                        &turned[(static_cast<std::size_t>(ny) * height + nx) * 4]);
+                }
+            }
+            pixels.swap(turned);
+            std::swap(width, height);
+        }
+        std::vector<std::uint8_t> png;
+        stbi_write_png_to_func(
+            [](void* context, void* data, int size)
+            {
+                auto* out = static_cast<std::vector<std::uint8_t>*>(context);
+                const auto* begin = static_cast<const std::uint8_t*>(data);
+                out->insert(out->end(), begin, begin + size);
+            },
+            &png, width, height, 4, pixels.data(), width * 4);
+        std::ofstream(std::filesystem::u8path(path), std::ios::binary | std::ios::trunc)
+            .write(reinterpret_cast<const char*>(png.data()), static_cast<std::streamsize>(png.size()));
+    }
+
     [[nodiscard]] float PreviewValue(
         const MphRead::Mods::MapGen::MapPreview* preview,
         bool position,
@@ -599,8 +654,10 @@ namespace MphRead::Mods
     ThumbnailCapture::ThumbnailCapture(
         const std::string& roomKey,
         std::int32_t width,
-        std::int32_t height)
-        : _window(RendererPlatform::CreateWindow(WindowSettings(width, height)))
+        std::int32_t height,
+        std::vector<View> views)
+        : _window(RendererPlatform::CreateWindow(WindowSettings(width, height))),
+          _views(std::move(views))
     {
         NativeRuntime::Rhi::SwapchainDesc swapchainDesc{};
         const OpenTK::Mathematics::Vector2i framebufferSize = _window->Size();
@@ -743,7 +800,22 @@ namespace MphRead::Mods
     {
         GameState::ApplyPause();
         _scene->OnUpdateFrame();
-        ApplyPreviewCamera();
+        if (_views.empty())
+        {
+            ApplyPreviewCamera();
+        }
+        else
+        {
+            const View& view = _views[_view];
+            if (view.Up.LengthSquared() > 0.0F)
+            {
+                _scene->SetPreviewCamera(view.Position, view.Target, view.Up);
+            }
+            else
+            {
+                _scene->SetPreviewCamera(view.Position, view.Target);
+            }
+        }
 
         bool capturing = false;
         if (!_captured)
@@ -769,8 +841,25 @@ namespace MphRead::Mods
 
         ThumbnailGenerator::EnsureCacheDirectory();
         MphRead::Scene* captureScene = _scene.get();
-        const std::string path = ThumbnailGenerator::PathFor(_roomKey);
+        const std::string path = _views.empty()
+            ? ThumbnailGenerator::PathFor(_roomKey)
+            : _views[_view].Path;
         _captured = ScreenCapture::Save(captureScene, path);
+        if (_captured && !_views.empty())
+        {
+            Roll(path, _views[_view].Roll);
+            _view++;
+            if (_view < _views.size())
+            {
+                // The next view, after a few frames for the camera to land.
+                _captured = false;
+                _settleFrames = 4;
+                Present();
+                _scene->AfterRenderFrame();
+                _window->BaseOnRenderFrame(args);
+                return;
+            }
+        }
 
         if (_captured)
         {
@@ -863,11 +952,70 @@ namespace MphRead::Mods
         return captured;
     }
 
+    std::vector<ThumbnailCapture::View> ThumbnailCapture::PortalViews(const std::string& roomKey)
+    {
+        std::vector<View> views;
+        for (const std::shared_ptr<MapGen::MapDefinition>& definition : MapGen::CustomRooms::Definitions())
+        {
+            if (CompareOrdinalIgnoreCase(definition->Name(), roomKey) != 0)
+            {
+                continue;
+            }
+            const auto& portals = definition->Portals();
+            for (std::size_t i = 0; i < portals.size(); ++i)
+            {
+                const auto& portal = portals[i];
+                views.push_back(View{
+                    OpenTK::Mathematics::Vector3(portal.Camera[0], portal.Camera[1], portal.Camera[2]),
+                    OpenTK::Mathematics::Vector3(portal.Aim[0], portal.Aim[1], portal.Aim[2]),
+                    0.0F,
+                    MapGen::CustomRooms::PortalImagePath(definition.get(), i),
+                    OpenTK::Mathematics::Vector3(portal.Up[0], portal.Up[1], portal.Up[2])});
+            }
+        }
+        return views;
+    }
+
+    bool ThumbnailCapture::CaptureViews(
+        const std::string& roomKey,
+        const std::vector<View>& views,
+        std::int32_t width,
+        std::int32_t height)
+    {
+        if (views.empty())
+        {
+            return false;
+        }
+        try
+        {
+            ThumbnailMode::Enter();
+            GameState::Reset();
+            Rng::SetRng1(Rng::Rng1StartValue);
+            Rng::SetRng2(Rng::Rng2StartValue);
+
+            ThumbnailCapture window(roomKey, width, height, views);
+            window.Run();
+            return window.Succeeded();
+        }
+        catch (const std::exception& exception)
+        {
+            std::cout << "[thumbnails] failed views of " << roomKey << ": " << exception.what() << std::endl;
+            return false;
+        }
+    }
+
     bool ThumbnailCapture::CaptureRoom(
         const std::string& roomKey,
         std::int32_t width,
         std::int32_t height)
     {
+        static constexpr std::string_view PortalSuffix = "#portals";
+        if (roomKey.size() > PortalSuffix.size()
+            && roomKey.compare(roomKey.size() - PortalSuffix.size(), PortalSuffix.size(), PortalSuffix) == 0)
+        {
+            const std::string room = roomKey.substr(0, roomKey.size() - PortalSuffix.size());
+            return CaptureViews(room, PortalViews(room), width, height);
+        }
         try
         {
             ThumbnailMode::Enter();

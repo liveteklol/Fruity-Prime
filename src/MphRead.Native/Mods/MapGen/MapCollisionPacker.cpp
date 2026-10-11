@@ -9,6 +9,7 @@
 #include "NativeRuntime/System/Globalization.hpp"
 
 #include <algorithm>
+#include <map>
 #include <bit>
 #include <cmath>
 #include <cstddef>
@@ -329,26 +330,44 @@ namespace MphRead::Mods::MapGen
                 cell ? ListCount(cell->size()) : 0);
         }
 
+        // A cell names where its faces start in one list of face indices,
+        // and how many there are, both in 16 bits -- so cells holding the
+        // same faces, as the cells a wide floor crosses do, share one run of
+        // the list. A large level fits where a list per cell would not.
         std::vector<std::uint16_t> dataIndices;
         std::vector<Entry> entries;
+        std::map<std::vector<std::uint16_t>, std::int32_t> runs;
         for (const std::optional<std::vector<std::uint16_t>>& cell : cells)
         {
-            const std::int32_t start = ListCount(dataIndices.size());
-            if (start > std::numeric_limits<std::uint16_t>::max())
+            if (!cell || cell->empty())
             {
-                throw MphRead::ProgramException(
-                    "The collision grid needs " + ::MphRead::NativeRuntime::ToString(references) + " face references "
-                    "(" + ::MphRead::NativeRuntime::ToString(partsX) + "x" + ::MphRead::NativeRuntime::ToString(partsY) + "x"
-                    + ::MphRead::NativeRuntime::ToString(partsZ) + " cells over " + ::MphRead::NativeRuntime::ToString(dataCount) + " faces), "
-                    "and the format indexes them with 16 bits. "
-                    "Convert at a larger scale, or with fewer solid surfaces.");
+                entries.push_back(Entry{0, 0});
+                continue;
             }
-            if (cell)
+            const auto found = runs.find(*cell);
+            std::int32_t start = 0;
+            if (found != runs.end())
             {
+                start = found->second;
+            }
+            else
+            {
+                start = ListCount(dataIndices.size());
+                if (start > std::numeric_limits<std::uint16_t>::max())
+                {
+                    throw MphRead::ProgramException(
+                        "The collision grid needs more than 65536 face references even with the cells that "
+                        "hold the same faces sharing them (" + ::MphRead::NativeRuntime::ToString(references)
+                        + " without; " + ::MphRead::NativeRuntime::ToString(partsX) + "x"
+                        + ::MphRead::NativeRuntime::ToString(partsY) + "x" + ::MphRead::NativeRuntime::ToString(partsZ)
+                        + " cells over " + ::MphRead::NativeRuntime::ToString(dataCount)
+                        + " faces), and the format indexes them with 16 bits.");
+                }
                 dataIndices.insert(dataIndices.end(), cell->begin(), cell->end());
+                runs.emplace(*cell, start);
             }
             entries.push_back(Entry{
-                static_cast<std::uint16_t>(cell ? cell->size() : 0U),
+                static_cast<std::uint16_t>(cell->size()),
                 static_cast<std::uint16_t>(start)
             });
         }

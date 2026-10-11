@@ -27,6 +27,8 @@ namespace MphRead::Mods::MapGen
         // bits, and no level has this many shaders.
         static constexpr std::int32_t SkyBoxSourceIndex = 0xFF00;
         static constexpr std::int32_t SkyBoxMaxSize = 512;
+        // A portal's view, entry PortalSourceIndex + portal.
+        static constexpr std::int32_t PortalSourceIndex = 0xFE00;
 
         class Result final
         {
@@ -51,7 +53,8 @@ namespace MphRead::Mods::MapGen
             const std::optional<std::string>& outputPath,
             std::int32_t size = DefaultSize,
             bool sky = true,
-            const std::vector<std::pair<std::string, std::string>>* aliases = nullptr);
+            const std::vector<std::pair<std::string, std::string>>* aliases = nullptr,
+            const std::vector<std::string>* portalImages = nullptr);
 
         MapTextureBake() = delete;
         MapTextureBake(const MapTextureBake&) = delete;

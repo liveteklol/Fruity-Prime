@@ -14,11 +14,15 @@ namespace MphRead::Mods::MapGen
     class Q3Convert final
     {
     public:
-        static constexpr float TargetExtent = 130.0F;
+        // Quake units to one of this game's: a Quake player stands 56 units
+        // tall and a hunter 1.6, so at 35 a level is the size it was built
+        // for -- its stairs, doorways and jumps -- and a run at 320 units a
+        // second is 9.1 here, against a hunter's 7.2.
+        static constexpr float UnitsPerUnit = 35.0F;
 
         // Bumped whenever a translated level comes out differently, so the
         // rooms already built from one are built again (CustomRooms).
-        static constexpr std::int32_t TranslatorVersion = 1;
+        static constexpr std::int32_t TranslatorVersion = 7;
 
         // A Quake 3 level (mapName, one of Q3Bsp::ListMaps) inside a .pk3 or
         // .zip, read as it is: a room whose geometry, art, pickups, starts,

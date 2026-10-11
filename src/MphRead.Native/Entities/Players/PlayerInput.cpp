@@ -859,7 +859,7 @@ namespace MphRead::Entities
                         _flags1 &= ~PlayerFlags1::Walking;
                     }
                     float traction = Fixed::ToFloat(_values.StrafeBipedTraction) * RigMoveScale(*this);
-                    if (_jumpPadControlLockMin > 0)
+                    if (_jumpPadControlLockMin > 0 && _q3PadGravity == 0.0F)
                     {
                         traction *= Fixed::ToFloat(_values.JumpPadSlideFactor);
                     }
@@ -894,7 +894,7 @@ namespace MphRead::Entities
                         _flags1 &= ~PlayerFlags1::Walking;
                     }
                     float traction = Fixed::ToFloat(_values.WalkBipedTraction) * RigMoveScale(*this);
-                    if (_jumpPadControlLockMin > 0)
+                    if (_jumpPadControlLockMin > 0 && _q3PadGravity == 0.0F)
                     {
                         traction *= Fixed::ToFloat(_values.JumpPadSlideFactor);
                     }
@@ -1188,6 +1188,13 @@ namespace MphRead::Entities
                 }
             }
 
+            // Off a Quake 3 pad the controls steer the way Quake's do,
+            // in ProcessMovement, rather than this game's way.
+            if (_q3PadGravity != 0.0F)
+            {
+                _q3Wish = speedDelta;
+                speedDelta = Vector3{};
+            }
             const float magBefore = std::sqrt(_speed.X * _speed.X + _speed.Z * _speed.Z);
             _speed = Add(_speed, speedDelta);
             const float magAfter = std::sqrt(_speed.X * _speed.X + _speed.Z * _speed.Z);
@@ -1559,7 +1566,7 @@ namespace MphRead::Entities
                         if (TestFlag(_flags1, PlayerFlags1::Standing)) _flags1 |= PlayerFlags1::Walking;
                         else _flags1 &= ~PlayerFlags1::Walking;
                         float traction = Fixed::ToFloat(_values.StrafeBipedTraction);
-                        if (_jumpPadControlLockMin > 0)
+                        if (_jumpPadControlLockMin > 0 && _q3PadGravity == 0.0F)
                         {
                             traction *= Fixed::ToFloat(_values.JumpPadSlideFactor);
                         }
@@ -1577,7 +1584,7 @@ namespace MphRead::Entities
                         if (TestFlag(_flags1, PlayerFlags1::Standing)) _flags1 |= PlayerFlags1::Walking;
                         else _flags1 &= ~PlayerFlags1::Walking;
                         float traction = Fixed::ToFloat(_values.WalkBipedTraction);
-                        if (_jumpPadControlLockMin > 0)
+                        if (_jumpPadControlLockMin > 0 && _q3PadGravity == 0.0F)
                         {
                             traction *= Fixed::ToFloat(_values.JumpPadSlideFactor);
                         }
@@ -1602,7 +1609,7 @@ namespace MphRead::Entities
             else
             {
                 float traction = Fixed::ToFloat(_values.RollAltTraction);
-                if (_jumpPadControlLockMin > 0)
+                if (_jumpPadControlLockMin > 0 && _q3PadGravity == 0.0F)
                 {
                     traction *= Fixed::ToFloat(_values.JumpPadSlideFactor);
                 }
@@ -1767,6 +1774,13 @@ namespace MphRead::Entities
                 }
             }
 
+            // Off a Quake 3 pad the controls steer the way Quake's do,
+            // in ProcessMovement, rather than this game's way.
+            if (_q3PadGravity != 0.0F)
+            {
+                _q3Wish = speedDelta;
+                speedDelta = Vector3{};
+            }
             const float magBefore = std::sqrt(_speed.X * _speed.X + _speed.Z * _speed.Z);
             _speed = Add(_speed, speedDelta);
             const float magAfter = std::sqrt(_speed.X * _speed.X + _speed.Z * _speed.Z);
@@ -2055,6 +2069,30 @@ namespace MphRead::Entities
         {
             UpdateAimY(0.0F);
         }
+        // Quake's air control off a Quake 3 pad (PM_AirMove, pm_airaccelerate
+        // 1): towards where the controls point, up to Quake's 320 a second
+        // along it, by a sixtieth of that a frame -- a nudge, not a stop --
+        // and kept as the pad's own speed, so nothing below damps it.
+        if (_q3PadGravity != 0.0F)
+        {
+            const float wish = std::sqrt(_q3Wish.X * _q3Wish.X + _q3Wish.Z * _q3Wish.Z);
+            if (wish > 1.0e-6F && _q3AirSpeed > 0.0F)
+            {
+                const float dirX = _q3Wish.X / wish;
+                const float dirZ = _q3Wish.Z / wish;
+                const float current = _speed.X * dirX + _speed.Z * dirZ;
+                const float add = _q3AirSpeed - current;
+                if (add > 0.0F)
+                {
+                    const float accel = std::min(_q3AirSpeed / 60.0F, add);
+                    _speed.X += accel * dirX;
+                    _speed.Z += accel * dirZ;
+                }
+            }
+            _jumpPadAccel.X = _speed.X;
+            _jumpPadAccel.Z = _speed.Z;
+            _q3Wish = Vector3{};
+        }
         if (TestFlag(_flags1, PlayerFlags1::UsedJumpPad))
         {
             const float prevX = _speed.X;
@@ -2222,6 +2260,8 @@ namespace MphRead::Entities
         }
         const Terrain prevTerrain = _standTerrain;
         const bool standingPrev = TestFlag(_flags1, PlayerFlags1::Standing);
+        const Vector3 stepFrom = PrevPosition();
+        const Vector3 stepMove = static_cast<Vector3>(Position) - stepFrom;
         const bool noUnmorphPrev = TestFlag(_flags1, PlayerFlags1::NoUnmorph);
         _flags1 &= ~PlayerFlags1::Standing;
         _flags1 &= ~PlayerFlags1::StandingPrevious;
@@ -2245,6 +2285,11 @@ namespace MphRead::Entities
         const Vector3 prevC0 = _fieldC0;
         _fieldC0 = Vector3::Zero;
         CheckCollision();
+        if (standingPrev && TestFlag(_flags1, PlayerFlags1::CollidingLateral)
+            && _q3PadGravity == 0.0F && _speed.Y <= 0.01F)
+        {
+            (void)TryQ3StepUp(stepFrom, stepMove);
+        }
         if (_field449 > 0 && _field449 < 60)
         {
             _fieldC0 = prevC0;

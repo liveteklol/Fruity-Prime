@@ -36,6 +36,8 @@ namespace MphRead::Mods::MapGen
         {
             std::int32_t Pad = 0;
             bool Running = false;
+            // Walked onto it from off it, forward held.
+            bool Walking = false;
             bool Launched = false;
             bool Landed = false;
             // Thrown on by another trigger before it came down.
@@ -82,6 +84,8 @@ namespace MphRead::Mods::MapGen
         static constexpr std::int32_t Slot = 1;
         static constexpr std::int32_t Settle = 20;
         static constexpr std::int32_t Limit = 60 * 12;
+        // Standing on it, running across it, walking onto it.
+        static constexpr std::size_t Starts = 3;
 
         std::vector<Entities::JumpPadEntity*> _pads;
         std::vector<Entities::JumpPadEntity*> _teleporters;
@@ -90,6 +94,9 @@ namespace MphRead::Mods::MapGen
         std::int32_t _frame = 0;
         std::int32_t _waited = 0;
         bool _placed = false;
+        // Which side a walking start comes from: what is behind one pad may
+        // be another pad, or a drop.
+        std::int32_t _approach = 0;
         std::vector<Sample> _samples;
         std::vector<Trial> _trials;
         std::vector<bool> _wasDown;
@@ -101,10 +108,10 @@ namespace MphRead::Mods::MapGen
         [[nodiscard]] OpenTK::Mathematics::Vector2i ClientSize() const;
         void Close();
         void Step();
-        void Place(Entities::PlayerEntity& player, Entities::JumpPadEntity& pad, bool running);
-        void Measure(Entities::JumpPadEntity& pad, bool running);
+        void Place(Entities::PlayerEntity& player, Entities::JumpPadEntity& pad, bool running, bool walking);
+        void Measure(Entities::JumpPadEntity& pad, bool running, bool walking);
         void Teleport(Entities::PlayerEntity& player, Entities::JumpPadEntity& teleporter);
-        void Controls(Entities::PlayerEntity& player, bool morph);
+        void Controls(Entities::PlayerEntity& player, bool morph, bool forward);
         [[nodiscard]] std::int32_t Report() const;
 
     protected:

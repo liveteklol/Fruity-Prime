@@ -153,7 +153,7 @@ namespace MphRead::Mods::MapGen
         _window->BaseOnRenderFrame(args);
     }
 
-    void PadProbe::Controls(PlayerEntity& player, bool morph)
+    void PadProbe::Controls(PlayerEntity& player, bool morph, bool forward)
     {
         Entities::PlayerControls& c = player.Controls();
         const auto& all = c.All();
@@ -164,7 +164,7 @@ namespace MphRead::Mods::MapGen
         for (std::size_t i = 0; i < all.size(); i++)
         {
             Keybind& bind = Runtime::RequireReference(Runtime::ManagedAt(all, i));
-            bind.SetIsDown(morph && &bind == &c.Morph());
+            bind.SetIsDown((morph && &bind == &c.Morph()) || (forward && &bind == &c.MoveUp()));
             bind.SetIsPressed(bind.IsDown() && !_wasDown[i]);
             bind.SetIsReleased(!bind.IsDown() && _wasDown[i]);
             _wasDown[i] = bind.IsDown();
@@ -172,13 +172,20 @@ namespace MphRead::Mods::MapGen
         player.ModNoteInput();
     }
 
-    void PadProbe::Place(PlayerEntity& player, JumpPadEntity& pad, bool running)
+    void PadProbe::Place(PlayerEntity& player, JumpPadEntity& pad, bool running, bool walking)
     {
         const Vector3 launch = pad.LaunchVelocity();
         const float along = std::sqrt(launch.X * launch.X + launch.Z * launch.Z);
-        const Vector3 way = along > 0.0F
+        Vector3 way = along > 0.0F
             ? Vector3(launch.X / along, 0.0F, launch.Z / along)
             : Vector3(0.0F, 0.0F, 1.0F);
+        if (walking)
+        {
+            for (std::int32_t turn = 0; turn < _approach; turn++)
+            {
+                way = Vector3(-way.Z, 0.0F, way.X);
+            }
+        }
         Vector3 at = OpenTK::Mathematics::AddY(static_cast<Vector3>(pad.Position), 0.02F);
         Vector3 speed{};
         if (running)
@@ -189,6 +196,22 @@ namespace MphRead::Mods::MapGen
             // steps up and this game does not always.)
             at = Vector3(at.X - way.X * 0.4F, at.Y, at.Z - way.Z * 0.4F);
             speed = Vector3(way.X * 0.5F, 0.0F, way.Z * 0.5F);
+        }
+        if (walking)
+        {
+            // Off the pad, short of its volume, facing it: forward is held
+            // until it throws, so the hunter has to get up onto it the way a
+            // player does.
+            const CollisionVolume volume = pad.ModVolume();
+            const float half = (std::fabs(way.X) * volume.BoxDot1 + std::fabs(way.Z) * volume.BoxDot3) / 2.0F;
+            // FP_PADPROBE_WALKBACK: start further off, for a pad at the top of
+            // a slope (the start must stand on the slope, not inside it).
+            float back = 0.6F;
+            if (const char* walkBack = std::getenv("FP_PADPROBE_WALKBACK"))
+            {
+                back = static_cast<float>(std::atof(walkBack));
+            }
+            at = Vector3(at.X - way.X * (half + back), at.Y + 0.5F + back, at.Z - way.Z * (half + back));
         }
         player.Teleport(at, way, _scene->GetNodeRefByPosition(at));
         player.SetPrevPosition(player.Position);
@@ -228,9 +251,9 @@ namespace MphRead::Mods::MapGen
                 return;
             }
         }
-        if (_trial >= _pads.size() * 2)
+        if (_trial >= _pads.size() * Starts)
         {
-            const std::size_t index = _trial - _pads.size() * 2;
+            const std::size_t index = _trial - _pads.size() * Starts;
             if (index >= _teleporters.size())
             {
                 Close();
@@ -239,18 +262,19 @@ namespace MphRead::Mods::MapGen
             Teleport(player, *_teleporters[index]);
             return;
         }
-        JumpPadEntity& pad = *_pads[_trial / 2];
-        const bool running = _trial % 2 == 1;
+        JumpPadEntity& pad = *_pads[_trial / Starts];
+        const bool running = _trial % Starts == 1;
+        const bool walking = _trial % Starts == 2;
 
         if (_alt != player.IsAltForm() || player.IsMorphing() || player.IsUnmorphing())
         {
             _frame = Runtime::UncheckedIncrement(_frame);
-            Controls(player, !player.IsMorphing() && !player.IsUnmorphing() && _frame % 30 < 2);
+            Controls(player, !player.IsMorphing() && !player.IsUnmorphing() && _frame % 30 < 2, false);
             return;
         }
         if (!_placed)
         {
-            Controls(player, false);
+            Controls(player, false, false);
             // Still and on the ground for a while first: what the last
             // trial ended in -- a teleporter's carry -- is over.
             const Vector3 still = player.Speed();
@@ -263,14 +287,17 @@ namespace MphRead::Mods::MapGen
             {
                 return;
             }
-            Place(player, pad, running);
+            Place(player, pad, running, walking);
             _placed = true;
             _samples.clear();
             _waited = 0;
             return;
         }
 
-        Controls(player, false);
+        // Walking: forward held until the pad has thrown, as a player would.
+        Controls(player, false, walking
+            && std::none_of(_samples.begin(), _samples.end(),
+                [](const Sample& s) { return s.Reset || s.Speed.Y > 0.3F; }));
         const Vector3 launch = pad.LaunchVelocity();
         const Vector3 speed = player.Speed();
         const float fall = pad.Q3Value() / 2.0F;
@@ -292,9 +319,38 @@ namespace MphRead::Mods::MapGen
             }
         }
         const bool down = last.has_value() && _samples.size() - 1 > *last + 5 && sample.Standing;
-        if (down || _waited > Limit)
+        const bool elsewhere = walking && !last.has_value()
+            && (sample.Speed.Y > 0.3F || _waited > 60 * 4);
+        if (const char* trace = std::getenv("FP_PADPROBE_TRACE");
+            elsewhere && trace != nullptr && std::atoi(trace) == pad.Id && !_samples.empty())
         {
-            Measure(pad, running);
+            float low = _samples.front().Position.Y;
+            float high = low;
+            for (const Sample& each : _samples)
+            {
+                low = std::min(low, each.Position.Y);
+                high = std::max(high, each.Position.Y);
+            }
+            const Vector3 from = _samples.front().Position;
+            const Vector3 to = _samples.back().Position;
+            Runtime::ConsoleWriteLine("    approach " + Runtime::ToString(_approach) + ": pad at "
+                + F(pad.Position.X, "F2") + " " + F(pad.Position.Y, "F2") + " " + F(pad.Position.Z, "F2")
+                + "  from " + F(from.X, "F2") + " " + F(from.Y, "F2") + " " + F(from.Z, "F2")
+                + "  to " + F(to.X, "F2") + " " + F(to.Y, "F2") + " " + F(to.Z, "F2")
+                + "  y " + F(low, "F2") + ".." + F(high, "F2"));
+        }
+        if (elsewhere && _approach < 3)
+        {
+            _approach++;
+            _placed = false;
+            _frame = 0;
+            _waited = 0;
+            return;
+        }
+        if (down || _waited > Limit || elsewhere)
+        {
+            _approach = 0;
+            Measure(pad, running, walking);
             _trial++;
             _placed = false;
             _frame = 0;
@@ -306,7 +362,7 @@ namespace MphRead::Mods::MapGen
     // destination, and how it left, against Quake's 400 along its angle.
     void PadProbe::Teleport(PlayerEntity& player, JumpPadEntity& teleporter)
     {
-        Controls(player, false);
+        Controls(player, false, false);
         if (!_placed)
         {
             _frame = Runtime::UncheckedIncrement(_frame);
@@ -343,11 +399,12 @@ namespace MphRead::Mods::MapGen
         }
     }
 
-    void PadProbe::Measure(JumpPadEntity& pad, bool running)
+    void PadProbe::Measure(JumpPadEntity& pad, bool running, bool walking)
     {
         if (const char* trace = std::getenv("FP_PADPROBE_TRACE");
             trace != nullptr && std::atoi(trace) == pad.Id
-            && running == (std::string_view(trace).find('r') != std::string_view::npos))
+            && running == (std::string_view(trace).find('r') != std::string_view::npos)
+            && walking == (std::string_view(trace).find('w') != std::string_view::npos))
         {
             for (std::size_t i = 0; i < _samples.size(); i++)
             {
@@ -362,6 +419,7 @@ namespace MphRead::Mods::MapGen
         Trial trial;
         trial.Pad = pad.Id;
         trial.Running = running;
+        trial.Walking = walking;
         std::optional<std::size_t> last;
         for (std::size_t i = 0; i < _samples.size(); i++)
         {
@@ -469,12 +527,12 @@ namespace MphRead::Mods::MapGen
             {
                 failed++;
                 Runtime::ConsoleWriteLine("    " + Right(Runtime::ToString(trial.Pad), 4) + "  "
-                    + (trial.Running ? "running" : "standing") + "  never thrown");
+                    + (trial.Walking ? "walking" : trial.Running ? "running" : "standing") + "  never thrown");
                 continue;
             }
             worst = std::max(worst, trial.Deviation);
             Runtime::ConsoleWriteLine("    " + Right(Runtime::ToString(trial.Pad), 4) + "  "
-                + (trial.Running ? "running " : "standing") + "  "
+                + (trial.Walking ? "walking " : trial.Running ? "running " : "standing") + "  "
                 + Right(F(static_cast<float>(trial.Frames) / 60.0F, "F2"), 5) + "s  "
                 + Right(F(trial.Distance, "F2"), 8) + "  " + Right(F(trial.Height, "F2"), 6) + "   "
                 + Right(F(trial.Deviation, "F5"), 9) + "  "

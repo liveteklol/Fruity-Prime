@@ -1475,6 +1475,9 @@ namespace MphRead::Entities
             && jumpPad->Q3Kind() == JumpPadEntity::Q3Trigger::Push
             ? jumpPad->Q3Value()
             : 0.0F;
+        _q3AirSpeed = _q3PadGravity != 0.0F && jumpPad->Q3Unit() > 0.0F
+            ? 320.0F / jumpPad->Q3Unit() / 30.0F
+            : 0.0F;
         if (jumpPad == nullptr)
         {
             _lastJumpPad.reset();

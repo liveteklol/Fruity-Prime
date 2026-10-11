@@ -108,6 +108,9 @@ namespace MphRead::Mods::MapGen
         // Sky: drawn sky, which is never collision, so the check that every
         // drawn surface has something solid behind it skips it.
         bool Sky = false;
+        // The light at each corner, red green blue, 1 the texture as painted;
+        // none for one shade over the whole face.
+        std::vector<OpenTK::Mathematics::Vector3> Colors{};
         std::int32_t Slipperiness = 0;
         bool ReflectBeams = false;
         bool IgnorePlayers = false;

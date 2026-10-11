@@ -8,10 +8,12 @@
 namespace MphRead::Mods::MapGen
 {
     // The cartridge's own art, for a surface of a Quake 3 level whose image
-    // is nowhere to be found: a wall is painted with a wall of the game's
-    // rooms, lava with its lava, the sky with its space. Which one is decided
-    // by the shader's name and surface flags alone, so the same level always
-    // comes out the same.
+    // is nowhere to be found. A shader Quake 3 and its community levels use
+    // is painted with the cartridge texture that looks most like it, chosen
+    // by comparing the two images (tools/q3-texture-match.py, which writes
+    // Q3TextureMatches.inc); any other by its name and surface flags -- a
+    // wall with a wall, lava with lava, the sky with space. Either way the
+    // same level always comes out the same.
     class MphTextures final
     {
     public:
@@ -30,6 +32,10 @@ namespace MphRead::Mods::MapGen
         // surfaceparm bits from the .bsp.
         [[nodiscard]] static std::optional<Image> StandIn(
             const std::string& shader, std::int32_t flags, std::int32_t contents);
+
+        // -mphtexdump DIR: every texture of the cartridge's rooms as PNG,
+        // with index.tsv, for tools/q3-texture-match.py.
+        [[nodiscard]] static std::int32_t Dump(const std::string& directory);
 
         MphTextures() = delete;
         MphTextures(const MphTextures&) = delete;

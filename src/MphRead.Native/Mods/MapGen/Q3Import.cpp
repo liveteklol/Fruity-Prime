@@ -283,6 +283,8 @@ namespace MphRead::Mods::MapGen
         }
 
         std::int32_t unpainted = 0;
+        const std::vector<Q3Portal> portals = Portals(bsp.get());
+        std::int32_t portalFaces = 0;
 
         float skySpan = 100.0F;
         if (!bsp)
@@ -371,6 +373,45 @@ namespace MphRead::Mods::MapGen
                 continue;
             }
 
+            // A portal: the view from its camera, one material each
+            // (MapTextureBake::PortalSourceIndex), on the face nearest the
+            // portal's entity.
+            if (pack != nullptr && !portals.empty() && IsPortalShader(texture->Name().Value()))
+            {
+                Vector3 centre(0.0F, 0.0F, 0.0F);
+                for (std::int32_t i = 0; i < face->VertexCount(); ++i)
+                {
+                    const std::vector<float>& at = RequireReference(RequireReference(
+                        ManagedListAt(bsp->Vertices(), UncheckedAdd(face->Vertex(), i))).Position());
+                    centre = Add(centre, Vector3(at[0], at[1], at[2]));
+                }
+                centre = Divide(centre, static_cast<float>(std::max(face->VertexCount(), 1)));
+                std::optional<std::size_t> nearest;
+                float best = 256.0F * 256.0F;
+                for (std::size_t p = 0; p < portals.size(); ++p)
+                {
+                    const float distance = LengthSquared(Subtract(portals[p].Surface, centre));
+                    if (distance < best)
+                    {
+                        best = distance;
+                        nearest = p;
+                    }
+                }
+                std::int32_t portalMaterial = 0;
+                if (nearest.has_value() && pack->BySourceIndex().TryGetValue(
+                        MapTextureBake::PortalSourceIndex + static_cast<std::int32_t>(*nearest), portalMaterial))
+                {
+                    const auto [portalWidth, portalHeight] = textureSizes.at(static_cast<std::size_t>(portalMaterial));
+                    AddPortalFace(map.get(), bsp.get(), face, unit, portalMaterial, portalWidth, portalHeight);
+                    portalFaces = UncheckedAdd(portalFaces, 1);
+                }
+                else
+                {
+                    unpainted = UncheckedAdd(unpainted, 1);
+                }
+                continue;
+            }
+
             std::int32_t material = 0;
             if (pack == nullptr)
             {
@@ -444,6 +485,11 @@ namespace MphRead::Mods::MapGen
         if (skyBox && skyMin.X <= skyMax.X)
         {
             AddSkyBox(map.get(), skyMin, skyMax, unit, skyMaterials, textureSizes);
+        }
+        if (verbose && portalFaces > 0)
+        {
+            WriteLine("  " + Runtime::ToString(portalFaces) + " portal faces showing "
+                + Runtime::ToString(static_cast<std::int32_t>(portals.size())) + " portals' views");
         }
 
         const Vector3 margin(6.0F, 6.0F, 6.0F);
@@ -740,6 +786,7 @@ namespace MphRead::Mods::MapGen
                 {
                     std::vector<Vector3> points(3);
                     std::vector<Vector2> uvs(3);
+                    std::vector<Vector3> lights(3);
                     Vector3 vertexNormal(0.0F, 0.0F, 0.0F);
                     float shade = 0.0F;
 
@@ -774,6 +821,7 @@ namespace MphRead::Mods::MapGen
                             + static_cast<std::int32_t>(ManagedAt(color, 2));
                         shade += static_cast<float>(colorSum)
                             / (3.0F * 255.0F);
+                        lights[static_cast<std::size_t>(j)] = Light(color);
                     }
 
                     const Vector3 normal = TriangleNormal(points, vertexNormal,
@@ -783,7 +831,8 @@ namespace MphRead::Mods::MapGen
                         std::move(uvs),
                         normal,
                         material,
-                        Shade(shade / 3.0F, sky));
+                        Shade(shade / 3.0F, sky),
+                        sky ? std::vector<Vector3>{} : std::move(lights));
                 }
             });
     }
@@ -829,6 +878,7 @@ namespace MphRead::Mods::MapGen
                         std::vector<Vector2> uvs(valueCount);
                         std::vector<Vector3> normals(valueCount);
                         std::vector<float> shades(valueCount);
+                        std::vector<Vector3> lights(valueCount);
 
                         for (std::int32_t a = 0; a <= tessLevel; ++a)
                         {
@@ -848,6 +898,7 @@ namespace MphRead::Mods::MapGen
                                 Vector2 uv(0.0F, 0.0F);
                                 Vector3 normal(0.0F, 0.0F, 0.0F);
                                 float shade = 0.0F;
+                                Vector3 light(0.0F, 0.0F, 0.0F);
 
                                 for (std::int32_t r = 0; r < 3; ++r)
                                 {
@@ -915,6 +966,7 @@ namespace MphRead::Mods::MapGen
                                             static_cast<float>(colorSum)
                                             / (3.0F * 255.0F))
                                             * weight;
+                                        light = Add(light, Multiply(Light(color), weight));
                                     }
                                 }
 
@@ -926,6 +978,7 @@ namespace MphRead::Mods::MapGen
                                     ? ToDirection(&RequireReference(face->Normal()))
                                     : normal.Normalized();
                                 shades[index] = shade;
+                                lights[index] = light;
                             }
                         }
 
@@ -934,13 +987,13 @@ namespace MphRead::Mods::MapGen
                             for (std::int32_t b = 0; b < tessLevel; ++b)
                             {
                                 co_yield Cell(
-                                    points, uvs, normals, shades,
+                                    points, uvs, normals, shades, lights,
                                     dimension, material, sky,
                                     GridPoint{a, b},
                                     GridPoint{a, b + 1},
                                     GridPoint{a + 1, b + 1});
                                 co_yield Cell(
-                                    points, uvs, normals, shades,
+                                    points, uvs, normals, shades, lights,
                                     dimension, material, sky,
                                     GridPoint{a, b},
                                     GridPoint{a + 1, b + 1},
@@ -991,6 +1044,7 @@ namespace MphRead::Mods::MapGen
         const std::vector<Vector2>& uvs,
         const std::vector<Vector3>& normals,
         const std::vector<float>& shades,
+        const std::vector<Vector3>& lights,
         std::int32_t dimension,
         std::int32_t material,
         bool sky,
@@ -1030,7 +1084,8 @@ namespace MphRead::Mods::MapGen
             std::move(texcoords),
             normal,
             material,
-            Shade(shade, sky));
+            Shade(shade, sky),
+            sky ? std::vector<Vector3>{} : std::vector<Vector3>{lights.at(i0), lights.at(i1), lights.at(i2)});
     }
 
     float Q3Import::Shade(float baked, bool sky) noexcept
@@ -1040,12 +1095,28 @@ namespace MphRead::Mods::MapGen
             : std::clamp(0.62F + baked * 0.75F, 0.55F, 1.0F);
     }
 
+    Vector3 Q3Import::Light(const std::vector<std::uint8_t>* color)
+    {
+        float r = static_cast<float>(ManagedAt(color, 0)) * 4.0F;
+        float g = static_cast<float>(ManagedAt(color, 1)) * 4.0F;
+        float b = static_cast<float>(ManagedAt(color, 2)) * 4.0F;
+        const float most = std::max(r, std::max(g, b));
+        if (most > 255.0F)
+        {
+            r = r * 255.0F / most;
+            g = g * 255.0F / most;
+            b = b * 255.0F / most;
+        }
+        return Vector3(r / 255.0F, g / 255.0F, b / 255.0F);
+    }
+
     BuiltFace* Q3Import::MakeFace(
         std::vector<Vector3> points,
         std::vector<Vector2> uvs,
         Vector3 normal,
         std::int32_t material,
-        float shade)
+        float shade,
+        std::vector<Vector3> colors)
     {
         const Vector3 point1 = ManagedAt(&points, 1);
         const Vector3 point0a = ManagedAt(&points, 0);
@@ -1062,6 +1133,10 @@ namespace MphRead::Mods::MapGen
             (void)ManagedAt(&uvs, 2);
             std::swap(points[1], points[2]);
             std::swap(uvs[1], uvs[2]);
+            if (colors.size() == 3)
+            {
+                std::swap(colors[1], colors[2]);
+            }
         }
 
         auto pointArray = std::make_unique<ManagedArray<Vector3>>(points.size());
@@ -1075,12 +1150,22 @@ namespace MphRead::Mods::MapGen
             (*uvArray)[i] = uvs[i];
         }
 
-        return new BuiltFace(
+        BuiltFace* made = new BuiltFace(
             std::move(pointArray),
             std::move(uvArray),
             normal,
             material,
             shade);
+
+        if (colors.size() == points.size() && made != nullptr)
+
+        {
+
+            made->Colors = std::move(colors);
+
+        }
+
+        return made;
     }
 
     void Q3Import::AddSkyBox(
@@ -1214,6 +1299,13 @@ namespace MphRead::Mods::MapGen
                 archivePaths->push_back(std::move(pak));
             }
 
+            // Each portal's view, where CustomRooms keeps it once rendered.
+            std::vector<std::string> portalImages;
+            const std::filesystem::path directory = PathFromUtf8(target).parent_path();
+            for (std::size_t i = 0; i < Portals(bsp.get()).size(); ++i)
+            {
+                portalImages.push_back(PathToUtf8(directory / ("portal_" + std::to_string(i) + ".png")));
+            }
             std::shared_ptr<MapTextureBake::Result> result
                 = MapTextureBake::Bake(
                     bsp,
@@ -1221,7 +1313,8 @@ namespace MphRead::Mods::MapGen
                     std::optional<std::string>(target),
                     MapTextureBake::DefaultSize,
                     true,
-                    &import->TextureAliases());
+                    &import->TextureAliases(),
+                    &portalImages);
             if (!result)
             {
                 throw System::NullReferenceException();
@@ -1926,10 +2019,17 @@ namespace MphRead::Mods::MapGen
                 // (G_TouchTriggers, bg_public's playerMins/Maxs); this game
                 // tests the feet alone, so the volume is the trigger grown by
                 // the player's box.
+                // A pad on the ground reaches a step higher: a Quake player
+                // drops into the hollow a pad is often set in -- a hunter's
+                // round body rides over one narrower than itself -- and steps
+                // up onto one at the crest of a slope, so a hunter at that
+                // height is where a Quake player would have touched it. Not
+                // a pad in mid-air, which a flight's path meets exactly.
+                const bool grounded = push && q3Min[2] - floorZ < 8.0F;
                 const Vector3 cornerA = ToWorld(
                     Vector3(q3Min[0] - 15.0F, q3Min[1] - 15.0F, q3Min[2] - 56.0F), unit);
                 const Vector3 cornerB = ToWorld(
-                    Vector3(q3Max[0] + 15.0F, q3Max[1] + 15.0F, q3Max[2]), unit);
+                    Vector3(q3Max[0] + 15.0F, q3Max[1] + 15.0F, q3Max[2] + (grounded ? 18.0F : 0.0F)), unit);
                 const Vector3 boxMin = Subtract(ComponentMin(cornerA, cornerB), position);
                 const Vector3 boxMax = Subtract(ComponentMax(cornerA, cornerB), position);
 
@@ -1993,6 +2093,7 @@ namespace MphRead::Mods::MapGen
                 pad->Speed(length);
                 pad->Q3Kind(1);
                 pad->Q3Value(q3Gravity / unit / 900.0F);
+                pad->Q3Unit(static_cast<std::uint16_t>(std::lround(unit)));
 
                 // Where the feet come down, from standing on the floor under
                 // the trigger, for the bots' routes; and how long that takes,
@@ -2076,6 +2177,23 @@ namespace MphRead::Mods::MapGen
                     places.emplace_back((*target)[0], (*target)[1], (*target)[2]);
                 }
             }
+            // Not on a pad or a teleporter -- a pad that throws straight up
+            // lands on itself -- where it would sit on the trigger.
+            const auto onTrigger = [&def](const Vector3& place)
+            {
+                for (const std::shared_ptr<MapJumpPad>& pad : RequireReference(def->JumpPads()))
+                {
+                    const std::vector<float>& at = RequireReference(RequireReference(pad).Position());
+                    const float dx = place.X - at[0];
+                    const float dz = place.Z - at[2];
+                    if (dx * dx + dz * dz < 9.0F && std::fabs(place.Y - at[1]) < 3.0F)
+                    {
+                        return true;
+                    }
+                }
+                return false;
+            };
+            places.erase(std::remove_if(places.begin(), places.end(), onTrigger), places.end());
             std::vector<Vector3> taken;
             for (const std::shared_ptr<MapSpawn>& spawn : RequireReference(def->Spawns()))
             {
@@ -2148,6 +2266,279 @@ namespace MphRead::Mods::MapGen
         }
 
         MapBuilder::AddEntities(map, def);
+    }
+
+    // A Quake 3 level's portals: each misc_portal_surface with the camera
+    // its target names (misc_portal_camera), looking at that camera's own
+    // target -- or along its angle -- turned by its roll. A surface with no
+    // camera is a mirror, which this game has no way to draw: left out.
+    std::vector<Q3Import::Q3Portal> Q3Import::Portals(Q3Bsp* bsp)
+    {
+        std::vector<Q3Portal> portals;
+        if (bsp == nullptr)
+        {
+            return portals;
+        }
+        const auto named = [bsp](const std::string& name) -> const Q3Entity*
+        {
+            for (const std::shared_ptr<Q3Entity>& entity : bsp->Entities())
+            {
+                const std::string* value = EntityValue(entity.get(), "targetname");
+                if (value != nullptr && *value == name)
+                {
+                    return entity.get();
+                }
+            }
+            return nullptr;
+        };
+        const auto origin = [](const Q3Entity* entity) -> std::optional<Vector3>
+        {
+            const std::string* value = EntityValue(entity, "origin");
+            if (value == nullptr)
+            {
+                return std::nullopt;
+            }
+            const std::shared_ptr<std::vector<float>> parsed = ParseVector(*value);
+            return Vector3((*parsed)[0], (*parsed)[1], (*parsed)[2]);
+        };
+        for (const std::shared_ptr<Q3Entity>& entityValue : bsp->Entities())
+        {
+            const Q3Entity* entity = entityValue.get();
+            const std::string* classname = EntityValue(entity, "classname");
+            const std::string* target = EntityValue(entity, "target");
+            if (classname == nullptr || target == nullptr
+                || !StringEqualsOrdinalIgnoreCase(*classname, "misc_portal_surface"))
+            {
+                continue;
+            }
+            const Q3Entity* camera = named(*target);
+            const std::optional<Vector3> surface = origin(entity);
+            const std::optional<Vector3> eye = camera != nullptr ? origin(camera) : std::nullopt;
+            if (!surface || !eye)
+            {
+                continue;
+            }
+            Q3Portal portal;
+            portal.Surface = *surface;
+            portal.Camera = *eye;
+            std::optional<Vector3> aim;
+            if (const std::string* cameraTarget = EntityValue(camera, "target"))
+            {
+                if (const Q3Entity* looked = named(*cameraTarget))
+                {
+                    aim = origin(looked);
+                }
+            }
+            if (!aim)
+            {
+                float yaw = 0.0F;
+                float pitch = 0.0F;
+                if (const std::string* angles = EntityValue(camera, "angles"))
+                {
+                    const std::shared_ptr<std::vector<float>> parsed = ParseVector(*angles);
+                    pitch = (*parsed)[0];
+                    yaw = (*parsed)[1];
+                }
+                else if (const std::string* angle = EntityValue(camera, "angle"))
+                {
+                    (void)Runtime::SingleTryParseInvariant(*angle, yaw);
+                }
+                constexpr float DegreesToRadians = 0.017453292519943295769F;
+                aim = Vector3(
+                    eye->X + std::cos(yaw * DegreesToRadians) * std::cos(pitch * DegreesToRadians) * 64.0F,
+                    eye->Y + std::sin(yaw * DegreesToRadians) * std::cos(pitch * DegreesToRadians) * 64.0F,
+                    eye->Z - std::sin(pitch * DegreesToRadians) * 64.0F);
+            }
+            portal.Aim = *aim;
+            if (const std::string* roll = EntityValue(camera, "roll"))
+            {
+                (void)Runtime::SingleTryParseInvariant(*roll, portal.Roll);
+            }
+            portal.Up = PortalUp(bsp, portal);
+            portals.push_back(portal);
+        }
+        return portals;
+    }
+
+    // Which way is up through a portal, as Quake works it out: the surface's
+    // axes and the camera's are each the normal (the camera's facing) and
+    // q_math's PerpendicularVector of it -- some perpendicular, not the
+    // world's up, which is why mappers roll their portal cameras -- the
+    // camera's turned by its roll (cg_ents.c CG_Portal, tr_main.c
+    // R_GetPortalOrientations), and a direction seen through the portal
+    // carried from the one set of axes to the other (R_MirrorVector).
+    OpenTK::Mathematics::Vector3 Q3Import::PortalUp(Q3Bsp* bsp, const Q3Portal& portal)
+    {
+        const auto perpendicular = [](Vector3 v)
+        {
+            const float values[3] = {std::fabs(v.X), std::fabs(v.Y), std::fabs(v.Z)};
+            std::int32_t smallest = 0;
+            float least = 1.0F;
+            for (std::int32_t i = 0; i < 3; i++)
+            {
+                if (values[i] < least)
+                {
+                    smallest = i;
+                    least = values[i];
+                }
+            }
+            const Vector3 axis(smallest == 0 ? 1.0F : 0.0F, smallest == 1 ? 1.0F : 0.0F, smallest == 2 ? 1.0F : 0.0F);
+            const float along = Vector3::Dot(axis, v) / Vector3::Dot(v, v);
+            return Vector3(axis.X - v.X * along, axis.Y - v.Y * along, axis.Z - v.Z * along).Normalized();
+        };
+        // The portal's surface: the drawn face nearest its entity.
+        Vector3 normal(0.0F, 0.0F, 1.0F);
+        float best = std::numeric_limits<float>::max();
+        for (const std::shared_ptr<Q3Face>& faceValue : bsp->Faces())
+        {
+            Q3Face* face = faceValue.get();
+            if (face == nullptr || face->VertexCount() <= 0)
+            {
+                continue;
+            }
+            const Q3Texture* texture = &RequireReference(ManagedListAt(bsp->Textures(), face->Texture()));
+            if (!IsPortalShader(texture->Name().Value()))
+            {
+                continue;
+            }
+            Vector3 centre(0.0F, 0.0F, 0.0F);
+            for (std::int32_t i = 0; i < face->VertexCount(); ++i)
+            {
+                const std::vector<float>& at = RequireReference(RequireReference(
+                    ManagedListAt(bsp->Vertices(), UncheckedAdd(face->Vertex(), i))).Position());
+                centre = Add(centre, Vector3(at[0], at[1], at[2]));
+            }
+            centre = Divide(centre, static_cast<float>(face->VertexCount()));
+            const float distance = LengthSquared(Subtract(centre, portal.Surface));
+            if (distance < best)
+            {
+                best = distance;
+                const std::vector<float>& n = RequireReference(face->Normal());
+                normal = Vector3(n[0], n[1], n[2]);
+            }
+        }
+        const Vector3 s0 = normal;
+        const Vector3 s1 = perpendicular(s0);
+        const Vector3 s2 = Vector3::Cross(s0, s1);
+
+        Vector3 c0 = Subtract(portal.Aim, portal.Camera);
+        if (LengthSquared(c0) < 1.0e-6F)
+        {
+            return Vector3(0.0F, 0.0F, 1.0F);
+        }
+        c0 = c0.Normalized();
+        // cgame's axes (CG_Portal): the facing, the negated perpendicular,
+        // and their cross product.
+        const Vector3 p = perpendicular(c0);
+        Vector3 c1(-p.X, -p.Y, -p.Z);
+        Vector3 c2 = Vector3::Cross(c0, c1);
+        // The renderer's (R_GetPortalOrientations): facing and side turned
+        // round, then the side rolled about the turned facing -- the roll as
+        // the byte cgame is sent and back (clientNum / 256 * 360) -- and the
+        // third axis made again from the two.
+        const Vector3 camera0(-c0.X, -c0.Y, -c0.Z);
+        Vector3 camera1(-c1.X, -c1.Y, -c1.Z);
+        const float roll = std::floor(portal.Roll / 360.0F * 256.0F) / 256.0F * 360.0F;
+        if (roll != 0.0F)
+        {
+            constexpr float DegreesToRadians = 0.017453292519943295769F;
+            const float angle = roll * DegreesToRadians;
+            const Vector3 across = Vector3::Cross(camera0, camera1);
+            const float along = Vector3::Dot(camera0, camera1);
+            camera1 = Vector3(
+                camera1.X * std::cos(angle) + across.X * std::sin(angle) + camera0.X * along * (1.0F - std::cos(angle)),
+                camera1.Y * std::cos(angle) + across.Y * std::sin(angle) + camera0.Y * along * (1.0F - std::cos(angle)),
+                camera1.Z * std::cos(angle) + across.Z * std::sin(angle) + camera0.Z * along * (1.0F - std::cos(angle)));
+            c2 = Vector3::Cross(camera0, camera1);
+        }
+
+        // Up for somebody facing the surface: the world's, along the surface.
+        Vector3 up(0.0F, 0.0F, 1.0F);
+        up = Subtract(up, Vector3(s0.X * Vector3::Dot(up, s0), s0.Y * Vector3::Dot(up, s0), s0.Z * Vector3::Dot(up, s0)));
+        if (LengthSquared(up) < 1.0e-6F)
+        {
+            up = Vector3(1.0F, 0.0F, 0.0F);
+        }
+        up = up.Normalized();
+        const float d0 = Vector3::Dot(up, s0);
+        const float d1 = Vector3::Dot(up, s1);
+        const float d2 = Vector3::Dot(up, s2);
+        return Vector3(
+            camera0.X * d0 + camera1.X * d1 + c2.X * d2,
+            camera0.Y * d0 + camera1.Y * d1 + c2.Y * d2,
+            camera0.Z * d0 + camera1.Z * d1 + c2.Z * d2);
+    }
+
+    bool Q3Import::IsPortalShader(const std::string& shader)
+    {
+        std::string lower = shader;
+        for (char& ch : lower)
+        {
+            ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+        }
+        return lower.find("portal") != std::string::npos;
+    }
+
+    // The portal's face, painted with the view from its camera, the image
+    // filling the face the way it is seen from in front of it.
+    void Q3Import::AddPortalFace(
+        BuiltMap* map, Q3Bsp* bsp, Q3Face* face, float unit,
+        std::int32_t material, std::int32_t width, std::int32_t height)
+    {
+        std::vector<Vector3> points;
+        for (std::int32_t i = 0; i < face->VertexCount(); ++i)
+        {
+            Q3Vertex* vertex = &RequireReference(ManagedListAt(bsp->Vertices(), UncheckedAdd(face->Vertex(), i)));
+            points.push_back(ToWorld(&RequireReference(vertex->Position()), unit));
+        }
+        if (points.size() < 3)
+        {
+            return;
+        }
+        const Vector3 normal = ToDirection(&RequireReference(face->Normal()));
+        const Vector3 forward(-normal.X, -normal.Y, -normal.Z);
+        Vector3 right = Vector3::Cross(forward, Vector3(0.0F, 1.0F, 0.0F));
+        if (LengthSquared(right) < 1.0e-4F)
+        {
+            right = Vector3(1.0F, 0.0F, 0.0F);
+        }
+        right = right.Normalized();
+        const Vector3 up = Vector3::Cross(right, forward).Normalized();
+        float uLow = std::numeric_limits<float>::max();
+        float uHigh = std::numeric_limits<float>::lowest();
+        float vLow = std::numeric_limits<float>::max();
+        float vHigh = std::numeric_limits<float>::lowest();
+        for (const Vector3 point : points)
+        {
+            const float u = Vector3::Dot(point, right);
+            const float v = Vector3::Dot(point, up);
+            uLow = std::min(uLow, u);
+            uHigh = std::max(uHigh, u);
+            vLow = std::min(vLow, v);
+            vHigh = std::max(vHigh, v);
+        }
+        const float uSpan = std::max(uHigh - uLow, 1.0e-4F);
+        const float vSpan = std::max(vHigh - vLow, 1.0e-4F);
+        const auto uv = [&](Vector3 point)
+        {
+            return Vector2(
+                (Vector3::Dot(point, right) - uLow) / uSpan * static_cast<float>(width),
+                (vHigh - Vector3::Dot(point, up)) / vSpan * static_cast<float>(height));
+        };
+        for (std::int32_t i = 0; UncheckedAdd(i, 2) < face->MeshVertCount(); i = UncheckedAdd(i, 3))
+        {
+            std::vector<Vector3> corners(3);
+            std::vector<Vector2> uvs(3);
+            for (std::int32_t j = 0; j < 3; ++j)
+            {
+                const std::int32_t offset = ManagedListAt(bsp->MeshVerts(), UncheckedAdd(UncheckedAdd(face->MeshVert(), i), j));
+                corners[static_cast<std::size_t>(j)] = points.at(static_cast<std::size_t>(offset));
+                uvs[static_cast<std::size_t>(j)] = uv(corners[static_cast<std::size_t>(j)]);
+            }
+            BuiltFace* built = MakeFace(std::move(corners), std::move(uvs), normal, material, Shade(1.0F, true));
+            std::unique_ptr<BuiltFace> owner(built);
+            map->Faces().push_back(map->OwnFace(std::move(owner)));
+        }
     }
 
     std::optional<float> Q3Import::Floor(Q3Bsp* bsp, float x, float y, float z)
@@ -2272,8 +2663,9 @@ namespace MphRead::Mods::MapGen
     // Nothing for the BFG -- the Omega Cannon is out of custom maps -- nor
     // the machine gun and gauntlet every hunter's Power Beam already is.
     // There is no armour here, health being the shield, so armour is health
-    // of the same size. Powerups and holdables are nothing: custom maps
-    // carry none. Ammo is Pickups' affair.
+    // of the same size -- except the 5-point bubble and shard, which nothing
+    // here is as small as: those are left out. Powerups and holdables are
+    // nothing: custom maps carry none. Ammo is Pickups' affair.
     ItemType Q3Import::MapItemType(
         const std::string& classname) noexcept
     {
@@ -2291,11 +2683,9 @@ namespace MphRead::Mods::MapGen
         if (equal("weapon_nailgun")) return ItemType::VoltDriver;
         if (equal("weapon_chaingun")) return ItemType::Battlehammer;
         if (equal("weapon_prox_launcher")) return ItemType::Judicator;
-        if (equal("item_health_small")) return ItemType::HealthSmall;
         if (equal("item_health")) return ItemType::HealthMedium;
         if (equal("item_health_large")) return ItemType::HealthBig;
         if (equal("item_health_mega")) return ItemType::HealthBig;
-        if (equal("item_armor_shard")) return ItemType::HealthSmall;
         if (equal("item_armor_combat")) return ItemType::HealthMedium;
         if (equal("item_armor_body")) return ItemType::HealthBig;
         return ItemType::None;

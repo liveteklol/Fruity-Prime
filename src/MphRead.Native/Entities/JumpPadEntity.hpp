@@ -44,6 +44,9 @@ namespace MphRead::Entities
 
         [[nodiscard]] Q3Trigger Q3Kind() const noexcept;
         [[nodiscard]] float Q3Value() const noexcept;
+        // Quake units to one of this game's, in Padding82: what a Push
+        // flight's air control (Quake's 320 a second) is measured in.
+        [[nodiscard]] float Q3Unit() const noexcept { return static_cast<float>(_data.Padding82); }
         // The velocity it gives, in units per frame.
         [[nodiscard]] ::OpenTK::Mathematics::Vector3 LaunchVelocity() const noexcept { return _beamVector; }
         // Where a Teleport sends you.

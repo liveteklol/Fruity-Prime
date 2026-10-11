@@ -1,4 +1,5 @@
 #include "PlayerCollision.hpp"
+#include "../../Mods/MapGen/CustomRooms.hpp"
 
 #include "../../Features.hpp"
 #include "../../GameState.hpp"
@@ -1351,5 +1352,119 @@ namespace MphRead::Entities
         Position = position;
         _volume = CollisionVolume::Move(
             _volumeUnxf, static_cast<Vector3>(Position));
+    }
+
+    // Quake's PM_StepSlideMove, for a Quake 3 level's rooms: a player that
+    // walks into something no higher than STEPSIZE (18 Quake units) is
+    // carried up onto it in the same frame, at its own speed, without a hop.
+    // This game's hunters climb only what their round collision rides over,
+    // which at a Quake level's scale is not a stair. Tried when a hunter on
+    // the ground is stopped by something: the same move, raised by a step,
+    // must touch no wall and no ceiling, and the top it then comes down onto
+    // is found by halving the drop.
+    bool PlayerEntity::TryQ3StepUp(Vector3 from, Vector3 move)
+    {
+        const float step = Mods::MapGen::CustomRooms::Q3StepHeight(RequireReference(_scene).RoomId());
+        const float along = std::sqrt(move.X * move.X + move.Z * move.Z);
+        if (step <= 0.0F || along < 1.0e-4F)
+        {
+            return false;
+        }
+
+        float offset = 0.0F;
+        float radius = 0.0F;
+        if (IsAltForm())
+        {
+            const CollisionVolume altVolume = ManagedAt(
+                ManagedAt(PlayerVolumes, static_cast<std::int32_t>(Hunter())), 2);
+            offset = altVolume.SpherePosition.Y;
+            radius = altVolume.SphereRadius;
+        }
+        else
+        {
+            const float low = Fixed::ToFloat(Values().MinPickupHeight);
+            const float high = Fixed::ToFloat(Values().MaxPickupHeight);
+            offset = (low + high) / 2.0F;
+            radius = (high - low) / 2.0F;
+        }
+
+        // Whether the body at these feet is inside something: walls and
+        // ceilings only, or floors as well.
+        ManagedArray<CollisionResult> results(40);
+        const auto inside = [&](Vector3 feet, bool floors) -> bool
+        {
+            const Vector3 centre = AddY(feet, offset);
+            const std::int32_t count = CollisionDetection::CheckSphereBetweenPoints(
+                centre, centre, radius, 40, true, TestFlags::Players, _scene, &results);
+            for (std::int32_t i = 0; i < count; ++i)
+            {
+                const CollisionResult& result = results[static_cast<std::size_t>(i)];
+                Vector3 away;
+                float depth = 0.0F;
+                if (result.Field0 == 0)
+                {
+                    away = result.Plane.Xyz();
+                    depth = radius + result.Plane.W - Vector3::Dot(centre, away);
+                }
+                else
+                {
+                    const Vector3 edge = result.EdgePoint2 - result.EdgePoint1;
+                    const float length = LengthSquared(edge);
+                    const float t = length > 0.0F
+                        ? std::clamp(Vector3::Dot(centre - result.EdgePoint1, edge) / length, 0.0F, 1.0F)
+                        : 0.0F;
+                    const Vector3 between = centre - (result.EdgePoint1 + ScaleVector(edge, t));
+                    const float distance = std::sqrt(LengthSquared(between));
+                    if (distance <= 1.0e-6F)
+                    {
+                        return true;
+                    }
+                    away = ScaleVector(between, 1.0F / distance);
+                    depth = radius - distance;
+                }
+                if (depth > 0.002F && (floors || away.Y < 0.7F))
+                {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        const Vector3 lifted = AddY(from, step);
+        const Vector3 raised(from.X + move.X, from.Y + step, from.Z + move.Z);
+        if (inside(lifted, false) || inside(raised, false) || inside(raised, true))
+        {
+            return false;
+        }
+        // Something to stand on within a step, higher than where it was.
+        Vector3 floorFeet(raised.X, from.Y, raised.Z);
+        if (!inside(floorFeet, true))
+        {
+            return false;
+        }
+        float top = raised.Y;
+        float bottom = from.Y;
+        for (std::int32_t i = 0; i < 12; ++i)
+        {
+            const float middle = (top + bottom) / 2.0F;
+            if (inside(Vector3(raised.X, middle, raised.Z), true))
+            {
+                bottom = middle;
+            }
+            else
+            {
+                top = middle;
+            }
+        }
+        if (top - from.Y < 0.01F)
+        {
+            return false;
+        }
+        Position = Vector3(raised.X, top, raised.Z);
+        _prevPosition = static_cast<Vector3>(Position);
+        _speed.Y = 0.0F;
+        _flags1 |= PlayerFlags1::Standing;
+        _flags1 &= ~PlayerFlags1::CollidingLateral;
+        return true;
     }
 }
