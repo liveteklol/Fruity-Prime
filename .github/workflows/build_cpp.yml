@@ -735,5 +735,7 @@ jobs:
 
   android:
     uses: ./.github/workflows/native-cpp-android.yml
+    secrets: inherit
     with:
       checkout_ref: ${{ inputs.checkout_ref }}
+      release_version: ${{ inputs.release_version }}

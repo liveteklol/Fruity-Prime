@@ -8,9 +8,23 @@ on:
         required: false
         type: string
         default: ""
+      release_version:
+        description: MAJOR.MINOR.PATCH of a release (signs with the release key)
+        required: false
+        type: string
+        default: ""
   workflow_call:
     inputs:
       checkout_ref:
+        required: false
+        type: string
+        default: ""
+      # Set by release_cpp.yml. A release APK is stamped with it, numbered
+      # from it, and signed with the release key, so that phones already
+      # running Fruity Prime (the C# v0.10.0 APK included) install it as an
+      # update. The caller passes `secrets: inherit` for the ANDROID_KEY*
+      # secrets.
+      release_version:
         required: false
         type: string
         default: ""
@@ -20,6 +34,7 @@ permissions:
 
 env:
   ANDROID_SDK_ROOT: ${{ github.workspace }}/.cache/android-sdk
+  FRUITY_RELEASE_VERSION: ${{ inputs.release_version }}
   VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.cache/vcpkg/archives
 
 jobs:
@@ -220,6 +235,7 @@ jobs:
             -DANDROID_SDK_ROOT="$ANDROID_SDK_ROOT" \
             -DANDROID_NDK_ROOT="$ANDROID_NDK_HOME" \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DFRUITY_RELEASE_VERSION="${FRUITY_RELEASE_VERSION}" \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache 2>&1 | tee "$build_dir/configure.log"
 
@@ -334,8 +350,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          tag="$(git tag --points-at HEAD | grep -E '^cpp_v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true)"
-          if [[ "$tag" =~ ^cpp_v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+          # The same versionCode formula as the C# APKs (v0.10.0 was 10000),
+          # so a release numbered after them is an update to them.
+          if [[ "${FRUITY_RELEASE_VERSION:-}" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
             major="${BASH_REMATCH[1]}"
             minor="${BASH_REMATCH[2]}"
             patch="${BASH_REMATCH[3]}"
@@ -364,6 +381,33 @@ jobs:
             keytool -genkeypair               -keystore "$HOME/.android/debug.keystore"               -storepass android               -alias androiddebugkey               -keypass android               -dname "CN=Android Debug,O=Fruity Prime,C=US"               -keyalg RSA               -keysize 2048               -validity 10000
           fi
 
+      # Android installs an update only over an app signed with the same
+      # certificate. Releases are signed with the key the C# APKs were
+      # (ANDROID_KEYSTORE*), so the in-app updater on every phone can replace
+      # them; other builds keep the cached development key.
+      - name: Unlock the release signing key
+        if: env.FRUITY_RELEASE_VERSION != ''
+        shell: bash
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${KEYSTORE:-}" ] || [ -z "${KEY_ALIAS:-}" ]; then
+            echo "::error::a release APK needs the ANDROID_KEYSTORE secrets; signed with any other key it cannot update an installed Fruity Prime"
+            exit 1
+          fi
+          # Outside the workspace, so no later step can archive it by accident.
+          printf '%s' "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/android.jks"
+          {
+            echo "FRUITY_ANDROID_KEYSTORE=$RUNNER_TEMP/android.jks"
+            echo "FRUITY_ANDROID_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD"
+            echo "FRUITY_ANDROID_KEY_ALIAS=$KEY_ALIAS"
+            echo "FRUITY_ANDROID_KEY_PASSWORD=$KEY_PASSWORD"
+          } >> "$GITHUB_ENV"
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
@@ -384,6 +428,30 @@ jobs:
           "$build_tools/aapt" dump badging "$apk" | tee app/build/outputs/apk/release/badging.txt
 
           cp "$apk" app/build/outputs/apk/release/FruityPrime.apk
+
+      # A release APK signed with a different certificate from the published
+      # one would download on every phone and then be refused at install.
+      - name: Same signer as the published release
+        if: env.FRUITY_RELEASE_VERSION != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          signer="${ANDROID_SDK_ROOT}/build-tools/${ANDROID_BUILD_TOOLS}/apksigner"
+          mkdir -p "$RUNNER_TEMP/published"
+          if ! gh release download --repo "$GITHUB_REPOSITORY" --pattern '*android*.apk' \
+              --dir "$RUNNER_TEMP/published" 2>/dev/null; then
+            echo "::warning::no published APK to compare the signer with"
+            exit 0
+          fi
+          digest() { "$signer" verify --print-certs "$1" | grep -m1 'certificate SHA-256 digest' | awk '{print $NF}'; }
+          published=$(digest "$(ls "$RUNNER_TEMP"/published/*.apk | head -1)")
+          built=$(digest android/app/build/outputs/apk/release/FruityPrime.apk)
+          echo "published release: $published"
+          echo "this build:        $built"
+          test -n "$built" && [ "$built" = "$published" ] \
+            || { echo "::error::this APK is not signed with the published release's key"; exit 1; }
 
       - name: Upload installable APK
         uses: actions/upload-artifact@v4

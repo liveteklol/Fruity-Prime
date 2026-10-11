@@ -31,6 +31,21 @@ android {
         }
     }
 
+    // A release is signed with the key every published APK (C# ones
+    // included) carries, which is what lets the in-app updater install it
+    // over them. CI sets these from the ANDROID_KEYSTORE* secrets.
+    def releaseKeystore = System.getenv("FRUITY_ANDROID_KEYSTORE")
+    signingConfigs {
+        if (releaseKeystore) {
+            release {
+                storeFile file(releaseKeystore)
+                storePassword System.getenv("FRUITY_ANDROID_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("FRUITY_ANDROID_KEY_ALIAS")
+                keyPassword System.getenv("FRUITY_ANDROID_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         debug {
             debuggable true
@@ -38,10 +53,10 @@ android {
         release {
             debuggable false
             minifyEnabled false
-            // The C++ beta APK must be installable from CI without a private
-            // signing secret. Keep one cached development key in Actions so
-            // successive beta builds can update each other.
-            signingConfig signingConfigs.debug
+            // Without the release key (any build that is not a release): the
+            // cached development key, so successive beta builds can at least
+            // update each other.
+            signingConfig releaseKeystore ? signingConfigs.release : signingConfigs.debug
         }
     }
 

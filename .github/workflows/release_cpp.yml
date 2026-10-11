@@ -130,6 +130,8 @@ jobs:
   build:
     needs: resolve
     uses: ./.github/workflows/build_cpp.yml
+    # The Android release key (ANDROID_KEYSTORE*) for the APK.
+    secrets: inherit
     with:
       checkout_ref: refs/tags/${{ needs.resolve.outputs.tag }}
       release_version: ${{ needs.resolve.outputs.version }}
