@@ -1006,6 +1006,9 @@ namespace MphRead::Entities
         std::uint16_t _jumpPadControlLockMin = 0;
         std::uint16_t _timeSinceJumpPad = 0;
         ::OpenTK::Mathematics::Vector3 _jumpPadAccel{};
+        // Quake's gravity while flying off a Quake 3 jump pad, as a positive
+        // fall per frame per frame; 0 when not. JumpPadEntity::Q3Trigger.
+        float _q3PadGravity = 0.0F;
         std::uint16_t _autofireCooldown = 0;
         std::uint16_t _powerBeamAutofire = 0;
         std::uint16_t _timeSinceInput = 0;

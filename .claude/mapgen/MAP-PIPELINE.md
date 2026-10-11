@@ -365,35 +365,65 @@ platform, spawns, a push trigger and items -- so the importer can be exercised
 with no game data at all. That is how it was tested before any real level was
 available.
 
-## Converting a level, in one command
+## A Quake 3 level is read, not converted
 
-```bash
-FruityPrime -q3convert path/to/level.pk3 -map LEVELNAME -name ROOM [-noclip] [-noitems]
-```
+Put the `.pk3` (or `.zip`) in `maps/`, anywhere under it, and every level in
+it is a room the next time the game starts, named after its `.bsp` and titled
+by its worldspawn `message`. Nothing is written beside it and there is no
+recipe: `CustomRooms::AddTranslated` lists the archives,
+`Q3Convert::Translate` makes each level's definition in memory, and the room's
+binaries and baked textures are built from the level into the game's own
+`_archives` folder, like any custom room's, and built again when the archive
+changes or `Q3Convert::TranslatorVersion` is bumped (`translated.txt` beside
+them is the stamp). A recipe that imports the same archive and level wins:
+DUST2 is played the way its recipe says, not as `DF_DUST2`.
 
-Bakes the textures, picks the scale, the extents, the kill height and the
-vertex precision from the level's own geometry, writes the spawns and the
-pickups from its entities, copies the `.pk3` in beside the result, and leaves a
-`maps/<room>/<room>.json` that `-mapgen` can build. `-scale N` overrides the
-scale, `-texsize N` the texture size, `-out DIR` where it lands.
+What the level holds comes across by rule, never by hand:
 
-It does **not** *place* weapons or powerups. Where those go is a judgement
-about how the map plays -- which routes meet, what is worth contesting -- and
-a generator that scattered them evenly would produce a map worse than one with
-none. It prints the list of pickups a custom map may use, and leaves choosing
-to a person.
-
-It does write down the ones the level's own author placed, which is a
-different thing. Those were being read out of the `.bsp` on every generation
-anyway; listing them under `items` and setting `keepItems` to false only moves
-them somewhere an author can edit them. `-noitems` writes none and still sets
-the flag, for a level whose pickups are nothing you want.
-
-The texture baking is in `MapTextureBake.cs` now, not only in
-`tools/bake-textures.py`: the archive is a zip, the decoder is the one the
-exporter already uses, and the median-cut quantiser is fifty lines, so a
-conversion that needed a Python with Pillow on it needs nothing. The Python is
-still there and still produces the same file.
+- **Textures.** Each shader is resolved the way Quake does -- its `.shader`
+  script's first stage image, then the image at its name, its sky box, its
+  editor image -- in the level's own archive, and baked **at the size it was
+  painted at** (each side down to a power of two, up to 512, as
+  `r_roundImagesDown` does: `MapTextureBake::NativeSize`). A shader the level
+  carries no image for is painted with **the cartridge's own art of the same
+  kind** (`MphTextures`): its name and surfaceparms put it in a family -- sky,
+  lava, ice for slime and water, glass, grate, pipe, light, trim, metal, rock,
+  sand, floor, wall -- and a hash of the name picks one of that family's
+  materials from the multiplayer rooms (MP7's `lava2`, MP8's `floor_metroid`,
+  AD2's `rock_reg`...), so the same level always comes out the same. The log
+  says `stand-in: shader <- ROOM/material`. Left out instead: a shader with no
+  lightmap that is not the sky (a flare, a glow), a see-through effect
+  (energy, fog, flames, beams), and `textures/common`'s editor markers --
+  painted opaque, each would be a wall where there was none.
+- **Texture coordinates** are 16-bit sixteenths of a texel, so a vertex sits
+  within 2048 texels of its texture's origin, and a floor tiling a 512-texel
+  image tens of times does not. `MapPacker` cuts such a face into triangles
+  that fit and moves each by whole repeats of its texture; before this every
+  converted floor past sixteen repeats was clamped and smeared.
+- **The sky** is the level's sky box, six sides at their own size, drawn as a
+  box round the level's sky (`tr_sky.c`'s `st_to_vec`).
+- **Pickups**, by what they do (`Q3Import::MapItemType`): the railgun is the
+  Imperialist, rockets the Magmaul, the plasma gun the Battlehammer, the
+  lightning gun the Shock Coil, grenades the Judicator, the shotgun the Volt
+  Driver (Team Arena's nailgun, chaingun and prox launcher the Volt Driver,
+  Battlehammer and Judicator). No BFG -- the Omega Cannon is out of custom
+  maps -- and no machine gun or gauntlet, which the Power Beam already is.
+  Armour is health of the same size, health being the shield here. An ammo
+  box is worth as many shots of the weapon standing in for Quake's as it held
+  of Quake's, priced at that weapon's UA cost: 100 and up is the big UA
+  pickup, less the small one. A box for a weapon the level does not hold, and
+  the machine gun's, is missiles instead, at 10 a shot. Items fall to the
+  floor unless spawnflag 1 hangs them; `notfree` ones are left out. Powerups
+  and holdables are nothing.
+- **A level with no weapon** -- a race map -- is given the six, each as far
+  from the starts and from the others as its own places allow (its pickups,
+  where its pads land and its teleporters lead).
+- **Spawns** are its deathmatch starts; with fewer than four, its targets and
+  teleporter destinations that stand over a floor join them.
+- **Scale** is measured on where play happens -- the extent of spawns and
+  pickups plus a margin -- when a level places enough of them: acid3dm12
+  stands in a 16384-unit vista and would otherwise come out at 126 units each.
+- **No fog**: the cartridge's fog colours belong to its rooms.
 
 **How the scale is chosen.** `TargetExtent` is 130 units and 35 is the floor.
 The floor is the architecture matching exactly -- a 56-unit Quake player
@@ -404,6 +434,55 @@ guide: df_dust2's crates are 128 and 192 units, which are de_dust2's 64 and 96
 *doubled*, so that level is built at twice the scale of the map it copies. 130
 was arrived at by measuring the crates. It puts the small one at 1.56 units
 against Samus's 1.6 -- waist-high, which is what a crate is.
+
+### Jump pads and teleporters fly Quake's flight
+
+A cartridge pad throws a hunter in a **straight line** for its control lock --
+`ProcessMovement` applies no gravity while `_jumpPadControlLock` runs -- and
+only then lets it fall, with the hunter's own gravity (the Morph Ball's is
+three times the biped's, Sylux's ball two). No speed and gravity given to such
+a pad can trace Quake's parabola, which is why the first conversions missed
+their ledges. A level's pads are therefore not cartridge pads: they are
+`JumpPadEntity::Q3Trigger`s, kept in bytes of `JumpPadEntityData` the
+cartridge leaves zero (`Padding81` the kind, `Unused28` a float).
+
+- **Push** (`trigger_push`). `AimAtTarget`'s velocity -- the one that reaches
+  the target, the *top* of the arc, from the trigger's centre under the
+  level's gravity (worldspawn `gravity`, else 800) -- is used as it is, only in
+  this game's units: no rescaling, so the path **and** the time are Quake's.
+  It replaces whatever the hunter was moving at. From the first frame the
+  hunter falls under that gravity, whatever its form (`_q3PadGravity`), and
+  the step is taken on the mean of the speed before and after it, as Quake's
+  pmove does, so the path is the parabola exactly rather than Euler's
+  approximation of it. The pad sets the velocity again every frame it is
+  touched (cooldown 0), as Quake's does. It holds the hunter for the flight's
+  length, worked out against the level's floors, which is also where the
+  bots' route lands.
+- **Teleport** (`trigger_teleport`). `TeleportPlayer`: out 1 above the
+  destination, facing its angle, at 400 along it, unslowed by the ground for
+  the first ten frames (`PMF_TIME_KNOCKBACK`'s 160 ms) --
+  `PlayerEntity::Q3Teleport`. Spectator-only ones (spawnflag 1) are left out.
+- **Touching** is Quake's: its triggers fire when the player's box (15 either
+  side, the feet to 56 above) overlaps them, and this game tests the feet, so
+  the volume is the trigger grown by that box.
+- Neither draws anything: the level's own pad and teleporter surfaces are
+  what you see.
+
+`-padprobe ROOM [-hunter H] [-alt]` proves it in the real engine: it stands a
+hunter on every push pad, then runs one across it, and compares each flight,
+frame by frame, with the parabola of the velocity the pad set. It stops where
+another trigger throws on (`chained`, a pad in mid-air) or the level is
+touched on the way (`hit`, a ledge's lip), and checks every teleporter's
+arrival, exit speed and angle. Measured 2026-10-11: on Q3DM17R every flight
+is within 0.00011 units of the parabola for all seven hunters and for Samus's
+and Sylux's alt forms, and on RUNDM17, Q3DM16R, PRO_Q3DM6 and
+ACID3DM12 (0.00011 at worst); no entry speed survives a pad, and every teleporter sends you out
+at 400 along its angle to the hundredth of a degree. Two things it cannot
+make Quake's. A touch of the level mid-flight is decided by this game's
+collision, and a hunter is not Quake's 30-unit box, so a flight that grazes a
+ledge may graze it differently. And Quake rounds the velocity to whole units
+every client frame (`trap_SnapVector`), so a pad there throws a little
+differently at 125 and at 333 frames a second: This is the parabola that rounding wobbles about.
 
 ## Collision a person edits: the OBJ round trip
 
@@ -635,56 +714,6 @@ reason.
 **No powerups either**, by the project's rule (2026-10-11): Double Damage,
 Cloak and Deathalt are refused in a custom map, and the importer maps
 `item_quad` and `item_invis` onto nothing.
-
-## A level to a bundle, with nobody choosing anything
-
-```bash
-tools/convert-q3-map.sh LEVEL.pk3|LEVEL.zip [-map BSP] [-name ROOM] [-overlay X.json] [-noclip]
-```
-
-`-q3convert`, then `-mapgen`, `-mapcheck` and `-mapbundle`, and a
-`maps/<room>.fpmap` at the end. What the level holds comes across by itself;
-what it does not -- a race map's weapons -- goes in an overlay, a JSON object
-whose keys replace the generated recipe's (`tools/q3maps/rundm17.overlay.json`).
-Converted maps get no fog. Proven on rundm17 (a DeFRaG run of q3dm17) and
-acid3dm12 (a 2025 deathmatch level with its own art).
-
-- **Textures.** The level's own archive first, then the game's texture paks:
-  Quake 3's are id's and are not fetched, OpenArena's (GPL, Debian) reuse most
-  of the names and are, into `~/.cache/fruityprime/openarena`, only when the
-  level lacks images. A shader is resolved the way Quake does: its `.shader`
-  script's first stage image, then the image at its name, its sky box, its
-  editor image; a lit surface still unanswered takes the nearest-named image
-  in the same folder ("stand-in" in the log), and `import.textureAliases` says
-  otherwise by hand. `import.texturePaks` keeps the list for a rebake.
-  Default size 128.
-- **The images were black.** `NativeRuntime/Stb` decoded PNG only, and a
-  level's art is JPEG and TGA, so since the C++ port every converted map --
-  DUST2 included -- baked to one black palette entry and drew black.
-  `ImageDecode.cpp` is stb_image for those two, which is what the managed
-  build used through ReFuel.Stb.
-- **Texture names** end at the NUL: q3map2 2.5 leaves its buffer behind it.
-- **The sky** is the level's sky box: its six sides baked at the size they
-  were painted at (up to 512, `MapTextureBake::SkyBoxSourceIndex`) and drawn
-  as a box spanning the level's sky, oriented by `tr_sky.c`'s `st_to_vec`. A
-  level whose sky has no box keeps the old one image tiled over its sky.
-- **Jump pads.** Quake aims a pad at the *top* of its arc
-  (`AimAtTarget`), often over the void. The pad keeps Quake's own launch with
-  the speed scaled by the root of the gravity ratio -- the same path, slower
-  -- and the point it comes down on (a floor probe of the brushes) is its
-  target for the bots. It draws nothing of its own
-  (`JumpPadEntity::HiddenModelId`): the level's pad surfaces are the pad.
-- **Teleporters.** `trigger_teleport` becomes the cartridge's multiplayer
-  teleporter on the floor of its volume, sending you to the destination's
-  floor facing its angle (`"teleporters"` in a recipe).
-- **Bots.** Each pad and teleporter is a one-way edge in the node graph, from
-  a node on the pad to the waypoint at its landing (one is added on a ledge
-  the thinning left bare); routes are found walking edges backwards.
-- **Scale** is measured on where play happens -- the extent of spawns and
-  pickups plus a margin -- when a level places enough of them: acid3dm12
-  stands in a 16384-unit vista and came out at 126 units each.
-- **Spawns** for a level with too few starts are taken from its targets and
-  teleporter destinations, but only those standing over a floor.
 
 ## Bots
 

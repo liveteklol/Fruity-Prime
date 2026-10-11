@@ -38,6 +38,9 @@ namespace MphRead::Mods::MapGen
         [[nodiscard]] static std::string EntityDirectory();
         [[nodiscard]] static std::string NodeDirectory();
 
+        // Generates the room's files: MapPacker::Generate, and for a level
+        // read from its archive the stamp NeedsGenerating compares.
+        static void Build(MapDefinition* def, bool verbose);
         [[nodiscard]] static std::int32_t GenerateAll(
             bool force = false, bool verbose = true);
         static void GenerateMissing();
@@ -54,5 +57,8 @@ namespace MphRead::Mods::MapGen
         [[nodiscard]] static std::shared_ptr<MphRead::RoomMetadata> MakeMetadata(
             MapDefinition* def, std::int32_t id);
         [[nodiscard]] static bool NeedsGenerating(MapDefinition* def);
+        static void AddTranslated(DefinitionList& results);
+        [[nodiscard]] static std::string TranslatorStamp(MapDefinition* def);
+        [[nodiscard]] static std::string TranslatorStampPath(MapDefinition* def);
     };
 }

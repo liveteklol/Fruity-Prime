@@ -2130,6 +2130,7 @@ namespace MphRead::Entities
         {
             _lastJumpPad = nullptr;
             _flags1 &= ~PlayerFlags1::UsedJumpPad;
+            _q3PadGravity = 0.0F;
             _jumpPadControlLock = 0;
             _jumpPadControlLockMin = 0;
         }
@@ -2143,7 +2144,17 @@ namespace MphRead::Entities
         }
         if (_health > 0)
         {
-            if (_jumpPadControlLock == 0 && !TestFlag(_flags2, PlayerFlags2::BipedStuck))
+            // Off a Quake 3 pad the fall is Quake's, from the first frame,
+            // and the step is taken on the mean of the speed before and after
+            // it, as Quake's pmove does: a parabola, exactly.
+            float q3Fall = 0.0F;
+            if (_q3PadGravity != 0.0F && !TestFlag(_flags2, PlayerFlags2::BipedStuck))
+            {
+                _gravity = -_q3PadGravity;
+                _speed.Y += _gravity / 2.0F;
+                q3Fall = _gravity / 2.0F;
+            }
+            else if (_jumpPadControlLock == 0 && !TestFlag(_flags2, PlayerFlags2::BipedStuck))
             {
                 if (TestFlag(_flags2, PlayerFlags2::GravityOverride))
                 {
@@ -2178,7 +2189,9 @@ namespace MphRead::Entities
                 }
                 _speed.Y += _gravity / 2.0F;
             }
-            Vector3 position = Add(static_cast<Vector3>(Position), Divide(_speed, 2.0F));
+            Vector3 step = Divide(_speed, 2.0F);
+            step.Y -= q3Fall / 4.0F;
+            Vector3 position = Add(static_cast<Vector3>(Position), step);
             if (_attachedEnemy != nullptr && _attachedEnemy->EnemyType() == EnemyType::Quadtroid)
             {
                 position.X = Position.X;

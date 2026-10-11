@@ -1,5 +1,6 @@
 #include "Q3Convert.hpp"
 #include "Q3Import.hpp"
+#include "../../Program.hpp"
 #include "NativeRuntime/System/Charconv.hpp"
 
 #include "../../Formats/Enums.hpp"
@@ -99,38 +100,6 @@ namespace
         ::MphRead::NativeRuntime::ConsoleWriteLine(line);
     }
 
-    void ValidatePathText(const std::string& path)
-    {
-        if (path.find('\0') != std::string::npos)
-        {
-            throw System::ArgumentException();
-        }
-    }
-
-    [[nodiscard]] bool WindowsEffectivelyEmpty(
-        const std::string& path) noexcept
-    {
-#if defined(_WIN32)
-        return !path.empty()
-            && std::all_of(
-                path.begin(), path.end(),
-                [](char ch) noexcept { return ch == ' '; });
-#else
-        (void)path;
-        return false;
-#endif
-    }
-
-    void CopyFile(
-        const std::string& source,
-        const std::string& destination)
-    {
-        (void)std::filesystem::copy_file(
-            PathFromUtf8(source),
-            PathFromUtf8(destination),
-            std::filesystem::copy_options::overwrite_existing);
-    }
-
     [[nodiscard]] const std::string* EntityValue(
         const Q3Entity* entity,
         std::string_view key)
@@ -171,113 +140,29 @@ namespace
         return sum / static_cast<double>(count);
     }
 
-    [[nodiscard]] std::string JoinMultiplayerItems(
-        const MphRead::Mods::MapGen::ItemTypeHashSet& values)
-    {
-        std::string result;
-        bool first = true;
-        for (const ItemType value : values)
-        {
-            if (!first)
-            {
-                result += ", ";
-            }
-            first = false;
-            result += ::MphRead::ToString(value);
-        }
-        return result;
-    }
-
-    [[nodiscard]] std::string JoinStrings(
-        const std::vector<std::string>& values,
-        std::size_t count)
-    {
-        std::string result;
-        const std::size_t limit = std::min(count, values.size());
-        for (std::size_t i = 0; i < limit; ++i)
-        {
-            if (i != 0)
-            {
-                result += ", ";
-            }
-            result += values[i];
-        }
-        return result;
-    }
 }
 
 namespace MphRead::Mods::MapGen
 {
-    std::int32_t Q3Convert::Run(
-        const std::string& source,
-        const std::optional<std::string>& mapName,
-        const std::optional<std::string>& roomName,
-        const std::optional<std::string>& outputDir,
-        bool dropClip,
-        bool dropItems,
-        const std::optional<float>& forcedScale,
-        std::int32_t textureSize,
-        const std::vector<std::string>& texturePaks)
+    std::shared_ptr<MapDefinition> Q3Convert::Translate(
+        const std::string& archive,
+        const std::string& mapName)
     {
-        if (!FileExists(source))
-        {
-            WriteLine("No such file: ", source);
-            return 1;
-        }
-
-        const std::string& sourceValue = source;
-        std::shared_ptr<Q3Bsp> bsp;
-        try
-        {
-            bsp = Q3Bsp::Load(sourceValue, mapName);
-        }
-        catch (...)
-        {
-            WriteLine(::MphRead::NativeRuntime::ExceptionMessage(std::current_exception()));
-            return 1;
-        }
-
-        std::optional<std::string> selectedMapName = mapName;
-        if (!selectedMapName.has_value())
-        {
-            const std::vector<std::string> maps
-                = Q3Bsp::ListMaps(sourceValue);
-            if (!maps.empty())
-            {
-                selectedMapName = maps.front();
-            }
-        }
-
-        const std::string roomValue = roomName.has_value()
-            ? *roomName
-            : selectedMapName.has_value()
-                ? *selectedMapName
-                : "CUSTOM";
-        const std::string room = ::MphRead::NativeRuntime::ToUpperInvariant(roomValue);
-        const std::string prefix = ::MphRead::NativeRuntime::ToLowerInvariant(room);
-        const std::string directory = outputDir.has_value()
-            ? *outputDir
-            : PathCombine(CustomRooms::MapDirectory(), prefix);
-        DirectoryCreateDirectory(directory);
+        const std::shared_ptr<Q3Bsp> bsp = Q3Bsp::Load(archive, std::optional<std::string>(mapName));
 
         std::shared_ptr<std::vector<float>> min;
         std::shared_ptr<std::vector<float>> max;
         Bounds(&RequireReference(bsp), min, max, false);
         if (ManagedAt(min.get(), 0) > ManagedAt(max.get(), 0))
         {
-            WriteLine(selectedMapName.value_or(std::string()), " has no drawn surfaces.");
-            return 1;
+            throw MphRead::ProgramException(mapName + " has no drawn surfaces.");
         }
 
-        const float xExtent
-            = ManagedAt(max.get(), 0) - ManagedAt(min.get(), 0);
-        const float yExtent
-            = ManagedAt(max.get(), 1) - ManagedAt(min.get(), 1);
-        const float zExtent
-            = ManagedAt(max.get(), 2) - ManagedAt(min.get(), 2);
         const float widest = MathMax(
-            xExtent,
-            MathMax(yExtent, zExtent));
+            ManagedAt(max.get(), 0) - ManagedAt(min.get(), 0),
+            MathMax(
+                ManagedAt(max.get(), 1) - ManagedAt(min.get(), 1),
+                ManagedAt(max.get(), 2) - ManagedAt(min.get(), 2)));
         // The scale is for the part of the level anybody plays in. A level
         // may stand in a vista many times its arena's size -- acid3dm12's
         // floor and water run 16384 units across round an arena of 1500 --
@@ -286,14 +171,27 @@ namespace MphRead::Mods::MapGen
         // to say where play happens, their extent (and a margin) is what is
         // measured; the vista is still drawn.
         float measured = widest;
+        std::optional<std::string> title;
         {
             std::vector<std::shared_ptr<std::vector<float>>> placed;
             for (const std::shared_ptr<Q3Entity>& entityRef : RequireReference(bsp).Entities())
             {
                 const Q3Entity* entity = &RequireReference(entityRef);
                 const std::string* classname = EntityValue(entity, "classname");
+                if (classname == nullptr)
+                {
+                    continue;
+                }
+                if (StringEqualsOrdinalIgnoreCase(*classname, "worldspawn"))
+                {
+                    if (const std::string* message = EntityValue(entity, "message"))
+                    {
+                        title = Title(*message);
+                    }
+                    continue;
+                }
                 const std::string* origin = EntityValue(entity, "origin");
-                if (classname == nullptr || origin == nullptr)
+                if (origin == nullptr)
                 {
                     continue;
                 }
@@ -323,215 +221,76 @@ namespace MphRead::Mods::MapGen
                 measured = MathMin(widest, playWidest + 1024.0F);
             }
         }
-        const float unit = forcedScale.has_value()
-            ? *forcedScale
-            : AutoScale(measured);
+        const float unit = AutoScale(measured);
 
         std::shared_ptr<std::vector<float>> reachMin;
         std::shared_ptr<std::vector<float>> reachMax;
         Bounds(&RequireReference(bsp), reachMin, reachMax, true);
 
-        const std::string levelName = PathGetFileName(sourceValue);
-        const std::string beside
-            = PathCombine(directory, levelName);
-        const std::string besideFullPath = PathGetFullPath(beside);
-        const std::string sourceFullPath = PathGetFullPath(sourceValue);
-        if (besideFullPath != sourceFullPath)
-        {
-            CopyFile(sourceValue, beside);
-        }
-
-        const std::string texturePath
-            = PathCombine(directory, prefix + ".tex");
-        auto archivePaths = std::make_shared<
-            std::vector<std::optional<std::string>>>();
-        archivePaths->push_back(sourceValue);
-        for (const std::string& pak : texturePaks)
-        {
-            if (!FileExists(pak))
-            {
-                WriteLine("  no texture pak at ", pak, "; going on without it");
-                continue;
-            }
-            archivePaths->push_back(PathGetFullPath(pak));
-        }
-        const std::shared_ptr<MapTextureBake::Result> baked
-            = MapTextureBake::Bake(
-                bsp,
-                archivePaths,
-                std::optional<std::string>(texturePath),
-                textureSize);
-        MapTextureBake::Result* bakedValue = &RequireReference(baked);
-
-        WriteLine("  ", ::MphRead::NativeRuntime::ToString(bakedValue->Baked),
-            " textures at ", ::MphRead::NativeRuntime::ToString(textureSize), "x",
-            ::MphRead::NativeRuntime::ToString(textureSize), " -> ",
-            ::MphRead::NativeRuntime::ToString(bakedValue->Bytes, "N0"),
-            " B  ", PathGetFileName(texturePath));
-        for (const std::string& line : RequireReference(bakedValue->Substituted))
-        {
-            WriteLine("  stand-in: ", line);
-        }
-        if (!RequireReference(bakedValue->Missing).empty())
-        {
-            WriteLine("  no image for ",
-                ::MphRead::NativeRuntime::ToString(RequireReference(bakedValue->Missing).size()),
-                ": ", JoinStrings(RequireReference(bakedValue->Missing), 6),
-                RequireReference(bakedValue->Missing).size() > 6 ? " ..." : "");
-            WriteLine("  those surfaces are dropped rather than painted with somebody else's"
-                " texture; pass another .pk3 in the same folder if it has them");
-        }
+        const std::string room = ::MphRead::NativeRuntime::ToUpperInvariant(mapName);
+        const std::string prefix = ::MphRead::NativeRuntime::ToLowerInvariant(room);
 
         auto definition = std::make_shared<MapDefinition>();
         definition->Name(room);
-        definition->InGameName(
-            roomName.has_value()
-                ? roomName
-                : selectedMapName.has_value()
-                    ? selectedMapName
-                    : std::optional<std::string>(room));
-        definition->ScaleFactor(
-            ScaleFactor(reachMin.get(), reachMax.get(), unit));
-        definition->KillHeight(
-            RoundToEven(ManagedAt(min.get(), 2) / unit)
-            - 5.0F);
-        definition->FarClip(
-            RoundToEven(MathMin(
-                400.0F,
-                widest / unit * 1.2F)));
-        // A converted level is drawn with its own sky and no fog: the
-        // cartridge's fog colours belong to the cartridge's rooms.
+        definition->InGameName(title.has_value() && !title->empty() ? title : std::optional<std::string>(room));
+        definition->SourcePath(PathGetFullPath(archive));
+        definition->Translated(true);
+        definition->ScaleFactor(ScaleFactor(reachMin.get(), reachMax.get(), unit));
+        definition->KillHeight(RoundToEven(ManagedAt(min.get(), 2) / unit) - 5.0F);
+        definition->FarClip(RoundToEven(MathMin(400.0F, widest / unit * 1.2F)));
+        // A level is drawn with its own sky and no fog: the cartridge's fog
+        // colours belong to the cartridge's rooms.
         definition->FogEnabled(false);
 
         auto import = std::make_shared<MapImport>();
-        import->Source(levelName);
-        import->MapName(selectedMapName);
+        import->Source(PathGetFullPath(archive));
+        import->MapName(mapName);
         import->UnitsPerUnit(unit);
-        import->Textures(PathGetFileName(texturePath));
+        // The textures are baked beside the room they build, a cache like the
+        // rest of it; CustomRooms::Build names the file, the game's folders
+        // not being known yet when the maps are first listed.
         import->KeepSky(true);
-        import->KeepClip(!dropClip);
+        import->KeepClip(true);
         import->KeepSpawns(true);
-        {
-            std::vector<std::string> paks;
-            for (std::size_t i = 1; i < archivePaths->size(); ++i)
-            {
-                paks.push_back(*(*archivePaths)[i]);
-            }
-            import->TexturePaks(std::move(paks));
-        }
+        import->KeepItems(true);
         definition->Import(import);
 
-        std::int32_t clipBrushes = 0;
-        for (const std::shared_ptr<Q3Brush>& brushRef
-            : RequireReference(bsp).Brushes())
+        AddSpawns(&RequireReference(definition), &RequireReference(bsp), unit);
+        return definition;
+    }
+
+    // A worldspawn message as a title: Quake's colour codes (^ and a
+    // character) and line breaks out.
+    std::string Q3Convert::Title(const std::string& message)
+    {
+        std::string result;
+        for (std::size_t i = 0; i < message.size(); ++i)
         {
-            Q3Brush* brush = &RequireReference(brushRef);
-            Q3Texture* solidTexture = &RequireReference(
-                ManagedListAt(
-                    RequireReference(bsp).Textures(),
-                    brush->Texture()));
-            if ((solidTexture->Contents()
-                    & Q3Bsp::ContentsSolid) != 0)
+            const char ch = message[i];
+            if (ch == '^' && i + 1 < message.size())
             {
+                ++i;
                 continue;
             }
-            Q3Texture* clipTexture = &RequireReference(
-                ManagedListAt(
-                    RequireReference(bsp).Textures(),
-                    brush->Texture()));
-            if ((clipTexture->Contents()
-                    & Q3Bsp::ContentsPlayerClip) != 0)
+            if (ch == '\n' || ch == '\r' || ch == '\\')
             {
-                if (clipBrushes
-                    == std::numeric_limits<std::int32_t>::max())
+                if (!result.empty() && result.back() != ' ')
                 {
-                    throw System::OverflowException();
+                    result.push_back(' ');
                 }
-                ++clipBrushes;
+                if (ch == '\\' && i + 1 < message.size() && message[i + 1] == 'n')
+                {
+                    ++i;
+                }
+                continue;
             }
+            result.push_back(ch);
         }
-
-        AddSpawns(
-            &RequireReference(definition),
-            &RequireReference(bsp),
-            unit);
-        AddItems(&RequireReference(definition), &RequireReference(bsp), unit, dropItems);
-
-        const std::string path
-            = PathCombine(directory, prefix + ".json");
-        definition->Save(path);
-
-        MapDefinition::SpawnList* outputSpawns
-            = definition->Spawns();
-        if (outputSpawns == nullptr)
+        while (!result.empty() && result.back() == ' ')
         {
-            throw System::NullReferenceException();
+            result.pop_back();
         }
-
-        WriteLine("  ", ::MphRead::NativeRuntime::ToString(outputSpawns->size()),
-            " spawn points, ", ::MphRead::NativeRuntime::ToString(unit, "0.#"),
-            " Quake units per unit -> ",
-            ::MphRead::NativeRuntime::ToString((ManagedAt(max.get(), 0)
-                - ManagedAt(min.get(), 0)) / unit, "0"),
-            " x ",
-            ::MphRead::NativeRuntime::ToString((ManagedAt(max.get(), 2)
-                - ManagedAt(min.get(), 2)) / unit, "0"),
-            " x ",
-            ::MphRead::NativeRuntime::ToString((ManagedAt(max.get(), 1)
-                - ManagedAt(min.get(), 1)) / unit, "0"), " units");
-        WriteLine("  wrote ", path);
-
-        // With keepSpawns on, the level's own starts are read at every
-        // generation and the recipe lists none, so the recipe is not the
-        // count.
-        if (RequireReference(definition->Import()).KeepSpawns())
-        {
-            WriteLine("  the level's own deathmatch starts are its spawns (\"keepSpawns\")");
-        }
-        else if (outputSpawns->size() < 4)
-        {
-            WriteLine("  only ", ::MphRead::NativeRuntime::ToString(outputSpawns->size()),
-                " places to appear: this level was not"
-                " built for a deathmatch. Add spawns to the map file before playing it with a full house.");
-        }
-        if (clipBrushes > 0 && !dropClip)
-        {
-            WriteLine("  ", clipBrushes,
-                " player-clip brushes kept. They are the level's invisible"
-                " walls; on a race map they fence the route. -noclip converts without them.");
-        }
-        const std::vector<Q3Import::Q3Pickup> pickups = Q3Import::Pickups(bsp.get(), unit);
-        const std::size_t itemCount = RequireReference(definition->Items()).size();
-        if (dropItems)
-        {
-            WriteLine("  -noitems: the level's ",
-                ::MphRead::NativeRuntime::ToString(pickups.size()),
-                " pickups were left out, and \"keepItems\" turned off so they stay out. Add your own under \"items\", from:");
-        }
-        else if (itemCount > 0)
-        {
-            WriteLine("  ", ::MphRead::NativeRuntime::ToString(itemCount),
-                " of the level's own pickups written under \"items\", and \"keepItems\" turned off so the recipe is the only place they"
-                " live. Move them, drop them, or change what they are, from:");
-        }
-        else
-        {
-            WriteLine("  no pickups: this level holds none this game has an answer for."
-                " Where weapons and powerups go decides how the map plays, so none were"
-                " invented. Add them under \"items\", from:");
-        }
-        WriteLine("  ", JoinMultiplayerItems(MapBuilder::MultiplayerItems));
-        const auto scripted = dropItems ? 0 : std::count_if(pickups.begin(), pickups.end(),
-            [](const Q3Import::Q3Pickup& p) { return p.TargetName.has_value(); });
-        if (scripted > 0)
-        {
-            WriteLine("  ", ::MphRead::NativeRuntime::ToString(scripted),
-                " of them are handed out by the level's own scripts"
-                " rather than walked over, and are usually stood in a closet nobody can reach."
-                " FruityPrime -mapitems \"", room, "\" says which.");
-        }
-        WriteLine("  then: FruityPrime -mapgen \"", room, "\"");
-        return 0;
+        return result;
     }
 
     float Q3Convert::AutoScale(float widestExtent)
@@ -550,25 +309,6 @@ namespace MphRead::Mods::MapGen
         }
         return MathMax(ManagedAt(max.get(), 0) - ManagedAt(min.get(), 0),
             MathMax(ManagedAt(max.get(), 1) - ManagedAt(min.get(), 1), ManagedAt(max.get(), 2) - ManagedAt(min.get(), 2)));
-    }
-
-    // The level's own pickups, written into the recipe; either way the recipe
-    // is now the only source, so keepItems goes off.
-    void Q3Convert::AddItems(MapDefinition* definition, Q3Bsp* bsp, float unit, bool dropItems)
-    {
-        RequireReference(definition->Import()).KeepItems(false);
-        if (dropItems)
-        {
-            return;
-        }
-        for (const Q3Import::Q3Pickup& pickup : Q3Import::Pickups(bsp, unit))
-        {
-            auto item = std::make_shared<MapItem>();
-            item->Position(std::make_shared<std::vector<float>>(std::initializer_list<float>{
-                Round(pickup.Position.X), Round(pickup.Position.Y), Round(pickup.Position.Z)}));
-            item->Type(::MphRead::ToString(pickup.Type));
-            RequireReference(definition->Items()).push_back(std::move(item));
-        }
     }
 
     void Q3Convert::Bounds(

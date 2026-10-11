@@ -594,7 +594,10 @@ namespace MphRead::Mods::MapGen
         for (const std::shared_ptr<MapJumpPad>& padValue : *jumpPads)
         {
             MapJumpPad* pad = &RequireReference(padValue);
-            const auto [beam, speed] = SolveJumpPad(pad);
+            // A Quake 3 teleporter keeps where it sends you in the beam.
+            const auto [beam, speed] = pad->Q3Kind() == 2
+                ? std::pair<Vector3, float>(ToVector(pad->Target()), pad->Speed())
+                : SolveJumpPad(pad);
 
             auto entity = std::make_unique<Editor::JumpPadEntityEditor>();
             entity->Id = PostIncrement(id);
@@ -604,13 +607,15 @@ namespace MphRead::Mods::MapGen
             entity->Facing = Vector3(0.0F, 0.0F, 1.0F);
             entity->NodeName = RmMainString();
             entity->ParentId = -1;
-            entity->Volume = MakeBox(pad->Size());
+            entity->Volume = pad->Box() != nullptr ? MakeBox(*pad->Box()) : MakeBox(pad->Size());
             entity->BeamVector = beam;
             entity->Speed = speed;
             entity->ControlLockTime = pad->ControlLockTime();
             entity->CooldownTime = pad->CooldownTime();
             entity->Active = true;
             entity->ModelId = pad->ModelId();
+            entity->Padding81 = pad->Q3Kind();
+            entity->Unused28 = std::bit_cast<std::uint32_t>(pad->Q3Value());
             entity->BeamType = 0;
             entity->TriggerFlags = Entities::TriggerFlags::PlayerBiped
                 | Entities::TriggerFlags::PlayerAlt
@@ -777,6 +782,24 @@ namespace MphRead::Mods::MapGen
         volume.BoxDot1 = ArrayValue(size, 0);
         volume.BoxDot2 = ArrayValue(size, 1);
         volume.BoxDot3 = ArrayValue(size, 2);
+        return volume;
+    }
+
+    CollisionVolume MapBuilder::MakeBox(const std::vector<float>& box)
+    {
+        if (box.size() != 6)
+        {
+            throw MphRead::ProgramException("A jump pad box is six numbers, its least and greatest corners.");
+        }
+        CollisionVolume volume;
+        volume.Type = VolumeType::Box;
+        volume.BoxVector1 = Vector3(1.0F, 0.0F, 0.0F);
+        volume.BoxVector2 = Vector3(0.0F, 1.0F, 0.0F);
+        volume.BoxVector3 = Vector3(0.0F, 0.0F, 1.0F);
+        volume.BoxPosition = Vector3(box[0], box[1], box[2]);
+        volume.BoxDot1 = box[3] - box[0];
+        volume.BoxDot2 = box[4] - box[1];
+        volume.BoxDot3 = box[5] - box[2];
         return volume;
     }
 

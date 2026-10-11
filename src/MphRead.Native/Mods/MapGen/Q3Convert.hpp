@@ -16,16 +16,17 @@ namespace MphRead::Mods::MapGen
     public:
         static constexpr float TargetExtent = 130.0F;
 
-        [[nodiscard]] static std::int32_t Run(
-            const std::string& source,
-            const std::optional<std::string>& mapName,
-            const std::optional<std::string>& roomName,
-            const std::optional<std::string>& outputDir,
-            bool dropClip,
-            bool dropItems,
-            const std::optional<float>& forcedScale,
-            std::int32_t textureSize,
-            const std::vector<std::string>& texturePaks = {});
+        // Bumped whenever a translated level comes out differently, so the
+        // rooms already built from one are built again (CustomRooms).
+        static constexpr std::int32_t TranslatorVersion = 1;
+
+        // A Quake 3 level (mapName, one of Q3Bsp::ListMaps) inside a .pk3 or
+        // .zip, read as it is: a room whose geometry, art, pickups, starts,
+        // jump pads and teleporters come out of the level every time it is
+        // built. Nothing is written; the room is named after the level.
+        [[nodiscard]] static std::shared_ptr<MapDefinition> Translate(
+            const std::string& archive,
+            const std::string& mapName);
 
         [[nodiscard]] static float AutoScale(float widestExtent);
         [[nodiscard]] static float WidestExtent(Q3Bsp* bsp);
@@ -46,7 +47,7 @@ namespace MphRead::Mods::MapGen
             const std::vector<float>* max,
             float unit);
 
-        static void AddItems(MapDefinition* definition, Q3Bsp* bsp, float unit, bool dropItems);
+        [[nodiscard]] static std::string Title(const std::string& message);
 
         static void AddSpawns(
             MapDefinition* definition,

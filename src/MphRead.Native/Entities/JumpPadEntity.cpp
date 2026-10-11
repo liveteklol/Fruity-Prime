@@ -65,6 +65,11 @@ namespace MphRead::Entities
         _volume = CollisionVolume::Move(_data.Volume, Position);
 
         _hidden = data.ModelId == HiddenModelId;
+        _q3 = static_cast<Q3Trigger>(data.Padding81);
+        if (_q3 == Q3Trigger::Teleport)
+        {
+            _q3Target = data.BeamVector.ToFloatVector();
+        }
         const std::string modelName = GetJumpPadName(_hidden ? 0U : data.ModelId);
         SetUpModel(modelName);
         ModelInstance& beamInst = SetUpModel("JumpPad_Beam");
@@ -94,6 +99,16 @@ namespace MphRead::Entities
             Active = data.Active != 0;
         }
         beamInst.Active = Active;
+    }
+
+    JumpPadEntity::Q3Trigger JumpPadEntity::Q3Kind() const noexcept
+    {
+        return _q3;
+    }
+
+    float JumpPadEntity::Q3Value() const noexcept
+    {
+        return std::bit_cast<float>(_data.Unused28);
     }
 
     std::shared_ptr<Formats::NodeData3> JumpPadEntity::ClosestNode() const noexcept
@@ -171,6 +186,13 @@ namespace MphRead::Entities
                         continue;
                     }
                     position = player.Volume().SpherePosition;
+                    // Quake's trigger is touched from the feet up; the
+                    // ball's are the bottom of the sphere, not its centre,
+                    // which stands above a thin trigger altogether.
+                    if (_q3 != Q3Trigger::None)
+                    {
+                        position.Y -= player.Volume().SphereRadius;
+                    }
                 }
                 else
                 {
@@ -182,10 +204,23 @@ namespace MphRead::Entities
                     position = player.Position;
                 }
 
-                if (_volume.TestPoint(position))
+                if (!_volume.TestPoint(position))
                 {
-                    player.ActivateJumpPad(this, _beamVector, _data.ControlLockTime);
-                    Mods::WorldEvents::NoteJumpPad(player, Id);
+                    continue;
+                }
+                if (_q3 == Q3Trigger::Teleport)
+                {
+                    const float yaw = Q3Value();
+                    player.Q3Teleport(_q3Target,
+                        Vector3(std::sin(yaw), 0.0F, std::cos(yaw)),
+                        NodeRef, _data.Speed.FloatValue());
+                    Mods::WorldEvents::NoteTeleport(player, Id);
+                    continue;
+                }
+                player.ActivateJumpPad(this, _beamVector, _data.ControlLockTime);
+                Mods::WorldEvents::NoteJumpPad(player, Id);
+                if (_q3 == Q3Trigger::None)
+                {
                     _cooldownTimer = static_cast<std::uint16_t>(
                         static_cast<std::uint32_t>(_data.CooldownTime) * 2U);
                 }

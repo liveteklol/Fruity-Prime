@@ -1238,6 +1238,14 @@ namespace MphRead::Mods::MapGen
                 WriteLine("  baked " + Runtime::ToString(result->Baked)
                     + " textures from " + PathGetFileName(*level)
                     + " -> " + PathGetFileName(target));
+                for (const std::string& line : RequireReference(result->Substituted))
+                {
+                    WriteLine("    stand-in: " + line);
+                }
+                for (const std::string& line : RequireReference(result->Missing))
+                {
+                    WriteLine("    left out: " + line);
+                }
             }
             return target;
         }
@@ -1758,15 +1766,11 @@ namespace MphRead::Mods::MapGen
 
         std::unordered_map<
             std::string,
-            Vector3,
-            Q3StringHash,
-            Q3StringEqual> targets;
-        std::unordered_map<
-            std::string,
             float,
             Q3StringHash,
             Q3StringEqual> targetAngles;
-        // The same targets in Quake's own units and axes, for the pads.
+        // Where each named entity is, in Quake's own units and axes: the
+        // pads aim at them and the teleporters send you to them.
         std::unordered_map<
             std::string,
             Vector3,
@@ -1783,7 +1787,6 @@ namespace MphRead::Mods::MapGen
             if (name != nullptr && origin != nullptr)
             {
                 const std::shared_ptr<std::vector<float>> raw = ParseVector(*origin);
-                targets[*name] = ToWorld(raw.get(), import->UnitsPerUnit());
                 q3Targets[*name] = Vector3(
                     ManagedAt(raw.get(), 0), ManagedAt(raw.get(), 1), ManagedAt(raw.get(), 2));
                 float angle = 0.0F;
@@ -1792,7 +1795,30 @@ namespace MphRead::Mods::MapGen
                 {
                     (void)::MphRead::NativeRuntime::SingleTryParseInvariant(*value, angle);
                 }
+                else if (const std::string* angles = EntityValue(entity, "angles"))
+                {
+                    // "pitch yaw roll"
+                    const std::shared_ptr<std::vector<float>> parsed = ParseVector(*angles);
+                    angle = ManagedAt(parsed.get(), 1);
+                }
                 targetAngles[*name] = angle;
+            }
+        }
+
+        // The level's gravity: worldspawn's "gravity", or g_gravity's 800.
+        float q3Gravity = 800.0F;
+        for (const std::shared_ptr<Q3Entity>& entityValue : bsp->Entities())
+        {
+            const Q3Entity* entity = &RequireReference(entityValue);
+            const std::string* classname = EntityValue(entity, "classname");
+            const std::string* gravity = EntityValue(entity, "gravity");
+            float parsed = 0.0F;
+            if (classname != nullptr && gravity != nullptr
+                && StringEqualsOrdinalIgnoreCase(*classname, "worldspawn")
+                && ::MphRead::NativeRuntime::SingleTryParseInvariant(*gravity, parsed)
+                && parsed > 0.0F)
+            {
+                q3Gravity = parsed;
             }
         }
 
@@ -1849,218 +1875,154 @@ namespace MphRead::Mods::MapGen
                 spawn->Yaw(90.0F + angle);
                 spawns->push_back(std::move(spawn));
             }
-            else if (StringEqualsOrdinalIgnoreCase(
-                *classname, "trigger_push"))
+            else if (StringEqualsOrdinalIgnoreCase(*classname, "trigger_push")
+                || StringEqualsOrdinalIgnoreCase(*classname, "trigger_teleport"))
             {
-                const std::string* model
-                    = EntityValue(entity, "model");
-                const std::string* target
-                    = EntityValue(entity, "target");
-                if (model == nullptr
-                    || !::MphRead::NativeRuntime::StringStartsWithCurrentCulture(*model, "*")
-                    || target == nullptr)
-                {
-                    continue;
-                }
-
-                const auto targetIterator = targets.find(*target);
-                if (targetIterator == targets.end())
-                {
-                    continue;
-                }
-                const Vector3 destination = targetIterator->second;
-
-                std::int32_t modelIndex = 0;
-                if (!Int32TryParseCurrentCulture(
-                        std::string_view(*model).substr(1),
-                        modelIndex)
-                    || modelIndex < 0
-                    || static_cast<std::size_t>(modelIndex)
-                        >= bsp->Models().size())
-                {
-                    continue;
-                }
-
-                Q3Model* volume
-                    = &RequireReference(ManagedListAt(bsp->Models(), modelIndex));
-                const Vector3 min = ToWorld(
-                    &RequireReference(volume->Mins()),
-                    import->UnitsPerUnit());
-                const Vector3 max = ToWorld(
-                    &RequireReference(volume->Maxs()),
-                    import->UnitsPerUnit());
-                const Vector3 lower = ComponentMin(min, max);
-                const Vector3 upper = ComponentMax(min, max);
-                const Vector3 centre(
-                    (lower.X + upper.X) / 2.0F,
-                    lower.Y,
-                    (lower.Z + upper.Z) / 2.0F);
-
-                MapDefinition::JumpPadList* jumpPads
-                    = def->JumpPads();
-                if (jumpPads == nullptr)
-                {
-                    throw System::NullReferenceException();
-                }
-                auto pad = std::make_shared<MapJumpPad>();
-                pad->Position(std::make_shared<std::vector<float>>(
-                    std::initializer_list<float>{
-                        centre.X, centre.Y, centre.Z}));
-                // The level draws its own pad (launchpad_diamond and the
-                // like, plain surfaces of the .bsp), so the cartridge's pad
-                // and beam stay off: JumpPadEntity::HiddenModelId.
-                pad->ModelId(0xFFFFFFFFU);
-
-                // Quake aims a pad at the top of its arc, not at where it
-                // lands (g_mover's AimAtTarget): the target is often over
-                // the void, with the platform it throws you onto further
-                // on. So the launch is Quake's own, from the volume's centre,
-                // with its speed scaled by the root of the gravity ratio --
-                // the same path under this game's gravity, only slower --
-                // and the target kept is where that path comes down, for the
-                // bots' routes.
-                const std::vector<float>& q3Min = RequireReference(volume->Mins());
-                const std::vector<float>& q3Max = RequireReference(volume->Maxs());
-                const Vector3 q3Origin(
-                    (q3Min[0] + q3Max[0]) / 2.0F,
-                    (q3Min[1] + q3Max[1]) / 2.0F,
-                    (q3Min[2] + q3Max[2]) / 2.0F);
-                // A trigger often reaches into the floor; the pad stands on
-                // the floor, where a bot has to walk to.
-                if (const std::optional<float> padFloor
-                        = Q3Floor(bsp, q3Origin.X, q3Origin.Y, q3Max[2]);
-                    padFloor && *padFloor >= q3Min[2] - 1.0F)
-                {
-                    pad->Position(std::make_shared<std::vector<float>>(
-                        std::initializer_list<float>{
-                            centre.X, *padFloor / import->UnitsPerUnit(), centre.Z}));
-                }
-                const Vector3 apex = q3Targets[*target];
-                constexpr float Q3Gravity = 800.0F;
-                const float height = apex.Z - q3Origin.Z;
-                Vector3 landing = destination;
-                if (height > 0.0F)
-                {
-                    const float time = std::sqrt(height / (0.5F * Q3Gravity));
-                    const float dx = apex.X - q3Origin.X;
-                    const float dy = apex.Y - q3Origin.Y;
-                    const Vector3 velocity(dx / time, dy / time, time * Q3Gravity);
-
-                    const float unit = import->UnitsPerUnit();
-                    constexpr float Gravity = 77.0F / 4096.0F;
-                    const float q3GravityPerFrame = Q3Gravity / unit / 900.0F;
-                    const float scale = std::sqrt(Gravity / q3GravityPerFrame);
-                    const Vector3 world(velocity.X, velocity.Z, -velocity.Y);
-                    const float length = std::sqrt(
-                        world.X * world.X + world.Y * world.Y + world.Z * world.Z);
-                    pad->Vector(std::make_shared<std::vector<float>>(
-                        std::initializer_list<float>{
-                            world.X / length, world.Y / length, world.Z / length}));
-                    pad->Speed(length / unit / 30.0F * scale);
-
-                    // Down the arc in sixtieths of a second until it passes
-                    // below the floor under it.
-                    for (std::int32_t step = 1; step < 60 * 12; ++step)
-                    {
-                        const float t = static_cast<float>(step) / 60.0F;
-                        const Vector3 at(
-                            q3Origin.X + velocity.X * t,
-                            q3Origin.Y + velocity.Y * t,
-                            q3Origin.Z + velocity.Z * t - 0.5F * Q3Gravity * t * t);
-                        if (velocity.Z - Q3Gravity * t > 0.0F)
-                        {
-                            continue;
-                        }
-                        const std::optional<float> floor = Q3Floor(bsp, at.X, at.Y, at.Z + 32.0F);
-                        if (floor && at.Z <= *floor)
-                        {
-                            landing = ToWorld(Vector3(at.X, at.Y, *floor), unit);
-                            break;
-                        }
-                    }
-                }
-                pad->Target(std::make_shared<std::vector<float>>(
-                    std::initializer_list<float>{
-                        landing.X, landing.Y, landing.Z}));
-                pad->Size(std::make_shared<std::vector<float>>(
-                    std::initializer_list<float>{
-                        MathMax(upper.X - lower.X, 0.8F),
-                        MathMax(upper.Y - lower.Y, 0.8F),
-                        MathMax(upper.Z - lower.Z, 0.8F)}));
-                jumpPads->push_back(std::move(pad));
-                pads = UncheckedAdd(pads, 1);
-            }
-            else if (StringEqualsOrdinalIgnoreCase(
-                *classname, "trigger_teleport"))
-            {
-                // A brush volume in Quake; here the cartridge's teleporter
-                // pad, stood on the floor of that volume at its centre, which
-                // sends you to the destination's floor facing its angle.
-                // Spawnflag 1 is a spectators-only teleporter.
+                // Both are brush volumes in Quake, and both become a trigger
+                // that does what Quake's does (JumpPadEntity::Q3Trigger),
+                // drawn by nothing but the level's own surfaces.
+                const bool push = StringEqualsOrdinalIgnoreCase(*classname, "trigger_push");
                 const std::string* model = EntityValue(entity, "model");
                 const std::string* target = EntityValue(entity, "target");
-                const std::string* spawnflags = EntityValue(entity, "spawnflags");
                 std::int32_t flags = 0;
-                if (spawnflags != nullptr)
+                if (const std::string* spawnflags = EntityValue(entity, "spawnflags"))
                 {
                     (void)Int32TryParseCurrentCulture(*spawnflags, flags);
                 }
+                std::int32_t modelIndex = 0;
+                // Spawnflag 1 on a teleporter is a spectators-only one.
                 if (model == nullptr
                     || !::MphRead::NativeRuntime::StringStartsWithCurrentCulture(*model, "*")
                     || target == nullptr
-                    || (flags & 1) != 0)
-                {
-                    continue;
-                }
-                const auto targetIterator = targets.find(*target);
-                std::int32_t modelIndex = 0;
-                if (targetIterator == targets.end()
+                    || (!push && (flags & 1) != 0)
+                    || !q3Targets.contains(*target)
                     || !Int32TryParseCurrentCulture(std::string_view(*model).substr(1), modelIndex)
                     || modelIndex < 0
                     || static_cast<std::size_t>(modelIndex) >= bsp->Models().size())
                 {
                     continue;
                 }
-                Q3Model* volume
-                    = &RequireReference(ManagedListAt(bsp->Models(), modelIndex));
-                const Vector3 min = ToWorld(
-                    &RequireReference(volume->Mins()),
-                    import->UnitsPerUnit());
-                const Vector3 max = ToWorld(
-                    &RequireReference(volume->Maxs()),
-                    import->UnitsPerUnit());
-                const Vector3 lower = ComponentMin(min, max);
-                const Vector3 upper = ComponentMax(min, max);
-                const Vector3 destination = targetIterator->second;
+                Q3Model* volume = &RequireReference(ManagedListAt(bsp->Models(), modelIndex));
+                const std::vector<float>& q3Min = RequireReference(volume->Mins());
+                const std::vector<float>& q3Max = RequireReference(volume->Maxs());
+                const float unit = import->UnitsPerUnit();
+                const Vector3 q3Centre(
+                    (q3Min[0] + q3Max[0]) / 2.0F,
+                    (q3Min[1] + q3Max[1]) / 2.0F,
+                    (q3Min[2] + q3Max[2]) / 2.0F);
 
-                MapDefinition::TeleporterList* list = def->Teleporters();
-                if (list == nullptr)
+                // The floor under the trigger -- which often reaches into it
+                // -- is where the trigger stands and where a bot walks to.
+                float floorZ = q3Min[2];
+                if (const std::optional<float> floor = Q3Floor(bsp, q3Centre.X, q3Centre.Y, q3Max[2]);
+                    floor && *floor >= q3Min[2] - 1.0F)
+                {
+                    floorZ = *floor;
+                }
+                const Vector3 position = ToWorld(Vector3(q3Centre.X, q3Centre.Y, floorZ), unit);
+
+                // Quake touches a trigger when the player's box overlaps it,
+                // 15 units either side and from the feet to 56 above them
+                // (G_TouchTriggers, bg_public's playerMins/Maxs); this game
+                // tests the feet alone, so the volume is the trigger grown by
+                // the player's box.
+                const Vector3 cornerA = ToWorld(
+                    Vector3(q3Min[0] - 15.0F, q3Min[1] - 15.0F, q3Min[2] - 56.0F), unit);
+                const Vector3 cornerB = ToWorld(
+                    Vector3(q3Max[0] + 15.0F, q3Max[1] + 15.0F, q3Max[2]), unit);
+                const Vector3 boxMin = Subtract(ComponentMin(cornerA, cornerB), position);
+                const Vector3 boxMax = Subtract(ComponentMax(cornerA, cornerB), position);
+
+                auto pad = std::make_shared<MapJumpPad>();
+                pad->Position(std::make_shared<std::vector<float>>(
+                    std::initializer_list<float>{position.X, position.Y, position.Z}));
+                pad->Box(std::make_shared<std::vector<float>>(
+                    std::initializer_list<float>{
+                        boxMin.X, boxMin.Y, boxMin.Z, boxMax.X, boxMax.Y, boxMax.Z}));
+                // The level draws its own pad and teleporter, so the
+                // cartridge's stay off: JumpPadEntity::HiddenModelId.
+                pad->ModelId(0xFFFFFFFFU);
+                // Quake sets the velocity every frame the player touches it.
+                pad->CooldownTime(0);
+                const Vector3 destination = q3Targets.at(*target);
+                MapDefinition::JumpPadList* jumpPads = def->JumpPads();
+                if (jumpPads == nullptr)
                 {
                     throw System::NullReferenceException();
                 }
-                const std::vector<float>& q3Min = RequireReference(volume->Mins());
-                const std::vector<float>& q3Max = RequireReference(volume->Maxs());
-                float floorY = lower.Y;
-                if (const std::optional<float> floor = Q3Floor(bsp,
-                        (q3Min[0] + q3Max[0]) / 2.0F, (q3Min[1] + q3Max[1]) / 2.0F, q3Max[2]);
-                    floor && *floor >= q3Min[2] - 1.0F)
+
+                if (!push)
                 {
-                    floorY = *floor / import->UnitsPerUnit();
+                    // TeleportPlayer: at the destination, 1 above it, facing
+                    // its angle, moving at 400 along it.
+                    constexpr float DegreesToRadians = 0.017453292519943295769F;
+                    pad->Q3Kind(2);
+                    pad->Q3Value((90.0F + targetAngles[*target]) * DegreesToRadians);
+                    const Vector3 feet = ToWorld(
+                        Vector3(destination.X, destination.Y, destination.Z + 1.0F - 24.0F), unit);
+                    pad->Target(std::make_shared<std::vector<float>>(
+                        std::initializer_list<float>{feet.X, feet.Y, feet.Z}));
+                    pad->Speed(400.0F / unit / 30.0F);
+                    jumpPads->push_back(std::move(pad));
+                    teleporters = UncheckedAdd(teleporters, 1);
+                    continue;
                 }
-                auto teleporter = std::make_shared<MapTeleporter>();
-                teleporter->Position(std::make_shared<std::vector<float>>(
+
+                // AimAtTarget: the target is the top of the arc, often over
+                // the void, and the velocity is the one that reaches it from
+                // the trigger's centre under the level's gravity. It is used
+                // as it is -- the same speed and the same gravity, in this
+                // game's units -- so the flight is Quake's in its path and in
+                // its time.
+                const float height = destination.Z - q3Centre.Z;
+                if (height <= 0.0F)
+                {
+                    // Quake frees a pad it cannot aim.
+                    continue;
+                }
+                const float time = std::sqrt(height / (0.5F * q3Gravity));
+                const Vector3 velocity(
+                    (destination.X - q3Centre.X) / time,
+                    (destination.Y - q3Centre.Y) / time,
+                    time * q3Gravity);
+                const Vector3 world = ToWorld(velocity, unit * 30.0F);
+                const float length = std::sqrt(LengthSquared(world));
+                pad->Vector(std::make_shared<std::vector<float>>(
                     std::initializer_list<float>{
-                        (lower.X + upper.X) / 2.0F,
-                        floorY,
-                        (lower.Z + upper.Z) / 2.0F}));
-                teleporter->Target(std::make_shared<std::vector<float>>(
-                    std::initializer_list<float>{
-                        destination.X,
-                        destination.Y - 24.0F / import->UnitsPerUnit(),
-                        destination.Z}));
-                teleporter->Yaw(90.0F + targetAngles[*target]);
-                list->push_back(std::move(teleporter));
-                teleporters = UncheckedAdd(teleporters, 1);
+                        world.X / length, world.Y / length, world.Z / length}));
+                pad->Speed(length);
+                pad->Q3Kind(1);
+                pad->Q3Value(q3Gravity / unit / 900.0F);
+
+                // Where the feet come down, from standing on the floor under
+                // the trigger, for the bots' routes; and how long that takes,
+                // which is how long the pad holds the player.
+                Vector3 landing = ToWorld(destination, unit);
+                float flight = 2.0F;
+                for (std::int32_t step = 1; step < 60 * 12; ++step)
+                {
+                    const float t = static_cast<float>(step) / 60.0F;
+                    if (velocity.Z - q3Gravity * t > 0.0F)
+                    {
+                        continue;
+                    }
+                    const Vector3 at(
+                        q3Centre.X + velocity.X * t,
+                        q3Centre.Y + velocity.Y * t,
+                        floorZ + velocity.Z * t - 0.5F * q3Gravity * t * t);
+                    const std::optional<float> floor = Q3Floor(bsp, at.X, at.Y, at.Z + 32.0F);
+                    if (floor && at.Z <= *floor)
+                    {
+                        landing = ToWorld(Vector3(at.X, at.Y, *floor), unit);
+                        flight = t;
+                        break;
+                    }
+                }
+                pad->ControlLockTime(static_cast<std::uint16_t>(std::ceil(flight * 30.0F)));
+                pad->Target(std::make_shared<std::vector<float>>(
+                    std::initializer_list<float>{landing.X, landing.Y, landing.Z}));
+                jumpPads->push_back(std::move(pad));
+                pads = UncheckedAdd(pads, 1);
             }
         }
 
@@ -2083,6 +2045,80 @@ namespace MphRead::Mods::MapGen
                 item->Type(::MphRead::ToString(pickup.Type));
                 mapItems->push_back(std::move(item));
                 items = UncheckedAdd(items, 1);
+            }
+        }
+
+        // A level that holds no weapon of its own -- a race map -- is given
+        // this game's six, one each, spread as far from the starts and from
+        // one another as the level's own places allow: where its pickups
+        // stand, where its pads land and its teleporters lead.
+        const auto isWeapon = [](const std::shared_ptr<MapItem>& item)
+        {
+            const std::string& type = RequireReference(item).Type();
+            return type == ::MphRead::ToString(ItemType::VoltDriver)
+                || type == ::MphRead::ToString(ItemType::Battlehammer)
+                || type == ::MphRead::ToString(ItemType::Imperialist)
+                || type == ::MphRead::ToString(ItemType::Judicator)
+                || type == ::MphRead::ToString(ItemType::Magmaul)
+                || type == ::MphRead::ToString(ItemType::ShockCoil);
+        };
+        if (import->KeepItems() && std::none_of(mapItems->begin(), mapItems->end(), isWeapon))
+        {
+            std::vector<Vector3> places;
+            for (const Q3Pickup& pickup : pickups)
+            {
+                places.push_back(pickup.Position);
+            }
+            for (const std::shared_ptr<MapJumpPad>& pad : RequireReference(def->JumpPads()))
+            {
+                if (const std::vector<float>* target = RequireReference(pad).Target())
+                {
+                    places.emplace_back((*target)[0], (*target)[1], (*target)[2]);
+                }
+            }
+            std::vector<Vector3> taken;
+            for (const std::shared_ptr<MapSpawn>& spawn : RequireReference(def->Spawns()))
+            {
+                const std::vector<float>& at = RequireReference(RequireReference(spawn).Position());
+                taken.emplace_back(at[0], at[1], at[2]);
+            }
+            constexpr ItemType Arsenal[] = {
+                ItemType::Imperialist, ItemType::Magmaul, ItemType::Battlehammer,
+                ItemType::ShockCoil, ItemType::Judicator, ItemType::VoltDriver};
+            std::int32_t given = 0;
+            for (const ItemType weapon : Arsenal)
+            {
+                float bestScore = 0.0F;
+                std::optional<std::size_t> best;
+                for (std::size_t i = 0; i < places.size(); ++i)
+                {
+                    float score = std::numeric_limits<float>::max();
+                    for (const Vector3& other : taken)
+                    {
+                        score = std::min(score, LengthSquared(Subtract(places[i], other)));
+                    }
+                    if (score > bestScore)
+                    {
+                        bestScore = score;
+                        best = i;
+                    }
+                }
+                // Not on top of a start or of another weapon.
+                if (!best.has_value() || bestScore < 4.0F)
+                {
+                    break;
+                }
+                auto item = std::make_shared<MapItem>();
+                item->Position(std::make_shared<std::vector<float>>(
+                    std::initializer_list<float>{places[*best].X, places[*best].Y, places[*best].Z}));
+                item->Type(::MphRead::ToString(weapon));
+                mapItems->push_back(std::move(item));
+                taken.push_back(places[*best]);
+                given = UncheckedAdd(given, 1);
+            }
+            if (verbose && given > 0)
+            {
+                WriteLine("  no weapons in the level: gave it " + Runtime::ToString(given));
             }
         }
 
@@ -2127,6 +2163,44 @@ namespace MphRead::Mods::MapGen
         {
             throw System::NullReferenceException();
         }
+
+        // An ammo box is worth as many shots of the weapon this game puts in
+        // place of Quake's as it held of Quake's own, priced at that weapon's
+        // UA cost (the multiplayer table, -mechanics): 100 and more is the
+        // big UA pickup, less the small one. A box for a weapon the level
+        // does not hold -- and the machine gun's, whose Power Beam needs
+        // none -- is missiles instead, at 10 a shot, the other weapon every
+        // hunter carries.
+        struct AmmoBox
+        {
+            const char* Classname;
+            const char* Weapon;
+            std::int32_t Shots;
+            std::int32_t Cost;
+        };
+        static constexpr AmmoBox AmmoBoxes[] = {
+            {"ammo_slugs", "weapon_railgun", 10, 20},
+            {"ammo_rockets", "weapon_rocketlauncher", 5, 10},
+            {"ammo_cells", "weapon_plasmagun", 30, 4},
+            {"ammo_lightning", "weapon_lightning", 60, 10},
+            {"ammo_grenades", "weapon_grenadelauncher", 5, 5},
+            {"ammo_shells", "weapon_shotgun", 10, 5},
+            {"ammo_nails", "weapon_nailgun", 20, 5},
+            {"ammo_belt", "weapon_chaingun", 100, 4},
+            {"ammo_mines", "weapon_prox_launcher", 10, 5},
+            {"ammo_bullets", nullptr, 50, 0},
+        };
+
+        std::vector<std::string> placed;
+        for (const std::shared_ptr<Q3Entity>& entityValue : bsp->Entities())
+        {
+            const std::string* classname = EntityValue(entityValue.get(), "classname");
+            if (classname != nullptr && MapItemType(*classname) != ItemType::None)
+            {
+                placed.push_back(Runtime::ToLowerInvariant(*classname));
+            }
+        }
+
         std::vector<Q3Pickup> pickups;
         for (const std::shared_ptr<Q3Entity>& entityValue : bsp->Entities())
         {
@@ -2137,18 +2211,69 @@ namespace MphRead::Mods::MapGen
             {
                 continue;
             }
-            const ItemType type = MapItemType(*classname);
+            // Only what a free-for-all places: "notfree" keeps an item to the
+            // team games.
+            if (const std::string* notFree = EntityValue(entity, "notfree");
+                notFree != nullptr && *notFree != "0")
+            {
+                continue;
+            }
+
+            ItemType type = MapItemType(*classname);
+            for (const AmmoBox& box : AmmoBoxes)
+            {
+                if (!Q3StringEqual{}(*classname, box.Classname))
+                {
+                    continue;
+                }
+                const bool held = box.Weapon != nullptr
+                    && std::find(placed.begin(), placed.end(), box.Weapon) != placed.end();
+                const std::int32_t amount = box.Shots * (held ? box.Cost : 10);
+                type = held
+                    ? (amount >= 100 ? ItemType::UABig : ItemType::UASmall)
+                    : (amount >= 100 ? ItemType::MissileBig : ItemType::MissileSmall);
+                break;
+            }
             if (type == ItemType::None)
             {
                 continue;
             }
+
+            // Quake drops an item to the floor under it unless spawnflag 1
+            // hangs it where it was placed (FinishSpawningItem).
+            std::shared_ptr<std::vector<float>> at = ParseVector(*origin);
+            std::int32_t flags = 0;
+            if (const std::string* spawnflags = EntityValue(entity, "spawnflags"))
+            {
+                (void)Int32TryParseCurrentCulture(*spawnflags, flags);
+            }
+            if ((flags & 1) == 0)
+            {
+                if (const std::optional<float> floor = Q3Floor(bsp,
+                        ManagedAt(at.get(), 0), ManagedAt(at.get(), 1), ManagedAt(at.get(), 2));
+                    floor.has_value())
+                {
+                    ManagedAt(at.get(), 2) = *floor;
+                }
+            }
+
             const std::string* targetName = EntityValue(entity, "targetname");
-            pickups.push_back(Q3Pickup{*classname, type, ToWorld(ParseVector(*origin).get(), unitsPerUnit),
+            pickups.push_back(Q3Pickup{*classname, type, ToWorld(at.get(), unitsPerUnit),
                 targetName != nullptr ? std::optional<std::string>(*targetName) : std::nullopt});
         }
         return pickups;
     }
 
+    // What stands in for Quake's weapons, health and armour. Weapons go by
+    // what they do: the rail by the sniper's Imperialist, rockets by the
+    // Magmaul's explosive shots, the plasma gun's stream of splash by the
+    // Battlehammer, the lightning gun by the Shock Coil, grenades that bounce
+    // by the Judicator's, the shotgun by the Volt Driver's charged burst.
+    // Nothing for the BFG -- the Omega Cannon is out of custom maps -- nor
+    // the machine gun and gauntlet every hunter's Power Beam already is.
+    // There is no armour here, health being the shield, so armour is health
+    // of the same size. Powerups and holdables are nothing: custom maps
+    // carry none. Ammo is Pickups' affair.
     ItemType Q3Import::MapItemType(
         const std::string& classname) noexcept
     {
@@ -2159,27 +2284,20 @@ namespace MphRead::Mods::MapGen
 
         if (equal("weapon_railgun")) return ItemType::Imperialist;
         if (equal("weapon_rocketlauncher")) return ItemType::Magmaul;
+        if (equal("weapon_plasmagun")) return ItemType::Battlehammer;
         if (equal("weapon_lightning")) return ItemType::ShockCoil;
-        if (equal("weapon_plasmagun")) return ItemType::VoltDriver;
-        if (equal("weapon_shotgun")) return ItemType::Battlehammer;
         if (equal("weapon_grenadelauncher")) return ItemType::Judicator;
-        if (equal("weapon_bfg")) return ItemType::OmegaCannon;
-        // item_quad and item_invis are left out like every other powerup:
-        // custom maps carry none.
-        if (equal("item_health")) return ItemType::HealthMedium;
+        if (equal("weapon_shotgun")) return ItemType::VoltDriver;
+        if (equal("weapon_nailgun")) return ItemType::VoltDriver;
+        if (equal("weapon_chaingun")) return ItemType::Battlehammer;
+        if (equal("weapon_prox_launcher")) return ItemType::Judicator;
         if (equal("item_health_small")) return ItemType::HealthSmall;
+        if (equal("item_health")) return ItemType::HealthMedium;
         if (equal("item_health_large")) return ItemType::HealthBig;
         if (equal("item_health_mega")) return ItemType::HealthBig;
-        if (equal("item_armor_shard")) return ItemType::UASmall;
-        if (equal("item_armor_combat")) return ItemType::UABig;
-        if (equal("item_armor_body")) return ItemType::UABig;
-        if (equal("ammo_rockets")) return ItemType::MissileBig;
-        if (equal("ammo_slugs")) return ItemType::UABig;
-        if (equal("ammo_cells")) return ItemType::UASmall;
-        if (equal("ammo_shells")) return ItemType::UASmall;
-        if (equal("ammo_bullets")) return ItemType::UASmall;
-        if (equal("ammo_grenades")) return ItemType::MissileSmall;
-        if (equal("ammo_lightning")) return ItemType::UASmall;
+        if (equal("item_armor_shard")) return ItemType::HealthSmall;
+        if (equal("item_armor_combat")) return ItemType::HealthMedium;
+        if (equal("item_armor_body")) return ItemType::HealthBig;
         return ItemType::None;
     }
 

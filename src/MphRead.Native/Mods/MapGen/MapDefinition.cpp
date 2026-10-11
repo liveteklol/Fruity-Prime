@@ -1680,6 +1680,8 @@ namespace MphRead::Mods::MapGen
     void MapDefinition::BundlePath(std::optional<std::string> value) noexcept { _bundlePath = std::move(value); }
     const std::optional<std::string>& MapDefinition::SourcePath() const noexcept { return _sourcePath; }
     void MapDefinition::SourcePath(std::optional<std::string> value) noexcept { _sourcePath = std::move(value); }
+    bool MapDefinition::Translated() const noexcept { return _translated; }
+    void MapDefinition::Translated(bool value) noexcept { _translated = value; }
 
     std::shared_ptr<MapDefinition> MapDefinition::Load(const std::string& path)
     {
@@ -2068,6 +2070,12 @@ namespace MphRead::Mods::MapGen
     void MapJumpPad::CooldownTime(std::uint16_t value) noexcept { _cooldownTime = value; }
     std::uint16_t MapJumpPad::ControlLockTime() const noexcept { return _controlLockTime; }
     void MapJumpPad::ControlLockTime(std::uint16_t value) noexcept { _controlLockTime = value; }
+    const std::vector<float>* MapJumpPad::Box() const noexcept { return _box.get(); }
+    void MapJumpPad::Box(std::shared_ptr<std::vector<float>> value) noexcept { _box = std::move(value); }
+    std::uint8_t MapJumpPad::Q3Kind() const noexcept { return _q3Kind; }
+    void MapJumpPad::Q3Kind(std::uint8_t value) noexcept { _q3Kind = value; }
+    float MapJumpPad::Q3Value() const noexcept { return _q3Value; }
+    void MapJumpPad::Q3Value(float value) noexcept { _q3Value = value; }
 
     MapItem::MapItem()
         : _position(std::make_shared<std::vector<float>>(3)),

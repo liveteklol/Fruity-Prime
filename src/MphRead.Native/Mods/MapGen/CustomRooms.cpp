@@ -2,6 +2,9 @@
 #include "../Platform/AppPaths.hpp"
 
 #include "MapBundle.hpp"
+#include <fstream>
+#include "Q3Convert.hpp"
+#include "Q3Bsp.hpp"
 #include "MapDefinition.hpp"
 #include "MapPacker.hpp"
 #include "../../Formats/Types.hpp"
@@ -340,7 +343,138 @@ namespace MphRead::Mods::MapGen
                 ::MphRead::NativeRuntime::ConsoleWriteLine(message);
             }
         }
+        AddTranslated(*results);
         return results;
+    }
+
+    // Every level in every .pk3 or .zip in the map folder is a room, read
+    // from the archive as it is (Q3Convert::Translate) -- except one a recipe
+    // already imports, whose recipe says how it is to be played, and a name
+    // already taken.
+    void CustomRooms::AddTranslated(DefinitionList& results)
+    {
+        std::vector<std::string> archives;
+        for (const std::filesystem::directory_entry& entry :
+            std::filesystem::recursive_directory_iterator(
+                PathFromUtf8(MapDirectory()),
+                std::filesystem::directory_options::follow_directory_symlink
+                    | std::filesystem::directory_options::skip_permission_denied))
+        {
+            if (!entry.is_directory()
+                && (ExtensionMatches(entry.path(), ".pk3")
+                    || ExtensionMatches(entry.path(), ".PK3")
+                    || ExtensionMatches(entry.path(), ".zip")))
+            {
+                archives.push_back(PathToUtf8(entry.path()));
+            }
+        }
+        std::stable_sort(
+            archives.begin(), archives.end(),
+            [](const std::string& left, const std::string& right)
+            {
+                return ::MphRead::NativeRuntime::StringCompareOrdinalIgnoreCase(left, right) < 0;
+            });
+
+        std::vector<std::pair<std::string, std::string>> imported;
+        for (const std::shared_ptr<MapDefinition>& definition : results)
+        {
+            if (const MapImport* import = definition->Import())
+            {
+                if (const std::optional<std::string> source = import->Resolve())
+                {
+                    imported.emplace_back(
+                        PathGetFileName(*source),
+                        ::MphRead::NativeRuntime::ToLowerInvariant(import->MapName().value_or(std::string())));
+                }
+            }
+        }
+
+        for (const std::string& archive : archives)
+        {
+            std::vector<std::string> maps;
+            try
+            {
+                maps = Q3Bsp::ListMaps(archive);
+            }
+            catch (...)
+            {
+                ::MphRead::NativeRuntime::ConsoleWriteLine("Ignoring " + PathGetFileName(archive) + ": "
+                    + ::MphRead::NativeRuntime::ExceptionMessage(std::current_exception()));
+                continue;
+            }
+            for (const std::string& map : maps)
+            {
+                const std::string lower = ::MphRead::NativeRuntime::ToLowerInvariant(map);
+                const bool byRecipe = std::any_of(imported.begin(), imported.end(),
+                    [&](const auto& pair)
+                    {
+                        return ::MphRead::NativeRuntime::StringCompareOrdinalIgnoreCase(
+                                   pair.first, PathGetFileName(archive)) == 0
+                            && (pair.second.empty() || pair.second == lower);
+                    });
+                const bool taken = std::any_of(results.begin(), results.end(),
+                    [&](const std::shared_ptr<MapDefinition>& definition)
+                    {
+                        return ::MphRead::NativeRuntime::StringCompareOrdinalIgnoreCase(
+                                   definition->Name(), map) == 0;
+                    });
+                if (byRecipe || taken)
+                {
+                    continue;
+                }
+                try
+                {
+                    results.push_back(Q3Convert::Translate(archive, map));
+                }
+                catch (...)
+                {
+                    ::MphRead::NativeRuntime::ConsoleWriteLine("Ignoring map " + map + " in "
+                        + PathGetFileName(archive) + ": "
+                        + ::MphRead::NativeRuntime::ExceptionMessage(std::current_exception()));
+                }
+            }
+        }
+    }
+
+    std::string CustomRooms::TranslatorStamp(MapDefinition* def)
+    {
+        const std::string& source = ::MphRead::NativeRuntime::RequireReference(def).SourcePath().value();
+        const auto time = GetLastWriteTimeUtc(source).time_since_epoch().count();
+        return "translator " + ::MphRead::NativeRuntime::ToString(Q3Convert::TranslatorVersion)
+            + " " + ::MphRead::NativeRuntime::ToString(static_cast<std::int64_t>(
+                std::filesystem::file_size(PathFromUtf8(source))))
+            + " " + ::MphRead::NativeRuntime::ToString(static_cast<std::int64_t>(time));
+    }
+
+    std::string CustomRooms::TranslatorStampPath(MapDefinition* def)
+    {
+        return PathCombine(ArchiveDirectory(def), "translated.txt");
+    }
+
+    void CustomRooms::Build(MapDefinition* def, bool verbose)
+    {
+        if (def == nullptr)
+        {
+            throw System::NullReferenceException();
+        }
+        const std::string archiveDirectory = ArchiveDirectory(def);
+        if (def->Translated())
+        {
+            // The textures baked last time are part of what is built again.
+            const std::string textures = PathCombine(archiveDirectory,
+                ::MphRead::NativeRuntime::ToLowerInvariant(def->Name()) + ".tex");
+            ::MphRead::NativeRuntime::RequireReference(def->Import()).Textures(textures);
+            std::error_code ignored;
+            std::filesystem::remove(PathFromUtf8(TranslatorStampPath(def)), ignored);
+            std::filesystem::remove(PathFromUtf8(textures), ignored);
+            std::filesystem::create_directories(PathFromUtf8(archiveDirectory), ignored);
+        }
+        MapPacker::Generate(def, archiveDirectory, EntityDirectory(), NodeDirectory(), verbose);
+        if (def->Translated())
+        {
+            std::ofstream stamp(PathFromUtf8(TranslatorStampPath(def)), std::ios::trunc);
+            stamp << TranslatorStamp(def);
+        }
     }
 
     const std::vector<std::string>& CustomRooms::AppendIds(
@@ -508,19 +642,7 @@ namespace MphRead::Mods::MapGen
         {
             if (force || NeedsGenerating(def.get()))
             {
-                const std::string archiveDirectory =
-                    ArchiveDirectory(def.get());
-                const std::string entityDirectory =
-                    EntityDirectory();
-                const std::string nodeDirectory =
-                    NodeDirectory();
-
-                MapPacker::Generate(
-                    def.get(),
-                    archiveDirectory,
-                    entityDirectory,
-                    nodeDirectory,
-                    verbose);
+                Build(def.get(), verbose);
                 count = UncheckedAdd(count, 1);
             }
         }
@@ -551,19 +673,7 @@ namespace MphRead::Mods::MapGen
                 ::MphRead::NativeRuntime::ConsoleWriteLine(
                     "[mapgen] building " + def->Name());
 
-                const std::string archiveDirectory =
-                    ArchiveDirectory(def.get());
-                const std::string entityDirectory =
-                    EntityDirectory();
-                const std::string nodeDirectory =
-                    NodeDirectory();
-
-                MapPacker::Generate(
-                    def.get(),
-                    archiveDirectory,
-                    entityDirectory,
-                    nodeDirectory,
-                    false);
+                Build(def.get(), false);
             }
             catch (...)
             {
@@ -647,6 +757,14 @@ namespace MphRead::Mods::MapGen
         if (!source.has_value() || !FileExists(*source))
         {
             return false;
+        }
+
+        if (def->Translated())
+        {
+            std::ifstream stampFile(PathFromUtf8(TranslatorStampPath(def)));
+            std::string stamp;
+            std::getline(stampFile, stamp);
+            return stamp != TranslatorStamp(def);
         }
 
         const std::filesystem::file_time_type sourceTime =

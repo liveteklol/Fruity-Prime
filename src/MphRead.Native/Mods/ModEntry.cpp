@@ -30,6 +30,7 @@
 #include "Input/PointerCheck.hpp"
 #include "InputSettings.hpp"
 #include "MapGen/AltFormProbe.hpp"
+#include "MapGen/PadProbe.hpp"
 #include "MapGen/MapCheck.hpp"
 #include "Multiplayer/ResourceAudit.hpp"
 #if defined(MPHREAD_QT) && !defined(__ANDROID__)
@@ -1924,10 +1925,7 @@ namespace MphRead::Mods
                 }
                 try
                 {
-                    MapGen::MapPacker::Generate(definition.get(),
-                        MapGen::CustomRooms::ArchiveDirectory(definition.get()),
-                        MapGen::CustomRooms::EntityDirectory(),
-                        MapGen::CustomRooms::NodeDirectory(), true /* verbose */);
+                    MapGen::CustomRooms::Build(definition.get(), true /* verbose */);
                     count = ::MphRead::NativeRuntime::UncheckedAdd(count, 1);
                 }
                 catch (...)
@@ -1941,7 +1939,7 @@ namespace MphRead::Mods
             }
             if (count == 0 && failed == 0)
             {
-                ::MphRead::NativeRuntime::ConsoleWriteLine("No maps to generate. Put a map JSON in "
+                ::MphRead::NativeRuntime::ConsoleWriteLine("No maps to generate. Put a Quake 3 .pk3 or a map JSON in "
                     + MapGen::CustomRooms::MapDirectory() + ".");
             }
             SetExitCode(failed == 0 ? 0 : 1);
@@ -1962,57 +1960,6 @@ namespace MphRead::Mods
             catch (const std::exception& ex)
             {
                 WriteLine("Could not read " + *q3Maps + ": " + ex.what());
-                SetExitCode(1);
-            }
-            return true;
-        }
-
-        const std::optional<std::string> q3Convert = ValueAfter(args, "q3convert");
-        if (q3Convert.has_value())
-        {
-            std::optional<float> scale;
-            float parsedScale = 0;
-            if (TryParseFloatInvariant(ValueAfter(args, "scale"), parsedScale,
-                false /* NumberStyles.Float has no thousands */) && parsedScale > 0)
-            {
-                scale = parsedScale;
-            }
-            int textureSize = MapGen::MapTextureBake::DefaultSize;
-            const std::optional<std::string> texSizeValue = ValueAfter(args, "texsize");
-            std::int32_t parsedTextureSize = 0;
-            if (texSizeValue.has_value() && Int32TryParseCurrentCulture(*texSizeValue, parsedTextureSize)
-                && parsedTextureSize >= 8 && parsedTextureSize <= 256)
-            {
-                textureSize = parsedTextureSize;
-            }
-            // -texpaks "a.pk3,b.pk3": the game's texture paks the level was
-            // built against, searched after the level's own archive.
-            std::vector<std::string> texturePaks;
-            if (const std::optional<std::string> paks = ValueAfter(args, "texpaks"))
-            {
-                std::size_t start = 0;
-                while (start <= paks->size())
-                {
-                    const std::size_t comma = paks->find(',', start);
-                    const std::size_t end = comma == std::string::npos ? paks->size() : comma;
-                    if (end > start)
-                    {
-                        texturePaks.push_back(paks->substr(start, end - start));
-                    }
-                    start = end + 1;
-                }
-            }
-            try
-            {
-                SetExitCode(MapGen::Q3Convert::Run(*q3Convert,
-                    ValueAfter(args, "map"), ValueAfter(args, "name"),
-                    ValueAfter(args, "out"), ::HasFlag(args, "noclip"), ::HasFlag(args, "noitems"), scale,
-                    textureSize, texturePaks));
-            }
-            catch (...)
-            {
-                WriteLine("Could not convert " + *q3Convert + ": "
-                    + ::MphRead::NativeRuntime::ExceptionMessage(std::current_exception()));
                 SetExitCode(1);
             }
             return true;
@@ -2058,6 +2005,12 @@ namespace MphRead::Mods
                     : std::nullopt);
             SetExitCode(MapGen::AltFormProbe::Run(*altProbe,
                 OpenTK::Mathematics::Vector3(atX, atY, atZ), ParseHunter(args)));
+            return true;
+        }
+
+        if (const std::optional<std::string> padProbe = ValueAfter(args, "padprobe"); padProbe.has_value())
+        {
+            SetExitCode(MapGen::PadProbe::Run(*padProbe, ParseHunter(args), ::HasFlag(args, "alt")));
             return true;
         }
 

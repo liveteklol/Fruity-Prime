@@ -25,7 +25,7 @@ public:                                                                         
     [[nodiscard]] bool Process() override;                                                     \
     [[nodiscard]] bool ProcessPlayer();                                                        \
     void ActivateJumpPad(::MphRead::Entities::JumpPadEntity* jumpPad,                          \
-        ::OpenTK::Mathematics::Vector3 vector, std::uint16_t lockTime);                        \
+        ::OpenTK::Mathematics::Vector3 vector, std::uint16_t lockTime);                            void Q3Teleport(::OpenTK::Mathematics::Vector3 position,                                           ::OpenTK::Mathematics::Vector3 facing,                                                         ::MphRead::Formats::Culling::NodeRef nodeRef, float speed);                            \
     void GainHealth(std::uint32_t health);                                                     \
     void GainHealth(std::int32_t health);                                                      \
     void ExitAltForm();                                                                        \

@@ -342,6 +342,9 @@ namespace MphRead::Editor
         std::uint16_t ControlLockTime = 0;
         std::uint16_t CooldownTime = 0;
         bool Active = false;
+        // Zero on the cartridge; a custom map's Quake 3 trigger kind
+        // (JumpPadEntity::Q3Trigger), with its float in Unused28.
+        std::uint8_t Padding81 = 0;
         std::uint32_t ModelId = 0;
         std::uint32_t BeamType = 0;
         Entities::TriggerFlags TriggerFlags{};

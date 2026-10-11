@@ -122,6 +122,10 @@ namespace MphRead::Mods::MapGen
         void BundlePath(std::optional<std::string> value) noexcept;
         [[nodiscard]] const std::optional<std::string>& SourcePath() const noexcept;
         void SourcePath(std::optional<std::string> value) noexcept;
+        // Read from a Quake 3 level by Q3Convert::Translate rather than a
+        // recipe; SourcePath is the level's archive.
+        [[nodiscard]] bool Translated() const noexcept;
+        void Translated(bool value) noexcept;
 
         [[nodiscard]] static std::shared_ptr<MapDefinition> Load(const std::string& path);
         void Save(const std::string& path) const;
@@ -158,6 +162,7 @@ namespace MphRead::Mods::MapGen
         std::optional<std::string> _baseDirectory{};
         std::optional<std::string> _bundlePath{};
         std::optional<std::string> _sourcePath{};
+        bool _translated = false;
     };
 
     // Collision read from a Wavefront OBJ rather than derived from the
@@ -426,6 +431,18 @@ namespace MphRead::Mods::MapGen
         [[nodiscard]] std::uint16_t ControlLockTime() const noexcept;
         void ControlLockTime(std::uint16_t value) noexcept;
 
+        // Set by the Quake 3 importer only, never read from a recipe.
+        // The trigger volume, minX minY minZ maxX maxY maxZ from Position,
+        // in place of Size's box standing on it.
+        [[nodiscard]] const std::vector<float>* Box() const noexcept;
+        void Box(std::shared_ptr<std::vector<float>> value) noexcept;
+        // JumpPadEntity::Q3Trigger and its float: 0 for a cartridge pad.
+        // A teleporter (2) sends you to Target, leaving at Speed.
+        [[nodiscard]] std::uint8_t Q3Kind() const noexcept;
+        void Q3Kind(std::uint8_t value) noexcept;
+        [[nodiscard]] float Q3Value() const noexcept;
+        void Q3Value(float value) noexcept;
+
     private:
         friend class MapDefinitionJson;
         std::shared_ptr<std::vector<float>> _position;
@@ -436,6 +453,9 @@ namespace MphRead::Mods::MapGen
         std::uint32_t _modelId = 0;
         std::uint16_t _cooldownTime = 20;
         std::uint16_t _controlLockTime = 30;
+        std::shared_ptr<std::vector<float>> _box{};
+        std::uint8_t _q3Kind = 0;
+        float _q3Value = 0.0F;
     };
 
     class MapItem

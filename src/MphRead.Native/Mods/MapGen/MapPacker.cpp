@@ -603,6 +603,106 @@ namespace
         return result;
     }
 
+    // A texture coordinate is a 16-bit count of sixteenths of a texel
+    // (PackTexcoord), so a vertex sits no further than 2048 texels from its
+    // texture's origin -- and a Quake level's floor tiles a 512-texel image
+    // tens of times over. A face whose coordinates reach further is fanned
+    // into triangles, each cut in two across its longest side in texture
+    // space until it spans less than that, and each moved by whole repeats
+    // of its texture to start at the origin, which draws the same.
+    constexpr float TexcoordReach = 2040.0F;
+
+    [[nodiscard]] bool TexcoordsFit(BuiltFace* face)
+    {
+        ManagedArray<Vector2>* texcoords = FaceTexcoords(face);
+        for (std::size_t i = 0; i < texcoords->Length(); ++i)
+        {
+            const Vector2 t = (*texcoords)[i];
+            if (std::fabs(t.X) > TexcoordReach || std::fabs(t.Y) > TexcoordReach)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    void FitTriangle(
+        const std::array<Vector3, 3>& points,
+        const std::array<Vector2, 3>& texcoords,
+        BuiltFace* face,
+        float width,
+        float height,
+        std::int32_t depth,
+        std::vector<std::unique_ptr<FanFaceOwner>>& result)
+    {
+        Vector2 low = texcoords[0];
+        Vector2 high = texcoords[0];
+        for (const Vector2 t : texcoords)
+        {
+            low = Vector2(std::min(low.X, t.X), std::min(low.Y, t.Y));
+            high = Vector2(std::max(high.X, t.X), std::max(high.Y, t.Y));
+        }
+        if ((high.X - low.X <= TexcoordReach && high.Y - low.Y <= TexcoordReach) || depth >= 16)
+        {
+            const Vector2 offset(
+                std::floor(low.X / width) * width,
+                std::floor(low.Y / height) * height);
+            result.push_back(std::make_unique<FanFaceOwner>(
+                points[0], points[1], points[2],
+                Vector2(texcoords[0].X - offset.X, texcoords[0].Y - offset.Y),
+                Vector2(texcoords[1].X - offset.X, texcoords[1].Y - offset.Y),
+                Vector2(texcoords[2].X - offset.X, texcoords[2].Y - offset.Y),
+                face->Normal(), face->Material(), face->Shade()));
+            return;
+        }
+
+        // The longest side, as the first two corners in the same winding.
+        std::size_t first = 0;
+        float longest = -1.0F;
+        for (std::size_t i = 0; i < 3; ++i)
+        {
+            const Vector2 next = texcoords[(i + 1) % 3];
+            const float reach = std::max(
+                std::fabs(next.X - texcoords[i].X), std::fabs(next.Y - texcoords[i].Y));
+            if (reach > longest)
+            {
+                longest = reach;
+                first = i;
+            }
+        }
+        const std::size_t a = first;
+        const std::size_t b = (first + 1) % 3;
+        const std::size_t c = (first + 2) % 3;
+        const Vector3 middle(
+            (points[a].X + points[b].X) * 0.5F,
+            (points[a].Y + points[b].Y) * 0.5F,
+            (points[a].Z + points[b].Z) * 0.5F);
+        const Vector2 middleUv(
+            (texcoords[a].X + texcoords[b].X) * 0.5F,
+            (texcoords[a].Y + texcoords[b].Y) * 0.5F);
+        FitTriangle({points[a], middle, points[c]}, {texcoords[a], middleUv, texcoords[c]},
+            face, width, height, depth + 1, result);
+        FitTriangle({middle, points[b], points[c]}, {middleUv, texcoords[b], texcoords[c]},
+            face, width, height, depth + 1, result);
+    }
+
+    void FitTexcoords(
+        BuiltFace* face,
+        float width,
+        float height,
+        std::vector<std::unique_ptr<FanFaceOwner>>& result)
+    {
+        ManagedArray<Vector3>* points = FacePoints(face);
+        ManagedArray<Vector2>* texcoords = FaceTexcoords(face);
+        for (std::size_t i = 1; i + 1 < points->Length(); ++i)
+        {
+            FitTriangle(
+                {(*points)[0], (*points)[i], (*points)[i + 1]},
+                {(*texcoords)[0], (*texcoords)[i], (*texcoords)[i + 1]},
+                face, width, height, 0, result);
+        }
+    }
+
     [[nodiscard]] std::uint32_t PackColor(float shade) noexcept
     {
         const std::int32_t rounded = RoundedInt32(31.0F * shade);
@@ -738,47 +838,62 @@ namespace
 
             auto instructions = std::make_shared<std::vector<std::shared_ptr<RenderInstruction>>>();
 
-            std::vector<BuiltFace*> triangles;
-            for (BuiltFace* face : group)
+            // The material's texture size, for FitTexcoords; a material with
+            // none of its own here is drawn as it comes.
+            float width = 0.0F;
+            float height = 0.0F;
+            if (materials != nullptr && textures != nullptr
+                && static_cast<std::size_t>(materialId) < materials->size())
             {
-                if (FacePoints(face)->Length() == 3)
+                const std::int32_t textureId = RequireReference((*materials)[static_cast<std::size_t>(materialId)]).TextureId;
+                if (textureId >= 0 && static_cast<std::size_t>(textureId) < textures->size())
                 {
-                    triangles.push_back(face);
+                    const Repack::TextureInfo& texture = RequireReference((*textures)[static_cast<std::size_t>(textureId)]);
+                    width = static_cast<float>(texture.Width);
+                    height = static_cast<float>(texture.Height);
                 }
             }
-            vertexCount = UncheckedAdd(
-                vertexCount,
-                EmitPrimitives(*instructions, triangles, 0U, scale));
 
+            std::vector<std::unique_ptr<FanFaceOwner>> fanOwners;
+            std::vector<BuiltFace*> triangles;
             std::vector<BuiltFace*> quads;
             for (BuiltFace* face : group)
             {
-                if (FacePoints(face)->Length() == 4)
+                const std::size_t length = FacePoints(face)->Length();
+                if (width > 0.0F && height > 0.0F && !TexcoordsFit(face))
+                {
+                    std::vector<std::unique_ptr<FanFaceOwner>> current;
+                    FitTexcoords(face, width, height, current);
+                    for (auto& owner : current)
+                    {
+                        triangles.push_back(owner->Face.get());
+                        fanOwners.push_back(std::move(owner));
+                    }
+                }
+                else if (length == 3)
+                {
+                    triangles.push_back(face);
+                }
+                else if (length == 4)
                 {
                     quads.push_back(face);
                 }
-            }
-            vertexCount = UncheckedAdd(
-                vertexCount,
-                EmitPrimitives(*instructions, quads, 1U, scale));
-
-            std::vector<std::unique_ptr<FanFaceOwner>> fanOwners;
-            std::vector<BuiltFace*> fanFaces;
-            for (BuiltFace* face : group)
-            {
-                if (FacePoints(face)->Length() > 4)
+                else if (length > 4)
                 {
                     std::vector<std::unique_ptr<FanFaceOwner>> current = Fan(face);
                     for (auto& owner : current)
                     {
-                        fanFaces.push_back(owner->Face.get());
+                        triangles.push_back(owner->Face.get());
                         fanOwners.push_back(std::move(owner));
                     }
                 }
             }
             vertexCount = UncheckedAdd(
                 vertexCount,
-                EmitPrimitives(*instructions, fanFaces, 0U, scale));
+                EmitPrimitives(*instructions, triangles, 0U, scale));
+            vertexCount = UncheckedAdd(
+                vertexCount,
+                EmitPrimitives(*instructions, quads, 1U, scale));
 
             while (instructions->size() % 4U != 0U)
             {

@@ -967,6 +967,7 @@ namespace MphRead::Entities
         _jumpPadControlLock = 0;
         _jumpPadControlLockMin = 0;
         _timeSinceJumpPad = std::numeric_limits<std::uint16_t>::max();
+        _q3PadGravity = 0.0F;
         if (IsMainPlayer())
         {
             ResetReticle();

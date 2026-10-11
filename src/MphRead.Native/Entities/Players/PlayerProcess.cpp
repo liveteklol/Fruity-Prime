@@ -1471,6 +1471,10 @@ namespace MphRead::Entities
         }
         _speed = vector;
         _jumpPadAccel = vector;
+        _q3PadGravity = jumpPad != nullptr
+            && jumpPad->Q3Kind() == JumpPadEntity::Q3Trigger::Push
+            ? jumpPad->Q3Value()
+            : 0.0F;
         if (jumpPad == nullptr)
         {
             _lastJumpPad.reset();
@@ -1486,7 +1490,7 @@ namespace MphRead::Entities
         _timeSinceJumpPad = 0;
         _flags1 &= ~PlayerFlags1::UsedJump;
         _flags1 |= PlayerFlags1::Standing;
-        if (IsAltForm())
+        if (IsAltForm() && _q3PadGravity == 0.0F)
         {
             const float accelY = _jumpPadAccel.Y;
             const float altGrav = Fixed::ToFloat(_values.AltAirGravity);
@@ -1499,6 +1503,29 @@ namespace MphRead::Entities
                 / accelY + 2.0F;
             _jumpPadControlLock = ManagedUInt16Add(
                 _jumpPadControlLock, FloatToUInt16Unchecked(lockInc * 2.0F));
+        }
+    }
+
+    // Quake's TeleportPlayer: out at the destination facing its way, moving
+    // at speed along it, and for the first sixth of a second not slowed by
+    // the ground (PMF_TIME_KNOCKBACK, 160 ms) -- the pad's own carry, which
+    // ends ten frames after landing.
+    void PlayerEntity::Q3Teleport(Vector3 position, Vector3 facing,
+        MphRead::Formats::Culling::NodeRef nodeRef, float speed)
+    {
+        Teleport(position, facing, nodeRef);
+        const Vector3 velocity(facing.X * speed, 0.0F, facing.Z * speed);
+        _speed = velocity;
+        _jumpPadAccel = velocity;
+        _q3PadGravity = 0.0F;
+        _lastJumpPad.reset();
+        _flags1 |= PlayerFlags1::UsedJumpPad;
+        _jumpPadControlLock = 0;
+        _jumpPadControlLockMin = 0;
+        _timeSinceJumpPad = 0;
+        if (IsBot())
+        {
+            RequireReference(AiData).Field118 = 148 * 2;
         }
     }
 

@@ -1,4 +1,5 @@
 #include "MapTextureBake.hpp"
+#include "MphTextures.hpp"
 
 #include "../../NativeRuntime/Stb/Image.hpp"
 #include "../../NativeRuntime/System/ZipArchive.hpp"
@@ -34,6 +35,7 @@ using ::MphRead::NativeRuntime::FileExists;
 using ::MphRead::NativeRuntime::FileInfoLength;
 using ::MphRead::NativeRuntime::PathFromUtf8;
 using ::MphRead::NativeRuntime::PathGetExtension;
+using ::MphRead::NativeRuntime::RequireReference;
 using ::MphRead::NativeRuntime::UncheckedAdd;
 using ::MphRead::NativeRuntime::UncheckedMultiply;
 
@@ -180,8 +182,23 @@ namespace
         std::string Name;
         std::vector<std::uint16_t> Palette;
         std::vector<std::uint8_t> Pixels;
-        std::int32_t Size = 0;
+        std::int32_t Width = 0;
+        std::int32_t Height = 0;
     };
+
+    // Quake's own rule for an image's size (R_CreateImage with
+    // r_roundImagesDown): each side down to a power of two, here no larger
+    // than NativeMaxSize and no smaller than 8.
+    [[nodiscard]] std::int32_t NativeSide(std::int32_t side) noexcept
+    {
+        std::int32_t result = 8;
+        while (result * 2 <= side
+            && result * 2 <= MphRead::Mods::MapGen::MapTextureBake::NativeMaxSize)
+        {
+            result *= 2;
+        }
+        return result;
+    }
 
     // Quake's own sky box order is rt bk lf ft up dn; this is the order of
     // the axes they face, +X -X +Y -Y +Z -Z in Quake's space (tr_sky.c's
@@ -486,66 +503,6 @@ namespace
         return nullptr;
     }
 
-    [[nodiscard]] bool IsImage(const std::string& lowerName) noexcept
-    {
-        for (std::string_view extension : Extensions)
-        {
-            if (lowerName.size() > extension.size()
-                && lowerName.ends_with(extension))
-            {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    // A shader nothing answers, painted with the image beside it in the same
-    // folder whose name shares the longest start with its own -- the
-    // metaltech12final a level drew with, from the metaltech06final a pak
-    // has. Only for lit, solid-looking surfaces: a shader with no lightmap is
-    // a flare, a sky or a light's glow, and painting one of those opaque is
-    // worse than leaving it out. Never from textures/common, whose images are
-    // the editor's markers for caulk and clip.
-    [[nodiscard]] const FileEntry* Substitute(
-        const FileIndex& files, const std::string& name)
-    {
-        const std::string lower = Lower(name);
-        const std::size_t slash = lower.find_last_of('/');
-        if (slash == std::string::npos || lower.starts_with("textures/common/"))
-        {
-            return nullptr;
-        }
-        const std::string folder = lower.substr(0, slash + 1);
-        const std::string stem = lower.substr(slash + 1);
-        const FileEntry* best = nullptr;
-        std::string bestName;
-        std::size_t bestShared = 0;
-        for (const auto& [key, index] : files.ByName)
-        {
-            if (!key.starts_with(folder)
-                || key.find('/', folder.size()) != std::string::npos
-                || !IsImage(key))
-            {
-                continue;
-            }
-            const std::string candidate = key.substr(folder.size());
-            std::size_t shared = 0;
-            while (shared < candidate.size() && shared < stem.size()
-                && candidate[shared] == stem[shared])
-            {
-                ++shared;
-            }
-            if (best == nullptr || shared > bestShared
-                || (shared == bestShared && key < bestName))
-            {
-                best = std::addressof(files.Entries[index]);
-                bestName = key;
-                bestShared = shared;
-            }
-        }
-        return best;
-    }
-
     [[nodiscard]] std::optional<std::vector<std::uint8_t>> Find(
         const FileIndex& files, const std::string& name)
     {
@@ -595,12 +552,12 @@ namespace
         values[static_cast<std::size_t>(index)] = value;
     }
 
-    [[nodiscard]] std::vector<std::uint8_t> Decode(
-        const std::vector<std::uint8_t>& raw, std::int32_t size)
+    [[nodiscard]] std::vector<std::uint8_t> Resample(
+        const MphRead::Mods::MapGen::MapTextureBakeInterop::DecodedImage& image,
+        std::int32_t outWidth, std::int32_t outHeight)
     {
         using namespace MphRead::Mods::MapGen::MapTextureBakeInterop;
 
-        DecodedImage image = LoadRgb(raw);
         const std::int32_t width = image.Width;
         const std::int32_t height = image.Height;
         if (width <= 0 || height <= 0
@@ -610,23 +567,23 @@ namespace
         }
 
         const std::int32_t resultLength = UncheckedMultiply(
-            UncheckedMultiply(size, size), 3);
+            UncheckedMultiply(outWidth, outHeight), 3);
         std::vector<std::uint8_t> result(ArrayLength(resultLength));
 
-        for (std::int32_t y = 0; y < size; ++y)
+        for (std::int32_t y = 0; y < outHeight; ++y)
         {
             const std::int32_t y0
-                = UncheckedMultiply(y, height) / size;
+                = UncheckedMultiply(y, height) / outHeight;
             const std::int32_t y1 = std::max(
                 UncheckedAdd(y0, 1),
-                UncheckedMultiply(UncheckedAdd(y, 1), height) / size);
-            for (std::int32_t x = 0; x < size; ++x)
+                UncheckedMultiply(UncheckedAdd(y, 1), height) / outHeight);
+            for (std::int32_t x = 0; x < outWidth; ++x)
             {
                 const std::int32_t x0
-                    = UncheckedMultiply(x, width) / size;
+                    = UncheckedMultiply(x, width) / outWidth;
                 const std::int32_t x1 = std::max(
                     UncheckedAdd(x0, 1),
-                    UncheckedMultiply(UncheckedAdd(x, 1), width) / size);
+                    UncheckedMultiply(UncheckedAdd(x, 1), width) / outWidth);
 
                 std::int32_t r = 0;
                 std::int32_t g = 0;
@@ -650,7 +607,7 @@ namespace
                 }
 
                 const std::int32_t target = UncheckedMultiply(
-                    UncheckedAdd(UncheckedMultiply(y, size), x), 3);
+                    UncheckedAdd(UncheckedMultiply(y, outWidth), x), 3);
                 const std::int32_t divisor = std::max<std::int32_t>(1, count);
                 SetByte(result, target,
                     static_cast<std::uint8_t>(r / divisor));
@@ -661,6 +618,13 @@ namespace
             }
         }
         return result;
+    }
+
+    [[nodiscard]] std::vector<std::uint8_t> Decode(
+        const std::vector<std::uint8_t>& raw, std::int32_t outWidth, std::int32_t outHeight)
+    {
+        return Resample(
+            MphRead::Mods::MapGen::MapTextureBakeInterop::LoadRgb(raw), outWidth, outHeight);
     }
 
     struct BoxRange final
@@ -726,9 +690,8 @@ namespace
         std::vector<std::uint8_t>>
         Quantize(
             const std::vector<std::uint8_t>& rgb,
-            std::int32_t size)
+            std::int32_t count)
     {
-        const std::int32_t count = UncheckedMultiply(size, size);
         std::vector<std::int32_t> indices(ArrayLength(count));
         for (std::int32_t i = 0; i < count; ++i)
         {
@@ -912,8 +875,8 @@ namespace
         {
             const std::string& encoded = entry.Name;
             WriteU16(stream, static_cast<std::uint16_t>(entry.Index));
-            WriteU16(stream, static_cast<std::uint16_t>(entry.Size));
-            WriteU16(stream, static_cast<std::uint16_t>(entry.Size));
+            WriteU16(stream, static_cast<std::uint16_t>(entry.Width));
+            WriteU16(stream, static_cast<std::uint16_t>(entry.Height));
             WriteU16(stream, static_cast<std::uint16_t>(entry.Palette.size()));
             WriteU16(stream, static_cast<std::uint16_t>(encoded.size()));
             stream.write(
@@ -1074,35 +1037,61 @@ namespace MphRead::Mods::MapGen
             {
                 raw = resolve(name);
             }
-            if (!raw.has_value()
-                && (flags & (Q3Bsp::SurfaceNoLightmap | Q3Bsp::SurfaceSky)) == 0)
+            DecodedImage image;
+            if (raw.has_value())
             {
-                if (const FileEntry* file = Substitute(files, name))
-                {
-                    raw = read(file);
-                    substituted->push_back(name + " <- " + file->FullName);
-                }
+                image = LoadRgb(*raw);
             }
-            if (!raw.has_value())
+            // An image the level does not carry is painted with the
+            // cartridge's own art of the same kind (MphTextures). Not a
+            // shader with no lightmap that is not the sky -- a flare, a
+            // light's glow, an effect, which painted opaque would be worse
+            // than left out -- nor textures/common's editor markers.
+            if ((image.Width <= 0 || image.Height <= 0)
+                && ((flags & Q3Bsp::SurfaceNoLightmap) != 0 && (flags & Q3Bsp::SurfaceSky) == 0
+                    || Lower(name).starts_with("textures/common/")))
             {
-                missing->push_back(name);
+                missing->push_back(raw.has_value() ? name + " (undecodable)" : name);
                 continue;
             }
+            if (image.Width <= 0 || image.Height <= 0)
+            {
+                const std::int32_t contents
+                    = RequireReference(bsp->Textures().at(static_cast<std::size_t>(index))).Contents();
+                std::optional<MphTextures::Image> standIn = MphTextures::StandIn(name, flags, contents);
+                if (!standIn.has_value())
+                {
+                    missing->push_back(raw.has_value() ? name + " (undecodable)" : name);
+                    continue;
+                }
+                substituted->push_back(name + " <- " + standIn->Source);
+                image.Width = standIn->Width;
+                image.Height = standIn->Height;
+                image.Pixels = std::move(standIn->Pixels);
+            }
 
-            // An image nothing here can decode is missing, not black.
-            const std::vector<std::uint8_t> decoded = Decode(*raw, size);
+            // At the size it was painted at, or the one asked for.
+            std::int32_t width = size;
+            std::int32_t height = size;
+            if (size == NativeSize)
+            {
+                width = NativeSide(image.Width);
+                height = NativeSide(image.Height);
+            }
+            const std::vector<std::uint8_t> decoded = Resample(image, width, height);
             if (decoded.empty())
             {
                 missing->push_back(name + " (undecodable)");
                 continue;
             }
-            auto [palette, pixels] = Quantize(decoded, size);
+            auto [palette, pixels] = Quantize(decoded, UncheckedMultiply(width, height));
             entries.push_back(BakedEntry{
                 index,
                 name,
                 std::move(palette),
                 std::move(pixels),
-                size
+                width,
+                height
             });
         }
 
@@ -1146,17 +1135,18 @@ namespace MphRead::Mods::MapGen
                 {
                     sideSize *= 2;
                 }
-                const std::vector<std::uint8_t> decoded = Decode(*raw, sideSize);
+                const std::vector<std::uint8_t> decoded = Decode(*raw, sideSize, sideSize);
                 if (decoded.empty())
                 {
                     break;
                 }
-                auto [palette, pixels] = Quantize(decoded, sideSize);
+                auto [palette, pixels] = Quantize(decoded, UncheckedMultiply(sideSize, sideSize));
                 sides.push_back(BakedEntry{
                     SkyBoxSourceIndex + static_cast<std::int32_t>(side),
                     name + "#" + std::string(SkyBoxSuffixes[side]),
                     std::move(palette),
                     std::move(pixels),
+                    sideSize,
                     sideSize
                 });
             }

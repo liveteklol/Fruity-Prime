@@ -119,5 +119,6 @@ namespace MphRead::Mods::MapGen
             OpenTK::Mathematics::Vector3 origin,
             float texScale) noexcept;
         [[nodiscard]] static CollisionVolume MakeBox(const std::vector<float>* size);
+        [[nodiscard]] static CollisionVolume MakeBox(const std::vector<float>& box);
     };
 }

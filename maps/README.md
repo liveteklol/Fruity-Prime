@@ -2,8 +2,8 @@
 
 No level lives here, only recipes: the game ships the 27 multiplayer rooms of
 the cartridge and nothing else. What lives here is the *hook* for custom ones —
-drop a `.json` in, or a folder with a `.json` in it, and the game builds it and
-lists it. A map whose source level is not on this machine is left out rather
+drop a Quake 3 `.pk3` in, or a `.json`, or a folder with either in it, and the
+game builds it and lists it. A map whose source level is not on this machine is left out rather
 than listed and broken.
 
 Each `.json` describes one custom room. The binaries a room is actually made
@@ -12,9 +12,10 @@ extracted files, because a room's textures are borrowed from a shipped room
 and end up inside its model file. That is why no `.bin` is ever committed, and
 why the asset guard refuses one.
 
-- `q3dm17.json.example` — rename to `q3dm17.json` and drop your own `pak0.pk3`
-  beside it to convert the original Quake III map. Nothing here downloads it
-  for you: that is id Software's commercial data.
+- **A Quake 3 `.pk3`** dropped here, or in a folder under here, is a room for
+  every level in it, read from the archive as it is: no recipe, nothing
+  written beside it. Your own `pak0.pk3` gives the original Quake III maps;
+  nothing here downloads it for you, that is id Software's commercial data.
 - `dust2/dust2.json` — de_dust2, by way of the DeFRaG level `df_dust2`, which
   ships beside it. A map keeps its level in a folder of its own like this; it
   is looked for beside the map file first.
