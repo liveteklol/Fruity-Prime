@@ -233,12 +233,13 @@ def run_case(name, out_dir, timeout, allow_first_frame_retry=True):
             print("  " + line.strip())
 
     # API 35 emulator graphics initialization is intermittently unable to
-    # present the very first Qt/TextureView frame after a fresh AVD boot even
-    # though QML, nativeCreate and front publication all completed. This is
-    # distinct from an application startup failure: retry only this exact
+    # present the very first Qt/TextureView frame after a fresh app launch even
+    # though QML, nativeCreate and front publication all completed. Both the
+    # normal and lifecycle cases start the app from a force-stopped state, so
+    # either can hit the same emulator flake. Retry only this exact
     # infrastructure signature once, and preserve attempt 1 as evidence.
     retryable_first_frame = (
-        name == "normal"
+        name in ("normal", "lifecycle")
         and allow_first_frame_retry
         and failures == ["missing marker first_qt_frame_presented"]
         and "startup_timeout flags=3 reason=Qt never presented a frame" in log
@@ -250,7 +251,7 @@ def run_case(name, out_dir, timeout, allow_first_frame_retry=True):
             preserved = os.path.join(out_dir, "%s-attempt1-%s" % (name, suffix))
             if os.path.exists(source):
                 os.replace(source, preserved)
-        print("RETRY normal: first Qt frame was not presented after successful native/front startup")
+        print("RETRY %s: first Qt frame was not presented after successful native/front startup" % name)
         adb("shell", "rm", "-f", MARKER, check=False)
         adb("shell", "setprop", PROPERTY, "0", check=False)
         return run_case(name, out_dir, timeout, allow_first_frame_retry=False)
