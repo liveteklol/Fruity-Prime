@@ -148,6 +148,8 @@ namespace MphRead::Mods::Launcher
     std::int32_t LauncherPrefs::_windowX = 0;
     std::int32_t LauncherPrefs::_windowY = 0;
     bool LauncherPrefs::_windowMaximized = false;
+    bool LauncherPrefs::_windowedFullscreen = false;
+    bool LauncherPrefs::_windowedFullscreenRead = false;
     MphRead::Mods::WindowStartMode LauncherPrefs::_windowMode
         = static_cast<MphRead::Mods::WindowStartMode>(0);
     bool LauncherPrefs::_debugLogs = true;
@@ -337,6 +339,26 @@ namespace MphRead::Mods::Launcher
         MphRead::Mods::WindowStartMode value) noexcept
     {
         _windowMode = value;
+        if (value != MphRead::Mods::WindowStartMode::Windowed)
+        {
+            _windowedFullscreen = value == MphRead::Mods::WindowStartMode::BorderlessFullscreen;
+        }
+    }
+
+    bool LauncherPrefs::WindowedFullscreen() noexcept
+    {
+        return _windowedFullscreen;
+    }
+
+    void LauncherPrefs::WindowedFullscreen(bool value) noexcept
+    {
+        _windowedFullscreen = value;
+    }
+
+    MphRead::Mods::WindowStartMode LauncherPrefs::FullscreenKind() noexcept
+    {
+        return _windowedFullscreen ? MphRead::Mods::WindowStartMode::BorderlessFullscreen
+                                   : MphRead::Mods::WindowStartMode::ExclusiveFullscreen;
     }
 
     std::int32_t LauncherPrefs::WindowWidth() noexcept
@@ -427,6 +449,12 @@ namespace MphRead::Mods::Launcher
     void LauncherPrefs::Load()
     {
         LoadFile();
+        if (!_windowedFullscreenRead)
+        {
+            // A file from before the kind was its own line: borderless was
+            // the only way to have chosen it.
+            _windowedFullscreen = _windowMode == MphRead::Mods::WindowStartMode::BorderlessFullscreen;
+        }
         // The preference, or Auto when there is none. The command line's
         // -rhi, when given, still wins.
         ::MphRead::NativeRuntime::Rhi::SceneBackendRequest request{};
@@ -564,6 +592,15 @@ namespace MphRead::Mods::Launcher
                     _windowMode = MphRead::Mods::WindowMode::Parse(
                         std::optional<std::string_view>{value}, _windowMode);
                 }
+                else if (key == "windowed_fullscreen")
+                {
+                    bool windowed = false;
+                    if (BooleanTryParse(value, windowed))
+                    {
+                        _windowedFullscreen = windowed;
+                        _windowedFullscreenRead = true;
+                    }
+                }
                 else if (key == "window_size")
                 {
                     std::int32_t width = 0;
@@ -692,6 +729,7 @@ namespace MphRead::Mods::Launcher
                         : static_cast<std::int32_t>(_windowMode) == 2
                             ? "exclusive"
                             : "windowed"));
+            lines.emplace_back(std::string("windowed_fullscreen=") + (_windowedFullscreen ? "true" : "false"));
             lines.emplace_back("window_size=" + ::MphRead::NativeRuntime::ToStringInvariant(_windowWidth)
                 + "x" + ::MphRead::NativeRuntime::ToStringInvariant(_windowHeight));
             lines.emplace_back("window_pos=" + ::MphRead::NativeRuntime::ToStringInvariant(_windowX)
