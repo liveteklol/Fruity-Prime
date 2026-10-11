@@ -232,12 +232,10 @@ are pointed at the Pi's other name instead: launcher via
 `master_host=net.livetek.fr` in `launcher.txt`, server via
 `-master 127.0.0.1` (shares the directory's box).
 
-`tools/systemd/mphread-master.service` is the unit; `deploy-server.sh`
-installs both it and the game server's, filling in user/directory, and
-**leaves an existing unit alone** on later deploys — so the two hand-added
-options on the Pi (`-master 127.0.0.1` on the server, `-public
-net.livetek.fr` on the directory) survive a redeploy and aren't in the
-templates.
+`tools/systemd/mphread-master.service` is the unit, installed by hand from
+the template (user/directory filled in). Updates replace the binaries, never
+the units -- so the hand-added `-public france-mining.com` on the Pi's
+directory survives them and isn't in the template.
 
 Two things had to be true before anything appeared in a list, neither visible
 from the code:

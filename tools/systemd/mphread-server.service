@@ -1,7 +1,6 @@
 # The game server people join. One binary, no game files.
 #
-# __USER__ and __DIR__ are placeholders: deploy-server.sh fills them in when
-# it installs this. By hand:
+# __USER__ and __DIR__ are placeholders. Install it by hand:
 #
 #   sed -e 's|__USER__|livetek|' -e 's|__DIR__|/home/livetek/mphread-server|' \
 #       tools/systemd/mphread-server.service | sudo tee /etc/systemd/system/mphread-server.service

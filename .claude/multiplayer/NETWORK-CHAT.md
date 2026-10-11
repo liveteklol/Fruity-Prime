@@ -66,7 +66,7 @@ offline, and `NetConfig.ProtocolVersion` stays at 4.
 
 What that costs is the one failure mode worth knowing about: **against a
 server that predates this build, chat looks exactly like nobody answering.**
-Redeploy the server (`deploy-server.sh`) and it works.
+Update the server (a release does it by itself) and it works.
 
 That is not hypothetical: it is what happened. Chat landed on 2026-09-03 and
 the Pi was still running the binary deployed on 2026-09-01, so every player

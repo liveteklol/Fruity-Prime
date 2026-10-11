@@ -173,7 +173,13 @@ namespace MphRead::Mods::Network
                 = baseDirectory / std::filesystem::path(utf8FileName);
             auto writer = std::make_unique<std::ofstream>();
             writer->exceptions(std::ios::failbit | std::ios::badbit);
+            // Emptied once here, then written in append mode: a server's log
+            // is emptied daily from outside (tools/netlog-clean.sh), and a
+            // writer without O_APPEND would carry on at its old offset and
+            // leave a sparse file as long as before.
             writer->open(path, std::ios::out | std::ios::trunc);
+            writer->close();
+            writer->open(path, std::ios::out | std::ios::app);
             _writer = std::move(writer);
             _enabled = true;
             Line("=== MphRead net log for \"" + clientName + "\" ===");

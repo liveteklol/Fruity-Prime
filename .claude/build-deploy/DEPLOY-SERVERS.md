@@ -2,13 +2,17 @@
 
 Deployment notes and commands.
 
-Deploy script (server and directory)
+Deploying a server or the directory
+
+Publishing a release **is** the deployment: every server and the directory
+update themselves to it (see "Releases reach the servers by themselves" in
+`.claude/build-deploy/DEPLOY-SERVERS.md`). A new box, or one by hand, takes
+the `server-linux-x64` / `server-linux-arm64` package:
 
 ```bash
-# server and directory (rebuilds ARM64, installs both units, restarts them)
-MPH_SERVER_HOST=net.livetek.fr MPH_SERVER_USER=livetek \
-  MPH_SERVER_PASS="$(read -rsp 'pi password: ' p; echo "$p")" ./deploy-server.sh
-# MPH_DEPLOY_MASTER=0 to leave the directory alone
+sudo systemctl stop mphread-server
+tar -C /opt/fruityprime-server -xzf FruityPrime-vX.Y.Z-server-linux-x64.tar.gz
+sudo systemctl start mphread-server
 ```
 
 Publish commands (Windows client and server)
@@ -58,11 +62,19 @@ with the directory and the port with the game server.
 The C++ test units on the VMs (`fruityprime-pr109`, 27895, `/opt/fruityprime-nl`)
 keep `-noautoupdate` and are deployed by hand.
 
+## Netlogs are emptied daily
+
+Every server writes `netlog-*.txt` for as long as it runs; they reached a
+gigabyte each. All four boxes run `fruityprime-netlog-clean.timer` (05:00,
+installed 2026-10-11), which empties every `netlog-*.txt` under a
+fruity*/mphread* directory in /opt and /home -- `tools/netlog-clean.sh`, with
+the install lines at its top. A new box needs it installed the same way.
+
 ## The fleet
 
-Four boxes, not one. `deploy-server.sh` only ever touches the Pi -- the three
-Azure VMs are deployed by hand, and forgetting them is easy because the Pi is
-the one with a name anybody says out loud. **Ask the directory rather than
+Four boxes, not one. They all update themselves from a release, but a box
+set up or changed by hand is easy to forget -- the Pi is the one with a name
+anybody says out loud. **Ask the directory rather than
 remembering**, which is the only inventory that is never out of date:
 
 ```bash
@@ -98,8 +110,7 @@ curl -s -H Metadata:true \
 ## The simulation-authority servers (test, deployed 2026-09-09)
 
 `-simulate` (`.claude/multiplayer/NETWORK-SERVERAUTH.md`) needs the game files
-beside the binary, so it is deployed by hand rather than by
-`deploy-server.sh`. Two boxes carry one, **on port 27890, unlisted, alongside
+beside the binary, so it is deployed by hand. Two boxes carry one, **on port 27890, unlisted, alongside
 the production relay on 27888 which is untouched**:
 
 | Box | Path | Unit |

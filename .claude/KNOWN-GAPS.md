@@ -314,14 +314,9 @@ claiming coverage that isn't there.
 - **No browser has actually been opened.** `OpenPage` was only exercised
   where it correctly declined (headless, no `DISPLAY`). `xdg-open` on a real
   desktop and `UseShellExecute` on Windows are untried.
-- **The rename leaves an unrun migration on the Pi.** `deploy-server.sh`
-  rewrites an `ExecStart` still naming `MphRead` and deletes the old binary,
-  but that code path hasn't run against the real box yet. Check
-  `systemctl cat mphread-server` after the first deploy following the rename.
-- **The ARM64 server package has never been started by CI** — cross-compiled
-  on an x64 runner, so `check-dedicated-server.sh` can't run it there.
-  `linux-x64-server` (same build config, a processor the runner actually has)
-  is the nearest CI gets; the Pi via `deploy-server.sh` is the real test.
+- **The ARM64 server package is started by CI on an arm64 runner**
+  (`linux-arm64-server` in build_cpp.yml, `check-dedicated-server.sh` on the
+  package), but only the Pi runs it with game files.
 - **The Windows dedicated server is started in CI, but only there.** Checked
   on every push via the `windows-server` job, but nobody has run it on a real
   Windows machine behind a real firewall for a long session, unlike the Linux

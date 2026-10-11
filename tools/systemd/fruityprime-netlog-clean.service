@@ -1,0 +1,8 @@
+# Empties the Fruity Prime netlogs on this box; started daily by
+# fruityprime-netlog-clean.timer. See tools/netlog-clean.sh.
+[Unit]
+Description=Empty the Fruity Prime netlogs
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/fruityprime-netlog-clean

@@ -460,8 +460,7 @@ jobs:
             ./FruityPrime -masterserver -port 27889
 
           tools/systemd/ in the source has unit files to run this under
-          systemd; deploy-server.sh automates that end to end for the ARM64
-          build, and the same units work here with the RID changed.
+          systemd, and they work here with the RID changed.
           NOTE
           ( cd publish/linux-x64-server && tar czf "../../dist/FruityPrime-$TAG-server-linux-x64.tar.gz" . )
 

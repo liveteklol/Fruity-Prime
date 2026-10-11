@@ -930,11 +930,15 @@ split, why only the Windows server is renamed, and the CI runner layout: `.claud
 
 ## Deployment
 
+Publishing a release **is** the deployment: every server and the directory
+update themselves to it (see "Releases reach the servers by themselves" in
+`.claude/build-deploy/DEPLOY-SERVERS.md`). A new box, or one by hand, takes
+the `server-linux-x64` / `server-linux-arm64` package:
+
 ```bash
-# server and directory (rebuilds ARM64, installs both units, restarts them)
-MPH_SERVER_HOST=net.livetek.fr MPH_SERVER_USER=livetek \
-  MPH_SERVER_PASS="$(read -rsp 'pi password: ' p; echo "$p")" ./deploy-server.sh
-# MPH_DEPLOY_MASTER=0 to leave the directory alone
+sudo systemctl stop mphread-server
+tar -C /opt/fruityprime-server -xzf FruityPrime-vX.Y.Z-server-linux-x64.tar.gz
+sudo systemctl start mphread-server
 ```
 
 The exe is often locked by a running game: write `MphRead.new.exe`, then `mv`.

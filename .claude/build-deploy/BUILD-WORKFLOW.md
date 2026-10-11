@@ -95,15 +95,13 @@ changing.
 `-p:MphReadServer=true` is published three times: `win-x64-server`,
 `linux-x64-server` and `linux-arm64` (the Pi is server-only; plain x64 server
 covers a VPS/spare desktop). Only the Windows server package is renamed --
-Linux keeps the plain `FruityPrime` name, and the Pi's own
-`deploy-server.sh` migrates a systemd unit still pointing at the old name,
-`MphRead`.
+Linux keeps the plain `FruityPrime` name.
 
 Both x64 Linux builds (game's server capability, and the standalone server
 package) are started on the Ubuntu release runner, since it can actually run
 x64; the Windows server gets the same proof on a Windows runner. The ARM64
-package is cross-compiled and never started by CI -- only the Pi, through
-`deploy-server.sh`, has ever run it.
+package was cross-compiled and never started by CI. (The C++ release builds
+its arm64 server package on an arm64 runner and starts it there.)
 `tools/check-dedicated-server.sh` runs on the Windows runner too, in Git
 Bash rather than a parallel PowerShell script: the binary is
 `MphReadServer.exe`, `python3` may only be `python`, and a path has to go
