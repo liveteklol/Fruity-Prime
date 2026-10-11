@@ -1087,6 +1087,8 @@ private: \
     void UpdateCameraPosition(); \
     void ResetCamera(); \
     void UpdateCameraRotation(float stepH, float stepV); \
+    void UpdateCameraBasis(); \
+    void NoteRoamCameraHeld(const char* reason); \
     void AllocateEffects(); \
     std::shared_ptr<MphRead::Effects::EffectEntry> InitEffectEntry(); \
     std::shared_ptr<MphRead::Effects::EffectElementEntry> InitEffectElement(const std::shared_ptr<MphRead::Effect>& effect, \

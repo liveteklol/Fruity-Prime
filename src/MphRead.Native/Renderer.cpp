@@ -2584,8 +2584,36 @@ namespace MphRead
             std::cos(angleV) * std::sin(angleH),
             std::sin(angleV),
             -(std::cos(angleV) * std::cos(angleH))).Normalized();
-        _cameraRight = Vector3::Cross(_cameraFacing, Vector3(0.0F, 1.0F, 0.0F));
-        _cameraUp = Vector3::Cross(_cameraRight, _cameraFacing);
+        UpdateCameraBasis();
+    }
+
+    // The camera's right and up from where it faces, each of length one. The
+    // world's up crossed with a facing near straight up or down is a vector
+    // near zero, and the free camera's sideways step was that short; there
+    // the last right is kept.
+    void Scene::UpdateCameraBasis()
+    {
+        const Vector3 right = Vector3::Cross(_cameraFacing, Vector3(0.0F, 1.0F, 0.0F));
+        if (right.LengthSquared() > 1.0e-8F)
+        {
+            _cameraRight = right.Normalized();
+        }
+        _cameraUp = Vector3::Cross(_cameraRight, _cameraFacing).Normalized();
+    }
+
+    // What holds the free camera still, written to the debug log as it
+    // changes: a camera that will not move has several reasons and looks the
+    // same for all of them.
+    void Scene::NoteRoamCameraHeld(const char* reason)
+    {
+        static const char* last = nullptr;
+        if (reason == last || (reason != nullptr && last != nullptr && std::string_view(reason) == last))
+        {
+            return;
+        }
+        last = reason;
+        Mods::DebugLog::Line("camera", reason != nullptr
+            ? std::string("free camera held: ") + reason : std::string("free camera moving"));
     }
 
     void Scene::StartCutscene(std::int32_t id)
@@ -2606,8 +2634,7 @@ namespace MphRead
             _activeCutscene = -1;
             _cameraPosition = _priorCameraPos;
             _cameraFacing = _priorCameraFacing;
-            _cameraRight = Vector3::Cross(_cameraFacing, Vector3(0.0F, 1.0F, 0.0F));
-            _cameraUp = Vector3::Cross(_cameraRight, _cameraFacing);
+            UpdateCameraBasis();
             _cameraFov = _priorCameraFov;
         }
         if (resetFade)
@@ -4887,8 +4914,7 @@ namespace MphRead
             _cameraFacing = Vector3(0.0F, 0.0F, -1.0F);
         }
         _cameraFacing = _cameraFacing.Normalized();
-        _cameraRight = Vector3::Cross(_cameraFacing, Vector3(0.0F, 1.0F, 0.0F));
-        _cameraUp = Vector3::Cross(_cameraRight, _cameraFacing);
+        UpdateCameraBasis();
         _cameraMode = MphRead::CameraMode::Roam;
         _inputMode = InputMode::CameraOnly;
         _freeCam = true;
@@ -5014,13 +5040,23 @@ namespace MphRead
         using RendererPlatform::Key;
         const float mouseX = _roamMouseX, mouseY = _roamMouseY;
         _roamMouseX = _roamMouseY = 0.0F;
-        if (_cameraMode != MphRead::CameraMode::Roam || !AllowCameraMovement() || _inputMode == InputMode::PlayerOnly
-            || Mods::PauseMenu::Open() || Mods::Chat::ChatBox::Composing())
+        if (_cameraMode != MphRead::CameraMode::Roam)
+        {
+            return;
+        }
+        const bool alt = _keyboardState->IsKeyDown(RendererPlatform::LeftAltKey)
+            || _keyboardState->IsKeyDown(RendererPlatform::RightAltKey);
+        const char* blocked = !AllowCameraMovement() ? "cutscene"
+            : _inputMode == InputMode::PlayerOnly ? "player-only input"
+            : Mods::PauseMenu::Open() ? "pause menu"
+            : Mods::Chat::ChatBox::Composing() ? "chat" : nullptr;
+        NoteRoamCameraHeld(blocked != nullptr ? blocked : alt ? "Alt held (keys only)" : nullptr);
+        if (blocked != nullptr)
         {
             return;
         }
         constexpr float steps = 1.0F;
-        const bool keys = !(_keyboardState->IsKeyDown(RendererPlatform::LeftAltKey) || _keyboardState->IsKeyDown(RendererPlatform::RightAltKey));
+        const bool keys = !alt;
         const bool shift = keys && (_keyboardState->IsKeyDown(Key::LeftShift) || _keyboardState->IsKeyDown(RendererPlatform::RightShiftKey));
         // The death camera's speed (PlayerEntity::UpdateCameraFree: 0.4 / 2 a step).
         constexpr float DeathCameraStep = 0.4F / 2.0F;
@@ -6903,6 +6939,21 @@ namespace MphRead
                 _scene->OnMouseClick(true);
             }
         }
+        else if (e.Button == RendererPlatform::MouseButton::Button2
+            && (Mods::Network::DemoPlayback::IsActive() || Mods::SpectatorMode::IsSpectating()))
+        {
+            // The view, beside left click's next player. It was Space, which
+            // is also the free camera's rise: rising out of a player's view
+            // switched back into one, whenever somebody was there to follow.
+            if (Mods::Network::DemoPlayback::IsActive())
+            {
+                _scene->ToggleFreeCamera();
+            }
+            else
+            {
+                Mods::SpectatorMode::ToggleView();
+            }
+        }
         _window->BaseOnMouseDown(e);
     }
 
@@ -7072,20 +7123,6 @@ namespace MphRead
         }
         if (Mods::WindowMode::HandleKey(*this, e))
         {
-            _window->BaseOnKeyDown(e);
-            return;
-        }
-        if (e.Key == Key::Space
-            && (Mods::Network::DemoPlayback::IsActive() || Mods::SpectatorMode::IsSpectating()))
-        {
-            if (Mods::Network::DemoPlayback::IsActive())
-            {
-                _scene->ToggleFreeCamera();
-            }
-            else
-            {
-                Mods::SpectatorMode::ToggleView();
-            }
             _window->BaseOnKeyDown(e);
             return;
         }

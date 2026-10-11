@@ -46,13 +46,15 @@ namespace OpenTK::Windowing::GraphicsLibraryFramework
     class KeyboardState final
     {
     public:
+        static constexpr std::int32_t KeyCount = 512;
+
         KeyboardState() = default;
         [[nodiscard]] KeyboardState GetSnapshot() const { return *this; }
         [[nodiscard]] bool IsKeyDown(Keys key) const noexcept;
         void SetKeyDown(Keys key, bool down) noexcept;
 
     private:
-        std::array<bool, 512> _down{};
+        std::array<bool, KeyCount> _down{};
     };
 
     class MouseState final

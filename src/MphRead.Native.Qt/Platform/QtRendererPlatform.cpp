@@ -244,6 +244,8 @@ namespace
         [[nodiscard]] qreal Scale() const { return _window->devicePixelRatio(); }
         [[nodiscard]] QScreen* ScreenOf() const;
         void Key(QKeyEvent* event, bool down);
+        // Every key still down, released as if let go: focus is leaving.
+        void ReleaseHeldKeys();
         void MouseButton(QMouseEvent* event, bool down);
         void MouseMove(QMouseEvent* event);
         void Wheel(QWheelEvent* event);
@@ -960,6 +962,10 @@ namespace
                 // frame loop stalled.
                 Rhi::FullscreenExclusive::Active(event->type() == QEvent::FocusIn);
             }
+            if (event->type() == QEvent::FocusOut)
+            {
+                ReleaseHeldKeys();
+            }
             if (_events != nullptr)
             {
                 _events->OnFocusedChanged(event->type() == QEvent::FocusIn);
@@ -994,6 +1000,30 @@ namespace
             return true;
         default:
             return false;
+        }
+    }
+
+    void QtWindow::ReleaseHeldKeys()
+    {
+        // A key let go while another window had focus never reaches this one:
+        // without this it stays down here for good. Alt+Tab is the usual one,
+        // and a held Alt silences the free camera's keys. Each is released as
+        // a real key-up would be, so whatever counts presses sees one.
+        using MphRead::RendererPlatform::Key;
+        for (std::int32_t code = 0; code < MphRead::RendererPlatform::KeyboardState::KeyCount; ++code)
+        {
+            const auto key = static_cast<Key>(code);
+            if (!_keyboard.IsKeyDown(key))
+            {
+                continue;
+            }
+            _keyboard.SetKeyDown(key, false);
+            if (_events != nullptr)
+            {
+                KeyboardKeyEventArgs args;
+                args.Key = key;
+                _events->OnKeyUp(args);
+            }
         }
     }
 
