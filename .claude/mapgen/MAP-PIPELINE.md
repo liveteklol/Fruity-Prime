@@ -624,13 +624,67 @@ Two ways to fix one, and the second is what DUST2 uses:
 
 `MapBuilder.MultiplayerItems`, enforced when the map is built rather than
 written down somewhere. Health, UA and missile pickups in all three sizes,
-Double Damage, Cloak, Deathalt, and the weapons. What is refused is the
-story's permanent upgrades -- energy tank, missile expansion, UA expansion,
-artifact -- which raise a hunter's *capacity* for the rest of the game instead
-of topping it up until the end of the match: one of those in a deathmatch is a
-player who is simply better than everyone else for as long as the session
-lasts. The Quake importer maps mega health and body armour onto the largest
-thing that runs out, for the same reason.
+and the weapons. What is refused is the story's permanent upgrades -- energy
+tank, missile expansion, UA expansion, artifact -- which raise a hunter's
+*capacity* for the rest of the game instead of topping it up until the end of
+the match: one of those in a deathmatch is a player who is simply better than
+everyone else for as long as the session lasts. The Quake importer maps mega
+health and body armour onto the largest thing that runs out, for the same
+reason.
+
+**No powerups either**, by the project's rule (2026-10-11): Double Damage,
+Cloak and Deathalt are refused in a custom map, and the importer maps
+`item_quad` and `item_invis` onto nothing.
+
+## A level to a bundle, with nobody choosing anything
+
+```bash
+tools/convert-q3-map.sh LEVEL.pk3|LEVEL.zip [-map BSP] [-name ROOM] [-overlay X.json] [-noclip]
+```
+
+`-q3convert`, then `-mapgen`, `-mapcheck` and `-mapbundle`, and a
+`maps/<room>.fpmap` at the end. What the level holds comes across by itself;
+what it does not -- a race map's weapons -- goes in an overlay, a JSON object
+whose keys replace the generated recipe's (`tools/q3maps/rundm17.overlay.json`).
+Converted maps get no fog. Proven on rundm17 (a DeFRaG run of q3dm17) and
+acid3dm12 (a 2025 deathmatch level with its own art).
+
+- **Textures.** The level's own archive first, then the game's texture paks:
+  Quake 3's are id's and are not fetched, OpenArena's (GPL, Debian) reuse most
+  of the names and are, into `~/.cache/fruityprime/openarena`, only when the
+  level lacks images. A shader is resolved the way Quake does: its `.shader`
+  script's first stage image, then the image at its name, its sky box, its
+  editor image; a lit surface still unanswered takes the nearest-named image
+  in the same folder ("stand-in" in the log), and `import.textureAliases` says
+  otherwise by hand. `import.texturePaks` keeps the list for a rebake.
+  Default size 128.
+- **The images were black.** `NativeRuntime/Stb` decoded PNG only, and a
+  level's art is JPEG and TGA, so since the C++ port every converted map --
+  DUST2 included -- baked to one black palette entry and drew black.
+  `ImageDecode.cpp` is stb_image for those two, which is what the managed
+  build used through ReFuel.Stb.
+- **Texture names** end at the NUL: q3map2 2.5 leaves its buffer behind it.
+- **The sky** is the level's sky box: its six sides baked at the size they
+  were painted at (up to 512, `MapTextureBake::SkyBoxSourceIndex`) and drawn
+  as a box spanning the level's sky, oriented by `tr_sky.c`'s `st_to_vec`. A
+  level whose sky has no box keeps the old one image tiled over its sky.
+- **Jump pads.** Quake aims a pad at the *top* of its arc
+  (`AimAtTarget`), often over the void. The pad keeps Quake's own launch with
+  the speed scaled by the root of the gravity ratio -- the same path, slower
+  -- and the point it comes down on (a floor probe of the brushes) is its
+  target for the bots. It draws nothing of its own
+  (`JumpPadEntity::HiddenModelId`): the level's pad surfaces are the pad.
+- **Teleporters.** `trigger_teleport` becomes the cartridge's multiplayer
+  teleporter on the floor of its volume, sending you to the destination's
+  floor facing its angle (`"teleporters"` in a recipe).
+- **Bots.** Each pad and teleporter is a one-way edge in the node graph, from
+  a node on the pad to the waypoint at its landing (one is added on a ledge
+  the thinning left bare); routes are found walking edges backwards.
+- **Scale** is measured on where play happens -- the extent of spawns and
+  pickups plus a margin -- when a level places enough of them: acid3dm12
+  stands in a 16384-unit vista and came out at 126 units each.
+- **Spawns** for a level with too few starts are taken from its targets and
+  teleporter destinations, but only those standing over a floor.
 
 ## Bots
 

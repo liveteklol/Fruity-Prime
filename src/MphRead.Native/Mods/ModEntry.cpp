@@ -1985,12 +1985,29 @@ namespace MphRead::Mods
             {
                 textureSize = parsedTextureSize;
             }
+            // -texpaks "a.pk3,b.pk3": the game's texture paks the level was
+            // built against, searched after the level's own archive.
+            std::vector<std::string> texturePaks;
+            if (const std::optional<std::string> paks = ValueAfter(args, "texpaks"))
+            {
+                std::size_t start = 0;
+                while (start <= paks->size())
+                {
+                    const std::size_t comma = paks->find(',', start);
+                    const std::size_t end = comma == std::string::npos ? paks->size() : comma;
+                    if (end > start)
+                    {
+                        texturePaks.push_back(paks->substr(start, end - start));
+                    }
+                    start = end + 1;
+                }
+            }
             try
             {
                 SetExitCode(MapGen::Q3Convert::Run(*q3Convert,
                     ValueAfter(args, "map"), ValueAfter(args, "name"),
                     ValueAfter(args, "out"), ::HasFlag(args, "noclip"), ::HasFlag(args, "noitems"), scale,
-                    textureSize));
+                    textureSize, texturePaks));
             }
             catch (...)
             {

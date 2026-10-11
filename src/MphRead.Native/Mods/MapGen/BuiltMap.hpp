@@ -32,9 +32,20 @@ namespace MphRead::Mods::MapGen
     class Q3Import;
     class BuiltFace;
 
+    // A one-way route the walking graph cannot see: a jump pad to where it
+    // lands, a teleporter to where it sends you. The bots' node data carries
+    // it as an edge from the pad to the landing and not back.
+    struct BotLink
+    {
+        float From[3]{};
+        float To[3]{};
+    };
+
     class BuiltMap
     {
     public:
+        std::vector<BotLink> Links{};
+
         explicit BuiltMap(MapDefinition* definition) noexcept;
         virtual ~BuiltMap();
 

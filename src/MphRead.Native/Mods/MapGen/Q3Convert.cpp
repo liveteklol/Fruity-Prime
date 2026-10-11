@@ -216,7 +216,8 @@ namespace MphRead::Mods::MapGen
         bool dropClip,
         bool dropItems,
         const std::optional<float>& forcedScale,
-        std::int32_t textureSize)
+        std::int32_t textureSize,
+        const std::vector<std::string>& texturePaks)
     {
         if (!FileExists(source))
         {
@@ -277,9 +278,54 @@ namespace MphRead::Mods::MapGen
         const float widest = MathMax(
             xExtent,
             MathMax(yExtent, zExtent));
+        // The scale is for the part of the level anybody plays in. A level
+        // may stand in a vista many times its arena's size -- acid3dm12's
+        // floor and water run 16384 units across round an arena of 1500 --
+        // and measured on that it came out at 126 units each, a room a
+        // hunter crosses in two steps. Where the level places enough things
+        // to say where play happens, their extent (and a margin) is what is
+        // measured; the vista is still drawn.
+        float measured = widest;
+        {
+            std::vector<std::shared_ptr<std::vector<float>>> placed;
+            for (const std::shared_ptr<Q3Entity>& entityRef : RequireReference(bsp).Entities())
+            {
+                const Q3Entity* entity = &RequireReference(entityRef);
+                const std::string* classname = EntityValue(entity, "classname");
+                const std::string* origin = EntityValue(entity, "origin");
+                if (classname == nullptr || origin == nullptr)
+                {
+                    continue;
+                }
+                using ::MphRead::NativeRuntime::StringStartsWithOrdinalIgnoreCase;
+                if (StringStartsWithOrdinalIgnoreCase(*classname, "info_player_deathmatch")
+                    || StringStartsWithOrdinalIgnoreCase(*classname, "item_")
+                    || StringStartsWithOrdinalIgnoreCase(*classname, "weapon_")
+                    || StringStartsWithOrdinalIgnoreCase(*classname, "ammo_"))
+                {
+                    placed.push_back(ParseVector(*origin));
+                }
+            }
+            if (placed.size() >= 8)
+            {
+                float playWidest = 0.0F;
+                for (std::size_t axis = 0; axis < 3; ++axis)
+                {
+                    float low = std::numeric_limits<float>::max();
+                    float high = std::numeric_limits<float>::lowest();
+                    for (const auto& position : placed)
+                    {
+                        low = MathMin(low, ManagedAt(position.get(), axis));
+                        high = MathMax(high, ManagedAt(position.get(), axis));
+                    }
+                    playWidest = MathMax(playWidest, high - low);
+                }
+                measured = MathMin(widest, playWidest + 1024.0F);
+            }
+        }
         const float unit = forcedScale.has_value()
             ? *forcedScale
-            : AutoScale(widest);
+            : AutoScale(measured);
 
         std::shared_ptr<std::vector<float>> reachMin;
         std::shared_ptr<std::vector<float>> reachMax;
@@ -300,6 +346,15 @@ namespace MphRead::Mods::MapGen
         auto archivePaths = std::make_shared<
             std::vector<std::optional<std::string>>>();
         archivePaths->push_back(sourceValue);
+        for (const std::string& pak : texturePaks)
+        {
+            if (!FileExists(pak))
+            {
+                WriteLine("  no texture pak at ", pak, "; going on without it");
+                continue;
+            }
+            archivePaths->push_back(PathGetFullPath(pak));
+        }
         const std::shared_ptr<MapTextureBake::Result> baked
             = MapTextureBake::Bake(
                 bsp,
@@ -313,6 +368,10 @@ namespace MphRead::Mods::MapGen
             ::MphRead::NativeRuntime::ToString(textureSize), " -> ",
             ::MphRead::NativeRuntime::ToString(bakedValue->Bytes, "N0"),
             " B  ", PathGetFileName(texturePath));
+        for (const std::string& line : RequireReference(bakedValue->Substituted))
+        {
+            WriteLine("  stand-in: ", line);
+        }
         if (!RequireReference(bakedValue->Missing).empty())
         {
             WriteLine("  no image for ",
@@ -340,6 +399,9 @@ namespace MphRead::Mods::MapGen
             RoundToEven(MathMin(
                 400.0F,
                 widest / unit * 1.2F)));
+        // A converted level is drawn with its own sky and no fog: the
+        // cartridge's fog colours belong to the cartridge's rooms.
+        definition->FogEnabled(false);
 
         auto import = std::make_shared<MapImport>();
         import->Source(levelName);
@@ -349,6 +411,14 @@ namespace MphRead::Mods::MapGen
         import->KeepSky(true);
         import->KeepClip(!dropClip);
         import->KeepSpawns(true);
+        {
+            std::vector<std::string> paks;
+            for (std::size_t i = 1; i < archivePaths->size(); ++i)
+            {
+                paks.push_back(*(*archivePaths)[i]);
+            }
+            import->TexturePaks(std::move(paks));
+        }
         definition->Import(import);
 
         std::int32_t clipBrushes = 0;
@@ -411,21 +481,16 @@ namespace MphRead::Mods::MapGen
                 - ManagedAt(min.get(), 1)) / unit, "0"), " units");
         WriteLine("  wrote ", path);
 
-        MapDefinition::SpawnList* checkSpawns
-            = definition->Spawns();
-        if (checkSpawns == nullptr)
+        // With keepSpawns on, the level's own starts are read at every
+        // generation and the recipe lists none, so the recipe is not the
+        // count.
+        if (RequireReference(definition->Import()).KeepSpawns())
         {
-            throw System::NullReferenceException();
+            WriteLine("  the level's own deathmatch starts are its spawns (\"keepSpawns\")");
         }
-        if (checkSpawns->size() < 4)
+        else if (outputSpawns->size() < 4)
         {
-            MapDefinition::SpawnList* warningSpawns
-                = definition->Spawns();
-            if (warningSpawns == nullptr)
-            {
-                throw System::NullReferenceException();
-            }
-            WriteLine("  only ", ::MphRead::NativeRuntime::ToString(warningSpawns->size()),
+            WriteLine("  only ", ::MphRead::NativeRuntime::ToString(outputSpawns->size()),
                 " places to appear: this level was not"
                 " built for a deathmatch. Add spawns to the map file before playing it with a full house.");
         }
@@ -646,8 +711,22 @@ namespace MphRead::Mods::MapGen
             else if (::MphRead::NativeRuntime::StringStartsWithOrdinalIgnoreCase(*classname, "target_")
                 || StringEqualsOrdinalIgnoreCase(
                     *classname,
+                    "misc_teleporter_dest")
+                || StringEqualsOrdinalIgnoreCase(
+                    *classname,
                     "info_player_intermission"))
             {
+                // Only over ground, and stood on it: a jump pad's target is
+                // the top of its arc and an intermission is a camera, and
+                // either may hang over the void.
+                const std::optional<float> floor = Q3Import::Floor(bsp,
+                    ManagedAt(position.get(), 0), ManagedAt(position.get(), 1),
+                    ManagedAt(position.get(), 2));
+                if (!floor.has_value() || ManagedAt(position.get(), 2) - *floor > 96.0F)
+                {
+                    continue;
+                }
+                ManagedAt(position.get(), 2) = *floor + 24.0F;
                 fallbacks.push_back(std::move(position));
             }
         }

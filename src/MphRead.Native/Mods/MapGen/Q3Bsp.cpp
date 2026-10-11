@@ -569,7 +569,11 @@ namespace MphRead::Mods::MapGen
             {
                 ByteVector nameBytes = r.ReadBytes(64);
                 std::string name = DecodeAscii(nameBytes.data(), nameBytes.size());
-                while (!name.empty() && name.back() == '\0') name.pop_back();
+                // A C string: whatever follows the terminator is whatever the
+                // compiler's buffer held before (q3map2 2.5 leaves it there),
+                // not padding, so trimming trailing zeros is not enough.
+                const std::size_t terminator = name.find('\0');
+                if (terminator != std::string::npos) name.resize(terminator);
                 const std::int32_t flags = r.ReadInt32();
                 const std::int32_t contents = r.ReadInt32();
                 return std::make_shared<Q3Texture>(name, flags, contents);

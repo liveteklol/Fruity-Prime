@@ -67,16 +67,13 @@
     { "Position": [ 43.2163, -4.58838, 37.4923 ], "yaw": 90 }
   ],
   // Eight pads on the ring of ladders round the centre tower -- radius 14.6
-  // about the 4-fold centre (24.7714, -0.0978) -- and the Double Damage on
-  // top of it. They are there for the hunters who move badly: a ladder is
-  // the slowest way up in the room and the pads are a second one that costs
-  // nothing to learn. controlLockTime is 1 rather than the default 30, so
-  // the ride is a boost the player steers through rather than something that
-  // happens to them. Both times are frames.
-  //
-  // The Double Damage sits above the tower where the ground cannot reach it,
-  // so taking it costs the ride up and a moment at the top of the map with
-  // everybody's sight line on you.
+  // about the 4-fold centre (24.7714, -0.0978). They are there for the
+  // hunters who move badly: a ladder is the slowest way up in the room and
+  // the pads are a second one that costs nothing to learn. controlLockTime
+  // is 1 rather than the default 30, so the ride is a boost the player
+  // steers through rather than something that happens to them. Both times
+  // are frames. (The Double Damage that stood on top of the tower is gone:
+  // custom maps carry no powerups.)
   "JumpPads": [
     {
       "position": [ 19.322, -4.68734, 13.4567 ],
@@ -144,7 +141,6 @@
   // it has one in all four, because two opposite corners would be a half-turn
   // of symmetry inside a quarter-turn layout and read as a mistake.
   "Items": [
-    { "Position": [ 24.7702, 0.8, -0.306382 ], "Type": "DoubleDamage", "hasBase": false, "spawnInterval": 5400 },
 
     { "Position": [ -2.58491, -0.506107, 27.0647], "Type": "Imperialist", "hasBase": false },
     { "Position": [ -2.5836, -0.506107, -27.6329], "Type": "Imperialist", "hasBase": true },

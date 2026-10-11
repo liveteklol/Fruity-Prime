@@ -697,9 +697,173 @@ namespace MphRead::Mods::MapGen
             return nodes;
         }
 
+        // A pad and its landing as nodes of their own, joined one way. The pad
+        // node sits on the pad itself rather than on whichever waypoint the
+        // thinning left nearest, because a bot heading for a waypoint a few
+        // units off the pad walks past it; the landing is the waypoint nearest
+        // the target that is not above it. Returns the links that found no
+        // ground at one end.
+        // A point raised to the higher of two heights, so a wall test between
+        // them runs over the step up to a raised pad rather than into its
+        // side: Wall takes anything vertical above the lower end for a wall.
+        [[nodiscard]] Vector3 Level(Vector3 point, Vector3 other) noexcept
+        {
+            return Vector3(point.X, MathMax(point.Y, other.Y), point.Z);
+        }
+
+        std::int32_t AddLinks(
+            const std::vector<BuiltFace*>* solid,
+            std::vector<Node>& nodes,
+            const std::vector<BotLink>* links)
+        {
+            if (links == nullptr || links->empty() || nodes.empty())
+            {
+                return 0;
+            }
+            Vector3 min{};
+            Vector3 max{};
+            Bounds(solid, min, max);
+            BucketGrid grid = Buckets(solid, min, FineSpacing);
+            const auto join = [&nodes](std::int32_t a, std::int32_t b)
+            {
+                Node& node = nodes[static_cast<std::size_t>(a)];
+                if (node.Neighbours.size() < static_cast<std::size_t>(MaxNeighbours)
+                    && !ContainsValue(node.Neighbours, b))
+                {
+                    node.Neighbours.push_back(b);
+                }
+            };
+            std::int32_t unlinked = 0;
+            // Pads and ledges added below are not places to walk onto a pad from.
+            const std::int32_t walkable = static_cast<std::int32_t>(nodes.size());
+            for (const BotLink& link : *links)
+            {
+                const Vector3 from(link.From[0], link.From[1], link.From[2]);
+                const Vector3 to(link.To[0], link.To[1], link.To[2]);
+
+                std::int32_t landing = -1;
+                float landingDistance = std::numeric_limits<float>::max();
+                for (std::int32_t i = 0; i < walkable; i++)
+                {
+                    const Vector3 position = nodes[static_cast<std::size_t>(i)].Position;
+                    if (position.Y > to.Y + 1.0F)
+                    {
+                        continue;
+                    }
+                    const float distance = Length(Subtract(position, to));
+                    if (distance < landingDistance)
+                    {
+                        landing = i;
+                        landingDistance = distance;
+                    }
+                }
+
+                // Waypoints a bot can walk from to the pad: in reach, on its
+                // level, nothing in between. A pad in an alcove may have
+                // none in reach after the thinning, so the reach widens
+                // once before giving up.
+                std::vector<std::int32_t> approaches{};
+                for (const float reach : {Spacing * 1.5F, Spacing * 2.5F})
+                {
+                    for (std::int32_t i = 0; i < walkable; i++)
+                    {
+                        const Vector3 position = nodes[static_cast<std::size_t>(i)].Position;
+                        const float rise = from.Y - position.Y;
+                        const Vector3 flat(position.X - from.X, 0.0F, position.Z - from.Z);
+                        if (Length(flat) <= reach
+                            && rise <= StepUp && rise >= -StepDown
+                            && !Wall(solid, grid, min, FineSpacing, Level(position, from), Level(from, position)))
+                        {
+                            approaches.push_back(i);
+                        }
+                    }
+                    if (!approaches.empty())
+                    {
+                        break;
+                    }
+                }
+
+                // Somewhere the thinning left no waypoint -- a ledge, a
+                // platform's far end -- the landing becomes one, joined both
+                // ways to whatever it can walk to.
+                if (landing != -1 && landingDistance > Spacing * 2.0F)
+                {
+                    std::vector<std::int32_t> around{};
+                    for (std::int32_t i = 0; i < walkable; i++)
+                    {
+                        const Vector3 position = nodes[static_cast<std::size_t>(i)].Position;
+                        const float rise = position.Y - to.Y;
+                        const Vector3 flat(position.X - to.X, 0.0F, position.Z - to.Z);
+                        if (Length(flat) <= Spacing * 2.5F
+                            && rise <= StepUp && rise >= -StepDown
+                            && !Wall(solid, grid, min, FineSpacing, Level(to, position), Level(position, to)))
+                        {
+                            around.push_back(i);
+                        }
+                    }
+                    if (around.empty())
+                    {
+                        landing = -1;
+                    }
+                    else
+                    {
+                        Node ledge{};
+                        ledge.Position = to;
+                        ledge.Cell = -1;
+                        nodes.push_back(std::move(ledge));
+                        landing = static_cast<std::int32_t>(nodes.size()) - 1;
+                        landingDistance = 0.0F;
+                        for (const std::int32_t other : around)
+                        {
+                            join(landing, other);
+                            join(other, landing);
+                        }
+                    }
+                }
+
+                if (landing == -1 || approaches.empty())
+                {
+                    if (EnvironmentGetVariable("FP_NODEDEBUG").has_value())
+                    {
+                        std::printf("  [nodes] route (%.1f %.1f %.1f) -> (%.1f %.1f %.1f) not joined:"
+                            " landing waypoint %.1f away, %d approaches\n",
+                            from.X, from.Y, from.Z, to.X, to.Y, to.Z,
+                            landing == -1 ? -1.0 : static_cast<double>(landingDistance),
+                            static_cast<std::int32_t>(approaches.size()));
+                    }
+                    unlinked++;
+                    continue;
+                }
+
+                Node pad{};
+                pad.Position = from;
+                pad.Cell = -1;
+                nodes.push_back(std::move(pad));
+                const std::int32_t padIndex = static_cast<std::int32_t>(nodes.size()) - 1;
+                // Standing on the pad throws you, so its only way out is the
+                // landing.
+                for (const std::int32_t approach : approaches)
+                {
+                    join(approach, padIndex);
+                }
+                join(padIndex, landing);
+            }
+            return unlinked;
+        }
+
+        // Edges may be one way since a pad joined the graph, so the distance
+        // to a destination is found by walking edges backwards from it.
         [[nodiscard]] std::vector<RoutesForNode> Routes(const std::vector<Node>& nodes)
         {
             const std::int32_t count = static_cast<std::int32_t>(nodes.size());
+            std::vector<std::vector<std::int32_t>> incoming(nodes.size());
+            for (std::int32_t i = 0; i < count; i++)
+            {
+                for (const std::int32_t neighbour : nodes[static_cast<std::size_t>(i)].Neighbours)
+                {
+                    incoming[static_cast<std::size_t>(neighbour)].push_back(i);
+                }
+            }
             std::vector<std::uint16_t> hop(
                 static_cast<std::size_t>(count) * static_cast<std::size_t>(count), 0);
             std::vector<std::int32_t> distance(nodes.size(), 0);
@@ -714,7 +878,7 @@ namespace MphRead::Mods::MapGen
                 {
                     const std::int32_t current = queue.front();
                     queue.pop_front();
-                    for (const std::int32_t neighbour : nodes[static_cast<std::size_t>(current)].Neighbours)
+                    for (const std::int32_t neighbour : incoming[static_cast<std::size_t>(current)])
                     {
                         if (distance[static_cast<std::size_t>(neighbour)] < 0)
                         {
@@ -892,7 +1056,8 @@ namespace MphRead::Mods::MapGen
     }
 
     std::tuple<std::vector<std::uint8_t>, std::int32_t, std::int32_t> MapNodePacker::Pack(
-        const std::vector<BuiltFace*>* solid)
+        const std::vector<BuiltFace*>* solid,
+        const std::vector<BotLink>* links)
     {
         std::vector<Node> fine = Sample(solid, FineSpacing);
         Connect(solid, fine, FineSpacing);
@@ -912,6 +1077,13 @@ namespace MphRead::Mods::MapGen
                 break;
             }
             spacing *= 1.4F;
+        }
+        const std::int32_t unlinked = AddLinks(solid, nodes, links);
+        if (links != nullptr && !links->empty())
+        {
+            std::printf("  [nodes] %d of %d jump pad/teleporter routes joined to the bots' graph\n",
+                static_cast<std::int32_t>(links->size()) - unlinked,
+                static_cast<std::int32_t>(links->size()));
         }
         const std::int32_t edges = DegreeSum(nodes) / 2;
         if (EnvironmentGetVariable("FP_NODEDEBUG").has_value())

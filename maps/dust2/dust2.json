@@ -145,14 +145,6 @@
   "items": [
     {
       "position": [
-        -32.49,
-        1.46,
-        27.56
-      ],
-      "type": "DoubleDamage"
-    },
-    {
-      "position": [
         33.07,
         -1.66,
         -1.12
@@ -166,14 +158,6 @@
         15.27
       ],
       "type": "Magmaul"
-    },
-    {
-      "position": [
-        -41.85,
-        -0.88,
-        -54.98
-      ],
-      "type": "Cloak"
     },
     {
       "position": [

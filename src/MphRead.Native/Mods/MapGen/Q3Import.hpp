@@ -3,6 +3,7 @@
 #include "../../Formats/Enums.hpp"
 #include "../../Formats/Types.hpp"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -47,6 +48,10 @@ namespace MphRead::Mods::MapGen
         };
 
         [[nodiscard]] static std::vector<Q3Pickup> Pickups(Q3Bsp* bsp, float unitsPerUnit);
+
+        // The top of the highest solid world brush below (x, y, z), in Quake
+        // units and axes; none when nothing is under it.
+        [[nodiscard]] static std::optional<float> Floor(Q3Bsp* bsp, float x, float y, float z);
 
         [[nodiscard]] static std::optional<std::string> BakeTextures(
             const std::shared_ptr<Q3Bsp>& bsp, MapImport* import, bool verbose);
@@ -137,6 +142,16 @@ namespace MphRead::Mods::MapGen
             float shade);
 
         static void ProjectSky(BuiltFace* face, float texelsPerUnit);
+
+        // The six sides of a Quake sky box as a box of drawn faces spanning
+        // [min, max] (Quake units and axes), each side its own material.
+        static void AddSkyBox(
+            BuiltMap* map,
+            OpenTK::Mathematics::Vector3 min,
+            OpenTK::Mathematics::Vector3 max,
+            float unit,
+            const std::array<std::int32_t, 6>& materials,
+            const std::vector<std::pair<std::int32_t, std::int32_t>>& textureSizes);
 
         [[nodiscard]] static bool Inside(
             OpenTK::Mathematics::Vector3 point,

@@ -1138,7 +1138,7 @@ namespace MphRead::Mods::MapGen
         std::vector<std::uint8_t> entities = Repack::PackEntities(
             std::span<Editor::EntityEditorBase* const>(
                 entityList.data(), entityList.size()));
-        auto [nodes, nodeCount, edges] = MapNodePacker::Pack(&map->Solid());
+        auto [nodes, nodeCount, edges] = MapNodePacker::Pack(&map->Solid(), &map->Links);
 
         const std::string modelPath = PathCombine(archiveDir, prefix + "_Model.bin");
         FileWriteAllBytes(modelPath, model);

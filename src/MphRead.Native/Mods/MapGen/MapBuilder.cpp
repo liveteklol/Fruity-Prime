@@ -352,9 +352,7 @@ namespace MphRead::Mods::MapGen
         ItemType::UABig,
         ItemType::MissileSmall,
         ItemType::MissileBig,
-        ItemType::DoubleDamage,
-        ItemType::Cloak,
-        ItemType::Deathalt,
+        // No powerups: Double Damage, Cloak and Deathalt are refused.
         ItemType::VoltDriver,
         ItemType::Battlehammer,
         ItemType::Imperialist,
@@ -618,6 +616,51 @@ namespace MphRead::Mods::MapGen
                 | Entities::TriggerFlags::PlayerAlt
                 | Entities::TriggerFlags::IncludeBots;
             map->Entities().push_back(map->OwnEntity(std::move(entity)));
+
+            if (pad->Target() != nullptr)
+            {
+                const Vector3 from = ToVector(pad->Position());
+                const Vector3 to = ToVector(pad->Target());
+                map->Links.push_back(BotLink{{from.X, from.Y, from.Z}, {to.X, to.Y, to.Z}});
+            }
+        }
+
+        // The cartridge's multiplayer teleporter: ArtifactId 8 and up is the
+        // small pad with no artifact slots, and with no room named it moves
+        // the player within this one, to TargetPosition, facing the way the
+        // teleporter itself faces.
+        if (const MapDefinition::TeleporterList* teleporters = def->Teleporters())
+        {
+            for (const std::shared_ptr<MapTeleporter>& teleporterValue : *teleporters)
+            {
+                MapTeleporter* teleporter = &RequireReference(teleporterValue);
+                if (teleporter->Target() == nullptr)
+                {
+                    throw MphRead::ProgramException("A teleporter needs a target.");
+                }
+                constexpr float DegreesToRadians = 0.017453292519943295769F;
+                const float yaw = teleporter->Yaw() * DegreesToRadians;
+
+                auto entity = std::make_unique<Editor::TeleporterEntityEditor>();
+                entity->Id = PostIncrement(id);
+                entity->LayerMask = 0xFFFFU;
+                entity->Position = ToVector(teleporter->Position());
+                entity->Up = Vector3(0.0F, 1.0F, 0.0F);
+                entity->Facing = Vector3(std::sin(yaw), 0.0F, std::cos(yaw)).Normalized();
+                entity->NodeName = RmMainString();
+                entity->LoadIndex = 0;
+                entity->TargetIndex = 0;
+                entity->ArtifactId = 0xFF;
+                entity->Active = true;
+                entity->Invisible = !teleporter->Visible();
+                entity->TargetPosition = ToVector(teleporter->Target());
+                entity->TeleporterNodeName = RmMainString();
+                map->Entities().push_back(map->OwnEntity(std::move(entity)));
+
+                const Vector3 from = ToVector(teleporter->Position());
+                const Vector3 to = ToVector(teleporter->Target());
+                map->Links.push_back(BotLink{{from.X, from.Y, from.Z}, {to.X, to.Y, to.Z}});
+            }
         }
 
         MapDefinition::ItemList* items = def->Items();
@@ -640,11 +683,17 @@ namespace MphRead::Mods::MapGen
             if (!MultiplayerItems.Contains(itemType))
             {
                 const std::optional<std::string> messageType = MapItemTypeText(item);
+                const bool powerup = itemType == ItemType::DoubleDamage
+                    || itemType == ItemType::Cloak
+                    || itemType == ItemType::Deathalt;
                 throw MphRead::ProgramException(
                     messageType.value_or(std::string())
-                    + " does not belong in a multiplayer map. It is one of the story's permanent upgrades -- "
-                    "an energy tank, a missile or UA expansion, an artifact -- which raise a hunter's capacity "
-                    "for the rest of the game rather than topping it up for the rest of the match. Use one of: "
+                    + (powerup
+                        ? " does not belong in a custom map: custom maps carry no powerups -- no Double Damage, "
+                          "no Cloak, no Deathalt -- by the project's rule. Use one of: "
+                        : " does not belong in a multiplayer map. It is one of the story's permanent upgrades -- "
+                          "an energy tank, a missile or UA expansion, an artifact -- which raise a hunter's capacity "
+                          "for the rest of the game rather than topping it up for the rest of the match. Use one of: ")
                     + JoinMultiplayerItems(MultiplayerItems) + ".");
             }
 

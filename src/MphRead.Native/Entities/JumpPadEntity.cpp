@@ -64,7 +64,8 @@ namespace MphRead::Entities
         _prevPos = Position;
         _volume = CollisionVolume::Move(_data.Volume, Position);
 
-        const std::string modelName = GetJumpPadName(data.ModelId);
+        _hidden = data.ModelId == HiddenModelId;
+        const std::string modelName = GetJumpPadName(_hidden ? 0U : data.ModelId);
         SetUpModel(modelName);
         ModelInstance& beamInst = SetUpModel("JumpPad_Beam");
 
@@ -253,7 +254,7 @@ namespace MphRead::Entities
 
     void JumpPadEntity::GetDrawInfo()
     {
-        if (IsVisible(NodeRef))
+        if (!_hidden && IsVisible(NodeRef))
         {
             EntityBase::GetDrawInfo();
         }

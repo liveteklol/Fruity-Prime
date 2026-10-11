@@ -20,6 +20,10 @@ namespace MphRead::Entities
     public:
         JumpPadEntity(JumpPadEntityData data, std::string nodeName, Scene* scene);
 
+        // A ModelId no cartridge pad uses: the pad works and draws nothing,
+        // for a custom map whose own geometry already shows where it is.
+        static constexpr std::uint32_t HiddenModelId = 0xFFFFFFFFU;
+
         JumpPadEntity(const JumpPadEntity&) = delete;
         JumpPadEntity& operator=(const JumpPadEntity&) = delete;
         JumpPadEntity(JumpPadEntity&&) = delete;
@@ -55,6 +59,7 @@ namespace MphRead::Entities
 
         std::uint16_t _cooldownTimer = 0;
         std::shared_ptr<Formats::NodeData3> _closestNode{};
+        bool _hidden = false;
     };
 
     class FhJumpPadEntity : public EntityBase

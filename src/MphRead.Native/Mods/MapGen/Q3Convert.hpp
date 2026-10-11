@@ -24,7 +24,8 @@ namespace MphRead::Mods::MapGen
             bool dropClip,
             bool dropItems,
             const std::optional<float>& forcedScale,
-            std::int32_t textureSize);
+            std::int32_t textureSize,
+            const std::vector<std::string>& texturePaks = {});
 
         [[nodiscard]] static float AutoScale(float widestExtent);
         [[nodiscard]] static float WidestExtent(Q3Bsp* bsp);

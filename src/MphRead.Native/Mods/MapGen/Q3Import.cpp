@@ -21,6 +21,7 @@
 #include "../../NativeRuntime/OpenTK/Mathematics.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -139,6 +140,61 @@ namespace
             * static_cast<std::size_t>(dimension)
             + static_cast<std::size_t>(b);
     }
+
+    // The highest top of a solid world brush straight below (x, y, z), in
+    // Quake units -- where something falling there lands. Only the floors:
+    // a wall crossed on the way down is not looked for.
+    [[nodiscard]] std::optional<float> Q3Floor(
+        MphRead::Mods::MapGen::Q3Bsp* bsp, float x, float y, float z)
+    {
+        using MphRead::Mods::MapGen::Q3Bsp;
+        const auto& models = bsp->Models();
+        if (models.empty())
+        {
+            return std::nullopt;
+        }
+        const auto& world = *models.front();
+        std::optional<float> best;
+        for (std::int32_t b = world.Brush(); b < world.Brush() + world.BrushCount(); ++b)
+        {
+            const auto& brush = *bsp->Brushes()[static_cast<std::size_t>(b)];
+            const auto& texture = *bsp->Textures()[static_cast<std::size_t>(brush.Texture())];
+            if ((texture.Contents() & Q3Bsp::ContentsSolid) == 0)
+            {
+                continue;
+            }
+            float low = -1.0e9F;
+            float high = 1.0e9F;
+            bool inside = true;
+            for (std::int32_t s = brush.FirstSide(); s < brush.FirstSide() + brush.SideCount(); ++s)
+            {
+                const auto& side = *bsp->BrushSides()[static_cast<std::size_t>(s)];
+                const auto& plane = *bsp->Planes()[static_cast<std::size_t>(side.Plane())];
+                const float across = plane.X() * x + plane.Y() * y;
+                if (std::fabs(plane.Z()) < 1.0e-6F)
+                {
+                    if (across > plane.Distance() + 0.01F)
+                    {
+                        inside = false;
+                        break;
+                    }
+                }
+                else if (plane.Z() > 0.0F)
+                {
+                    high = std::min(high, (plane.Distance() - across) / plane.Z());
+                }
+                else
+                {
+                    low = std::max(low, (plane.Distance() - across) / plane.Z());
+                }
+            }
+            if (inside && low <= high && high <= z + 1.0F && (!best || high > *best))
+            {
+                best = high;
+            }
+        }
+        return best;
+    }
 }
 
 namespace MphRead::Mods::MapGen
@@ -243,6 +299,27 @@ namespace MphRead::Mods::MapGen
             skySpan = MathMax(spanX, spanY) / unit;
         }
 
+        // A sky box baked as six sides (MapTextureBake) is drawn the way
+        // Quake draws one -- a box of six images round the level -- instead
+        // of the level's sky surfaces with one image tiled over them, which
+        // is neither what the level looked like nor sharp enough to look at.
+        std::array<std::int32_t, 6> skyMaterials{};
+        bool skyBox = pack != nullptr && import->KeepSky();
+        for (std::size_t side = 0; skyBox && side < skyMaterials.size(); ++side)
+        {
+            skyBox = pack->BySourceIndex().TryGetValue(
+                MapTextureBake::SkyBoxSourceIndex + static_cast<std::int32_t>(side),
+                skyMaterials[side]);
+        }
+        Vector3 skyMin(
+            std::numeric_limits<float>::max(),
+            std::numeric_limits<float>::max(),
+            std::numeric_limits<float>::max());
+        Vector3 skyMax(
+            std::numeric_limits<float>::lowest(),
+            std::numeric_limits<float>::lowest(),
+            std::numeric_limits<float>::lowest());
+
         std::int32_t skipped = 0;
         std::int32_t patches = 0;
         std::int32_t patchTriangles = 0;
@@ -276,6 +353,21 @@ namespace MphRead::Mods::MapGen
             if (sky && !import->KeepSky())
             {
                 skipped = UncheckedAdd(skipped, 1);
+                continue;
+            }
+            if (sky && skyBox)
+            {
+                // Only where the box goes: the extent of the level's sky.
+                for (std::int32_t i = face->Vertex();
+                    i < UncheckedAdd(face->Vertex(), face->VertexCount());
+                    i = UncheckedAdd(i, 1))
+                {
+                    const std::vector<float>& position = RequireReference(
+                        RequireReference(ManagedListAt(bsp->Vertices(), i)).Position());
+                    const Vector3 point(position[0], position[1], position[2]);
+                    skyMin = ComponentMin(skyMin, point);
+                    skyMax = ComponentMax(skyMax, point);
+                }
                 continue;
             }
 
@@ -347,6 +439,11 @@ namespace MphRead::Mods::MapGen
                     map->Solid().push_back(built);
                 }
             }
+        }
+
+        if (skyBox && skyMin.X <= skyMax.X)
+        {
+            AddSkyBox(map.get(), skyMin, skyMax, unit, skyMaterials, textureSizes);
         }
 
         const Vector3 margin(6.0F, 6.0F, 6.0F);
@@ -498,21 +595,57 @@ namespace MphRead::Mods::MapGen
 
         if (def->Preview() == nullptr)
         {
-            Vector3 low;
-            Vector3 high;
-            Bounds(map.get(), low, high);
+            // Over where play happens, looking across it from inside: the
+            // drawn bounds take in the sky box, and a camera outside that
+            // photographs the lid of the sky.
+            Vector3 low(
+                std::numeric_limits<float>::max(),
+                std::numeric_limits<float>::max(),
+                std::numeric_limits<float>::max());
+            Vector3 high(
+                std::numeric_limits<float>::lowest(),
+                std::numeric_limits<float>::lowest(),
+                std::numeric_limits<float>::lowest());
+            std::int32_t placed = 0;
+            const auto take = [&](const std::vector<float>* position)
+            {
+                if (position != nullptr && position->size() >= 3)
+                {
+                    const Vector3 point((*position)[0], (*position)[1], (*position)[2]);
+                    low = ComponentMin(low, point);
+                    high = ComponentMax(high, point);
+                    ++placed;
+                }
+            };
+            for (const auto& spawn : RequireReference(def->Spawns()))
+            {
+                take(RequireReference(spawn).Position());
+            }
+            for (const auto& item : RequireReference(def->Items()))
+            {
+                take(RequireReference(item).Position());
+            }
+            for (const auto& pad : RequireReference(def->JumpPads()))
+            {
+                take(RequireReference(pad).Position());
+            }
+            if (placed < 4)
+            {
+                Bounds(map.get(), low, high);
+            }
             const Vector3 centre = Divide(Add(low, high), 2.0F);
             const Vector3 size = Subtract(high, low);
+            const float across = MathMax(size.X, size.Z);
 
             auto preview = std::make_shared<MapPreview>();
             preview->Position(std::make_shared<std::vector<float>>(
                 std::initializer_list<float>{
-                    centre.X + size.X * 0.6F,
-                    high.Y + size.Y * 0.5F,
-                    centre.Z + size.Z * 0.6F}));
+                    centre.X + size.X * 0.55F,
+                    high.Y + across * 0.25F,
+                    centre.Z + size.Z * 0.55F}));
             preview->Target(std::make_shared<std::vector<float>>(
                 std::initializer_list<float>{
-                    centre.X, centre.Y, centre.Z}));
+                    centre.X, low.Y, centre.Z}));
             def->Preview(preview);
 
             if (verbose)
@@ -950,6 +1083,80 @@ namespace MphRead::Mods::MapGen
             shade);
     }
 
+    void Q3Import::AddSkyBox(
+        BuiltMap* map,
+        Vector3 min,
+        Vector3 max,
+        float unit,
+        const std::array<std::int32_t, 6>& materials,
+        const std::vector<std::pair<std::int32_t, std::int32_t>>& textureSizes)
+    {
+        // tr_sky.c's st_to_vec: for each side, where each of the three
+        // axes takes its value from -- 1 is s, 2 is t, 3 the side's own
+        // depth, negative for the opposite sign. Its texture coordinates are
+        // ((s + 1) / 2, 1 - (t + 1) / 2).
+        static constexpr std::array<std::array<std::int32_t, 3>, 6> StToVec{{
+            {{3, -1, 2}}, {{-3, 1, 2}}, {{1, 3, 2}}, {{-1, -3, 2}}, {{-2, -1, 3}}, {{2, -1, -3}}
+        }};
+        static constexpr std::array<std::array<float, 2>, 4> Corners{{
+            {{-1.0F, -1.0F}}, {{1.0F, -1.0F}}, {{1.0F, 1.0F}}, {{-1.0F, 1.0F}}
+        }};
+        const Vector3 centre = Divide(Add(min, max), 2.0F);
+        const Vector3 half = Divide(Subtract(max, min), 2.0F);
+        const Vector3 centreWorld = ToWorld(centre, unit);
+        for (std::size_t side = 0; side < StToVec.size(); ++side)
+        {
+            const std::int32_t material = materials[side];
+            if (material < 0 || static_cast<std::size_t>(material) >= textureSizes.size())
+            {
+                throw System::ArgumentOutOfRangeException();
+            }
+            const auto [width, height] = textureSizes[static_cast<std::size_t>(material)];
+            std::vector<Vector3> points;
+            std::vector<Vector2> texcoords;
+            for (const auto& [s, t] : Corners)
+            {
+                const float source[3] = {s, t, 1.0F};
+                float axis[3]{};
+                for (std::size_t j = 0; j < 3; ++j)
+                {
+                    const std::int32_t k = StToVec[side][j];
+                    axis[j] = k < 0 ? -source[-k - 1] : source[k - 1];
+                }
+                const Vector3 q3(
+                    centre.X + axis[0] * half.X,
+                    centre.Y + axis[1] * half.Y,
+                    centre.Z + axis[2] * half.Z);
+                points.push_back(ToWorld(q3, unit));
+                texcoords.emplace_back(
+                    (s + 1.0F) * 0.5F * static_cast<float>(width),
+                    (1.0F - (t + 1.0F) * 0.5F) * static_cast<float>(height));
+            }
+            // Seen from inside: wound counter-clockwise towards the centre.
+            const Vector3 faceCentre = Divide(
+                Add(Add(points[0], points[1]), Add(points[2], points[3])), 4.0F);
+            const Vector3 inward = Subtract(centreWorld, faceCentre).Normalized();
+            const Vector3 winding = Vector3::Cross(
+                Subtract(points[1], points[0]), Subtract(points[2], points[0]));
+            if (Vector3::Dot(winding, inward) < 0.0F)
+            {
+                std::reverse(points.begin(), points.end());
+                std::reverse(texcoords.begin(), texcoords.end());
+            }
+            auto pointArray = std::make_unique<ManagedArray<Vector3>>(points.size());
+            auto texcoordArray = std::make_unique<ManagedArray<Vector2>>(texcoords.size());
+            for (std::size_t i = 0; i < points.size(); ++i)
+            {
+                (*pointArray)[i] = points[i];
+                (*texcoordArray)[i] = texcoords[i];
+            }
+            auto face = std::make_unique<BuiltFace>(
+                std::move(pointArray), std::move(texcoordArray), inward, material, Shade(1.0F, true));
+            face->Sky = true;
+            map->Faces().push_back(map->OwnFace(std::move(face)));
+        }
+    }
+
     void Q3Import::ProjectSky(BuiltFace* face, float texelsPerUnit)
     {
         ManagedArray<Vector3>* points = FacePoints(face);
@@ -1002,12 +1209,19 @@ namespace MphRead::Mods::MapGen
             auto archivePaths = std::make_shared<
                 std::vector<std::optional<std::string>>>();
             archivePaths->push_back(*level);
+            for (std::string& pak : import->ResolveTexturePaks())
+            {
+                archivePaths->push_back(std::move(pak));
+            }
 
             std::shared_ptr<MapTextureBake::Result> result
                 = MapTextureBake::Bake(
                     bsp,
                     archivePaths,
-                    std::optional<std::string>(target));
+                    std::optional<std::string>(target),
+                    MapTextureBake::DefaultSize,
+                    true,
+                    &import->TextureAliases());
             if (!result)
             {
                 throw System::NullReferenceException();
@@ -1547,6 +1761,17 @@ namespace MphRead::Mods::MapGen
             Vector3,
             Q3StringHash,
             Q3StringEqual> targets;
+        std::unordered_map<
+            std::string,
+            float,
+            Q3StringHash,
+            Q3StringEqual> targetAngles;
+        // The same targets in Quake's own units and axes, for the pads.
+        std::unordered_map<
+            std::string,
+            Vector3,
+            Q3StringHash,
+            Q3StringEqual> q3Targets;
 
         for (const std::shared_ptr<Q3Entity>& entityValue : bsp->Entities())
         {
@@ -1557,13 +1782,22 @@ namespace MphRead::Mods::MapGen
                 = EntityValue(entity, "origin");
             if (name != nullptr && origin != nullptr)
             {
-                targets[*name] = ToWorld(
-                    ParseVector(*origin).get(),
-                    import->UnitsPerUnit());
+                const std::shared_ptr<std::vector<float>> raw = ParseVector(*origin);
+                targets[*name] = ToWorld(raw.get(), import->UnitsPerUnit());
+                q3Targets[*name] = Vector3(
+                    ManagedAt(raw.get(), 0), ManagedAt(raw.get(), 1), ManagedAt(raw.get(), 2));
+                float angle = 0.0F;
+                const std::string* value = EntityValue(entity, "angle");
+                if (value != nullptr)
+                {
+                    (void)::MphRead::NativeRuntime::SingleTryParseInvariant(*value, angle);
+                }
+                targetAngles[*name] = angle;
             }
         }
 
         std::int32_t pads = 0;
+        std::int32_t teleporters = 0;
         std::int32_t items = 0;
         for (const std::shared_ptr<Q3Entity>& entityValue : bsp->Entities())
         {
@@ -1672,9 +1906,82 @@ namespace MphRead::Mods::MapGen
                 pad->Position(std::make_shared<std::vector<float>>(
                     std::initializer_list<float>{
                         centre.X, centre.Y, centre.Z}));
+                // The level draws its own pad (launchpad_diamond and the
+                // like, plain surfaces of the .bsp), so the cartridge's pad
+                // and beam stay off: JumpPadEntity::HiddenModelId.
+                pad->ModelId(0xFFFFFFFFU);
+
+                // Quake aims a pad at the top of its arc, not at where it
+                // lands (g_mover's AimAtTarget): the target is often over
+                // the void, with the platform it throws you onto further
+                // on. So the launch is Quake's own, from the volume's centre,
+                // with its speed scaled by the root of the gravity ratio --
+                // the same path under this game's gravity, only slower --
+                // and the target kept is where that path comes down, for the
+                // bots' routes.
+                const std::vector<float>& q3Min = RequireReference(volume->Mins());
+                const std::vector<float>& q3Max = RequireReference(volume->Maxs());
+                const Vector3 q3Origin(
+                    (q3Min[0] + q3Max[0]) / 2.0F,
+                    (q3Min[1] + q3Max[1]) / 2.0F,
+                    (q3Min[2] + q3Max[2]) / 2.0F);
+                // A trigger often reaches into the floor; the pad stands on
+                // the floor, where a bot has to walk to.
+                if (const std::optional<float> padFloor
+                        = Q3Floor(bsp, q3Origin.X, q3Origin.Y, q3Max[2]);
+                    padFloor && *padFloor >= q3Min[2] - 1.0F)
+                {
+                    pad->Position(std::make_shared<std::vector<float>>(
+                        std::initializer_list<float>{
+                            centre.X, *padFloor / import->UnitsPerUnit(), centre.Z}));
+                }
+                const Vector3 apex = q3Targets[*target];
+                constexpr float Q3Gravity = 800.0F;
+                const float height = apex.Z - q3Origin.Z;
+                Vector3 landing = destination;
+                if (height > 0.0F)
+                {
+                    const float time = std::sqrt(height / (0.5F * Q3Gravity));
+                    const float dx = apex.X - q3Origin.X;
+                    const float dy = apex.Y - q3Origin.Y;
+                    const Vector3 velocity(dx / time, dy / time, time * Q3Gravity);
+
+                    const float unit = import->UnitsPerUnit();
+                    constexpr float Gravity = 77.0F / 4096.0F;
+                    const float q3GravityPerFrame = Q3Gravity / unit / 900.0F;
+                    const float scale = std::sqrt(Gravity / q3GravityPerFrame);
+                    const Vector3 world(velocity.X, velocity.Z, -velocity.Y);
+                    const float length = std::sqrt(
+                        world.X * world.X + world.Y * world.Y + world.Z * world.Z);
+                    pad->Vector(std::make_shared<std::vector<float>>(
+                        std::initializer_list<float>{
+                            world.X / length, world.Y / length, world.Z / length}));
+                    pad->Speed(length / unit / 30.0F * scale);
+
+                    // Down the arc in sixtieths of a second until it passes
+                    // below the floor under it.
+                    for (std::int32_t step = 1; step < 60 * 12; ++step)
+                    {
+                        const float t = static_cast<float>(step) / 60.0F;
+                        const Vector3 at(
+                            q3Origin.X + velocity.X * t,
+                            q3Origin.Y + velocity.Y * t,
+                            q3Origin.Z + velocity.Z * t - 0.5F * Q3Gravity * t * t);
+                        if (velocity.Z - Q3Gravity * t > 0.0F)
+                        {
+                            continue;
+                        }
+                        const std::optional<float> floor = Q3Floor(bsp, at.X, at.Y, at.Z + 32.0F);
+                        if (floor && at.Z <= *floor)
+                        {
+                            landing = ToWorld(Vector3(at.X, at.Y, *floor), unit);
+                            break;
+                        }
+                    }
+                }
                 pad->Target(std::make_shared<std::vector<float>>(
                     std::initializer_list<float>{
-                        destination.X, destination.Y, destination.Z}));
+                        landing.X, landing.Y, landing.Z}));
                 pad->Size(std::make_shared<std::vector<float>>(
                     std::initializer_list<float>{
                         MathMax(upper.X - lower.X, 0.8F),
@@ -1682,6 +1989,78 @@ namespace MphRead::Mods::MapGen
                         MathMax(upper.Z - lower.Z, 0.8F)}));
                 jumpPads->push_back(std::move(pad));
                 pads = UncheckedAdd(pads, 1);
+            }
+            else if (StringEqualsOrdinalIgnoreCase(
+                *classname, "trigger_teleport"))
+            {
+                // A brush volume in Quake; here the cartridge's teleporter
+                // pad, stood on the floor of that volume at its centre, which
+                // sends you to the destination's floor facing its angle.
+                // Spawnflag 1 is a spectators-only teleporter.
+                const std::string* model = EntityValue(entity, "model");
+                const std::string* target = EntityValue(entity, "target");
+                const std::string* spawnflags = EntityValue(entity, "spawnflags");
+                std::int32_t flags = 0;
+                if (spawnflags != nullptr)
+                {
+                    (void)Int32TryParseCurrentCulture(*spawnflags, flags);
+                }
+                if (model == nullptr
+                    || !::MphRead::NativeRuntime::StringStartsWithCurrentCulture(*model, "*")
+                    || target == nullptr
+                    || (flags & 1) != 0)
+                {
+                    continue;
+                }
+                const auto targetIterator = targets.find(*target);
+                std::int32_t modelIndex = 0;
+                if (targetIterator == targets.end()
+                    || !Int32TryParseCurrentCulture(std::string_view(*model).substr(1), modelIndex)
+                    || modelIndex < 0
+                    || static_cast<std::size_t>(modelIndex) >= bsp->Models().size())
+                {
+                    continue;
+                }
+                Q3Model* volume
+                    = &RequireReference(ManagedListAt(bsp->Models(), modelIndex));
+                const Vector3 min = ToWorld(
+                    &RequireReference(volume->Mins()),
+                    import->UnitsPerUnit());
+                const Vector3 max = ToWorld(
+                    &RequireReference(volume->Maxs()),
+                    import->UnitsPerUnit());
+                const Vector3 lower = ComponentMin(min, max);
+                const Vector3 upper = ComponentMax(min, max);
+                const Vector3 destination = targetIterator->second;
+
+                MapDefinition::TeleporterList* list = def->Teleporters();
+                if (list == nullptr)
+                {
+                    throw System::NullReferenceException();
+                }
+                const std::vector<float>& q3Min = RequireReference(volume->Mins());
+                const std::vector<float>& q3Max = RequireReference(volume->Maxs());
+                float floorY = lower.Y;
+                if (const std::optional<float> floor = Q3Floor(bsp,
+                        (q3Min[0] + q3Max[0]) / 2.0F, (q3Min[1] + q3Max[1]) / 2.0F, q3Max[2]);
+                    floor && *floor >= q3Min[2] - 1.0F)
+                {
+                    floorY = *floor / import->UnitsPerUnit();
+                }
+                auto teleporter = std::make_shared<MapTeleporter>();
+                teleporter->Position(std::make_shared<std::vector<float>>(
+                    std::initializer_list<float>{
+                        (lower.X + upper.X) / 2.0F,
+                        floorY,
+                        (lower.Z + upper.Z) / 2.0F}));
+                teleporter->Target(std::make_shared<std::vector<float>>(
+                    std::initializer_list<float>{
+                        destination.X,
+                        destination.Y - 24.0F / import->UnitsPerUnit(),
+                        destination.Z}));
+                teleporter->Yaw(90.0F + targetAngles[*target]);
+                list->push_back(std::move(teleporter));
+                teleporters = UncheckedAdd(teleporters, 1);
             }
         }
 
@@ -1726,12 +2105,18 @@ namespace MphRead::Mods::MapGen
             WriteLine("  "
                 + Runtime::ToString(static_cast<std::int32_t>(spawns->size()))
                 + " spawns, " + Runtime::ToString(pads)
-                + " jump pads, "
+                + " jump pads, " + Runtime::ToString(teleporters)
+                + " teleporters, "
                 + Runtime::ToString(static_cast<std::int32_t>(mapItems->size()))
                 + " items" + note);
         }
 
         MapBuilder::AddEntities(map, def);
+    }
+
+    std::optional<float> Q3Import::Floor(Q3Bsp* bsp, float x, float y, float z)
+    {
+        return Q3Floor(&RequireReference(bsp), x, y, z);
     }
 
     // The level's pickups, in world units: one definition of what counts as
@@ -1779,8 +2164,8 @@ namespace MphRead::Mods::MapGen
         if (equal("weapon_shotgun")) return ItemType::Battlehammer;
         if (equal("weapon_grenadelauncher")) return ItemType::Judicator;
         if (equal("weapon_bfg")) return ItemType::OmegaCannon;
-        if (equal("item_quad")) return ItemType::DoubleDamage;
-        if (equal("item_invis")) return ItemType::Cloak;
+        // item_quad and item_invis are left out like every other powerup:
+        // custom maps carry none.
         if (equal("item_health")) return ItemType::HealthMedium;
         if (equal("item_health_small")) return ItemType::HealthSmall;
         if (equal("item_health_large")) return ItemType::HealthBig;

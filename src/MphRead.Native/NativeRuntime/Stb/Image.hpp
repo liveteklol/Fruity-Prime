@@ -37,4 +37,10 @@ namespace MphRead::NativeRuntime
     // bytes are not a PNG this decoder understands.
     [[nodiscard]] Image LoadPng(
         const std::vector<std::uint8_t>& bytes, std::int32_t desiredComponents);
+
+    // PNG through LoadPng, JPEG and TGA through stb_image (ImageDecode.cpp):
+    // what a Quake 3 level's textures are made of. An empty image for
+    // anything else.
+    [[nodiscard]] Image LoadImage(
+        const std::vector<std::uint8_t>& bytes, std::int32_t desiredComponents);
 }

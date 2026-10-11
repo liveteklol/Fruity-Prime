@@ -557,6 +557,7 @@ namespace MphRead::Mods::MapGen
         static constexpr std::int32_t SurfaceNoDraw = 0x80;
         static constexpr std::int32_t SurfaceHint = 0x100;
         static constexpr std::int32_t SurfaceSkip = 0x200;
+        static constexpr std::int32_t SurfaceNoLightmap = 0x400;
 
         static const Q3UsedLumps UsedLumps;
 

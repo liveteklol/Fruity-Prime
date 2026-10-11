@@ -1,0 +1,250 @@
+{
+  "//": "rundm17 (DeFRaG run map of q3dm17 by Biotrix) made deathmatch: its eight armour shards, plus weapons, health and armour on every platform. No powerups. Used by tools/convert-q3-map.sh -overlay.",
+  "inGameName": "The Longest Yard (run)",
+  "pointLimit": 10,
+  "items": [
+    {
+      "position": [
+        19.2,
+        9.71,
+        -1.83
+      ],
+      "type": "UASmall",
+      "hasBase": false
+    },
+    {
+      "position": [
+        -16.46,
+        16.91,
+        31.09
+      ],
+      "type": "UASmall",
+      "hasBase": false
+    },
+    {
+      "position": [
+        -16.46,
+        16.91,
+        -34.74
+      ],
+      "type": "UASmall",
+      "hasBase": false
+    },
+    {
+      "position": [
+        8.23,
+        9.83,
+        -19.2
+      ],
+      "type": "UASmall",
+      "hasBase": false
+    },
+    {
+      "position": [
+        2.74,
+        0.46,
+        -18.29
+      ],
+      "type": "UASmall",
+      "hasBase": false
+    },
+    {
+      "position": [
+        8.23,
+        9.83,
+        15.54
+      ],
+      "type": "UASmall",
+      "hasBase": false
+    },
+    {
+      "position": [
+        2.74,
+        0.46,
+        14.63
+      ],
+      "type": "UASmall",
+      "hasBase": false
+    },
+    {
+      "position": [
+        3.66,
+        37.03,
+        -1.83
+      ],
+      "type": "UASmall",
+      "hasBase": false
+    },
+    {
+      "position": [
+        67.89,
+        6.06,
+        -1.71
+      ],
+      "type": "Imperialist",
+      "hasBase": true
+    },
+    {
+      "position": [
+        7.54,
+        37.03,
+        -1.71
+      ],
+      "type": "Imperialist",
+      "hasBase": true
+    },
+    {
+      "position": [
+        25.71,
+        0.46,
+        -1.71
+      ],
+      "type": "Magmaul",
+      "hasBase": true
+    },
+    {
+      "position": [
+        -5.26,
+        0.46,
+        -1.71
+      ],
+      "type": "Magmaul",
+      "hasBase": true
+    },
+    {
+      "position": [
+        8.23,
+        9.83,
+        -21.71
+      ],
+      "type": "VoltDriver",
+      "hasBase": true
+    },
+    {
+      "position": [
+        8.23,
+        9.83,
+        18.06
+      ],
+      "type": "VoltDriver",
+      "hasBase": true
+    },
+    {
+      "position": [
+        -14.4,
+        16.91,
+        -29.14
+      ],
+      "type": "ShockCoil",
+      "hasBase": true
+    },
+    {
+      "position": [
+        5.71,
+        7.77,
+        -20.0
+      ],
+      "type": "Judicator",
+      "hasBase": true
+    },
+    {
+      "position": [
+        -5.71,
+        5.94,
+        -20.0
+      ],
+      "type": "Battlehammer",
+      "hasBase": true
+    },
+    {
+      "position": [
+        -5.71,
+        5.94,
+        16.0
+      ],
+      "type": "Battlehammer",
+      "hasBase": true
+    },
+    {
+      "position": [
+        5.71,
+        37.03,
+        -3.43
+      ],
+      "type": "HealthBig",
+      "hasBase": true
+    },
+    {
+      "position": [
+        21.71,
+        9.71,
+        -1.71
+      ],
+      "type": "UABig",
+      "hasBase": true
+    },
+    {
+      "position": [
+        69.71,
+        6.06,
+        -1.71
+      ],
+      "type": "MissileBig",
+      "hasBase": true
+    },
+    {
+      "position": [
+        17.14,
+        0.46,
+        -1.71
+      ],
+      "type": "HealthMedium",
+      "hasBase": true
+    },
+    {
+      "position": [
+        -2.86,
+        9.83,
+        -25.71
+      ],
+      "type": "HealthMedium",
+      "hasBase": true
+    },
+    {
+      "position": [
+        -2.86,
+        9.83,
+        22.29
+      ],
+      "type": "HealthMedium",
+      "hasBase": true
+    },
+    {
+      "position": [
+        -14.4,
+        16.91,
+        29.37
+      ],
+      "type": "MissileSmall",
+      "hasBase": true
+    },
+    {
+      "position": [
+        -3.43,
+        5.94,
+        -18.17
+      ],
+      "type": "HealthSmall",
+      "hasBase": false
+    },
+    {
+      "position": [
+        -3.43,
+        5.94,
+        18.4
+      ],
+      "type": "HealthSmall",
+      "hasBase": false
+    }
+  ]
+}
