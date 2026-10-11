@@ -426,7 +426,7 @@ namespace MphRead::Qt
         // costs is part of what it means, and a warning that appears as it is
         // ticked reads as something having gone wrong.
         rows.push_back(NoteRow(QStringLiteral(
-            "On: a borderless fullscreen window, drawn through the desktop compositor (DWM), which adds "
+            "On: a borderless fullscreen window, drawn through the desktop compositor, which adds "
             "display latency. Off: exclusive fullscreen, the lowest latency."),
             QColor(0xc0, 0x8a, 0x3e))); // Theme.warn
 #endif
