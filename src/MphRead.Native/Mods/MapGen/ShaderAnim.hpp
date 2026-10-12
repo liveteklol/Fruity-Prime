@@ -64,6 +64,9 @@ namespace MphRead::Mods::MapGen::ShaderAnim
         // animMap: frames a second and how many.
         float FrameRate = 0.0F;
         std::int32_t FrameCount = 0;
+        // A sky's base drawn as Quake's cloud layers (skyparms' cloudheight):
+        // over a dome that high, not over the level's sky surfaces.
+        float CloudHeight = 0.0F;
 
         [[nodiscard]] bool Animated() const;
         [[nodiscard]] bool MovesTexcoords() const;

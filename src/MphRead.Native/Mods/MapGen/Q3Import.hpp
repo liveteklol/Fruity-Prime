@@ -223,6 +223,17 @@ namespace MphRead::Mods::MapGen
 
         // The six sides of a Quake sky box as a box of drawn faces spanning
         // [min, max] (Quake units and axes), each side its own material.
+        // Quake's cloud sky (tr_sky.c): a box round the level, each side cut
+        // 8 by 8, its texcoords where the view through each point meets a
+        // dome cloudHeight high; the base and then each layer over it.
+        static void AddCloudBox(
+            BuiltMap* map,
+            OpenTK::Mathematics::Vector3 min,
+            OpenTK::Mathematics::Vector3 max,
+            float unit,
+            float cloudHeight,
+            const std::vector<std::int32_t>& materials,
+            const std::vector<std::pair<std::int32_t, std::int32_t>>& textureSizes);
         static void AddSkyBox(
             BuiltMap* map,
             OpenTK::Mathematics::Vector3 min,

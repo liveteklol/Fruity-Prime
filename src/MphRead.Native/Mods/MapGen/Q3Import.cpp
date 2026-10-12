@@ -376,6 +376,9 @@ namespace MphRead::Mods::MapGen
             }
         }
         std::int32_t layerFaces = 0;
+        // A cloud sky's base and layers, and its dome's height.
+        std::vector<std::int32_t> cloudMaterials;
+        float cloudHeight = 0.0F;
 
         // The brush models that move (Q3Movers::IsMover), by face.
         std::vector<std::int32_t> faceMover(bsp->Faces().size(), -1);
@@ -513,6 +516,39 @@ namespace MphRead::Mods::MapGen
             }
             const auto [width, height]
                 = textureSizes[static_cast<std::size_t>(material)];
+
+            // A cloud sky: only where it goes; the dome is built after.
+            if (sky && pack != nullptr && !skyBox)
+            {
+                const ShaderAnim::EntryMeta meta = ShaderAnim::Decode(
+                    pack->Entries()[static_cast<std::size_t>(material)].Meta());
+                if (meta.CloudHeight > 0.0F)
+                {
+                    if (cloudMaterials.empty())
+                    {
+                        cloudHeight = meta.CloudHeight;
+                        cloudMaterials.push_back(material);
+                        if (const auto layered = layersOf.find(face->Texture()); layered != layersOf.end())
+                        {
+                            for (const LayerUse& use : layered->second)
+                            {
+                                cloudMaterials.push_back(use.Material);
+                            }
+                        }
+                    }
+                    for (std::int32_t i = face->Vertex();
+                        i < UncheckedAdd(face->Vertex(), face->VertexCount());
+                        i = UncheckedAdd(i, 1))
+                    {
+                        const std::vector<float>& position = RequireReference(
+                            RequireReference(ManagedListAt(bsp->Vertices(), i)).Position());
+                        const Vector3 point(position[0], position[1], position[2]);
+                        skyMin = ComponentMin(skyMin, point);
+                        skyMax = ComponentMax(skyMax, point);
+                    }
+                    continue;
+                }
+            }
 
             const bool patch = face->Type() == 2;
             if (patch)
@@ -678,6 +714,10 @@ namespace MphRead::Mods::MapGen
         if (skyBox && skyMin.X <= skyMax.X)
         {
             AddSkyBox(map.get(), skyMin, skyMax, unit, skyMaterials, textureSizes);
+        }
+        else if (!cloudMaterials.empty() && skyMin.X <= skyMax.X)
+        {
+            AddCloudBox(map.get(), skyMin, skyMax, unit, cloudHeight, cloudMaterials, textureSizes);
         }
         if (verbose && portalFaces > 0)
         {
@@ -1851,6 +1891,109 @@ namespace MphRead::Mods::MapGen
         }
 
         return made;
+    }
+
+    void Q3Import::AddCloudBox(
+        BuiltMap* map,
+        Vector3 min,
+        Vector3 max,
+        float unit,
+        float cloudHeight,
+        const std::vector<std::int32_t>& materials,
+        const std::vector<std::pair<std::int32_t, std::int32_t>>& textureSizes)
+    {
+        // The same sides as AddSkyBox (tr_sky.c's st_to_vec).
+        static constexpr std::array<std::array<std::int32_t, 3>, 6> StToVec{{
+            {{3, -1, 2}}, {{-3, 1, 2}}, {{1, 3, 2}}, {{-1, -3, 2}}, {{-2, -1, 3}}, {{2, -1, -3}}
+        }};
+        constexpr std::int32_t Cells = 8;
+        constexpr float Radius = 4096.0F;
+        const Vector3 centre = Divide(Add(min, max), 2.0F);
+        const Vector3 half = Divide(Subtract(max, min), 2.0F);
+        const Vector3 centreWorld = ToWorld(centre, unit);
+        // R_InitSkyTexCoords: the view along `d` meets a sphere of radius
+        // 4096 + cloudHeight centred 4096 below the eye; s and t are the
+        // angles of that point.
+        const auto cloud = [&](float sx, float tx, std::size_t side)
+        {
+            const float source[3] = {sx, tx, 1.0F};
+            float d[3]{};
+            for (std::size_t j = 0; j < 3; ++j)
+            {
+                const std::int32_t k = StToVec[side][j];
+                d[j] = k < 0 ? -source[-k - 1] : source[k - 1];
+            }
+            const float length2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+            const float h = cloudHeight;
+            const float p = (-2.0F * d[2] * Radius + 2.0F * std::sqrt(d[2] * d[2] * Radius * Radius
+                + length2 * (2.0F * Radius * h + h * h))) / (2.0F * length2);
+            float v[3] = {d[0] * p, d[1] * p, d[2] * p + Radius};
+            const float norm = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+            for (float& c : v)
+            {
+                c /= norm;
+            }
+            const float pi = 3.14159265358979F;
+            return std::array<float, 5>{
+                std::acos(std::clamp(v[0], -1.0F, 1.0F)) / pi,
+                std::acos(std::clamp(v[1], -1.0F, 1.0F)) / pi,
+                d[0], d[1], d[2]};
+        };
+        for (std::size_t layer = 0; layer < materials.size(); ++layer)
+        {
+            const std::int32_t material = materials[layer];
+            if (material < 0 || static_cast<std::size_t>(material) >= textureSizes.size())
+            {
+                continue;
+            }
+            const auto [width, height] = textureSizes[static_cast<std::size_t>(material)];
+            for (std::size_t side = 0; side < StToVec.size(); ++side)
+            {
+                for (std::int32_t row = 0; row < Cells; ++row)
+                {
+                    for (std::int32_t column = 0; column < Cells; ++column)
+                    {
+                        std::vector<Vector3> points;
+                        std::vector<Vector2> texcoords;
+                        for (const auto& [ds, dt] : std::array<std::array<std::int32_t, 2>, 4>{{
+                                 {{0, 0}}, {{1, 0}}, {{1, 1}}, {{0, 1}}}})
+                        {
+                            const float s = -1.0F + 2.0F * static_cast<float>(column + ds) / Cells;
+                            const float t = -1.0F + 2.0F * static_cast<float>(row + dt) / Cells;
+                            const auto at = cloud(s, t, side);
+                            points.push_back(ToWorld(Vector3(
+                                centre.X + at[2] * half.X,
+                                centre.Y + at[3] * half.Y,
+                                centre.Z + at[4] * half.Z), unit));
+                            texcoords.emplace_back(at[0] * static_cast<float>(width), at[1] * static_cast<float>(height));
+                        }
+                        const Vector3 faceCentre = Divide(
+                            Add(Add(points[0], points[1]), Add(points[2], points[3])), 4.0F);
+                        const Vector3 inward = Subtract(centreWorld, faceCentre).Normalized();
+                        const Vector3 winding = Vector3::Cross(
+                            Subtract(points[1], points[0]), Subtract(points[2], points[0]));
+                        if (Vector3::Dot(winding, inward) < 0.0F)
+                        {
+                            std::reverse(points.begin(), points.end());
+                            std::reverse(texcoords.begin(), texcoords.end());
+                        }
+                        auto pointArray = std::make_unique<ManagedArray<Vector3>>(points.size());
+                        auto texcoordArray = std::make_unique<ManagedArray<Vector2>>(texcoords.size());
+                        for (std::size_t i = 0; i < points.size(); ++i)
+                        {
+                            (*pointArray)[i] = points[i];
+                            (*texcoordArray)[i] = texcoords[i];
+                        }
+                        auto face = std::make_unique<BuiltFace>(
+                            std::move(pointArray), std::move(texcoordArray), inward, material, Shade(1.0F, true));
+                        face->Sky = true;
+                        face->Overlay = layer > 0;
+                        face->Colors.assign(points.size(), Vector3(1.0F, 1.0F, 1.0F));
+                        map->Faces().push_back(map->OwnFace(std::move(face)));
+                    }
+                }
+            }
+        }
     }
 
     void Q3Import::AddSkyBox(

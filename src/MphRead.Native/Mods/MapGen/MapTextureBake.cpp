@@ -271,6 +271,8 @@ namespace
         std::string FirstMap;
         std::string EditorImage;
         std::string SkyBase;
+        // skyparms' cloud height: Quake's 512 when it says "-".
+        float CloudHeight = 512.0F;
         // cull none (or disable, twosided).
         bool TwoSided = false;
         // fogparms: red, green, blue and the depth it is opaque at.
@@ -664,6 +666,11 @@ namespace
                         if (value != nullptr && *value != "-")
                         {
                             script.SkyBase = *value;
+                        }
+                        if (const std::string* height = argument(i, 2); height != nullptr)
+                        {
+                            const float cloud = static_cast<float>(std::atof(height->c_str()));
+                            script.CloudHeight = cloud > 0.0F ? cloud : 512.0F;
                         }
                     }
                     else if (depth == 2
@@ -1668,6 +1675,23 @@ namespace MphRead::Mods::MapGen
             }
             const ShaderScript& script = found->second;
             const ShaderPlan plan = MakePlan(script);
+            // A sky drawn by its box (six images) does not move here; one
+            // without a box is Quake's cloud layers, scrolling over a dome
+            // (Q3Import::AddCloudBox).
+            const bool sky = (flags & Q3Bsp::SurfaceSky) != 0;
+            if (sky)
+            {
+                bool box = false;
+                for (std::string_view extension : Extensions)
+                {
+                    box = box || (!script.SkyBase.empty()
+                        && FindFile(files, script.SkyBase + "_" + std::string(SkyBoxSuffixes[0]) + std::string(extension)) != nullptr);
+                }
+                if (box || !plan.Animated || plan.Translucent)
+                {
+                    return false;
+                }
+            }
             // A glow added after the lightmap (base x lightmap + glow): Quake
             // never darkens it, so it is not baked into the lit base but laid
             // over it unlit -- the bright strips of a light fitting.
@@ -1727,6 +1751,10 @@ namespace MphRead::Mods::MapGen
             SA::EntryMeta baseMeta;
             baseMeta.Of = index;
             baseMeta.TwoSided = script.TwoSided;
+            if (sky)
+            {
+                baseMeta.CloudHeight = script.CloudHeight;
+            }
             if (plan.Translucent)
             {
                 encode(*baseImage, NativeSide(baseImage->Width), NativeSide(baseImage->Height),
@@ -1784,7 +1812,7 @@ namespace MphRead::Mods::MapGen
         }
         for (const auto& [index, name, flags] : used)
         {
-            if ((flags & Q3Bsp::SurfaceSky) == 0 && bakeAnimated(index, name, flags))
+            if (bakeAnimated(index, name, flags))
             {
                 continue;
             }

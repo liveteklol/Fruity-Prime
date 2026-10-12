@@ -112,6 +112,11 @@ namespace MphRead::Mods::MapGen::ShaderAnim
             + ";lit=" + (meta.Lit ? "1" : "0")
             + ";clamp=" + (meta.Clamp ? "1" : "0")
             + ";sides=" + (meta.TwoSided ? "2" : "1");
+        if (meta.CloudHeight > 0.0F)
+        {
+            out += ";cloud=";
+            Put(out, meta.CloudHeight);
+        }
         if (!meta.TcMods.empty())
         {
             out += ";tc=";
@@ -175,6 +180,7 @@ namespace MphRead::Mods::MapGen::ShaderAnim
             else if (key == "clamp") meta.Clamp = value == "1";
             else if (key == "sides") meta.TwoSided = value == "2";
             else if (key == "frames") meta.FrameCount = GetInt(value);
+            else if (key == "cloud") meta.CloudHeight = Get(value);
             else if (key == "fps") meta.FrameRate = Get(value);
             else if (key == "fade") meta.Fade = GetWave(Split(value, ','), 0);
             else if (key == "tc")
