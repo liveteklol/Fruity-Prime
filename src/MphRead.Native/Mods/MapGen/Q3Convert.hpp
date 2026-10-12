@@ -22,7 +22,7 @@ namespace MphRead::Mods::MapGen
 
         // Bumped whenever a translated level comes out differently, so the
         // rooms already built from one are built again (CustomRooms).
-        static constexpr std::int32_t TranslatorVersion = 22;
+        static constexpr std::int32_t TranslatorVersion = 23;
 
         // A Quake 3 level (mapName, one of Q3Bsp::ListMaps) inside a .pk3 or
         // .zip, read as it is: a room whose geometry, art, pickups, starts,

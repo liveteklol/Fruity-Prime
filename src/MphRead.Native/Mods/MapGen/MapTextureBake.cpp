@@ -1668,7 +1668,17 @@ namespace MphRead::Mods::MapGen
             }
             const ShaderScript& script = found->second;
             const ShaderPlan plan = MakePlan(script);
-            if (plan.Base < 0 || !plan.Animated)
+            // A glow added after the lightmap (base x lightmap + glow): Quake
+            // never darkens it, so it is not baked into the lit base but laid
+            // over it unlit -- the bright strips of a light fitting.
+            const auto glowsUnlit = [&](std::int32_t stage, bool lit)
+            {
+                return !lit && (flags & Q3Bsp::SurfaceNoLightmap) == 0
+                    && BlendOf(script.Stages[static_cast<std::size_t>(stage)]) == StageBlend::Add;
+            };
+            const bool glow = !plan.Translucent && std::any_of(plan.Layers.begin(), plan.Layers.end(),
+                [&](const auto& layer) { return glowsUnlit(layer.first, layer.second); });
+            if (plan.Base < 0 || (!plan.Animated && !glow))
             {
                 return false;
             }
@@ -1678,7 +1688,8 @@ namespace MphRead::Mods::MapGen
             std::vector<std::pair<std::int32_t, bool>> moving;
             for (const auto& [stage, lit] : plan.Layers)
             {
-                if (!baseMoves && !Moves(script.Stages[static_cast<std::size_t>(stage)]))
+                if (!baseMoves && !Moves(script.Stages[static_cast<std::size_t>(stage)])
+                    && !glowsUnlit(stage, lit))
                 {
                     still.push_back(stage);
                 }
