@@ -1555,19 +1555,23 @@ namespace MphRead::Formats::Collision
                 header.DataIndexOffset,
                 header.DataIndexCount);
 
+        // The lists are held by name: a range-for over *DoOffsets(...) would
+        // walk a vector its temporary shared_ptr has already freed.
         auto entries = std::make_shared<std::vector<CollisionEntry>>();
         if (::MphRead::MarshalExtensions::MarshalUtf8(header.Type) == "wc32")
         {
-            for (const RawCollisionEntry32& raw : *Read::DoOffsets<RawCollisionEntry32>(
-                     bytes, header.EntryOffset, header.EntryCount))
+            const auto raws = Read::DoOffsets<RawCollisionEntry32>(
+                bytes, header.EntryOffset, header.EntryCount);
+            for (const RawCollisionEntry32& raw : *raws)
             {
                 entries->emplace_back(static_cast<std::uint16_t>(raw.DataCount), raw.DataStartIndex);
             }
         }
         else
         {
-            for (const RawCollisionEntry& raw : *Read::DoOffsets<RawCollisionEntry>(
-                     bytes, header.EntryOffset, header.EntryCount))
+            const auto raws = Read::DoOffsets<RawCollisionEntry>(
+                bytes, header.EntryOffset, header.EntryCount);
+            for (const RawCollisionEntry& raw : *raws)
             {
                 entries->emplace_back(raw.DataCount, raw.DataStartIndex);
             }

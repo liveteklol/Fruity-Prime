@@ -12,6 +12,7 @@
 #include "MapTextureBake.hpp"
 #include "MapTexturePack.hpp"
 #include "Q3Bsp.hpp"
+#include "ShaderAnim.hpp"
 #include "../../Formats/Types.hpp"
 #include "../../NativeRuntime/System/Console.hpp"
 #include "../../NativeRuntime/System/Encoding.hpp"
@@ -24,6 +25,8 @@
 #include <algorithm>
 #include <array>
 #include <functional>
+#include <unordered_map>
+#include <unordered_set>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -334,6 +337,44 @@ namespace MphRead::Mods::MapGen
             std::numeric_limits<float>::lowest(),
             std::numeric_limits<float>::lowest());
 
+        // A moving shader's layers (MapTextureBake, ShaderAnim), each laid
+        // over its faces as a decal, in order; and the shaders drawn by
+        // brightness alone -- a flame -- which no light falls on.
+        struct LayerUse
+        {
+            std::int32_t Order = 0;
+            std::int32_t Material = 0;
+            bool Lit = true;
+        };
+        std::unordered_map<std::int32_t, std::vector<LayerUse>> layersOf;
+        std::unordered_set<std::int32_t> glowing;
+        if (pack != nullptr)
+        {
+            for (std::size_t e = 0; e < pack->Entries().size(); ++e)
+            {
+                const std::string& text = pack->Entries()[e].Meta();
+                if (text.empty())
+                {
+                    continue;
+                }
+                const ShaderAnim::EntryMeta meta = ShaderAnim::Decode(text);
+                if (meta.Role == "layer")
+                {
+                    layersOf[meta.Of].push_back(LayerUse{meta.Order, static_cast<std::int32_t>(e), meta.Lit});
+                }
+                else if (meta.Role == "base" && meta.Blend == "add")
+                {
+                    glowing.insert(meta.Of);
+                }
+            }
+            for (auto& [texture, uses] : layersOf)
+            {
+                std::sort(uses.begin(), uses.end(),
+                    [](const LayerUse& left, const LayerUse& right) { return left.Order < right.Order; });
+            }
+        }
+        std::int32_t layerFaces = 0;
+
         std::int32_t skipped = 0;
         std::int32_t patches = 0;
         std::int32_t patchTriangles = 0;
@@ -465,10 +506,12 @@ namespace MphRead::Mods::MapGen
                     bsp.get(), face, unit, width, height,
                     material, sky, &lighting);
 
+            std::vector<BuiltFace*> madeFaces;
             for (BuiltFace* built : builtFaces)
             {
                 std::unique_ptr<BuiltFace> builtOwner(built);
                 built = map->OwnFace(std::move(builtOwner));
+                madeFaces.push_back(built);
                 if (sky)
                 {
                     ProjectSky(
@@ -500,6 +543,56 @@ namespace MphRead::Mods::MapGen
                     map->Solid().push_back(built);
                 }
             }
+
+            if (!sky && glowing.contains(face->Texture()))
+            {
+                for (BuiltFace* built : madeFaces)
+                {
+                    built->Colors.assign(FacePoints(built)->Length(), Vector3(1.0F, 1.0F, 1.0F));
+                }
+            }
+            const auto layered = sky ? layersOf.end() : layersOf.find(face->Texture());
+            if (layered != layersOf.end())
+            {
+                for (const LayerUse& use : layered->second)
+                {
+                    const auto [layerWidth, layerHeight] = textureSizes.at(static_cast<std::size_t>(use.Material));
+                    const float scaleS = static_cast<float>(layerWidth) / static_cast<float>(std::max(width, 1));
+                    const float scaleT = static_cast<float>(layerHeight) / static_cast<float>(std::max(height, 1));
+                    for (BuiltFace* under : madeFaces)
+                    {
+                        ManagedArray<Vector3>* points = FacePoints(under);
+                        ManagedArray<Vector2>* uvs = FaceTexcoords(under);
+                        auto pointArray = std::make_unique<ManagedArray<Vector3>>(points->Length());
+                        auto uvArray = std::make_unique<ManagedArray<Vector2>>(uvs->Length());
+                        for (std::size_t i = 0; i < points->Length(); ++i)
+                        {
+                            (*pointArray)[i] = (*points)[i];
+                        }
+                        for (std::size_t i = 0; i < uvs->Length(); ++i)
+                        {
+                            (*uvArray)[i] = Vector2((*uvs)[i].X * scaleS, (*uvs)[i].Y * scaleT);
+                        }
+                        auto over = std::make_unique<BuiltFace>(
+                            std::move(pointArray), std::move(uvArray), under->Normal(), use.Material, under->Shade());
+                        over->Overlay = true;
+                        if (use.Lit)
+                        {
+                            over->Colors = under->Colors;
+                        }
+                        else
+                        {
+                            over->Colors.assign(points->Length(), Vector3(1.0F, 1.0F, 1.0F));
+                        }
+                        map->Faces().push_back(map->OwnFace(std::move(over)));
+                        layerFaces = UncheckedAdd(layerFaces, 1);
+                    }
+                }
+            }
+        }
+        if (verbose && layerFaces > 0)
+        {
+            WriteLine("  " + Runtime::ToString(layerFaces) + " faces of moving shaders' layers laid over the rest");
         }
 
         if (skyBox && skyMin.X <= skyMax.X)

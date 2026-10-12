@@ -31,6 +31,10 @@ namespace MphRead::Mods::MapGen
         static constexpr std::int32_t SkyBoxMaxSize = 512;
         // A portal's view, entry PortalSourceIndex + portal.
         static constexpr std::int32_t PortalSourceIndex = 0xFE00;
+        // What a moving shader adds to its base image -- the layers laid
+        // over it, an animMap's frames -- from AnimatedSourceIndex up, each
+        // saying what it is (MapTexturePack::Entry::Meta).
+        static constexpr std::int32_t AnimatedSourceIndex = 0x8000;
 
         class Result final
         {

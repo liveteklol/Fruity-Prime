@@ -668,6 +668,12 @@ namespace MphRead::Mods
         _asked = OpenTK::Mathematics::Vector2i(width, height);
         _roomKey = roomKey;
         _settleFrames = SettleFrames;
+        // FP_SHOT_WAIT: frames more before the first view, for a level whose
+        // surfaces move (a translated Quake 3 shader) seen at a later moment.
+        if (const char* wait = std::getenv("FP_SHOT_WAIT"); wait != nullptr)
+        {
+            _settleFrames = UncheckedAdd(_settleFrames, std::max(0, std::atoi(wait)));
+        }
 
         const OpenTK::Mathematics::Vector2i size = _window->Size();
         RendererPlatform::KeyboardState& keyboardState = _window->Keyboard();

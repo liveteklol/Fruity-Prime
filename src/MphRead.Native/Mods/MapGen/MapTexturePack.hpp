@@ -15,13 +15,25 @@ namespace MphRead::Mods::MapGen
         class Entry final
         {
         public:
+            // How its pixels are stored: one byte each, a palette index
+            // (Palette8), or an index and an alpha (A5I3: 8 colours, 32
+            // levels of see-through; A3I5: 32 colours, 8 levels).
+            enum class PixelFormat : std::uint8_t
+            {
+                Palette8 = 0,
+                A5I3 = 1,
+                A3I5 = 2,
+            };
+
             explicit Entry(
                 std::int32_t sourceIndex = 0,
                 std::string name = {},
                 std::uint16_t width = 0,
                 std::uint16_t height = 0,
                 std::vector<std::uint16_t> palette = {},
-                std::vector<std::uint8_t> pixels = {});
+                std::vector<std::uint8_t> pixels = {},
+                PixelFormat format = PixelFormat::Palette8,
+                std::string meta = {});
 
             [[nodiscard]] std::int32_t SourceIndex() const noexcept;
             [[nodiscard]] const std::string& Name() const noexcept;
@@ -29,6 +41,10 @@ namespace MphRead::Mods::MapGen
             [[nodiscard]] std::uint16_t Height() const noexcept;
             [[nodiscard]] const std::vector<std::uint16_t>& Palette() const noexcept;
             [[nodiscard]] const std::vector<std::uint8_t>& Pixels() const noexcept;
+            [[nodiscard]] PixelFormat Format() const noexcept;
+            // ShaderAnim::Encode's text: what the entry is to its Quake
+            // texture and how it moves; empty for a plain image.
+            [[nodiscard]] const std::string& Meta() const noexcept;
 
         private:
             std::int32_t _sourceIndex = 0;
@@ -37,6 +53,8 @@ namespace MphRead::Mods::MapGen
             std::uint16_t _height = 0;
             std::vector<std::uint16_t> _palette{};
             std::vector<std::uint8_t> _pixels{};
+            PixelFormat _format = PixelFormat::Palette8;
+            std::string _meta{};
         };
 
         // Minimal insertion-ordered adapter for IReadOnlyDictionary<int, int>.

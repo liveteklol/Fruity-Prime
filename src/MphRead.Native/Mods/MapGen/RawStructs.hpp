@@ -37,7 +37,8 @@ namespace MphRead::Mods::MapGen
             bool lighting,
             ColorRgb diffuse,
             ColorRgb ambient,
-            RenderMode renderMode = RenderMode::Normal);
+            RenderMode renderMode = RenderMode::Normal,
+            CullingMode culling = CullingMode::Back);
 
         [[nodiscard]] static std::shared_ptr<Mesh> MakeMesh(
             std::int32_t materialId,

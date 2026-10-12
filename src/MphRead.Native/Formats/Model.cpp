@@ -1119,6 +1119,22 @@ namespace MphRead
                     const std::int32_t end = static_cast<std::int32_t>(
                         animation.StartIndex)
                         + static_cast<std::int32_t>(animation.Count);
+                    // A translated Quake 3 animMap (MapPacker) repeats over
+                    // Field2A frames, which no cartridge animation sets: each
+                    // image from its frame until the next one's.
+                    if (animation.Field2A != 0)
+                    {
+                        const std::int32_t at = animationInfo.TextureFrame() % animation.Field2A;
+                        for (std::int32_t j = animation.StartIndex; j < end; ++j)
+                        {
+                            if (ManagedAt(group->FrameIndices, j) <= at)
+                            {
+                                material.CurrentTextureId = ManagedAt(group->TextureIds, j);
+                                material.CurrentPaletteId = ManagedAt(group->PaletteIds, j);
+                            }
+                        }
+                        continue;
+                    }
                     for (std::int32_t j = animation.StartIndex; j < end; ++j)
                     {
                         if (ManagedAt(group->FrameIndices, j)

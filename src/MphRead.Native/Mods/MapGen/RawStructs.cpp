@@ -165,14 +165,15 @@ namespace MphRead::Mods::MapGen
         bool lighting,
         ColorRgb diffuse,
         ColorRgb ambient,
-        RenderMode renderMode)
+        RenderMode renderMode,
+        CullingMode culling)
     {
         std::vector<std::uint8_t> writer;
         writer.reserve(sizeof(RawMaterial));
 
         WriteFixedString(writer, name, 64);
         WriteByte(writer, lighting ? 1U : 0U);
-        WriteByte(writer, static_cast<std::uint8_t>(CullingMode::Back));
+        WriteByte(writer, static_cast<std::uint8_t>(culling));
         WriteByte(writer, 31);
         WriteByte(writer, 0);
         WriteInt16(writer, paletteId);

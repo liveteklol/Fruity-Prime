@@ -5,7 +5,10 @@
 #include "../../NativeRuntime/System/ZipArchive.hpp"
 
 #include "Q3Bsp.hpp"
+#include "ShaderAnim.hpp"
+#include "MapTexturePack.hpp"
 #include "../../Formats/Types.hpp"
+#include "../../NativeRuntime/System/Number.hpp"
 #include "../../NativeRuntime/System/IO.hpp"
 #include "../../NativeRuntime/System/Managed.hpp"
 
@@ -189,6 +192,9 @@ namespace
         std::vector<std::uint8_t> Pixels;
         std::int32_t Width = 0;
         std::int32_t Height = 0;
+        MphRead::Mods::MapGen::MapTexturePack::Entry::PixelFormat Format
+            = MphRead::Mods::MapGen::MapTexturePack::Entry::PixelFormat::Palette8;
+        std::string Meta;
     };
 
     // Quake's own rule for an image's size (R_CreateImage with
@@ -265,6 +271,8 @@ namespace
         std::string FirstMap;
         std::string EditorImage;
         std::string SkyBase;
+        // cull none (or disable, twosided).
+        bool TwoSided = false;
         // fogparms: red, green, blue and the depth it is opaque at.
         std::optional<std::array<float, 4>> Fog;
         // Its stages' images, in the order drawn, each with whether it is
@@ -275,9 +283,135 @@ namespace
             std::string Map;
             bool Alpha = false;
             bool Opaque = false;
+            // map $lightmap: where Quake lays the level's light, which
+            // decides what of the rest it falls on.
+            bool Lightmap = false;
+            // blendFunc, as its two factors in lower case ("" for none).
+            std::string Blend;
+            bool Clamp = false;
+            // animMap: its images in turn, so many a second.
+            std::vector<std::string> Frames;
+            float FrameRate = 0.0F;
+            std::vector<MphRead::Mods::MapGen::ShaderAnim::TcMod> TcMods;
+            std::optional<MphRead::Mods::MapGen::ShaderAnim::Wave> Fade;
         };
         std::vector<Stage> Stages;
     };
+
+    // How a stage is laid over what is under it.
+    enum class StageBlend
+    {
+        Opaque,
+        Filter,
+        Add,
+        Alpha,
+        Other,
+    };
+
+    [[nodiscard]] StageBlend BlendOf(const ShaderScript::Stage& stage)
+    {
+        const std::string& b = stage.Blend;
+        if (b.empty() || b == "gl_one gl_zero")
+        {
+            return StageBlend::Opaque;
+        }
+        if (b == "gl_dst_color gl_zero" || b == "gl_zero gl_src_color")
+        {
+            return StageBlend::Filter;
+        }
+        if (b == "gl_one gl_one")
+        {
+            return StageBlend::Add;
+        }
+        if (b == "gl_src_alpha gl_one_minus_src_alpha")
+        {
+            return StageBlend::Alpha;
+        }
+        return StageBlend::Other;
+    }
+
+    [[nodiscard]] bool Moves(const ShaderScript::Stage& stage)
+    {
+        if (stage.Fade.has_value() || stage.Frames.size() > 1)
+        {
+            return true;
+        }
+        for (const auto& mod : stage.TcMods)
+        {
+            if (mod.Kind == "scroll" || mod.Kind == "rotate" || mod.Kind == "stretch" || mod.Kind == "turb")
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // What of a shader is drawn how: its base image (the stage the light
+    // falls on, or for a shader with none -- a flame, a beam -- its first,
+    // laid on by brightness) and the stages laid over it, each with whether
+    // the light falls on it too.
+    struct ShaderPlan
+    {
+        std::int32_t Base = -1;
+        bool Translucent = false;
+        std::vector<std::pair<std::int32_t, bool>> Layers;
+        bool Animated = false;
+    };
+
+    [[nodiscard]] ShaderPlan MakePlan(const ShaderScript& script)
+    {
+        ShaderPlan plan;
+        const auto& stages = script.Stages;
+        for (std::size_t s = 0; s < stages.size(); ++s)
+        {
+            const StageBlend blend = BlendOf(stages[s]);
+            if (!stages[s].Lightmap && (blend == StageBlend::Opaque || blend == StageBlend::Filter))
+            {
+                plan.Base = static_cast<std::int32_t>(s);
+                break;
+            }
+        }
+        if (plan.Base < 0)
+        {
+            for (std::size_t s = 0; s < stages.size(); ++s)
+            {
+                if (!stages[s].Lightmap)
+                {
+                    if (BlendOf(stages[s]) == StageBlend::Add)
+                    {
+                        plan.Base = static_cast<std::int32_t>(s);
+                        plan.Translucent = true;
+                    }
+                    break;
+                }
+            }
+        }
+        if (plan.Base < 0)
+        {
+            return plan;
+        }
+        plan.Animated = Moves(stages[static_cast<std::size_t>(plan.Base)]);
+        if (plan.Translucent)
+        {
+            return plan;
+        }
+        for (std::size_t s = static_cast<std::size_t>(plan.Base) + 1; s < stages.size(); ++s)
+        {
+            const StageBlend blend = BlendOf(stages[s]);
+            if (stages[s].Lightmap || (blend != StageBlend::Add && blend != StageBlend::Alpha))
+            {
+                continue;
+            }
+            bool lit = false;
+            for (std::size_t after = s + 1; after < stages.size(); ++after)
+            {
+                lit = lit || stages[after].Lightmap || BlendOf(stages[after]) == StageBlend::Filter;
+            }
+            plan.Layers.emplace_back(static_cast<std::int32_t>(s), lit);
+            plan.Animated = plan.Animated || Moves(stages[s]);
+        }
+        return plan;
+    }
 
     struct ShaderToken final
     {
@@ -401,9 +535,9 @@ namespace
                 }
                 else if (token == "}")
                 {
-                    if (depth == 2 && !stage.Map.empty())
+                    if (depth == 2 && (!stage.Map.empty() || stage.Lightmap))
                     {
-                        stage.Opaque = !blended;
+                        stage.Opaque = !blended && !stage.Lightmap;
                         script.Stages.push_back(stage);
                     }
                     --depth;
@@ -421,6 +555,69 @@ namespace
                         blended = false;
                     }
                     stage.Alpha = mode == "blend " || mode == "gl_src_alpha gl_one_minus_src_alpha ";
+                    std::string normal = mode.empty() ? mode : mode.substr(0, mode.size() - 1);
+                    if (normal == "blend") normal = "gl_src_alpha gl_one_minus_src_alpha";
+                    else if (normal == "add") normal = "gl_one gl_one";
+                    else if (normal == "filter") normal = "gl_dst_color gl_zero";
+                    stage.Blend = normal;
+                }
+                else if (depth == 2 && (Lower(token) == "tcmod" || Lower(token) == "rgbgen" || Lower(token) == "alphagen"))
+                {
+                    const std::string key = Lower(token);
+                    std::vector<std::string> args;
+                    for (std::size_t k = i + 1; k < tokens.size() && tokens[k].Line == tokens[i].Line
+                        && tokens[k].Text != "{" && tokens[k].Text != "}"; ++k)
+                    {
+                        args.push_back(Lower(tokens[k].Text));
+                    }
+                    const auto number = [&args](std::size_t at)
+                    {
+                        float value = 0.0F;
+                        if (at < args.size())
+                        {
+                            (void)::MphRead::NativeRuntime::SingleTryParseInvariant(args[at], value);
+                        }
+                        return value;
+                    };
+                    const auto wave = [&](std::size_t at)
+                    {
+                        MphRead::Mods::MapGen::ShaderAnim::Wave result;
+                        result.Function = at < args.size() ? args[at] : "sin";
+                        result.Base = number(at + 1);
+                        result.Amplitude = number(at + 2);
+                        result.Phase = number(at + 3);
+                        result.Frequency = number(at + 4);
+                        return result;
+                    };
+                    if (key == "tcmod" && !args.empty())
+                    {
+                        MphRead::Mods::MapGen::ShaderAnim::TcMod mod;
+                        mod.Kind = args[0];
+                        if (mod.Kind == "stretch")
+                        {
+                            mod.Wave = wave(1);
+                        }
+                        else if (mod.Kind == "turb" && args.size() > 1 && !args[1].empty()
+                            && (args[1][0] < '0' || args[1][0] > '9') && args[1][0] != '.' && args[1][0] != '-')
+                        {
+                            // Written by some with a waveform first, which
+                            // Quake does not read; its numbers follow.
+                            for (std::size_t v = 0; v < 4; ++v) mod.Values[v] = number(v + 2);
+                        }
+                        else
+                        {
+                            for (std::size_t v = 0; v < mod.Values.size(); ++v) mod.Values[v] = number(v + 1);
+                        }
+                        if (mod.Kind == "scroll" || mod.Kind == "scale" || mod.Kind == "rotate"
+                            || mod.Kind == "stretch" || mod.Kind == "turb" || mod.Kind == "transform")
+                        {
+                            stage.TcMods.push_back(std::move(mod));
+                        }
+                    }
+                    else if (!args.empty() && args[0] == "wave")
+                    {
+                        stage.Fade = wave(1);
+                    }
                 }
                 else
                 {
@@ -455,6 +652,12 @@ namespace
                             script.Fog = values;
                         }
                     }
+                    else if (depth == 1 && key == "cull")
+                    {
+                        const std::string* value = argument(i, 1);
+                        script.TwoSided = value != nullptr
+                            && (Lower(*value) == "none" || Lower(*value) == "disable" || Lower(*value) == "twosided");
+                    }
                     else if (depth == 1 && key == "skyparms")
                     {
                         const std::string* value = argument(i, 1);
@@ -466,6 +669,22 @@ namespace
                     else if (depth == 2
                         && (key == "map" || key == "clampmap" || key == "animmap"))
                     {
+                        if (const std::string* first = argument(i, 1); first != nullptr && Lower(*first) == "$lightmap")
+                        {
+                            stage.Lightmap = true;
+                        }
+                        stage.Clamp = key == "clampmap";
+                        if (key == "animmap")
+                        {
+                            if (const std::string* rate = argument(i, 1))
+                            {
+                                (void)::MphRead::NativeRuntime::SingleTryParseInvariant(*rate, stage.FrameRate);
+                            }
+                            for (std::size_t k = 2; const std::string* frame = argument(i, k); ++k)
+                            {
+                                stage.Frames.push_back(*frame);
+                            }
+                        }
                         const std::string* value = argument(i, key == "animmap" ? 2 : 1);
                         if (value != nullptr && !value->empty()
                             && (*value)[0] != '$' && (*value)[0] != '*')
@@ -484,33 +703,18 @@ namespace
         }
     }
 
-    // A shader that draws an opaque image and then others over it by their
-    // alpha -- fire behind a carved grille, lava under a pad's rim -- as one
-    // image, the way it looks standing still: each layer over the one under
-    // it, at the size of the topmost. A TGA, for the decoder that reads the
-    // rest. Nothing for a shader of one image, or with none laid over.
+    // A shader's base image with the stages laid over it (by their alpha,
+    // or added, as Quake adds a glow) as one image, the way it looks
+    // standing still -- fire behind a carved grille, a light's glow over
+    // its fitting -- at the size of the topmost. A TGA, for the decoder that
+    // reads the rest.
     [[nodiscard]] std::optional<std::vector<std::uint8_t>> Compose(
         const ShaderScript& script,
+        std::int32_t base,
+        const std::vector<std::int32_t>& overs,
         const std::function<std::optional<std::vector<std::uint8_t>>(const std::string&)>& read)
     {
-        std::size_t base = script.Stages.size();
-        for (std::size_t s = 0; s < script.Stages.size(); ++s)
-        {
-            if (script.Stages[s].Opaque)
-            {
-                base = s;
-                break;
-            }
-        }
-        std::vector<std::size_t> overs;
-        for (std::size_t s = base + 1; s < script.Stages.size(); ++s)
-        {
-            if (script.Stages[s].Alpha)
-            {
-                overs.push_back(s);
-            }
-        }
-        if (base >= script.Stages.size() || overs.empty())
+        if (base < 0 || overs.empty())
         {
             return std::nullopt;
         }
@@ -529,14 +733,14 @@ namespace
             }
             return image;
         };
-        const auto under = load(script.Stages[base].Map);
-        const auto top = load(script.Stages[overs.back()].Map);
+        const auto under = load(script.Stages[static_cast<std::size_t>(base)].Map);
+        const auto top = load(script.Stages[static_cast<std::size_t>(overs.back())].Map);
         if (!under || !top)
         {
             return std::nullopt;
         }
-        const std::int32_t width = top->Width;
-        const std::int32_t height = top->Height;
+        const std::int32_t width = std::max(top->Width, under->Width);
+        const std::int32_t height = std::max(top->Height, under->Height);
         std::vector<float> rgb(static_cast<std::size_t>(width) * height * 3);
         const auto sample = [](const ::MphRead::NativeRuntime::Image& image, std::int32_t x, std::int32_t y,
                                 std::int32_t width, std::int32_t height)
@@ -556,13 +760,15 @@ namespace
                 }
             }
         }
-        for (const std::size_t s : overs)
+        for (const std::int32_t s : overs)
         {
-            const auto layer = s == overs.back() ? top : load(script.Stages[s].Map);
+            const ShaderScript::Stage& stage = script.Stages[static_cast<std::size_t>(s)];
+            const auto layer = s == overs.back() ? top : load(stage.Map);
             if (!layer)
             {
                 continue;
             }
+            const bool add = BlendOf(stage) == StageBlend::Add;
             for (std::int32_t y = 0; y < height; ++y)
             {
                 for (std::int32_t x = 0; x < width; ++x)
@@ -572,7 +778,8 @@ namespace
                     for (std::size_t c = 0; c < 3; ++c)
                     {
                         float& out = rgb[(static_cast<std::size_t>(y) * width + x) * 3 + c];
-                        out = out * (1.0F - a) + static_cast<float>(p[c]) * a;
+                        out = add ? std::min(255.0F, out + static_cast<float>(p[c]))
+                                  : out * (1.0F - a) + static_cast<float>(p[c]) * a;
                     }
                 }
             }
@@ -594,6 +801,25 @@ namespace
             }
         }
         return tga;
+    }
+
+    // The same, for a shader that does not move: its base and every stage
+    // laid over it. Nothing for a shader of one image.
+    [[nodiscard]] std::optional<std::vector<std::uint8_t>> Compose(
+        const ShaderScript& script,
+        const std::function<std::optional<std::vector<std::uint8_t>>(const std::string&)>& read)
+    {
+        const ShaderPlan plan = MakePlan(script);
+        if (plan.Base < 0 || plan.Translucent)
+        {
+            return std::nullopt;
+        }
+        std::vector<std::int32_t> overs;
+        for (const auto& [stage, lit] : plan.Layers)
+        {
+            overs.push_back(stage);
+        }
+        return Compose(script, plan.Base, overs, read);
     }
 
     [[nodiscard]] std::vector<std::tuple<std::int32_t, std::string, std::int32_t>>
@@ -872,7 +1098,8 @@ namespace
         std::vector<std::uint8_t>>
         Quantize(
             const std::vector<std::uint8_t>& rgb,
-            std::int32_t count)
+            std::int32_t count,
+            std::int32_t colours = PaletteSize)
     {
         std::vector<std::int32_t> indices(ArrayLength(count));
         for (std::int32_t i = 0; i < count; ++i)
@@ -882,7 +1109,7 @@ namespace
 
         std::vector<BoxRange> boxes;
         boxes.push_back(BoxRange{0, count});
-        while (boxes.size() < static_cast<std::size_t>(PaletteSize))
+        while (boxes.size() < static_cast<std::size_t>(colours))
         {
             std::int32_t widest = -1;
             std::int32_t widestSpread = 0;
@@ -1050,7 +1277,7 @@ namespace
 
         static constexpr std::array<char, 4> Magic{'F', 'P', 'T', 'X'};
         stream.write(Magic.data(), static_cast<std::streamsize>(Magic.size()));
-        WriteU16(stream, 1);
+        WriteU16(stream, 2);
         WriteU16(stream, static_cast<std::uint16_t>(entries.size()));
 
         for (const BakedEntry& entry : entries)
@@ -1074,6 +1301,9 @@ namespace
                     reinterpret_cast<const char*>(entry.Pixels.data()),
                     static_cast<std::streamsize>(entry.Pixels.size()));
             }
+            stream.put(static_cast<char>(entry.Format));
+            WriteU16(stream, static_cast<std::uint16_t>(entry.Meta.size()));
+            stream.write(entry.Meta.data(), static_cast<std::streamsize>(entry.Meta.size()));
         }
         stream.close();
     }
@@ -1244,8 +1474,300 @@ namespace MphRead::Mods::MapGen
         std::vector<BakedEntry> entries;
         auto missing = std::make_shared<std::vector<std::string>>();
         auto substituted = std::make_shared<std::vector<std::string>>();
+
+        // A shader that moves (ShaderAnim): its base image, each stage laid
+        // over it that moves or that a moving base would carry away, and an
+        // animMap's frames, each an entry saying what it is. Its stages
+        // that stand still over a still base are baked into the base, as
+        // any other shader's are.
+        namespace SA = MphRead::Mods::MapGen::ShaderAnim;
+        using PixelFormat = MapTexturePack::Entry::PixelFormat;
+        std::int32_t nextSource = AnimatedSourceIndex;
+        const auto loadRgba = [&](const std::string& map) -> std::optional<::MphRead::NativeRuntime::Image>
+        {
+            const auto raw = read(FindImage(files, map));
+            if (!raw)
+            {
+                return std::nullopt;
+            }
+            ::MphRead::NativeRuntime::Image image = ::MphRead::NativeRuntime::LoadImage(*raw, 4);
+            if (image.Width <= 0 || image.Height <= 0
+                || image.Pixels.size() < static_cast<std::size_t>(image.Width) * image.Height * 4)
+            {
+                return std::nullopt;
+            }
+            return image;
+        };
+        // An image in one of the pack's formats. Added light (A5I3) is drawn
+        // as see-through as it is dark, its colour at full strength, which
+        // over anything darker than it is what adding it gives.
+        const auto encode = [](const ::MphRead::NativeRuntime::Image& image, std::int32_t width, std::int32_t height,
+                                PixelFormat format, bool overbright, BakedEntry& entry)
+        {
+            const std::size_t count = static_cast<std::size_t>(width) * height;
+            std::vector<std::uint8_t> rgb(count * 3);
+            std::vector<std::uint8_t> alpha(count);
+            for (std::int32_t y = 0; y < height; ++y)
+            {
+                const std::int32_t y0 = y * image.Height / height;
+                const std::int32_t y1 = std::max(y0 + 1, (y + 1) * image.Height / height);
+                for (std::int32_t x = 0; x < width; ++x)
+                {
+                    const std::int32_t x0 = x * image.Width / width;
+                    const std::int32_t x1 = std::max(x0 + 1, (x + 1) * image.Width / width);
+                    std::array<std::int32_t, 4> sum{};
+                    std::int32_t n = 0;
+                    for (std::int32_t sy = y0; sy < y1 && sy < image.Height; ++sy)
+                    {
+                        for (std::int32_t sx = x0; sx < x1 && sx < image.Width; ++sx)
+                        {
+                            const std::uint8_t* p = &image.Pixels[(static_cast<std::size_t>(sy) * image.Width + sx) * 4];
+                            for (std::size_t c = 0; c < 4; ++c)
+                            {
+                                sum[c] += p[c];
+                            }
+                            ++n;
+                        }
+                    }
+                    n = std::max(n, 1);
+                    const std::size_t at = static_cast<std::size_t>(y) * width + x;
+                    std::array<std::int32_t, 3> colour{sum[0] / n, sum[1] / n, sum[2] / n};
+                    std::int32_t a = sum[3] / n;
+                    if (format == PixelFormat::A5I3)
+                    {
+                        a = std::max(colour[0], std::max(colour[1], colour[2]));
+                        for (std::int32_t& c : colour)
+                        {
+                            c = a > 0 ? std::min(255, c * 255 / a) : 0;
+                        }
+                    }
+                    for (std::size_t c = 0; c < 3; ++c)
+                    {
+                        rgb[at * 3 + c] = static_cast<std::uint8_t>(std::min(255, colour[c] * (overbright ? Overbright : 1)));
+                    }
+                    alpha[at] = static_cast<std::uint8_t>(a);
+                }
+            }
+            const std::int32_t colours = format == PixelFormat::Palette8 ? PaletteSize
+                : (format == PixelFormat::A5I3 ? 8 : 32);
+            auto [palette, indices] = Quantize(rgb, static_cast<std::int32_t>(count), colours);
+            palette.resize(static_cast<std::size_t>(colours), 0);
+            for (std::size_t p = 0; p < count; ++p)
+            {
+                if (format == PixelFormat::A5I3)
+                {
+                    indices[p] = static_cast<std::uint8_t>(((alpha[p] * 31 + 127) / 255) << 3 | (indices[p] & 7));
+                }
+                else if (format == PixelFormat::A3I5)
+                {
+                    indices[p] = static_cast<std::uint8_t>(((alpha[p] * 7 + 127) / 255) << 5 | (indices[p] & 31));
+                }
+            }
+            entry.Width = width;
+            entry.Height = height;
+            entry.Palette = std::move(palette);
+            entry.Pixels = std::move(indices);
+            entry.Format = format;
+        };
+        // A stage's motion, its rates rounded to whole cycles of the room's
+        // loop.
+        const auto describe = [](const ShaderScript::Stage& stage, SA::EntryMeta& meta)
+        {
+            meta.Clamp = stage.Clamp;
+            meta.TcMods = stage.TcMods;
+            for (SA::TcMod& mod : meta.TcMods)
+            {
+                if (mod.Kind == "scroll")
+                {
+                    mod.Values[0] = SA::Looped(mod.Values[0]);
+                    mod.Values[1] = SA::Looped(mod.Values[1]);
+                }
+                else if (mod.Kind == "rotate")
+                {
+                    mod.Values[0] = SA::Looped(mod.Values[0], 360.0F);
+                }
+                else if (mod.Kind == "turb")
+                {
+                    mod.Values[3] = SA::Looped(mod.Values[3]);
+                }
+                else if (mod.Kind == "stretch" && mod.Wave.has_value())
+                {
+                    mod.Wave->Frequency = SA::Looped(mod.Wave->Frequency);
+                }
+            }
+            meta.Fade = stage.Fade;
+            if (meta.Fade.has_value())
+            {
+                meta.Fade->Frequency = SA::Looped(meta.Fade->Frequency);
+            }
+            if (stage.Frames.size() > 1 && stage.FrameRate > 0.0F)
+            {
+                const float frames = static_cast<float>(stage.Frames.size());
+                meta.FrameCount = static_cast<std::int32_t>(stage.Frames.size());
+                meta.FrameRate = SA::Looped(stage.FrameRate / frames) * frames;
+                if (meta.FrameRate <= 0.0F)
+                {
+                    meta.FrameCount = 0;
+                }
+            }
+        };
+        // An entry and the frames of its animMap after it.
+        const auto addAnimated = [&](BakedEntry entry, const ShaderScript::Stage& stage,
+                                     SA::EntryMeta meta, bool overbright, bool fades)
+        {
+            describe(stage, meta);
+            if (!fades)
+            {
+                meta.Fade.reset();
+            }
+            entry.Meta = SA::Encode(meta);
+            const std::int32_t owner = entry.Index;
+            const std::int32_t width = entry.Width;
+            const std::int32_t height = entry.Height;
+            const PixelFormat format = entry.Format;
+            const std::string name = entry.Name;
+            entries.push_back(std::move(entry));
+            for (std::int32_t k = 0; k < meta.FrameCount; ++k)
+            {
+                const auto image = loadRgba(stage.Frames[static_cast<std::size_t>(k)]);
+                if (!image)
+                {
+                    continue;
+                }
+                BakedEntry frame;
+                frame.Index = nextSource++;
+                frame.Name = name + "#" + std::to_string(k);
+                encode(*image, width, height, format, overbright, frame);
+                SA::EntryMeta frameMeta;
+                frameMeta.Role = "frame";
+                frameMeta.Of = owner;
+                frameMeta.Frame = k;
+                frame.Meta = SA::Encode(frameMeta);
+                entries.push_back(std::move(frame));
+            }
+        };
+        const auto bakeAnimated = [&](std::int32_t index, const std::string& name, std::int32_t flags) -> bool
+        {
+            std::string lookup = name;
+            if (aliases != nullptr)
+            {
+                for (const auto& [from, to] : *aliases)
+                {
+                    if (OrdinalIgnoreCaseEquals(from, name))
+                    {
+                        lookup = to;
+                        break;
+                    }
+                }
+            }
+            const auto found = shaders.find(Lower(lookup));
+            if (found == shaders.end())
+            {
+                return false;
+            }
+            const ShaderScript& script = found->second;
+            const ShaderPlan plan = MakePlan(script);
+            if (plan.Base < 0 || !plan.Animated)
+            {
+                return false;
+            }
+            const ShaderScript::Stage& baseStage = script.Stages[static_cast<std::size_t>(plan.Base)];
+            const bool baseMoves = Moves(baseStage);
+            std::vector<std::int32_t> still;
+            std::vector<std::pair<std::int32_t, bool>> moving;
+            for (const auto& [stage, lit] : plan.Layers)
+            {
+                if (!baseMoves && !Moves(script.Stages[static_cast<std::size_t>(stage)]))
+                {
+                    still.push_back(stage);
+                }
+                else
+                {
+                    moving.emplace_back(stage, lit);
+                }
+            }
+            std::optional<::MphRead::NativeRuntime::Image> baseImage;
+            if (!still.empty())
+            {
+                if (const auto composed = Compose(script, plan.Base, still,
+                        [&](const std::string& map) { return read(FindImage(files, map)); }))
+                {
+                    ::MphRead::NativeRuntime::Image image = ::MphRead::NativeRuntime::LoadImage(*composed, 4);
+                    if (image.Width > 0 && image.Height > 0)
+                    {
+                        baseImage = std::move(image);
+                    }
+                }
+            }
+            if (!baseImage)
+            {
+                baseImage = loadRgba(baseStage.Frames.empty() ? baseStage.Map : baseStage.Frames.front());
+            }
+            if (!baseImage)
+            {
+                return false;
+            }
+
+            const bool unlit = (flags & Q3Bsp::SurfaceNoLightmap) != 0;
+            BakedEntry base;
+            base.Index = index;
+            base.Name = name;
+            SA::EntryMeta baseMeta;
+            baseMeta.Of = index;
+            baseMeta.TwoSided = script.TwoSided;
+            if (plan.Translucent)
+            {
+                encode(*baseImage, NativeSide(baseImage->Width), NativeSide(baseImage->Height),
+                    PixelFormat::A5I3, false, base);
+                baseMeta.Blend = "add";
+                baseMeta.Lit = false;
+            }
+            else
+            {
+                encode(*baseImage, NativeSide(baseImage->Width), NativeSide(baseImage->Height),
+                    PixelFormat::Palette8, !unlit, base);
+            }
+            // An opaque base's own wave is left out (ShaderAnim::EntryMeta's
+            // Fade dims by see-through, which an opaque image is not); a
+            // flame's is its glow.
+            // A flame's wave fades its frames into the next stage's, which
+            // is not drawn here: shown alone it would flicker.
+            addAnimated(std::move(base), baseStage, baseMeta, !plan.Translucent && !unlit,
+                plan.Translucent && baseStage.Frames.size() <= 1);
+
+            std::int32_t order = 0;
+            for (const auto& [stageIndex, lit] : moving)
+            {
+                const ShaderScript::Stage& stage = script.Stages[static_cast<std::size_t>(stageIndex)];
+                const auto image = loadRgba(stage.Frames.empty() ? stage.Map : stage.Frames.front());
+                if (!image)
+                {
+                    continue;
+                }
+                const bool add = BlendOf(stage) == StageBlend::Add;
+                BakedEntry layer;
+                layer.Index = nextSource++;
+                layer.Name = name + "@" + std::to_string(order);
+                encode(*image, NativeSide(image->Width), NativeSide(image->Height),
+                    add ? PixelFormat::A5I3 : PixelFormat::A3I5, lit && !add, layer);
+                SA::EntryMeta meta;
+                meta.Role = "layer";
+                meta.Of = index;
+                meta.Order = order++;
+                meta.Blend = add ? "add" : "alpha";
+                meta.Lit = lit;
+                meta.TwoSided = script.TwoSided;
+                addAnimated(std::move(layer), stage, meta, lit && !add, true);
+            }
+            return true;
+        };
+
         for (const auto& [index, name, flags] : UsedTextures(bsp, sky))
         {
+            if ((flags & Q3Bsp::SurfaceSky) == 0 && bakeAnimated(index, name, flags))
+            {
+                continue;
+            }
             std::optional<std::vector<std::uint8_t>> raw;
             if (aliases != nullptr)
             {

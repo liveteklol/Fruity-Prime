@@ -133,14 +133,28 @@ namespace MphRead::Mods::MapGen
         std::uint16_t width,
         std::uint16_t height,
         std::vector<std::uint16_t> palette,
-        std::vector<std::uint8_t> pixels)
+        std::vector<std::uint8_t> pixels,
+        PixelFormat format,
+        std::string meta)
         : _sourceIndex(sourceIndex),
           _name(std::move(name)),
           _width(width),
           _height(height),
           _palette(std::move(palette)),
-          _pixels(std::move(pixels))
+          _pixels(std::move(pixels)),
+          _format(format),
+          _meta(std::move(meta))
     {
+    }
+
+    MapTexturePack::Entry::PixelFormat MapTexturePack::Entry::Format() const noexcept
+    {
+        return _format;
+    }
+
+    const std::string& MapTexturePack::Entry::Meta() const noexcept
+    {
+        return _meta;
     }
 
     std::int32_t MapTexturePack::Entry::SourceIndex() const noexcept
@@ -286,11 +300,13 @@ namespace MphRead::Mods::MapGen
         }
 
         const std::uint16_t version = reader.ReadUInt16();
-        if (version != 1)
+        // 2 adds each entry's pixel format and what it is to its shader
+        // (ShaderAnim).
+        if (version != 1 && version != 2)
         {
             throw ProgramException(
                 PathGetFileName(path) + " is version " + std::to_string(version)
-                + "; this build reads 1.");
+                + "; this build reads 1 and 2.");
         }
 
         const std::int32_t count = reader.ReadUInt16();
@@ -312,13 +328,27 @@ namespace MphRead::Mods::MapGen
             }
 
             std::vector<std::uint8_t> pixels = reader.ReadBytes(PixelCount(width, height));
+            Entry::PixelFormat format = Entry::PixelFormat::Palette8;
+            std::string meta;
+            if (version >= 2)
+            {
+                const std::vector<std::uint8_t> formatByte = reader.ReadBytes(1);
+                if (formatByte.size() != 1 || formatByte[0] > 2)
+                {
+                    throw ProgramException(PathGetFileName(path) + " has an entry of an unknown pixel format.");
+                }
+                format = static_cast<Entry::PixelFormat>(formatByte[0]);
+                meta = Utf8GetString(reader.ReadBytes(reader.ReadUInt16()));
+            }
             entries.emplace_back(
                 static_cast<std::int32_t>(sourceIndex),
                 name,
                 width,
                 height,
                 std::move(palette),
-                std::move(pixels));
+                std::move(pixels),
+                format,
+                std::move(meta));
         }
         return MapTexturePack(std::move(entries));
     }

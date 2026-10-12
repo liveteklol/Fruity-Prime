@@ -1729,6 +1729,13 @@ namespace MphRead
 
     void Scene::UpdateMaterial(Material& material, bool onlyOpaque)
     {
+        // A translated Quake 3 layer (MapPacker: a decal whose alpha comes
+        // and goes) is drawn over its face whatever its alpha.
+        if (material.RenderMode == RenderMode::Decal && material.CurrentAlpha < 1.0F
+            && material.Name.size() > 1 && material.Name[0] == 'q' && material.Name[1] >= '0' && material.Name[1] <= '9')
+        {
+            return;
+        }
         if (material.CurrentAlpha < 1.0F) material.RenderMode = RenderMode::Translucent;
         else if (material.RenderMode != RenderMode::Normal && onlyOpaque) material.RenderMode = RenderMode::Normal;
         else if (material.RenderMode == RenderMode::Normal && !onlyOpaque) material.RenderMode = RenderMode::Translucent;
