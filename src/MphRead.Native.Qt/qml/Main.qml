@@ -241,27 +241,76 @@ Item {
         Component.onCompleted: Theme.keyboard = controllerKeyboard
     }
 
-    // Quake 3 maps being translated in the background (once each): a bar at
-    // the foot of the launcher, whichever of its screens is open, while it lasts.
+    // New maps looked for, fetched and prepared in the background, then their
+    // previews: a slim line at the top of the launcher, whichever of its
+    // screens is open, while it lasts. A share below zero is a step of unknown
+    // length, shown as a sweep.
     Rectangle {
+        id: mapsLine
         parent: stage
         visible: ShellHost.mapsBuilding && ShellHost.page === "front"
-        anchors.left: parent.left
-        anchors.bottom: parent.bottom
-        anchors.margins: Math.round(16 * root.uiScale)
-        width: Math.min(parent.width - 2 * anchors.margins, Math.round(420 * root.uiScale))
-        height: progressRow.height + Math.round(16 * root.uiScale)
-        radius: Math.round(8 * root.uiScale)
-        color: "#cc10141c"
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.top: parent.top
+        anchors.topMargin: Math.round(10 * root.uiScale)
+        width: Math.min(parent.width - Math.round(32 * root.uiScale), mapsText.implicitWidth + Math.round(56 * root.uiScale))
+        height: Math.round(30 * root.uiScale)
+        radius: height / 2
+        color: "#d910141c"
+        border.color: Theme.ink
         z: 500
-        ProgressRow {
-            id: progressRow
-            anchors.left: parent.left
-            anchors.right: parent.right
+        readonly property bool known: ShellHost.mapsProgress >= 0
+        Rectangle {
+            id: mapsDot
             anchors.verticalCenter: parent.verticalCenter
-            anchors.margins: Math.round(12 * root.uiScale)
-            fraction: ShellHost.mapsProgress
-            stage: ShellHost.mapsStage
+            x: Math.round(12 * root.uiScale)
+            width: Math.round(8 * root.uiScale); height: width; radius: width / 2
+            color: Theme.accent
+            SequentialAnimation on opacity {
+                running: mapsLine.visible
+                loops: Animation.Infinite
+                NumberAnimation { from: 1; to: 0.25; duration: 600 }
+                NumberAnimation { from: 0.25; to: 1; duration: 600 }
+            }
+        }
+        Text {
+            id: mapsText
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.verticalCenterOffset: -Math.round(2 * root.uiScale)
+            x: mapsDot.x + mapsDot.width + Math.round(10 * root.uiScale)
+            width: parent.width - x - Math.round(14 * root.uiScale)
+            elide: Text.ElideRight
+            text: ShellHost.mapsStage
+                + (mapsLine.known ? "  " + Theme.roundEven(Math.max(0, Math.min(1, ShellHost.mapsProgress)) * 100) + "%" : "")
+            font.family: Theme.pixel; font.pixelSize: Math.round(12 * root.uiScale)
+            color: Theme.text
+        }
+        // The share done, or a sweep, along the foot of the pill.
+        Item {
+            anchors.left: parent.left; anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            anchors.leftMargin: parent.radius; anchors.rightMargin: parent.radius
+            anchors.bottomMargin: Math.round(4 * root.uiScale)
+            height: Math.max(2, Math.round(2 * root.uiScale))
+            clip: true
+            Rectangle {
+                visible: mapsLine.known
+                height: parent.height; radius: height / 2
+                width: parent.width * Math.max(0, Math.min(1, ShellHost.mapsProgress))
+                color: Theme.accent
+            }
+            Rectangle {
+                id: sweep
+                visible: !mapsLine.known
+                height: parent.height; radius: height / 2
+                width: parent.width / 3
+                color: Theme.accent
+                NumberAnimation on x {
+                    running: mapsLine.visible && !mapsLine.known
+                    loops: Animation.Infinite
+                    from: -sweep.width; to: sweep.parent.width
+                    duration: 1400
+                }
+            }
         }
     }
 

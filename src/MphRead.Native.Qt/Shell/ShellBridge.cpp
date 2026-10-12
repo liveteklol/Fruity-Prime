@@ -62,17 +62,32 @@ namespace MphRead::Qt
     {
         const auto progress = ::MphRead::Mods::MapGen::CustomRooms::Progress();
         const bool building = progress.Running && progress.Total > 0;
-        const double fraction = progress.Total > 0
-            ? (static_cast<double>(progress.Done) / static_cast<double>(progress.Total)) : 0.0;
-        const QString stage = building
-            ? QString::fromUtf8(progress.Downloading ? "Downloading maps: %1 (%2/%3)" : "Preparing maps: %1 (%2/%3)")
+        const bool previews = ::MphRead::Mods::ThumbnailGenerator::RefreshingPreviews();
+        // Asking the server for new maps, then fetching and preparing them,
+        // then their previews: one line at the top of the launcher. A share
+        // below zero is a step whose length is not known.
+        const bool busy = progress.Running || previews;
+        double fraction = -1.0;
+        QString stage;
+        if (building)
+        {
+            fraction = static_cast<double>(progress.Done) / static_cast<double>(progress.Total);
+            stage = QString::fromUtf8(progress.Downloading ? "Downloading new maps: %1 (%2/%3)" : "Preparing maps: %1 (%2/%3)")
                 .arg(QString::fromStdString(progress.Current))
                 .arg(std::min(progress.Done + 1, progress.Total))
-                .arg(progress.Total)
-            : QString();
-        if (building != _mapsBuilding || fraction != _mapsProgress || stage != _mapsStage)
+                .arg(progress.Total);
+        }
+        else if (progress.Running)
         {
-            _mapsBuilding = building;
+            stage = QString::fromUtf8("Checking for new maps…");
+        }
+        else if (previews)
+        {
+            stage = QString::fromUtf8("Refreshing map previews…");
+        }
+        if (busy != _mapsBuilding || fraction != _mapsProgress || stage != _mapsStage)
+        {
+            _mapsBuilding = busy;
             _mapsProgress = fraction;
             _mapsStage = stage;
             emit mapsChanged();

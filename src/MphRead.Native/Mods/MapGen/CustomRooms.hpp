@@ -115,6 +115,10 @@ namespace MphRead::Mods::MapGen
         [[nodiscard]] static std::optional<std::string> WhyUnplayable(
             const std::string& roomName);
 
+        // What a build of this map depends on (translator, archive, art):
+        // anything made from the build is stale once it changes.
+        [[nodiscard]] static std::string TranslatorStamp(MapDefinition* def);
+
         CustomRooms() = delete;
         CustomRooms(const CustomRooms&) = delete;
         CustomRooms& operator=(const CustomRooms&) = delete;
@@ -125,7 +129,6 @@ namespace MphRead::Mods::MapGen
             MapDefinition* def, std::int32_t id);
         [[nodiscard]] static bool NeedsGenerating(MapDefinition* def);
         static void AddTranslated(DefinitionList& results);
-        [[nodiscard]] static std::string TranslatorStamp(MapDefinition* def);
         [[nodiscard]] static std::string TranslatorStampPath(MapDefinition* def);
         [[nodiscard]] static std::string FailedStampPath(MapDefinition* def);
     };

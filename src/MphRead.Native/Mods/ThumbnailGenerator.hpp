@@ -23,7 +23,13 @@ namespace MphRead::Mods
         static std::vector<std::string> MultiplayerRooms();
         static bool FirstHuntAvailable();
         static std::vector<std::string> MissingThumbnails();
+        // A Quake 3 level's preview is the levelshot its .pk3 carries
+        // (levelshots/<map>.jpg or .tga), cropped to the launcher's shape;
+        // only a level without one is rendered, once it is built, and one
+        // that renders nothing is not tried again until it is rebuilt.
         static void EnsureCustomPreviews(std::function<void(const std::string&)> report = {});
+        // Whether EnsureCustomPreviews is at work (the launcher shows it).
+        [[nodiscard]] static bool RefreshingPreviews() noexcept;
         // The view through each portal of a Quake 3 level, rendered from its
         // camera, and the room built again to show them.
         static void EnsurePortalViews(std::function<void(const std::string&)> report = {});

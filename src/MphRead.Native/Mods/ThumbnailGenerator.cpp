@@ -12,9 +12,13 @@
 #include "../Read.hpp"
 #include "../NativeRuntime/System/Encoding.hpp"
 #include "../NativeRuntime/System/IO.hpp"
+#include "../NativeRuntime/System/ZipArchive.hpp"
+#include "../NativeRuntime/Stb/Image.hpp"
 
 #include <algorithm>
 #include <array>
+#include <atomic>
+#include <fstream>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -54,6 +58,84 @@ namespace
     {
         static SpawnCache cache;
         return cache;
+    }
+
+    std::atomic<std::int32_t> PreviewJobs{0};
+
+    struct PreviewJob final
+    {
+        PreviewJob() { ++PreviewJobs; }
+        ~PreviewJob() { --PreviewJobs; }
+        PreviewJob(const PreviewJob&) = delete;
+        PreviewJob& operator=(const PreviewJob&) = delete;
+    };
+
+    // levelshots/<map>.<jpg|tga|png> in the archive, any case.
+    std::vector<std::uint8_t> ReadLevelshot(const std::string& archivePath, const std::string& map)
+    {
+        const std::shared_ptr<::MphRead::NativeRuntime::ZipArchive> archive
+            = ::MphRead::NativeRuntime::ZipArchive::OpenRead(archivePath);
+        for (const std::string_view extension : {".jpg", ".tga", ".png", ".jpeg"})
+        {
+            const std::string wanted = "levelshots/" + map + std::string(extension);
+            for (const auto& entry : archive->Entries())
+            {
+                if (::MphRead::NativeRuntime::StringCompareOrdinalIgnoreCase(entry->FullName(), wanted) == 0)
+                {
+                    return entry->ReadAllBytes();
+                }
+            }
+        }
+        return {};
+    }
+
+    // The middle of the image at the launcher's 16:9, at its own resolution
+    // (whatever reads the preview scales it), as an RGB PNG.
+    bool WriteCropped(const ::MphRead::NativeRuntime::Image& image, const std::string& path)
+    {
+        if (image.Width <= 0 || image.Height <= 0
+            || image.Pixels.size() < static_cast<std::size_t>(image.Width) * image.Height * 3U)
+        {
+            return false;
+        }
+        std::int32_t width = image.Width;
+        std::int32_t height = width * 9 / 16;
+        if (height > image.Height)
+        {
+            height = image.Height;
+            width = std::min(image.Width, height * 16 / 9);
+        }
+        const std::int32_t left = (image.Width - width) / 2;
+        const std::int32_t top = (image.Height - height) / 2;
+        std::vector<std::uint8_t> rgb(static_cast<std::size_t>(width) * height * 3U);
+        for (std::int32_t y = 0; y < height; y++)
+        {
+            const std::uint8_t* const from = image.Pixels.data()
+                + (static_cast<std::size_t>(top + y) * image.Width + left) * 3U;
+            std::copy(from, from + static_cast<std::size_t>(width) * 3U,
+                rgb.data() + static_cast<std::size_t>(y) * width * 3U);
+        }
+        const std::string temporary = path + ".tmp";
+        {
+            std::ofstream stream(PathFromUtf8(temporary), std::ios::binary | std::ios::trunc);
+            if (!stream)
+            {
+                return false;
+            }
+            ::stbi_write_png_to_func(
+                [](void* context, void* data, int size)
+                {
+                    static_cast<std::ofstream*>(context)->write(static_cast<const char*>(data), size);
+                },
+                &stream, width, height, 3, rgb.data(), width * 3);
+            if (!stream)
+            {
+                return false;
+            }
+        }
+        std::error_code error;
+        std::filesystem::rename(PathFromUtf8(temporary), PathFromUtf8(path), error);
+        return !error;
     }
 
 }
@@ -213,29 +295,47 @@ namespace MphRead::Mods
         return missing;
     }
 
+    bool ThumbnailGenerator::RefreshingPreviews() noexcept
+    {
+        return PreviewJobs.load() > 0;
+    }
+
     void ThumbnailGenerator::EnsureCustomPreviews(std::function<void(const std::string&)> report)
     {
-        if (!Launcher::GameFiles::Ready() || !ThumbnailBatch::CanRun())
+        if (!Launcher::GameFiles::Ready())
         {
             return;
         }
+        const PreviewJob job;
+        if (!report)
+        {
+            report = [](const std::string& line)
+            {
+                std::cout << "  " << line << std::endl;
+            };
+        }
 
-        std::vector<std::string> missing;
+        // name -> (archive, map), for the levels read from a .pk3.
+        std::vector<std::pair<std::shared_ptr<MapGen::MapDefinition>, std::string>> levels;
+        std::vector<std::string> archives;
         try
         {
-            std::unordered_set<std::string> custom;
             for (const auto& definition : MapGen::CustomRooms::Definitions())
             {
-                custom.insert(definition->Name());
-            }
-
-            for (std::string room : MissingThumbnails())
-            {
-                // A map not built yet is drawn once it is (the launcher asks
-                // again then), not built by every worker on its own.
-                if (custom.contains(room) && !MapGen::CustomRooms::WhyUnplayable(room).has_value())
+                const MapGen::MapImport* import = definition->Import();
+                if (!definition->Translated() || import == nullptr)
                 {
-                    missing.push_back(std::move(room));
+                    continue;
+                }
+                const std::optional<std::string> archive = import->Resolve();
+                if (!archive.has_value())
+                {
+                    continue;
+                }
+                levels.emplace_back(definition, *archive);
+                if (std::find(archives.begin(), archives.end(), *archive) == archives.end())
+                {
+                    archives.push_back(*archive);
                 }
             }
         }
@@ -244,17 +344,109 @@ namespace MphRead::Mods
             return;
         }
 
-        if (missing.empty())
+        try
+        {
+            EnsureCacheDirectory();
+        }
+        catch (...)
         {
             return;
         }
 
-        if (!report)
+        // The levelshot, whether the level is built or not: a marker beside
+        // the PNG says it came from there (a rendered one is replaced).
+        std::vector<std::string> render;
+        std::int32_t fromArchives = 0;
+        for (const auto& [definition, archive] : levels)
         {
-            report = [](const std::string& line)
+            const std::string room = definition->Name();
+            const std::string png = PathFor(room);
+            const std::string marker = png + ".levelshot";
+            if (Exists(room) && ::MphRead::NativeRuntime::FileExists(marker))
             {
-                std::cout << "  " << line << std::endl;
-            };
+                continue;
+            }
+            const std::string map = definition->Import()->MapName().value_or(room);
+            bool written = false;
+            try
+            {
+                std::vector<std::uint8_t> bytes = ReadLevelshot(archive, map);
+                // pak0's levels can have their shot in another pak.
+                for (std::size_t i = 0; bytes.empty() && i < archives.size(); i++)
+                {
+                    if (archives[i] != archive)
+                    {
+                        bytes = ReadLevelshot(archives[i], map);
+                    }
+                }
+                if (!bytes.empty())
+                {
+                    written = WriteCropped(::MphRead::NativeRuntime::LoadImage(bytes, 3), png);
+                }
+            }
+            catch (const std::exception& ex)
+            {
+                report(room + ": levelshot unreadable: " + ex.what());
+            }
+            if (written)
+            {
+                ::MphRead::NativeRuntime::FileWriteAllText(marker, "");
+                fromArchives++;
+            }
+            else if (!Exists(room))
+            {
+                render.push_back(room);
+            }
+        }
+        if (fromArchives > 0)
+        {
+            report(std::to_string(fromArchives) + " preview(s) taken from the levels' own levelshots");
+        }
+
+        // The rest are drawn by the game, once built, and only once per build:
+        // a level that comes out black is left with the placeholder.
+        std::vector<std::string> missing;
+        std::vector<std::pair<std::string, std::string>> stamps;
+        if (ThumbnailBatch::CanRun())
+        {
+            for (const std::string& room : render)
+            {
+                const auto found = std::find_if(levels.begin(), levels.end(),
+                    [&](const auto& level) { return level.first->Name() == room; });
+                if (found == levels.end()
+                    || MapGen::CustomRooms::WhyUnplayable(room).has_value())
+                {
+                    continue;
+                }
+                std::string stamp;
+                try
+                {
+                    stamp = MapGen::CustomRooms::TranslatorStamp(found->first.get());
+                }
+                catch (...)
+                {
+                }
+                const std::string failed = PathFor(room) + ".failed";
+                if (::MphRead::NativeRuntime::FileExists(failed))
+                {
+                    try
+                    {
+                        if (::MphRead::NativeRuntime::FileReadAllText(failed) == stamp)
+                        {
+                            continue;
+                        }
+                    }
+                    catch (...)
+                    {
+                    }
+                }
+                missing.push_back(room);
+                stamps.emplace_back(failed, stamp);
+            }
+        }
+        if (missing.empty())
+        {
+            return;
         }
 
         report("Rendering " + std::to_string(missing.size()) + " custom map preview(s)...");
@@ -271,6 +463,19 @@ namespace MphRead::Mods
         catch (const std::exception& ex)
         {
             report("could not render: " + std::string(ex.what()));
+        }
+        for (std::size_t i = 0; i < missing.size(); i++)
+        {
+            if (!Exists(missing[i]))
+            {
+                try
+                {
+                    ::MphRead::NativeRuntime::FileWriteAllText(stamps[i].first, stamps[i].second);
+                }
+                catch (...)
+                {
+                }
+            }
         }
     }
 
