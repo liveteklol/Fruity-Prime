@@ -37,7 +37,7 @@ Page {
         // BodyGrid: a third of an em clear of the card's right edge.
         readonly property real inner: width - Theme.roundEven(Theme.em * 0.3)
         implicitHeight: play.current === 0 ? onlineBar.height + rowGap + servers.contentHeight
-                      : play.current === 1 || play.current === 4 ? rowGap + tiles.contentHeight
+                      : play.current === 1 || play.current === 4 ? mapSets.height + rowGap * 2 + tiles.contentHeight
                       : Math.max(list.implicitHeight, options.implicitHeight)
 
         // Online: the name, the address and Refresh over the server list.
@@ -87,14 +87,21 @@ Page {
             onActivated: index => play.go()
         }
 
-        // Offline and the ballot: the map cards.
+        // Offline and the ballot: the cartridge's maps or the custom ones,
+        // as cards.
+        MapSetSwitch {
+            id: mapSets
+            visible: play.current === 1 || play.current === 4
+            y: bodyGrid.rowGap
+            rooms: ShellHost.rooms
+        }
         DeckGrid {
             id: tiles
             visible: play.current === 1 || play.current === 4
-            y: bodyGrid.rowGap
+            y: mapSets.y + mapSets.height + bodyGrid.rowGap
             width: bodyGrid.inner
             height: bodyGrid.height - y
-            model: play.current === 1 || play.current === 4 ? ShellHost.rooms : []
+            model: play.current === 1 || play.current === 4 ? mapSets.pick(ShellHost.rooms) : []
             delegate: DeckTile {
                 property var modelData: ({})
                 property int index
@@ -321,9 +328,16 @@ Page {
     no: Mark { id: backMark; shape: "cancel"; label: "back"; onClicked: play.leave() }
     extra: Mark {
         id: lobbyMark
-        shape: "add"; label: "create lobby"
-        visible: play.current === 0
-        onClicked: if (play.nav) play.nav.openCreateServer()
+        shape: "add"; label: play.current === 1 ? "download maps" : "create lobby"
+        visible: play.current === 0 || play.current === 1
+        onClicked: {
+            if (!play.nav)
+                return
+            if (play.current === 1)
+                play.nav.push("DownloadMapsPage.qml", {})
+            else
+                play.nav.openCreateServer()
+        }
     }
     yes: Mark {
         id: goMark

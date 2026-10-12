@@ -68,13 +68,19 @@ Page {
     Component.onCompleted: { mark(); list.focusFirst() }
 
     body: Item {
+        MapSetSwitch {
+            id: mapSets
+            rooms: ShellHost.rooms
+        }
         UiList {
             id: list
+            readonly property var shown: mapSets.pick(ShellHost.rooms)
+            y: mapSets.height + 6
             width: parent.width
-            height: parent.height - note.height
-            model: ShellHost.rooms.map(r => ({ title: names.roomName(r.key), key: r.key,
-                                           detail: page.picked.indexOf(r.key) >= 0 ? "#" + (page.picked.indexOf(r.key) + 1) : "" }))
-            onChosen: index => page.toggle(ShellHost.rooms[index].key)
+            height: parent.height - note.height - mapSets.height - 6
+            model: shown.map(r => ({ title: names.roomName(r.key), key: r.key,
+                                     detail: page.picked.indexOf(r.key) >= 0 ? "#" + (page.picked.indexOf(r.key) + 1) : "" }))
+            onChosen: index => page.toggle(list.shown[index].key)
         }
         Note {
             id: note

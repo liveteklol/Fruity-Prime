@@ -34,12 +34,7 @@ namespace MphRead::Mods::MapGen
             return url;
         }
 
-        struct Entry
-        {
-            std::string File;
-            std::int64_t Size = 0;
-            std::string Sha256;
-        };
+        using Entry = MapCatalog::Pack;
 
         std::size_t ToMemory(char* data, std::size_t size, std::size_t count, void* user)
         {
@@ -127,7 +122,33 @@ namespace MphRead::Mods::MapGen
                 {
                     continue;
                 }
-                entries.push_back(Entry{name, size->AsInt64(), sha->Text()});
+                Entry entry;
+                entry.File = name;
+                entry.Size = size->AsInt64();
+                entry.Sha256 = sha->Text();
+                if (const JsonPtr levels = item->Get("levels"); levels && levels->Type() == JsonValue::Kind::Array)
+                {
+                    for (const JsonPtr& level : levels->Items())
+                    {
+                        if (level)
+                        {
+                            entry.Levels.push_back(level->Text());
+                        }
+                    }
+                }
+                if (const JsonPtr previews = item->Get("previews"); previews)
+                {
+                    for (const std::string& level : entry.Levels)
+                    {
+                        const JsonPtr picture = previews->Get(level);
+                        const std::string file = picture ? picture->Text() : std::string();
+                        if (!file.empty() && file.find_first_of("/\\") == std::string::npos && file.rfind("..", 0) != 0)
+                        {
+                            entry.Previews.emplace_back(level, file);
+                        }
+                    }
+                }
+                entries.push_back(std::move(entry));
             }
             return entries;
         }
@@ -159,6 +180,108 @@ namespace MphRead::Mods::MapGen
             }
             return false;
         }
+    }
+
+    namespace
+    {
+        [[nodiscard]] bool Fetch(const std::filesystem::path& folder, const Entry& entry)
+        {
+            std::error_code error;
+            std::filesystem::create_directories(folder, error);
+            const std::filesystem::path part = folder / (entry.File + ".part");
+            bool good = false;
+            {
+                std::ofstream out(part, std::ios::binary | std::ios::trunc);
+                // A minute a few megabytes would be slow; a pack is tens.
+                good = out.good() && Get(Base() + entry.File, nullptr, &out, 1800L);
+            }
+            if (good)
+            {
+                const std::vector<std::uint8_t> bytes = ::MphRead::NativeRuntime::FileReadAllBytes(PathToUtf8(part));
+                good = static_cast<std::int64_t>(bytes.size()) == entry.Size
+                    && Hex(::MphRead::NativeRuntime::Sha256HashData(bytes)) == entry.Sha256;
+            }
+            if (good)
+            {
+                std::filesystem::rename(part, folder / entry.File, error);
+                good = !error;
+            }
+            if (!good)
+            {
+                std::filesystem::remove(part, error);
+                ::MphRead::NativeRuntime::ConsoleWriteLine("[maps] could not download " + entry.File);
+                return false;
+            }
+            ::MphRead::NativeRuntime::ConsoleWriteLine("[maps] downloaded " + entry.File);
+            return true;
+        }
+    }
+
+    std::optional<std::vector<MapCatalog::Pack>> MapCatalog::List()
+    {
+        std::optional<std::vector<Entry>> catalogue = Catalogue();
+        if (!catalogue)
+        {
+            return std::nullopt;
+        }
+        const std::string directory = CustomRooms::MapDirectory();
+        if (!directory.empty())
+        {
+            const std::filesystem::path root = PathFromUtf8(directory);
+            for (Entry& entry : *catalogue)
+            {
+                entry.Installed = Present(root, entry);
+            }
+        }
+        return catalogue;
+    }
+
+    bool MapCatalog::Download(const Pack& pack)
+    {
+        const std::string directory = CustomRooms::MapDirectory();
+        if (directory.empty())
+        {
+            return false;
+        }
+        return Fetch(PathFromUtf8(directory) / "downloaded", pack);
+    }
+
+    std::optional<std::string> MapCatalog::Preview(const std::string& picture)
+    {
+        if (picture.empty() || picture.find_first_of("/\\") != std::string::npos || picture.rfind("..", 0) == 0)
+        {
+            return std::nullopt;
+        }
+        const std::string directory = CustomRooms::MapDirectory();
+        if (directory.empty())
+        {
+            return std::nullopt;
+        }
+        const std::filesystem::path folder = PathFromUtf8(directory) / "downloaded" / ".previews";
+        const std::filesystem::path target = folder / PathFromUtf8(picture);
+        std::error_code error;
+        if (std::filesystem::is_regular_file(target, error) && std::filesystem::file_size(target, error) > 0)
+        {
+            return PathToUtf8(target);
+        }
+        std::filesystem::create_directories(folder, error);
+        const std::filesystem::path part = folder / PathFromUtf8(picture + ".part");
+        bool good = false;
+        {
+            std::ofstream out(part, std::ios::binary | std::ios::trunc);
+            good = out.good() && Get(Base() + picture, nullptr, &out, 60L);
+        }
+        if (good)
+        {
+            std::filesystem::rename(part, target, error);
+            good = !error;
+        }
+        if (!good)
+        {
+            std::filesystem::remove(part, error);
+            return std::nullopt;
+        }
+        return PathToUtf8(target);
     }
 
     std::int32_t MapCatalog::Sync(
@@ -193,32 +316,10 @@ namespace MphRead::Mods::MapGen
             {
                 progress(entry.File, static_cast<std::int32_t>(i), static_cast<std::int32_t>(missing.size()));
             }
-            const std::filesystem::path part = folder / (entry.File + ".part");
-            bool good = false;
+            if (Fetch(folder, entry))
             {
-                std::ofstream out(part, std::ios::binary | std::ios::trunc);
-                // A minute a few megabytes would be slow; a pack is tens.
-                good = out.good() && Get(Base() + entry.File, nullptr, &out, 1800L);
+                ++arrived;
             }
-            if (good)
-            {
-                const std::vector<std::uint8_t> bytes = ::MphRead::NativeRuntime::FileReadAllBytes(PathToUtf8(part));
-                good = static_cast<std::int64_t>(bytes.size()) == entry.Size
-                    && Hex(::MphRead::NativeRuntime::Sha256HashData(bytes)) == entry.Sha256;
-            }
-            if (good)
-            {
-                std::filesystem::rename(part, folder / entry.File, error);
-                good = !error;
-            }
-            if (!good)
-            {
-                std::filesystem::remove(part, error);
-                ::MphRead::NativeRuntime::ConsoleWriteLine("[maps] could not download " + entry.File);
-                continue;
-            }
-            ++arrived;
-            ::MphRead::NativeRuntime::ConsoleWriteLine("[maps] downloaded " + entry.File);
         }
         return arrived;
     }

@@ -16,6 +16,10 @@ FocusScope {
     // How many have picked this map; negative means no ballot.
     property int tally: -1
     property bool leader: false
+    // A picture instead of the room's (the Download maps page), and when
+    // there is none a Quake 3 badge.
+    property string picture
+    property bool quakeBadge: false
     property real em: Theme.em
     signal clicked()
 
@@ -72,11 +76,29 @@ FocusScope {
             }
             Image {
                 anchors.fill: parent
-                source: ShellHost.mapShot(tile.roomKey)
+                source: tile.picture.length > 0 ? tile.picture
+                    : tile.roomKey.length > 0 ? ShellHost.mapShot(tile.roomKey) : ""
                 fillMode: Image.PreserveAspectCrop
                 smooth: false
                 asynchronous: !Theme.still
                 cache: true
+            }
+            Rectangle {
+                visible: tile.quakeBadge
+                anchors.fill: parent
+                gradient: Gradient {
+                    GradientStop { position: 0; color: "#3a1410" }
+                    GradientStop { position: 1; color: "#120706" }
+                }
+                Text {
+                    anchors.centerIn: parent
+                    anchors.verticalCenterOffset: -tile.height * 0.1
+                    text: "Q3"
+                    font.family: Theme.pixel; font.bold: true
+                    font.pixelSize: Math.round(tile.height * 0.36)
+                    color: "#b8321e"
+                    style: Text.Raised; styleColor: "#000000"
+                }
             }
             // Drift: a warm and a cool glow, placed from the room key.
             Item {

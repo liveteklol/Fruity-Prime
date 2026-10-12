@@ -20,6 +20,9 @@
 #include "../../MphRead.Native/Mods/PauseMenu.hpp"
 #include "../../MphRead.Native/Mods/SpectatorMode.hpp"
 #include "../../MphRead.Native/Mods/ThumbnailGenerator.hpp"
+#include "../../MphRead.Native/Mods/MapGen/CustomRooms.hpp"
+#include "../../MphRead.Native/Mods/MapGen/MapDefinition.hpp"
+#include "../../MphRead.Native/NativeRuntime/System/Globalization.hpp"
 #include "../../MphRead.Native/Mods/Update/BuildVersion.hpp"
 #include "../../MphRead.Native/Mods/Update/UpdateInstall.hpp"
 #include "../../MphRead.Native/Mods/Update/Updater.hpp"
@@ -140,6 +143,18 @@ namespace MphRead::Qt
 
     void ShellBridge::SetRooms(const std::vector<std::string>& rooms, bool gameFilesReady)
     {
+        // Rooms read from a .pk3 or a map recipe, apart from the cartridge's.
+        std::vector<std::string> custom;
+        try
+        {
+            for (const auto& definition : ::MphRead::Mods::MapGen::CustomRooms::Definitions())
+            {
+                custom.push_back(definition->Name());
+            }
+        }
+        catch (...)
+        {
+        }
         _rooms.clear();
         for (const std::string& room : rooms)
         {
@@ -154,6 +169,11 @@ namespace MphRead::Qt
                 space == std::string::npos ? room : room.substr(0, space)));
             entry.insert(QStringLiteral("name"), QString::fromStdString(
                 meta != nullptr ? meta->InGameName.value_or("") : ""));
+            entry.insert(QStringLiteral("custom"), std::any_of(custom.begin(), custom.end(),
+                [&](const std::string& name)
+                {
+                    return ::MphRead::NativeRuntime::StringCompareOrdinalIgnoreCase(name, room) == 0;
+                }));
             _rooms.push_back(entry);
         }
         _gameFilesReady = gameFilesReady;

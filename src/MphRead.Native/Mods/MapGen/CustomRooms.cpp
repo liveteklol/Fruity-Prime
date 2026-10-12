@@ -1152,6 +1152,13 @@ namespace MphRead::Mods::MapGen
         return arrived;
     }
 
+    void CustomRooms::NoteDownloaded(std::int32_t count)
+    {
+        GenerationState& state = Generation();
+        const std::lock_guard<std::mutex> guard(state.Lock);
+        state.Downloaded += count;
+    }
+
     void CustomRooms::Rescan()
     {
         CustomRoomsState& state = State();

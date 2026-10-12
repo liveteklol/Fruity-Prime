@@ -1,0 +1,16 @@
+#!/usr/bin/env python3
+"""Checks an uploaded FruityPrime map pack (upload.php): exit 0 and the
+levels it holds, one a line, when it is a zip with at least one maps/*.bsp
+and no entry climbing out of its folder; exit 1 otherwise."""
+import sys, zipfile
+try:
+    with zipfile.ZipFile(sys.argv[1]) as z:
+        names = z.namelist()
+except Exception:
+    sys.exit(1)
+if any(".." in n.split("/") or n.startswith("/") or "\\" in n for n in names):
+    sys.exit(1)
+levels = [n.split("/")[-1][:-4] for n in names if n.lower().startswith("maps/") and n.lower().endswith(".bsp") and n.count("/") == 1]
+if not levels:
+    sys.exit(1)
+print("\n".join(levels))

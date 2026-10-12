@@ -14,11 +14,21 @@ Page {
     heading: "choose map"
 
     body: Item {
+        MapSetSwitch {
+            id: mapSets
+            rooms: ShellHost.rooms
+            Component.onCompleted: {
+                const chosen = ShellHost.rooms.find(r => r.key === page.selected)
+                if (chosen && chosen.custom)
+                    index = 1
+            }
+        }
         DeckGrid {
             id: tiles
+            y: mapSets.height + 6
             width: parent.width
-            height: parent.height - note.height - 6
-            model: ShellHost.rooms
+            height: parent.height - note.height - 12 - mapSets.height
+            model: mapSets.pick(ShellHost.rooms)
             delegate: DeckTile {
                 property var modelData: ({})
                 property int index

@@ -113,6 +113,9 @@ namespace MphRead::Mods::MapGen
         // Maps the last StartGenerating downloaded, given once: the caller
         // then lists them (Rescan) and builds them (StartGenerating again).
         [[nodiscard]] static std::int32_t TakeDownloaded();
+        // A pack fetched outside StartGenerating (the Download maps page):
+        // TakeDownloaded gives it as the others.
+        static void NoteDownloaded(std::int32_t count);
         // Lists the map folder again, for maps that arrived since. Not while
         // anything else walks the list: the launcher's thread, between jobs.
         static void Rescan();

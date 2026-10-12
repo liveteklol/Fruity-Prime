@@ -1,6 +1,7 @@
 #include "QmlTypes.hpp"
 
 #include "ClassicMenuItem.hpp"
+#include "DownloadsModel.hpp"
 #include "GamepadMonitorItem.hpp"
 #include "HunterStandItem.hpp"
 #include "PlayModel.hpp"
@@ -35,6 +36,7 @@ namespace MphRead::Qt
                 return bridge;
             });
         qmlRegisterType<PlayModel>(uri, 1, 0, "PlayModel");
+        qmlRegisterType<DownloadsModel>(uri, 1, 0, "DownloadsModel");
         qmlRegisterType<HunterStandItem>(uri, 1, 0, "HunterStand");
         qmlRegisterType<ClassicMenuItem>(uri, 1, 0, "ClassicMenu");
         qmlRegisterType<GamepadMonitorItem>(uri, 1, 0, "GamepadMonitor");
