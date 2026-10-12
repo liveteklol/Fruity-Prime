@@ -122,11 +122,15 @@ feeding them structures that never came from a file:
   entity-local and its `BoxPosition` is the *corner*, not the centre.
 - **Camera limits are inherited from the room metadata**, so a custom map
   leaves them zero rather than borrowing another room's box.
-- **The collision grid is indexed with 16 bits.** Cell size is fixed at 4
-  units (the run-time lookup divides by four), so a big level means a lot of
-  cells, and each face is listed in every cell it touches. Past 65535 listings
-  the format cannot express it -- `MapCollisionPacker` says so by name instead
-  of writing something that half works.
+- **The collision grid is indexed with 16 bits** in the cartridge's format
+  (`wc01`). Cell size is fixed at 4 units (the run-time lookup divides by
+  four), so a big level means a lot of cells, and each face is listed in every
+  cell it touches. Cells sharing a run of faces share it, faces are ordered by
+  the cell they start in, and a level still past 16 bits (q3ctf2, q3ctf3) is
+  written as `wc32`: the same file with 32-bit cells, which only this game
+  reads (`Collision::ReadMphCollision`). The game holds every cell's start in
+  32 bits either way: it rebuilds the lists per mode layer without sharing
+  them, and q3ctf2's 70373 references would not fit otherwise.
 - **A Quake level is sealed inside a shell of sky brushes.** Importing it puts
   hundreds of units of empty grid around the level: wrackdm17 measured
   372x244x294 units with the shell and 157x77x176 without, which is the
@@ -433,9 +437,42 @@ What the level holds comes across by rule, never by hand:
   its light halved (`Q3Import::Light`). A level compiled for Quake Live
   leaves the faces' lightmap blocks out; they are taken from where the
   vertices' lightmap coordinates fall.
-- **Multi-stage shaders** -- fire behind a carved grille, lava under a pad's
-  rim -- are composited into one image at bake time, each `blendFunc blend`
-  stage over the opaque one under it (`MapTextureBake`'s `Compose`).
+- **Multi-stage shaders** that stand still -- fire behind a carved grille,
+  lava under a pad's rim, a light's glow -- are composited into one image at
+  bake time, each `blendFunc blend` stage over the base under it and each
+  added stage added (`MapTextureBake`'s `Compose`).
+- **Shaders move** (`ShaderAnim`). A shader with a time in it -- `tcMod
+  scroll/rotate/stretch/turb`, `rgbGen`/`alphaGen wave`, `animMap` -- is
+  baked as its base image (the stage the light falls on, or a flame's first
+  stage, drawn by brightness) and an entry per stage laid over it that moves
+  or that a moving base would carry away: `A5I3` for added light, as
+  see-through as it is dark, `A3I5` for one laid on by its alpha. Each entry
+  says what it is in the texture pack (`FPTX` 2, `MapTexturePack::Entry::Meta`).
+  The import lays a layer over its faces as a decal, lit by the level or not
+  as Quake draws it (before or after its lightmap stage); the packer draws
+  them in that order (faces, lit layers, the light layer, glows) and writes
+  the room's animation: tcMods as texcoord animations, waves as material
+  alpha, animMaps as texture animations that repeat over `Field2A` frames
+  (`Model::AnimateTextures`; no cartridge animation sets it). One loop of
+  100 seconds, every rate rounded to whole cycles of it. `cull none` is drawn
+  from both sides.
+- **Movers move** (`Q3Movers`, `g_mover.c`'s motions): `func_bobbing`,
+  `func_rotating`, `func_pendulum`, and a `func_door` that opens by itself
+  (no `targetname`, no `health`) while anyone is in its team's trigger (its
+  bounds, 120 wider on the thinnest side), closing after its `wait`. Each
+  mover's brush model is drawn in a node of its own (`q3model<N>`) and has a
+  collision of its own beside the room's (`<room>_q3model<N>_Collision.bin`),
+  held by a `Q3MoverEntity` (entity type `Q3Mover`, which collision takes like
+  a platform) that moves it a frame ahead of the hunters and carries whoever
+  stands on it, a hand's width into it so standing never lets go. A brush
+  model with an `origin` is stored about it (q3map moves it there). Its
+  `model2` -- an MD3 Quake draws on it, q3dm19's jets -- is read from the
+  level's archives and drawn in the same node (`Q3Md3`). `-moverprobe ROOM`
+  stands a hunter on each mover for six seconds (`FP_MOVERPROBE_DOORS`:
+  beside it, to see doors open).
+- **Sound**: each looped-on `target_speaker` plays its WAV where it stands,
+  full within 80 units and silent from 1330 as Quake's loops fall off
+  (`Q3Speakers`, the sound engine's `PlayAmbientLoop`).
 - **Portals** (`misc_portal_surface` and its `misc_portal_camera`) show the
   view from their camera: rendered by the thumbnail pass once the room is
   built (`ThumbnailGenerator::EnsurePortalViews`, or `-portalviews ROOM`),
@@ -481,6 +518,15 @@ What the level holds comes across by rule, never by hand:
 - **Out of bounds** is a wall: a hunter about to stand where the level's BSP
   has no cluster -- inside its walls or the void around it -- is put back
   where it was (`CustomRooms::Q3Open`, every frame, a walk down the tree).
+- **The server's maps**: every `.pk3` dropped in
+  `/var/www/net.livetek.fr/fruityprime/maps` on the Raspberry Pi is listed in
+  `index.json` (size, SHA-256, levels) and `index.html` by
+  `tools/fp-maps-index.py`, rerun on every change by `fp-maps-index.path`;
+  nothing else in the folder is served. `MapCatalog::Sync` downloads, before
+  anything is built, each pack the map folder lacks into `maps/downloaded`,
+  checked against the catalogue; the launcher shows `Downloading maps`, then
+  lists and builds them. `-mapsync` runs it; `FP_MAPS_URL` points it at a
+  copy, `FP_NO_MAP_DOWNLOAD` turns it off.
 - **OpenArena's art** stands in for what a level lacks before the
   cartridge's does: `tools/openarena-pack.py` builds `oa-textures.pk3`
   (stored, so any one file of it is a range request), `index.json` and
@@ -825,6 +871,20 @@ not over the room, so two points either side of a wall are never merged.
 first attempt stepped straight over every one of df_dust2's and produced a
 room of disconnected islands.
 
+A Quake level needed more (`-bottour ROOM`: bots play it, and it reports how
+far they got and what they used, against MP1's 85% of waypoints reached):
+
+- **A waypoint keeps a body's width off the walls** (`Clear`). One left in a
+  corner is one a bot heads for and cannot reach: it presses into the wall
+  for the rest of the match.
+- **A stair is not a wall.** A riser no higher than Quake's step (18 units)
+  above the floor under the way is stepped over, and a waypoint up to a
+  slope's rise above another is reached. Down a drop is one way, and the
+  thinning keeps it one way. (Feeling the floor along the way a quarter unit
+  at a time was tried, and cut more ways than it saved.)
+- **A waypoint with no way to or from it is dropped**: a bot whose nearest
+  waypoint it is stands at it for ever.
+
 Two lists per node, because the AI reads two. What it navigates with is the
 second one: a routing table giving, for every destination in the room, which
 neighbour to set off towards, run-length encoded as pairs of (how many
@@ -953,6 +1013,13 @@ listed and crashing. With nothing shipping, the APK now logs
   is as much as it can check.
 - **Nothing hashes the map** in the network handshake: two clients on the same
   build with different `maps/` will disagree silently.
+- **Animated deformations** (`deformVertexes wave` on banners and liquids,
+  `autosprite`) are drawn still; a door that waits for a button
+  (`targetname`) stays shut and has no collision; `func_train` and `func_plat`
+  are drawn where the level has them (no base level uses either).
+- **Bots on a Quake level** reach far less of it than of a cartridge room
+  (see Bots): they read Quake's level through the same waypoints, not its
+  own `.aas`.
 
 ## Handing a custom map to a client that does not have it
 

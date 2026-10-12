@@ -632,59 +632,6 @@ namespace MphRead::Mods::MapGen
             return false;
         }
 
-        // Whether a hunter walks from one waypoint to another: the floor
-        // under the way, felt a quarter unit at a time, never rises more than
-        // a step at once (a stair, a slope) and is never missing (a gap); it
-        // may drop, which makes the way one way.
-        [[nodiscard]] bool Walkable(
-            const std::vector<BuiltFace*>* solid,
-            const BucketGrid& grid,
-            Vector3 min,
-            float spacing,
-            Vector3 from,
-            Vector3 to)
-        {
-            const float dx = to.X - from.X;
-            const float dz = to.Z - from.Z;
-            const float length = std::sqrt(dx * dx + dz * dz);
-            const std::int32_t steps = std::max<std::int32_t>(1, static_cast<std::int32_t>(std::ceil(length / 0.25F)));
-            float floor = from.Y - 0.5F;
-            for (std::int32_t k = 1; k <= steps; ++k)
-            {
-                const float t = static_cast<float>(k) / static_cast<float>(steps);
-                const float x = from.X + dx * t;
-                const float z = from.Z + dz * t;
-                const std::int32_t column = static_cast<std::int32_t>(std::floor((x - min.X) / spacing));
-                const std::int32_t row = static_cast<std::int32_t>(std::floor((z - min.Z) / spacing));
-                if (column < 0 || row < 0 || column >= grid.Columns || row >= grid.Rows)
-                {
-                    return false;
-                }
-                const auto& bucketValue = BucketAt(grid, UncheckedAdd(UncheckedMultiply(row, grid.Columns), column));
-                if (!bucketValue)
-                {
-                    return false;
-                }
-                float best = std::numeric_limits<float>::lowest();
-                for (const std::int32_t index : *bucketValue)
-                {
-                    const BuiltFace* face = (*solid)[static_cast<std::size_t>(index)];
-                    float y = 0.0F;
-                    if (Normal(face).Y >= WalkNormal && Contains(face, x, z, y)
-                        && y <= floor + StepHeight + 0.02F && y >= floor - StepDown && y > best)
-                    {
-                        best = y;
-                    }
-                }
-                if (best == std::numeric_limits<float>::lowest())
-                {
-                    return false;
-                }
-                floor = best;
-            }
-            return std::fabs(floor - (to.Y - 0.5F)) < 0.3F;
-        }
-
         void Connect(
             const std::vector<BuiltFace*>* solid,
             std::vector<Node>& nodes,
@@ -1276,6 +1223,43 @@ namespace MphRead::Mods::MapGen
             spacing *= 1.4F;
         }
         const std::int32_t unlinked = AddLinks(solid, nodes, links);
+        // A waypoint no way leads to or from is no place to head for: a bot
+        // nearest one would stand at it for ever.
+        {
+            std::vector<bool> used(nodes.size(), false);
+            for (std::size_t i = 0; i < nodes.size(); ++i)
+            {
+                if (!nodes[i].Neighbours.empty())
+                {
+                    used[i] = true;
+                    for (const std::int32_t j : nodes[i].Neighbours)
+                    {
+                        used[static_cast<std::size_t>(j)] = true;
+                    }
+                }
+            }
+            std::vector<std::int32_t> index(nodes.size(), -1);
+            std::vector<Node> kept{};
+            for (std::size_t i = 0; i < nodes.size(); ++i)
+            {
+                if (used[i])
+                {
+                    index[i] = static_cast<std::int32_t>(kept.size());
+                    kept.push_back(nodes[i]);
+                }
+            }
+            for (Node& node : kept)
+            {
+                for (std::int32_t& j : node.Neighbours)
+                {
+                    j = index[static_cast<std::size_t>(j)];
+                }
+            }
+            if (!kept.empty())
+            {
+                nodes = std::move(kept);
+            }
+        }
         if (links != nullptr && !links->empty())
         {
             std::printf("  [nodes] %d of %d jump pad/teleporter routes joined to the bots' graph\n",
