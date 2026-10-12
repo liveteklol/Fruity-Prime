@@ -523,6 +523,27 @@ namespace MphRead::Mods::MapGen
         return Q3LevelCache().Room == roomId ? Q3LevelCache().Bsp : nullptr;
     }
 
+    std::vector<std::string> CustomRooms::Q3LevelArchives(std::int32_t roomId)
+    {
+        std::vector<std::string> archives;
+        const ::MphRead::RoomMetadata* meta = ::MphRead::Metadata::GetRoomById(roomId, true);
+        for (const std::shared_ptr<MapDefinition>& definition : Definitions())
+        {
+            if (meta != nullptr && definition->Translated() && definition->Import() != nullptr
+                && definition->SourcePath().has_value()
+                && ::MphRead::NativeRuntime::StringCompareOrdinalIgnoreCase(definition->Name(), meta->Name) == 0)
+            {
+                archives.push_back(*definition->SourcePath());
+                for (std::string& pak : definition->Import()->ResolveTexturePaks())
+                {
+                    archives.push_back(std::move(pak));
+                }
+                break;
+            }
+        }
+        return archives;
+    }
+
     bool CustomRooms::Q3Open(std::int32_t roomId, OpenTK::Mathematics::Vector3 position)
     {
         Q3Level& level = Q3LevelCache();

@@ -752,6 +752,8 @@ namespace MphRead::Sound
     void SfxInstanceBase::StopSoundFromSource(SoundSource*, std::int32_t) {}
     void SfxInstanceBase::StopEnvironmentSfx() {}
     void SfxInstanceBase::StopAllSound(bool) {}
+    void SfxInstanceBase::PlayAmbientLoop(const std::vector<std::uint8_t>&, std::int32_t, Vector3, float, float, float) {}
+    void SfxInstanceBase::StopAmbientLoops() {}
     void SfxInstanceBase::StopSoundById(std::int32_t) {}
     void SfxInstanceBase::StopFreeSfxScripts() {}
     void SfxInstanceBase::SetPausedFreeSfxScripts(bool) {}
@@ -1232,6 +1234,10 @@ namespace MphRead::Sound
 
     void SfxInstance::StopAllSound(bool force)
     {
+        if (force)
+        {
+            StopAmbientLoops();
+        }
         for (auto& holder : _instances)
         {
             if (!holder)
@@ -1647,6 +1653,13 @@ namespace MphRead::Sound
         Audio::SourceFloat(_streamInstance, AlReferenceDistance, std::numeric_limits<float>::max());
         Audio::SourceFloat(_streamInstance, AlMaxDistance, std::numeric_limits<float>::max());
         Audio::SourceFloat(_streamInstance, AlRolloffFactor, 1.0F);
+        for (const AmbientLoop& loop : _ambient)
+        {
+            if (loop.Playing)
+            {
+                Audio::SourceFloat(loop.Source, AlGain, Sfx::SfxMute ? 0.0F : Sfx::Volume * loop.Volume);
+            }
+        }
         for (auto& holder : _instances)
         {
             if (!holder)
@@ -1975,8 +1988,65 @@ namespace MphRead::Sound
         }
     }
 
+    void SfxInstance::PlayAmbientLoop(const std::vector<std::uint8_t>& samples, std::int32_t sampleRate,
+        Vector3 position, float volume, float reference, float maximum)
+    {
+        if (_context == 0 || samples.empty() || sampleRate <= 0)
+        {
+            return;
+        }
+        AmbientLoop* loop = nullptr;
+        for (AmbientLoop& existing : _ambient)
+        {
+            if (!existing.Playing)
+            {
+                loop = &existing;
+                break;
+            }
+        }
+        if (loop == nullptr)
+        {
+            // Quake's levels have dozens; more than this many at once is
+            // more than anyone hears.
+            if (_ambient.size() >= 64)
+            {
+                return;
+            }
+            _ambient.push_back(AmbientLoop{Audio::GenBuffer(), Audio::GenSource(), 0.0F, false});
+            loop = &_ambient.back();
+        }
+        Audio::SourceStop(loop->Source);
+        Audio::SourceInt(loop->Source, AlBuffer, 0);
+        Audio::BufferData(loop->Buffer, AlFormatMono16, samples, sampleRate);
+        Audio::SourceInt(loop->Source, AlBuffer, loop->Buffer);
+        Audio::SourceBool(loop->Source, AlSourceRelative, false);
+        Audio::SourceBool(loop->Source, AlLooping, true);
+        Audio::SourcePosition(loop->Source, position);
+        Audio::SourceFloat(loop->Source, AlReferenceDistance, reference);
+        Audio::SourceFloat(loop->Source, AlMaxDistance, maximum);
+        Audio::SourceFloat(loop->Source, AlRolloffFactor, 1.0F);
+        Audio::SourceFloat(loop->Source, AlPitch, 1.0F);
+        Audio::SourceFloat(loop->Source, AlGain, Sfx::SfxMute ? 0.0F : Sfx::Volume * volume);
+        Audio::SourcePlay(loop->Source);
+        loop->Volume = volume;
+        loop->Playing = true;
+    }
+
+    void SfxInstance::StopAmbientLoops()
+    {
+        for (AmbientLoop& loop : _ambient)
+        {
+            if (loop.Playing)
+            {
+                Audio::SourceStop(loop.Source);
+                loop.Playing = false;
+            }
+        }
+    }
+
     void SfxInstance::ShutDown()
     {
+        StopAmbientLoops();
         MphRead::MusicPlayer::Remove(true);
         for (auto& holder : _instances)
         {

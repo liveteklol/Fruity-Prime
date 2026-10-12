@@ -56,6 +56,9 @@ namespace MphRead::Mods::MapGen
         // The Quake 3 level a translated room came from, read once and kept
         // while the room is (Q3Open's); nothing for any other room.
         [[nodiscard]] static std::shared_ptr<Q3Bsp> Q3LevelBsp(std::int32_t roomId);
+        // The archives a translated room's level reads from: its own, then
+        // the texture paks it names.
+        [[nodiscard]] static std::vector<std::string> Q3LevelArchives(std::int32_t roomId);
         // The fog a point of such a room is in, as Quake's fogparms has it
         // (red, green, blue 0-1, and the distance it is opaque at in this
         // game's units); none outside every fog volume, and in any other room.

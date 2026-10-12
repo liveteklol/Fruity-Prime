@@ -32,6 +32,7 @@
 #include "Players/PlayerEntity.hpp"
 #include "../Mods/MapGen/CustomRooms.hpp"
 #include "../Mods/MapGen/Q3Movers.hpp"
+#include "../Mods/MapGen/Q3Speakers.hpp"
 #include "../NativeRuntime/System/Managed.hpp"
 #include "../NativeRuntime/OpenTK/Mathematics.hpp"
 #include "../Formats/Types.hpp"
@@ -1764,6 +1765,7 @@ namespace MphRead::Entities
                         }
                     }
                     Mods::MapGen::Q3Movers::Update(_roomId, scene.FrameCount() + 1, players);
+                    Mods::MapGen::Q3Speakers::Ensure(_roomId, scene.FrameCount());
                     Mods::MapGen::Q3Movers::Apply(_roomId, RequireReference(RequireReference(inst.Model()).Nodes));
                 }
                 if (scene.ProcessFrame())

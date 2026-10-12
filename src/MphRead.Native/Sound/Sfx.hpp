@@ -162,6 +162,13 @@ namespace MphRead::Sound
         virtual void Update(float time);
         virtual void Load(MphRead::Scene& scene);
         virtual void ShutDown();
+        // A translated Quake 3 level's looping sound (a target_speaker):
+        // 16-bit mono samples, at a place, at full strength out to reference
+        // and silent from maximum, as Quake's loops fall off. Nothing where
+        // there is no sound.
+        virtual void PlayAmbientLoop(const std::vector<std::uint8_t>& samples, std::int32_t sampleRate,
+            OpenTK::Mathematics::Vector3 position, float volume, float reference, float maximum);
+        virtual void StopAmbientLoops();
 
     private:
         std::shared_ptr<std::vector<MphRead::Formats::Sound::Sound3dEntry>> _baseRangeData;
@@ -269,6 +276,9 @@ namespace MphRead::Sound
         void PlayFreeStream(std::int32_t id) override;
         void Load(MphRead::Scene& scene) override;
         void ShutDown() override;
+        void PlayAmbientLoop(const std::vector<std::uint8_t>& samples, std::int32_t sampleRate,
+            OpenTK::Mathematics::Vector3 position, float volume, float reference, float maximum) override;
+        void StopAmbientLoops() override;
 
         std::shared_ptr<MphRead::Formats::Sound::SoundData> _soundData{};
 
@@ -336,6 +346,16 @@ namespace MphRead::Sound
         std::deque<std::shared_ptr<QueueItem>> _inactiveQueue{};
         std::int32_t _streamInstance = -1;
         std::int32_t _streamBuffer = -1;
+        // PlayAmbientLoop's: a buffer and a source each, kept for the next
+        // level once stopped, and how loud each is.
+        struct AmbientLoop
+        {
+            std::int32_t Buffer = 0;
+            std::int32_t Source = 0;
+            float Volume = 0.0F;
+            bool Playing = false;
+        };
+        std::vector<AmbientLoop> _ambient{};
 
         static std::array<EnvironmentItem, 10> _environmentItems;
     };
