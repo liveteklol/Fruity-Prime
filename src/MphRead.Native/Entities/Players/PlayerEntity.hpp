@@ -643,6 +643,7 @@ namespace MphRead::Entities
         [[nodiscard]] bool IsMainPlayer() const;
 
         [[nodiscard]] std::int32_t Health() const noexcept { return _health; }
+        [[nodiscard]] std::uint16_t TimeSinceJumpPad() const noexcept { return _timeSinceJumpPad; }
         void SetHealth(std::int32_t value) noexcept { _health = value; }
         [[nodiscard]] std::int32_t HealthMax() const noexcept { return _healthMax; }
         [[nodiscard]] AvailableArray& AvailableWeapons() noexcept { return _availableWeapons; }

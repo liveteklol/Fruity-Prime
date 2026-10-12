@@ -237,7 +237,11 @@ namespace MphRead::Mods::MapGen
             else
             {
                 bot.Stuck += dt;
-                bot.LongestStuck = std::max(bot.LongestStuck, bot.Stuck);
+                if (bot.Stuck > bot.LongestStuck)
+                {
+                    bot.LongestStuck = bot.Stuck;
+                    bot.StuckAt = bot.Anchor;
+                }
             }
             for (std::size_t n = 0; n < _nodes.size(); ++n)
             {
@@ -296,6 +300,14 @@ namespace MphRead::Mods::MapGen
                 slot, bot.Travelled, _nodes.empty() ? 0.0 : 100.0 * reached / static_cast<double>(_nodes.size()),
                 botPads, botTeles, botItems, bot.Rides, bot.Deaths, bot.LongestStuck);
             Runtime::ConsoleWriteLine(line);
+            if (bot.LongestStuck >= StuckSeconds)
+            {
+                // In Quake's units and axes, for a Quake 3 level.
+                char where[160];
+                std::snprintf(where, sizeof(where), "         stuck longest at quake (%.0f %.0f %.0f)",
+                    bot.StuckAt.X * 35.0F, -bot.StuckAt.Z * 35.0F, bot.StuckAt.Y * 35.0F);
+                Runtime::ConsoleWriteLine(where);
+            }
         }
         const std::int32_t together = static_cast<std::int32_t>(std::count(any.begin(), any.end(), true));
         char line[240];

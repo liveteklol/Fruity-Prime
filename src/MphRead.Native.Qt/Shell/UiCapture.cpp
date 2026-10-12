@@ -159,6 +159,7 @@ namespace MphRead::Qt
             {"play-online-phone-portrait", "front", "PlayPage.qml", P({{"face", 0}}), PhonePortrait, true},
             {"play-online-phone-landscape", "front", "PlayPage.qml", P({{"face", 0}}), PhoneLandscape, true},
             {"play-offline", "front", "PlayPage.qml", P({{"face", 1}}), Window, false},
+            {"download-maps", "front", "DownloadMapsPage.qml", P({}), Window, false},
             {"play-story", "front", "PlayPage.qml", P({{"face", 2}}), Window, false},
             {"play-clips", "front", "PlayPage.qml", P({{"face", 3}}), Window, false},
             {"play-vote", "pause", "PlayPage.qml", P({{"face", 4}, {"overGame", true}}), Window, false},

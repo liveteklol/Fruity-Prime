@@ -41,6 +41,8 @@ namespace MphRead::Mods::MapGen
             std::int32_t Deaths = 0;
             std::int32_t Rides = 0;
             float LongestStuck = 0.0F;
+            // Where it stood stuck longest.
+            OpenTK::Mathematics::Vector3 StuckAt{};
             float Stuck = 0.0F;
             OpenTK::Mathematics::Vector3 Last{};
             OpenTK::Mathematics::Vector3 Anchor{};

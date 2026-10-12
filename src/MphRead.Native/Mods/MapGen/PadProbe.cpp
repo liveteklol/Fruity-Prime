@@ -337,8 +337,10 @@ namespace MphRead::Mods::MapGen
         Sample sample;
         sample.Position = player.Position;
         sample.Speed = speed;
-        sample.Reset = std::fabs(speed.X - launch.X) < 1.0e-5F && std::fabs(speed.Z - launch.Z) < 1.0e-5F
-            && std::fabs(speed.Y - (launch.Y - fall)) < 1.0e-5F;
+        // The frame a pad threw (PlayerEntity::ActivateJumpPad).
+        sample.Reset = player.TimeSinceJumpPad() <= 1;
+        (void)launch;
+        (void)fall;
         sample.Standing = TestFlag(player.Flags1(), PlayerFlags1::Standing);
         _samples.push_back(sample);
         _waited = Runtime::UncheckedIncrement(_waited);
@@ -479,64 +481,43 @@ namespace MphRead::Mods::MapGen
         }
         trial.Landed = land < _samples.size();
 
+        // The pad throws as the cartridge's do (PlayerEntity::ActivateJumpPad):
+        // measured is how near the top of the flight comes to the top of
+        // Quake's arc from the same launch point (the pad's target), and how
+        // near the landing comes to where Quake's arc would have come down.
         const float g = pad.Q3Value();
         const Vector3 p0 = _samples[k].Position;
         const Vector3 v0 = _samples[k].Speed;
-        // Another trigger in the way -- a second pad up in the air, a
-        // teleporter -- ends this pad's flight where it changes the speed.
+        const Vector3 quake = pad.LaunchVelocity();
+        trial.SpeedError = 0.0F;
+        std::size_t topAt = k;
         for (std::size_t i = k + 1; i < land; i++)
         {
-            const float t = static_cast<float>(i - k) / 2.0F;
-            const Vector3 expected(v0.X, v0.Y - g * t, v0.Z);
-            if (Distance(_samples[i].Speed, expected) > 1.0e-3F && !_samples[i].Standing)
+            if (_samples[i].Position.Y > _samples[topAt].Position.Y)
             {
-                land = i;
-                trial.Landed = false;
-                trial.Chained = true;
-                break;
+                topAt = i;
             }
         }
-        const Vector3 launch = pad.LaunchVelocity();
-        trial.SpeedError = Across(Vector3(v0.X, 0.0F, v0.Z), Vector3(launch.X, 0.0F, launch.Z));
-        float top = p0.Y;
-        // Up to the frame before the one that hit something: the parabola,
-        // frame for frame (a frame is two ticks). A position off it by more
-        // than rounding before the landing is the level touched on the way
-        // -- a ledge's lip, a wall -- where the collision decides, not the
-        // flight: the flight is measured up to there.
-        for (std::size_t i = k + 1; i < land; i++)
+        trial.Height = _samples[topAt].Position.Y - p0.Y;
+        if (g > 0.0F && quake.Y > 0.0F)
         {
-            const float t = static_cast<float>(i - k) / 2.0F;
-            const Vector3 predicted(p0.X + v0.X * t, p0.Y + v0.Y * t - 0.5F * g * t * t, p0.Z + v0.Z * t);
-            const float off = Distance(_samples[i].Position, predicted);
-            if (off > 0.01F && i + 1 < land)
-            {
-                land = i;
-                trial.Landed = false;
-                trial.Chained = false;
-                trial.Hit = true;
-                break;
-            }
-            if (i + 1 < land)
-            {
-                trial.Deviation = std::max(trial.Deviation, off);
-            }
-            top = std::max(top, _samples[i].Position.Y);
+            const float t = quake.Y / g;
+            const Vector3 apex(p0.X + quake.X * t, p0.Y + quake.Y * quake.Y / (2.0F * g), p0.Z + quake.Z * t);
+            trial.Deviation = Distance(_samples[topAt].Position, apex);
         }
-        trial.Height = top - p0.Y;
+        (void)v0;
         const std::size_t end = std::min(land, _samples.size() - 1);
         const Vector3 at = _samples[end].Position;
         trial.Frames = static_cast<std::int32_t>(end - k);
         trial.Distance = Across(at, p0);
         if (trial.Landed && g > 0.0F)
         {
-            // Where the parabola comes down to the height it landed at.
             const float rise = p0.Y - at.Y;
-            const float root = v0.Y * v0.Y + 2.0F * g * rise;
+            const float root = quake.Y * quake.Y + 2.0F * g * rise;
             if (root >= 0.0F)
             {
-                const float t = (v0.Y + std::sqrt(root)) / g;
-                trial.LandingError = Across(at, Vector3(p0.X + v0.X * t, 0.0F, p0.Z + v0.Z * t));
+                const float t = (quake.Y + std::sqrt(root)) / g;
+                trial.LandingError = Across(at, Vector3(p0.X + quake.X * t, 0.0F, p0.Z + quake.Z * t));
             }
         }
         _trials.push_back(trial);

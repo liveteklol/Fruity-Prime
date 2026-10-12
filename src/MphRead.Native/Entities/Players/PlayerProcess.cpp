@@ -1503,15 +1503,38 @@ namespace MphRead::Entities
         {
             _soundSource.PlaySfx(SfxId::JUMP_PAD);
         }
+        // A Quake 3 pad throws the way the cartridge's do -- the same speed
+        // held across, the same rise with no gravity while the controls are
+        // locked, then this game's gravity and air control -- with the
+        // speed and lock that put a hunter at the top of Quake's arc (the
+        // pad's target) where and when Quake puts it. Its vector is Quake's
+        // launch velocity and its value Quake's gravity.
+        std::optional<std::uint16_t> q3Lock;
+        if (jumpPad != nullptr && jumpPad->Q3Kind() == JumpPadEntity::Q3Trigger::Push
+            && jumpPad->Q3Value() > 0.0F && vector.Y > 0.0F)
+        {
+            const float quakeGravity = jumpPad->Q3Value();
+            const float gravity = std::max(-Fixed::ToFloat(_values.BipedGravity), 0.0001F);
+            const float apexTime = vector.Y / quakeGravity;
+            const float height = vector.Y * vector.Y / (2.0F * quakeGravity);
+            // Frames locked (whole 60 Hz frames), then the rise left to the
+            // top under this game's gravity.
+            float locked = 0.0F;
+            if (gravity * apexTime * apexTime >= 2.0F * height)
+            {
+                const float rising = apexTime - std::sqrt(apexTime * apexTime - 2.0F * height / gravity);
+                locked = std::round((apexTime - rising) * 2.0F) / 2.0F;
+            }
+            const float up = gravity * (-locked + std::sqrt(locked * locked + 2.0F * height / gravity));
+            const float time = locked + up / gravity;
+            const float across = time > 0.0F ? apexTime / time : 1.0F;
+            vector = Vector3(vector.X * across, up, vector.Z * across);
+            q3Lock = static_cast<std::uint16_t>(std::lround(locked * 2.0F));
+        }
         _speed = vector;
         _jumpPadAccel = vector;
-        _q3PadGravity = jumpPad != nullptr
-            && jumpPad->Q3Kind() == JumpPadEntity::Q3Trigger::Push
-            ? jumpPad->Q3Value()
-            : 0.0F;
-        _q3AirSpeed = _q3PadGravity != 0.0F && jumpPad->Q3Unit() > 0.0F
-            ? 320.0F / jumpPad->Q3Unit() / 30.0F
-            : 0.0F;
+        _q3PadGravity = 0.0F;
+        _q3AirSpeed = 0.0F;
         if (jumpPad == nullptr)
         {
             _lastJumpPad.reset();
@@ -1521,7 +1544,7 @@ namespace MphRead::Entities
             _lastJumpPad = SharedFrom(jumpPad);
         }
         _flags1 |= PlayerFlags1::UsedJumpPad;
-        lockTime = ManagedUInt16Multiply(lockTime, 2);
+        lockTime = q3Lock.has_value() ? *q3Lock : ManagedUInt16Multiply(lockTime, 2);
         _jumpPadControlLock = lockTime;
         _jumpPadControlLockMin = std::max(lockTime, static_cast<std::uint16_t>(5 * 2));
         _timeSinceJumpPad = 0;
