@@ -29,6 +29,23 @@ public:
     {
         Vec4(SceneShaderAbi::ConstantIndex("fog_color"), c.Color); Float(SceneShaderAbi::ConstantIndex("fog_min"), c.MinDistance); Float(SceneShaderAbi::ConstantIndex("fog_max"), c.MaxDistance);
     }
+    void Set(const SceneFogBoxes& c) override
+    {
+        Int(SceneShaderAbi::ConstantIndex("fog_boxes"), c.Count);
+        Vec3(SceneShaderAbi::ConstantIndex("fog_eye"), c.Eye);
+        Vec4(SceneShaderAbi::ConstantIndex("fog_box0_min"), c.Boxes[0].Min);
+        Vec4(SceneShaderAbi::ConstantIndex("fog_box0_max"), c.Boxes[0].Max);
+        Vec4(SceneShaderAbi::ConstantIndex("fog_box0_color"), c.Boxes[0].Color);
+        Vec4(SceneShaderAbi::ConstantIndex("fog_box1_min"), c.Boxes[1].Min);
+        Vec4(SceneShaderAbi::ConstantIndex("fog_box1_max"), c.Boxes[1].Max);
+        Vec4(SceneShaderAbi::ConstantIndex("fog_box1_color"), c.Boxes[1].Color);
+        Vec4(SceneShaderAbi::ConstantIndex("fog_box2_min"), c.Boxes[2].Min);
+        Vec4(SceneShaderAbi::ConstantIndex("fog_box2_max"), c.Boxes[2].Max);
+        Vec4(SceneShaderAbi::ConstantIndex("fog_box2_color"), c.Boxes[2].Color);
+        Vec4(SceneShaderAbi::ConstantIndex("fog_box3_min"), c.Boxes[3].Min);
+        Vec4(SceneShaderAbi::ConstantIndex("fog_box3_max"), c.Boxes[3].Max);
+        Vec4(SceneShaderAbi::ConstantIndex("fog_box3_color"), c.Boxes[3].Color);
+    }
     void Set(const MaterialConstants& c) override { SetSurface(c); Float(SceneShaderAbi::ConstantIndex("mat_alpha"), c.Alpha); }
     void Set(const DrawConstants& c) override
     {

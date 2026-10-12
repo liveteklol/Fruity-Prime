@@ -496,6 +496,7 @@ namespace MphRead::Mods::MapGen
     namespace
     {
         thread_local std::optional<std::array<float, 4>>* fogQuery = nullptr;
+        std::vector<Q3Import::FogVolume> fogVolumes;
 
         // The level a translated room was read from, kept while the room is
         // played: its tree for Q3Open, its fog volumes for Q3FogAt.
@@ -517,6 +518,7 @@ namespace MphRead::Mods::MapGen
             cachedRoom = roomId;
             cachedLevel.reset();
             level.Lighting = Q3Import::Lighting{};
+            fogVolumes.clear();
             if (Q3StepHeight(roomId) > 0.0F)
             {
                 const ::MphRead::RoomMetadata* meta = ::MphRead::Metadata::GetRoomById(roomId, true);
@@ -531,6 +533,7 @@ namespace MphRead::Mods::MapGen
                             cachedLevel = Q3Bsp::Load(*definition->SourcePath(), definition->Import()->MapName());
                             level.Lighting = Q3Import::MakeLighting(cachedLevel.get(),
                                 std::vector<std::string>{*definition->SourcePath()});
+                            fogVolumes = level.Lighting.Fogs;
                         }
                         catch (...)
                         {
@@ -594,6 +597,69 @@ namespace MphRead::Mods::MapGen
             return true;
         }
         return cachedLevel->Open(position.X * unit, -position.Z * unit, position.Y * unit);
+    }
+
+    std::vector<CustomRooms::FogBox> CustomRooms::Q3FogBoxes(
+        std::int32_t roomId, OpenTK::Mathematics::Vector3 eye, std::size_t most)
+    {
+        static std::int32_t cachedRoom = -1;
+        static std::vector<FogBox> boxes;
+        if (roomId != cachedRoom)
+        {
+            cachedRoom = roomId;
+            boxes.clear();
+            (void)Q3Open(roomId, eye);
+            for (const Q3Import::FogVolume& fog : fogVolumes)
+            {
+                // The brush's box: its axial sides (a fog brush is a box in
+                // every level seen; a slanted side is left to its box).
+                std::array<float, 3> low{-1.0e9F, -1.0e9F, -1.0e9F};
+                std::array<float, 3> high{1.0e9F, 1.0e9F, 1.0e9F};
+                for (const OpenTK::Mathematics::Vector4& plane : fog.Planes)
+                {
+                    const std::array<float, 3> normal{plane.X, plane.Y, plane.Z};
+                    for (std::size_t k = 0; k < 3; ++k)
+                    {
+                        if (normal[k] > 0.999F)
+                        {
+                            high[k] = std::min(high[k], plane.W);
+                        }
+                        else if (normal[k] < -0.999F)
+                        {
+                            low[k] = std::max(low[k], -plane.W);
+                        }
+                    }
+                }
+                if (fog.Distance <= 0.0F || low[0] >= high[0] || low[1] >= high[1] || low[2] >= high[2]
+                    || high[0] > 1.0e8F || high[1] > 1.0e8F || high[2] > 1.0e8F)
+                {
+                    continue;
+                }
+                const float unit = Q3Convert::UnitsPerUnit;
+                FogBox box;
+                // Quake (x, y, z) is this game's (x, z, -y).
+                box.Min = OpenTK::Mathematics::Vector3(low[0] / unit, low[2] / unit, -high[1] / unit);
+                box.Max = OpenTK::Mathematics::Vector3(high[0] / unit, high[2] / unit, -low[1] / unit);
+                box.Color = fog.Color;
+                box.Depth = fog.Distance / unit;
+                boxes.push_back(box);
+            }
+        }
+        std::vector<FogBox> nearest = boxes;
+        const auto away = [&eye](const FogBox& box)
+        {
+            const float dx = std::max({box.Min.X - eye.X, 0.0F, eye.X - box.Max.X});
+            const float dy = std::max({box.Min.Y - eye.Y, 0.0F, eye.Y - box.Max.Y});
+            const float dz = std::max({box.Min.Z - eye.Z, 0.0F, eye.Z - box.Max.Z});
+            return dx * dx + dy * dy + dz * dz;
+        };
+        std::sort(nearest.begin(), nearest.end(),
+            [&away](const FogBox& a, const FogBox& b) { return away(a) < away(b); });
+        if (nearest.size() > most)
+        {
+            nearest.resize(most);
+        }
+        return nearest;
     }
 
     std::optional<std::array<float, 4>> CustomRooms::Q3FogAt(

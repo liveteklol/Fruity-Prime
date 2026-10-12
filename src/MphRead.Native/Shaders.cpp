@@ -34,6 +34,7 @@ attribute vec3 a_texcoord;
 
 varying vec2 texcoord;
 varying vec4 color;
+varying vec3 world_pos;
 
 vec3 light_calc(vec3 light_vec, vec3 light_col, vec3 normal_vec, vec3 dif_col, vec3 amb_col, vec3 spe_col)
 {
@@ -54,6 +55,7 @@ void main()
     // view_inv_mtx is set for billboard transforms
     mat4 model_mtx = stack_mtx * view_inv_mtx;
     gl_Position = proj_mtx * view_mtx * model_mtx * a_position;
+    world_pos = (model_mtx * a_position).xyz;
     vec4 vtx_color = show_colors ? a_color : vec4(1.0);
     vec3 normal = normalize(mat3(model_mtx) * a_normal);
     if (use_light) {
@@ -108,6 +110,20 @@ uniform bool fog_enable;
 uniform vec4 fog_color;
 uniform float fog_min;
 uniform float fog_max;
+uniform int fog_boxes;
+uniform vec3 fog_eye;
+uniform vec4 fog_box0_min;
+uniform vec4 fog_box0_max;
+uniform vec4 fog_box0_color;
+uniform vec4 fog_box1_min;
+uniform vec4 fog_box1_max;
+uniform vec4 fog_box1_color;
+uniform vec4 fog_box2_min;
+uniform vec4 fog_box2_max;
+uniform vec4 fog_box2_color;
+uniform vec4 fog_box3_min;
+uniform vec4 fog_box3_max;
+uniform vec4 fog_box3_color;
 uniform sampler2D tex;
 uniform bool use_override;
 uniform vec4 override_color;
@@ -132,6 +148,33 @@ uniform vec3 flat_color;
 
 varying vec2 texcoord;
 varying vec4 color;
+varying vec3 world_pos;
+
+// A Quake 3 level's fog volumes (Q3Import::FogVolume): each a box, fogging
+// what the ray from the eye to this point crosses inside it, as Quake's
+// fog does -- the floor under a layer of mist fogged, the wall above it not.
+// _min.w is the depth the fog is opaque at, in the same units.
+float fog_through(vec4 box_min, vec4 box_max)
+{
+    vec3 dir = world_pos - fog_eye;
+    float t0 = 0.0;
+    float t1 = 1.0;
+    vec3 lo = box_min.xyz;
+    vec3 hi = box_max.xyz;
+    vec3 safe = vec3(abs(dir.x) < 0.00001 ? 0.00001 : dir.x,
+                     abs(dir.y) < 0.00001 ? 0.00001 : dir.y,
+                     abs(dir.z) < 0.00001 ? 0.00001 : dir.z);
+    vec3 ta = (lo - fog_eye) / safe;
+    vec3 tb = (hi - fog_eye) / safe;
+    vec3 near_t = min(ta, tb);
+    vec3 far_t = max(ta, tb);
+    t0 = max(t0, max(near_t.x, max(near_t.y, near_t.z)));
+    t1 = min(t1, min(far_t.x, min(far_t.y, far_t.z)));
+    if (t1 <= t0) {
+        return 0.0;
+    }
+    return sqrt(clamp((t1 - t0) * length(dir) / max(box_min.w, 0.001), 0.0, 1.0));
+}
 
 vec4 toon_color(vec4 vtx_color)
 {
@@ -233,6 +276,19 @@ void main()
             density = (depth - fog_min) / (fog_max - fog_min) * 124.0 / 128.0;
         }
         col = vec4((col * (1.0 - density) + fog_color * density).xyz, col.a);
+    }
+    // Quake's fog volumes, nearest first (Scene::UpdateUniforms).
+    if (fog_boxes > 0) {
+        col.rgb = mix(col.rgb, fog_box0_color.rgb, fog_through(fog_box0_min, fog_box0_max));
+    }
+    if (fog_boxes > 1) {
+        col.rgb = mix(col.rgb, fog_box1_color.rgb, fog_through(fog_box1_min, fog_box1_max));
+    }
+    if (fog_boxes > 2) {
+        col.rgb = mix(col.rgb, fog_box2_color.rgb, fog_through(fog_box2_min, fog_box2_max));
+    }
+    if (fog_boxes > 3) {
+        col.rgb = mix(col.rgb, fog_box3_color.rgb, fog_through(fog_box3_min, fog_box3_max));
     }
     // Compared as the 8-bit value the target stores, as fixed-function
     // glAlphaFunc compares it: an interpolated constant alpha of 1.0 arrives

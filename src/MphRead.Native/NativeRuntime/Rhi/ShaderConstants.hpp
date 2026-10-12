@@ -3,6 +3,7 @@
 #include "../OpenTK/Mathematics.hpp"
 
 #include <cstddef>
+#include <array>
 #include <cstdint>
 #include <span>
 
@@ -45,6 +46,22 @@ namespace MphRead::NativeRuntime::Rhi
         ::OpenTK::Mathematics::Vector4 Color{};
         float MinDistance = 0.0F;
         float MaxDistance = 0.0F;
+    };
+
+    // A Quake 3 level's fog volumes nearest the eye, as boxes in world
+    // units: Min.W the depth each is opaque at, Color its fogparms colour.
+    struct SceneFogBoxes final
+    {
+        static constexpr std::size_t Capacity = 4;
+        struct Box
+        {
+            ::OpenTK::Mathematics::Vector4 Min{};
+            ::OpenTK::Mathematics::Vector4 Max{};
+            ::OpenTK::Mathematics::Vector4 Color{};
+        };
+        std::int32_t Count = 0;
+        ::OpenTK::Mathematics::Vector3 Eye{};
+        std::array<Box, Capacity> Boxes{};
     };
 
     // Per material: DoMaterial's set.
@@ -119,6 +136,7 @@ namespace MphRead::NativeRuntime::Rhi
         // One light on its own: an entity lit by its own light rather than the room's.
         virtual void SetLight(std::size_t index, const LightConstants& constants) = 0;
         virtual void Set(const SceneFogConstants& constants) = 0;
+        virtual void Set(const SceneFogBoxes& boxes) = 0;
         virtual void Set(const MaterialConstants& constants) = 0;
         virtual void Set(const DrawConstants& constants) = 0;
         virtual void Set(const CelPostConstants& constants) = 0;
@@ -181,6 +199,7 @@ namespace MphRead::NativeRuntime::Rhi
         void Set(const SceneLightConstants&) override {}
         void SetLight(std::size_t, const LightConstants&) override {}
         void Set(const SceneFogConstants&) override {}
+        void Set(const SceneFogBoxes&) override {}
         void Set(const MaterialConstants&) override {}
         void Set(const DrawConstants&) override {}
         void Set(const CelPostConstants&) override {}

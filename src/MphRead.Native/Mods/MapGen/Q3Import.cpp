@@ -362,6 +362,14 @@ namespace MphRead::Mods::MapGen
                 skipped = UncheckedAdd(skipped, 1);
                 continue;
             }
+            // A fog volume's own surface is never drawn: Quake fogs what is
+            // seen through it (Scene::UpdateUniforms does), and its shader's
+            // editor picture would be an opaque sheet over a pit.
+            if ((texture->Contents() & Q3Bsp::ContentsFog) != 0)
+            {
+                skipped = UncheckedAdd(skipped, 1);
+                continue;
+            }
 
             const bool sky = (texture->Flags() & Q3Bsp::SurfaceSky) != 0;
             if (sky && !import->KeepSky())
@@ -909,7 +917,10 @@ namespace MphRead::Mods::MapGen
             const std::size_t at = page * PageBytes + (static_cast<std::size_t>(y) * Size + x) * 3;
             return 0.299F * raw[at] + 0.587F * raw[at + 1] + 0.114F * raw[at + 2];
         };
-        const auto luminance = [](Vector3 c) { return 0.299F * c.X + 0.587F * c.Y + 0.114F * c.Z; };
+        // How bright, as its strongest channel: a face's vertices carry the
+        // hue at that brightness (LitFaces), so the layer's share of it gives
+        // the light back in colour as well as in strength.
+        const auto luminance = [](Vector3 c) { return std::max(c.X, std::max(c.Y, c.Z)); };
         lighting.Pages.assign(pages, std::vector<std::uint8_t>(static_cast<std::size_t>(Size) * Size, 0));
         for (const std::shared_ptr<Q3Face>& faceValue : bsp->Faces())
         {
@@ -954,13 +965,15 @@ namespace MphRead::Mods::MapGen
             {
                 for (std::int32_t x = x0; x < x0 + w; ++x)
                 {
-                    if (stored(page, x, y) > top)
+                    const Vector3 at = light(page, x, y);
+                    if (luminance(at) > top)
                     {
-                        top = stored(page, x, y);
-                        brightest = light(page, x, y);
+                        top = luminance(at);
+                        brightest = at;
                     }
                 }
             }
+            (void)stored;
             lighting.Brightest.emplace(key, brightest);
             // Against the light as drawn: up to white, which with the
             // textures' overbright is twice their own brightness.
@@ -1018,6 +1031,18 @@ namespace MphRead::Mods::MapGen
     {
         // A patch is already cut fine, and its cells are its collision too.
         const bool subdivide = face->Type() != 2;
+        // A surface with no lightmap by its shader (lava, a glowing panel)
+        // Quake draws at its own colour, which its texture is baked at.
+        const bool ownColour = face->Texture() >= 0
+            && static_cast<std::size_t>(face->Texture()) < bsp->Textures().size()
+            && (RequireReference(ManagedListAt(bsp->Textures(), face->Texture())).Flags() & Q3Bsp::SurfaceNoLightmap) != 0;
+        if (ownColour && !sky)
+        {
+            for (LitCorner& corner : corners)
+            {
+                corner.Color = Vector3(1.0F, 1.0F, 1.0F);
+            }
+        }
         std::vector<BuiltFace*> faces;
         const std::int32_t page = face->LightmapIndex;
         constexpr std::size_t PageBytes = static_cast<std::size_t>(Q3Bsp::LightmapSize) * Q3Bsp::LightmapSize * 3;
@@ -1032,21 +1057,34 @@ namespace MphRead::Mods::MapGen
                 layered = found->second;
             }
         }
+        // The light a corner is given: the lightmap's, or on a layered face
+        // its hue at the face's brightest strength -- a red glow spreading
+        // red across a white-lit wall -- which the layer then darkens.
+        const auto lightAt = [&](Vector2 st)
+        {
+            const Vector3 sample = SampleLightmap(bsp, page, st);
+            if (!layered.has_value())
+            {
+                return sample;
+            }
+            const float strongest = std::max(sample.X, std::max(sample.Y, sample.Z));
+            const float top = std::max(layered->X, std::max(layered->Y, layered->Z));
+            if (strongest < 0.02F)
+            {
+                return *layered;
+            }
+            return Multiply(sample, top / strongest);
+        };
         if (lit)
         {
             for (LitCorner& corner : corners)
             {
-                corner.Color = layered.has_value() ? *layered : SampleLightmap(bsp, page, corner.Lightmap);
+                corner.Color = lightAt(corner.Lightmap);
             }
         }
+        // Fog is drawn by the renderer from the level's volumes (what each
+        // ray crosses of them, Scene::UpdateUniforms), not painted in.
         const FogVolume* fog = nullptr;
-        if (lighting != nullptr && face->Effect() >= 0
-            && static_cast<std::size_t>(face->Effect()) < lighting->Fogs.size()
-            && lighting->Fogs[static_cast<std::size_t>(face->Effect())].Distance > 0.0F
-            && !lighting->Fogs[static_cast<std::size_t>(face->Effect())].Room)
-        {
-            fog = &lighting->Fogs[static_cast<std::size_t>(face->Effect())];
-        }
         const auto middle = [&](const LitCorner& a, const LitCorner& b)
         {
             LitCorner m;
@@ -1054,7 +1092,7 @@ namespace MphRead::Mods::MapGen
             m.Quake = Divide(Add(a.Quake, b.Quake), 2.0F);
             m.Uv = Vector2((a.Uv.X + b.Uv.X) / 2.0F, (a.Uv.Y + b.Uv.Y) / 2.0F);
             m.Lightmap = Vector2((a.Lightmap.X + b.Lightmap.X) / 2.0F, (a.Lightmap.Y + b.Lightmap.Y) / 2.0F);
-            m.Color = lit ? SampleLightmap(bsp, page, m.Lightmap) : Divide(Add(a.Color, b.Color), 2.0F);
+            m.Color = lit ? lightAt(m.Lightmap) : Divide(Add(a.Color, b.Color), 2.0F);
             return m;
         };
         const auto off = [](Vector3 a, Vector3 b)
@@ -1064,7 +1102,7 @@ namespace MphRead::Mods::MapGen
         std::function<void(const std::array<LitCorner, 3>&, std::int32_t)> emit;
         emit = [&](const std::array<LitCorner, 3>& tri, std::int32_t depth)
         {
-            if (lit && subdivide && !layered.has_value() && depth < 7)
+            if (lit && subdivide && depth < (layered.has_value() ? 5 : 7))
             {
                 std::size_t longest = 0;
                 float length = -1.0F;
@@ -1088,14 +1126,14 @@ namespace MphRead::Mods::MapGen
                         const LitCorner& a = tri[i];
                         const LitCorner& b = tri[(i + 1) % 3];
                         const Vector2 st((a.Lightmap.X + b.Lightmap.X) / 2.0F, (a.Lightmap.Y + b.Lightmap.Y) / 2.0F);
-                        error = std::max(error, off(SampleLightmap(bsp, page, st), Divide(Add(a.Color, b.Color), 2.0F)));
+                        error = std::max(error, off(lightAt(st), Divide(Add(a.Color, b.Color), 2.0F)));
                     }
                     const Vector2 centre(
                         (tri[0].Lightmap.X + tri[1].Lightmap.X + tri[2].Lightmap.X) / 3.0F,
                         (tri[0].Lightmap.Y + tri[1].Lightmap.Y + tri[2].Lightmap.Y) / 3.0F);
-                    error = std::max(error, off(SampleLightmap(bsp, page, centre),
+                    error = std::max(error, off(lightAt(centre),
                         Divide(Add(Add(tri[0].Color, tri[1].Color), tri[2].Color), 3.0F)));
-                    if (error > 0.08F)
+                    if (error > (layered.has_value() ? 0.12F : 0.08F))
                     {
                         const std::size_t a = longest;
                         const std::size_t b = (longest + 1) % 3;

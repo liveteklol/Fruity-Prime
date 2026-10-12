@@ -196,47 +196,6 @@ namespace MphRead::Mods::MapGen
         // A level is drawn with its own sky, and fogged only by its own fog:
         // the cartridge's fog colours belong to the cartridge's rooms.
         definition->FogEnabled(false);
-        for (const Q3Import::FogVolume& fog : Q3Import::MakeLighting(bsp.get(), {archive}).Fogs)
-        {
-            if (!fog.Room)
-            {
-                continue;
-            }
-            // Quake's fog is opaque at fogparms' distance from the eye; this
-            // game's fades between two depths (Scene::SetShaderFog: offset,
-            // and offset plus 32 * (0x400 >> slope), of 0x7FFF). The far
-            // one at that distance, the near at a tenth of it, as near as
-            // the slopes allow.
-            static constexpr float Near = 0.0625F;
-            const auto depth = [](float distance) { return 32767.0F * (1.0F - Near / std::max(distance, Near)); };
-            const float far = depth(fog.Distance / unit);
-            const float start = depth(fog.Distance / unit * 0.1F);
-            std::int32_t slope = 0;
-            float best = std::numeric_limits<float>::max();
-            for (std::int32_t s = 0; s <= 10; ++s)
-            {
-                const float span = 32.0F * static_cast<float>(0x400 >> s);
-                if (far - span < 0.0F)
-                {
-                    continue;
-                }
-                const float miss = std::fabs((far - span) - start);
-                if (miss < best)
-                {
-                    best = miss;
-                    slope = s;
-                }
-            }
-            const float offset = std::max(0.0F, far - 32.0F * static_cast<float>(0x400 >> slope));
-            definition->FogEnabled(true);
-            definition->FogColor(std::make_shared<std::vector<std::int32_t>>(std::vector<std::int32_t>{
-                static_cast<std::int32_t>(std::lround(std::clamp(fog.Color.X, 0.0F, 1.0F) * 31.0F)),
-                static_cast<std::int32_t>(std::lround(std::clamp(fog.Color.Y, 0.0F, 1.0F) * 31.0F)),
-                static_cast<std::int32_t>(std::lround(std::clamp(fog.Color.Z, 0.0F, 1.0F) * 31.0F))}));
-            definition->FogSlope(slope);
-            definition->FogOffset(static_cast<std::int32_t>(std::lround(offset)));
-            break;
-        }
 
         auto import = std::make_shared<MapImport>();
         import->Source(PathGetFullPath(archive));

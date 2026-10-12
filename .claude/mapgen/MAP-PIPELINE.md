@@ -416,16 +416,20 @@ What the level holds comes across by rule, never by hand:
   box round the level's sky (`tr_sky.c`'s `st_to_vec`).
 - **Light** is the level's lightmap, as sharp as Quake draws it
   (`Q3Import::LightLayer`): each face is lit by the brightest light of its
-  block of the lightmap, as a COLOR per vertex, and a second copy of it --
+  block of the lightmap -- its strongest channel -- in the lightmap's own hue
+  at each vertex, as a COLOR per vertex (cut finer where the hue changes, so
+  a red glow spreads red across a white-lit wall), and a second copy of it --
   the *light layer*, one 128x128 `PaletteA5I3` texture per lightmap page,
   black and as see-through as the light is bright, drawn as a decal
   (`RenderMode::Decal`, mirrored at both edges, which tells the renderer to
   filter it smoothly whatever the filtering setting) -- darkens it luxel by
   luxel to the rest: the pools of light on a floor, a pillar's shadow, a
   lamp's glow on a wall. A face without a lightmap is lit by its vertices
-  (`R_ColorShiftLightingBytes`). Quake's light reaches past white -- twice a
-  texture in full sun -- and vertex light stops at it, so a level's textures
-  are baked twice as bright (`MapTextureBake`'s `Overbright`, not skies) and
+  (`R_ColorShiftLightingBytes`); one its shader leaves unlit (`nolightmap`:
+  lava, a glowing panel) is drawn at its texture's own colour. Quake's light
+  reaches past white -- twice a texture in full sun -- and vertex light stops
+  at it, so a level's textures are baked twice as bright (`MapTextureBake`'s
+  `Overbright`, not skies nor unlit surfaces) and
   its light halved (`Q3Import::Light`). A level compiled for Quake Live
   leaves the faces' lightmap blocks out; they are taken from where the
   vertices' lightmap coordinates fall.
@@ -464,12 +468,14 @@ What the level holds comes across by rule, never by hand:
   pickups plus a margin -- when a level places enough of them: acid3dm12
   stands in a 16384-unit vista and would otherwise come out at 126 units each.
 - **Fog** is the level's own (`fogparms`, from its scripts or
-  `Q3Fogs.inc`, the base game's): a surface in a fog volume is tinted by how
-  deep under the fog's surface it lies, and while the camera stands inside a
-  volume everything is fogged by distance, opaque past the fog's depth --
-  thinned for a layer much thinner than that depth, since Quake fogs only
-  what a ray crosses inside it (`CustomRooms::Q3FogAt`, `Scene::UpdateUniforms`).
-  The cartridge's fog colours are never added.
+  `Q3Fogs.inc`, the base game's), fogged per pixel the way Quake does: by how
+  far the ray from the eye to the pixel runs inside each fog volume's box,
+  opaque past the fog's depth -- so fog lies where the volume is, a layer over
+  a floor or a pit, seen from above or from within. The four volumes nearest
+  the camera are sent to the shaders each frame (`CustomRooms::Q3FogBoxes`,
+  `SceneFogBoxes`, `fog_through` in `Shaders.cpp`/`EsShaders.cpp`). The fog
+  volume's own surface (`CONTENTS_FOG`) is not drawn. The cartridge's fog
+  colours are never added.
 - **A sky of one colour** (`gfx/colors/black` behind q3dm17) is given one of
   the cartridge's skies, as a sky the level lacks is.
 - **Out of bounds** is a wall: a hunter about to stand where the level's BSP

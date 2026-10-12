@@ -3811,25 +3811,26 @@ namespace MphRead
         // fog went to whichever program was bound then, and the scene program
         // kept the previous room's -- the launcher backdrop's warm Alinos fog
         // over a Data Shrine match on one renderer, its own green on the other.
-        // In a level read from Quake 3, the fog volume the camera stands in
-        // fogs everything by distance, as Quake's does, while it is there.
-        if (const auto fog = Mods::MapGen::CustomRooms::Q3FogAt(RoomId(), _cameraPosition))
+        SetShaderFog();
+        _shaderConstants->SetFogEnabled(_hasFog && FogOn());
+        // A level read from Quake 3 fogs by its own volumes, what each ray
+        // crosses of them, whatever the room's fog (Q3Import::FogVolume).
         {
-            constexpr float Near = 0.0625F;
-            const float distance = std::max((*fog)[3], Near * 2.0F);
-            // Quake's fog thickens with the square root of the distance and
-            // is only opaque well past fogparms' figure: fading from a tenth
-            // of it to twice it reads the same.
-            const float far = 1.0F - Near / (distance * 2.0F);
-            const float start = 1.0F - Near / std::max(distance * 0.1F, Near * 1.5F);
-            _shaderConstants->Set(NativeRuntime::Rhi::SceneFogConstants{
-                Vector4((*fog)[0], (*fog)[1], (*fog)[2], 1.0F), start, far});
-            _shaderConstants->SetFogEnabled(FogOn());
-        }
-        else
-        {
-            SetShaderFog();
-            _shaderConstants->SetFogEnabled(_hasFog && FogOn());
+            NativeRuntime::Rhi::SceneFogBoxes boxes{};
+            boxes.Eye = _cameraPosition;
+            if (FogOn())
+            {
+                const auto near = Mods::MapGen::CustomRooms::Q3FogBoxes(
+                    RoomId(), _cameraPosition, NativeRuntime::Rhi::SceneFogBoxes::Capacity);
+                for (const auto& box : near)
+                {
+                    auto& out = boxes.Boxes[static_cast<std::size_t>(boxes.Count++)];
+                    out.Min = Vector4(box.Min.X, box.Min.Y, box.Min.Z, box.Depth);
+                    out.Max = Vector4(box.Max.X, box.Max.Y, box.Max.Z, 0.0F);
+                    out.Color = Vector4(box.Color.X, box.Color.Y, box.Color.Z, 1.0F);
+                }
+            }
+            _shaderConstants->Set(boxes);
         }
         _shaderConstants->SetCelBands(Mods::RenderOptions::CelShading() ? Mods::RenderOptions::CelBands() : 0);
         _shaderConstants->SetShowColors(_showColors);

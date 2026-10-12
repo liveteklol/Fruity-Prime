@@ -48,6 +48,9 @@ namespace MphRead::NativeRuntime::Rhi::OpenGL
             ShaderUniformLocation FogColor{};
             ShaderUniformLocation FogMinDistance{};
             ShaderUniformLocation FogMaxDistance{};
+            ShaderUniformLocation FogBoxes{};
+            ShaderUniformLocation FogEye{};
+            std::array<std::array<ShaderUniformLocation, 3>, SceneFogBoxes::Capacity> FogBox{};
             ShaderUniformLocation UseOverride{};
             ShaderUniformLocation OverrideColor{};
             ShaderUniformLocation UsePaletteOverride{};
@@ -113,6 +116,18 @@ namespace MphRead::NativeRuntime::Rhi::OpenGL
                 Uniform4(_l.FogColor, constants.Color);
                 Uniform1(_l.FogMinDistance, constants.MinDistance);
                 Uniform1(_l.FogMaxDistance, constants.MaxDistance);
+            }
+
+            void Set(const SceneFogBoxes& boxes) override
+            {
+                Uniform1(_l.FogBoxes, boxes.Count);
+                Uniform3(_l.FogEye, boxes.Eye);
+                for (std::size_t i = 0; i < SceneFogBoxes::Capacity; ++i)
+                {
+                    Uniform4(_l.FogBox[i][0], boxes.Boxes[i].Min);
+                    Uniform4(_l.FogBox[i][1], boxes.Boxes[i].Max);
+                    Uniform4(_l.FogBox[i][2], boxes.Boxes[i].Color);
+                }
             }
 
             void Set(const MaterialConstants& constants) override
@@ -347,6 +362,15 @@ namespace MphRead::NativeRuntime::Rhi::OpenGL
                 l.FogColor = at(main, "fog_color");
                 l.FogMinDistance = at(main, "fog_min");
                 l.FogMaxDistance = at(main, "fog_max");
+                l.FogBoxes = at(main, "fog_boxes");
+                l.FogEye = at(main, "fog_eye");
+                for (std::size_t i = 0; i < SceneFogBoxes::Capacity; ++i)
+                {
+                    const std::string box = "fog_box" + std::to_string(i);
+                    l.FogBox[i][0] = at(main, (box + "_min").c_str());
+                    l.FogBox[i][1] = at(main, (box + "_max").c_str());
+                    l.FogBox[i][2] = at(main, (box + "_color").c_str());
+                }
                 l.UseOverride = at(main, "use_override");
                 l.OverrideColor = at(main, "override_color");
                 l.UsePaletteOverride = at(main, "use_pal_override");

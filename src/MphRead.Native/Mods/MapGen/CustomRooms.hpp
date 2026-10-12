@@ -53,6 +53,18 @@ namespace MphRead::Mods::MapGen
         // game's units); none outside every fog volume, and in any other room.
         [[nodiscard]] static std::optional<std::array<float, 4>> Q3FogAt(
             std::int32_t roomId, OpenTK::Mathematics::Vector3 position);
+        // A translated room's fog volumes as boxes in this game's units and
+        // axes -- low corner, high corner, colour, and the depth each is
+        // opaque at -- nearest `eye` first; none in any other room.
+        struct FogBox
+        {
+            OpenTK::Mathematics::Vector3 Min{};
+            OpenTK::Mathematics::Vector3 Max{};
+            OpenTK::Mathematics::Vector3 Color{};
+            float Depth = 0.0F;
+        };
+        [[nodiscard]] static std::vector<FogBox> Q3FogBoxes(
+            std::int32_t roomId, OpenTK::Mathematics::Vector3 eye, std::size_t most);
         // Where portal i of a translated level's room keeps the view from its
         // camera, and the rooms still without one (ThumbnailGenerator renders
         // them, then they are built again with them).

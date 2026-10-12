@@ -1333,8 +1333,9 @@ namespace MphRead::Mods::MapGen
             // game's vertex light stops at white. Its textures are baked
             // twice as bright and its light halved (Q3Import::Light), which
             // gives the light the room it has in Quake. Not a sky, which no
-            // light falls on.
-            if ((flags & Q3Bsp::SurfaceSky) == 0)
+            // light falls on, nor a surface Quake draws at its own colour
+            // without a lightmap (lava, a glowing panel).
+            if ((flags & (Q3Bsp::SurfaceSky | Q3Bsp::SurfaceNoLightmap)) == 0)
             {
                 for (std::uint8_t& value : image.Pixels)
                 {

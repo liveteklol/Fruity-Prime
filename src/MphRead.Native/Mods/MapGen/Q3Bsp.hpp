@@ -558,6 +558,7 @@ namespace MphRead::Mods::MapGen
         using EntityList = std::vector<std::shared_ptr<Q3Entity>>;
 
         static constexpr std::int32_t ContentsSolid = 0x1;
+        static constexpr std::int32_t ContentsFog = 0x40;
         static constexpr std::int32_t ContentsPlayerClip = 0x10000;
         static constexpr std::int32_t SurfaceSky = 0x4;
         static constexpr std::int32_t SurfaceNoDraw = 0x80;
