@@ -51,7 +51,6 @@ namespace MphRead::Mods::Launcher
         }
 
         GameFiles::ApplyPaths();
-        MphRead::Mods::MapGen::CustomRooms::GenerateMissing();
 
         if (plan.Kind() == LaunchKind::Adventure)
         {
@@ -105,6 +104,10 @@ namespace MphRead::Mods::Launcher
             return false;
         }
 
+        // Only the map about to be played, ahead of the others the background
+        // is still building: a cartridge room, or a map built already, starts
+        // at once.
+        MphRead::Mods::MapGen::CustomRooms::EnsureReady(roomKey);
         std::optional<std::string> unplayable
             = MphRead::Mods::MapGen::CustomRooms::WhyUnplayable(roomKey);
         if (unplayable.has_value())

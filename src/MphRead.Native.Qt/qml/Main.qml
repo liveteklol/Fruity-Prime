@@ -242,10 +242,10 @@ Item {
     }
 
     // Quake 3 maps being translated in the background (once each): a bar at
-    // the foot of the front screen while it lasts.
+    // the foot of the launcher, whichever of its screens is open, while it lasts.
     Rectangle {
         parent: stage
-        visible: ShellHost.mapsBuilding && ShellHost.page === "front" && !root.stacked
+        visible: ShellHost.mapsBuilding && ShellHost.page === "front"
         anchors.left: parent.left
         anchors.bottom: parent.bottom
         anchors.margins: Math.round(16 * root.uiScale)

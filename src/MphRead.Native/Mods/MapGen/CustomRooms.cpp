@@ -1110,7 +1110,8 @@ namespace MphRead::Mods::MapGen
             return;
         }
 
-        const std::lock_guard<std::recursive_mutex> building(BuildLock());
+        // The lock is held one map at a time, so a match about to load a map
+        // (EnsureReady) waits for the one being built, not for all of them.
         std::vector<std::shared_ptr<MapDefinition>> missing;
         for (const std::shared_ptr<MapDefinition>& def : *definitions)
         {
@@ -1142,10 +1143,14 @@ namespace MphRead::Mods::MapGen
             }
             try
             {
-                ::MphRead::NativeRuntime::ConsoleWriteLine(
-                    "[mapgen] building " + def->Name());
-
-                Build(def.get(), false);
+                const std::lock_guard<std::recursive_mutex> building(BuildLock());
+                // Built meanwhile for a match that could not wait.
+                if (NeedsGenerating(def.get()))
+                {
+                    ::MphRead::NativeRuntime::ConsoleWriteLine(
+                        "[mapgen] building " + def->Name());
+                    Build(def.get(), false);
+                }
             }
             catch (...)
             {
