@@ -16,6 +16,11 @@ namespace MphRead
 
 namespace MphRead::Mods::MapGen
 {
+    class Q3Bsp;
+}
+
+namespace MphRead::Mods::MapGen
+{
     class MapDefinition;
 
     class CustomRooms final
@@ -48,6 +53,9 @@ namespace MphRead::Mods::MapGen
         // inside its walls or out in the void around it. Always true in any
         // other room.
         [[nodiscard]] static bool Q3Open(std::int32_t roomId, OpenTK::Mathematics::Vector3 position);
+        // The Quake 3 level a translated room came from, read once and kept
+        // while the room is (Q3Open's); nothing for any other room.
+        [[nodiscard]] static std::shared_ptr<Q3Bsp> Q3LevelBsp(std::int32_t roomId);
         // The fog a point of such a room is in, as Quake's fogparms has it
         // (red, green, blue 0-1, and the distance it is opaque at in this
         // game's units); none outside every fog volume, and in any other room.

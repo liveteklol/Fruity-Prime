@@ -508,9 +508,24 @@ namespace MphRead::Mods::MapGen
         };
     }
 
+    namespace
+    {
+        [[nodiscard]] Q3Level& Q3LevelCache()
+        {
+            static Q3Level level;
+            return level;
+        }
+    }
+
+    std::shared_ptr<Q3Bsp> CustomRooms::Q3LevelBsp(std::int32_t roomId)
+    {
+        (void)Q3Open(roomId, OpenTK::Mathematics::Vector3(0.0F, 0.0F, 0.0F));
+        return Q3LevelCache().Room == roomId ? Q3LevelCache().Bsp : nullptr;
+    }
+
     bool CustomRooms::Q3Open(std::int32_t roomId, OpenTK::Mathematics::Vector3 position)
     {
-        static Q3Level level;
+        Q3Level& level = Q3LevelCache();
         std::int32_t& cachedRoom = level.Room;
         std::shared_ptr<Q3Bsp>& cachedLevel = level.Bsp;
         if (roomId != cachedRoom)

@@ -31,6 +31,7 @@
 #include "InputSettings.hpp"
 #include "MapGen/AltFormProbe.hpp"
 #include "MapGen/PadProbe.hpp"
+#include "MapGen/MoverProbe.hpp"
 #include "MapGen/MphTextures.hpp"
 #include "MapGen/MapCheck.hpp"
 #include "Multiplayer/ResourceAudit.hpp"
@@ -2081,6 +2082,12 @@ namespace MphRead::Mods
         if (const std::optional<std::string> texDump = ValueAfter(args, "mphtexdump"); texDump.has_value())
         {
             SetExitCode(MapGen::MphTextures::Dump(*texDump));
+            return true;
+        }
+
+        if (const std::optional<std::string> moverProbe = ValueAfter(args, "moverprobe"); moverProbe.has_value())
+        {
+            SetExitCode(MapGen::MoverProbe::Run(*moverProbe));
             return true;
         }
 

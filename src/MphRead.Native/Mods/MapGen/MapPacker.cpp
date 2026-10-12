@@ -865,6 +865,22 @@ namespace
                 order.push_back(materialId);
             }
         }
+        // The level's own faces, then each mover's (BuiltFace::Mover), each
+        // in a node of its own that the room moves (Q3Movers).
+        std::vector<std::int32_t> movers{-1};
+        for (BuiltFace* face : map->Faces())
+        {
+            if (face != nullptr && face->Mover >= 0
+                && std::find(movers.begin(), movers.end(), face->Mover) == movers.end())
+            {
+                movers.push_back(face->Mover);
+            }
+        }
+        std::sort(movers.begin() + 1, movers.end());
+        std::vector<std::pair<std::int32_t, std::int32_t>> nodeMeshes;
+        for (const std::int32_t mover : movers)
+        {
+        const std::int32_t firstMesh = ListCount(meshes->size());
         for (const std::int32_t materialId : order)
         {
             std::vector<BuiltFace*> group;
@@ -874,7 +890,7 @@ namespace
                 {
                     throw System::NullReferenceException();
                 }
-                if (face->Material() == materialId)
+                if (face->Material() == materialId && face->Mover == mover)
                 {
                     group.push_back(face);
                 }
@@ -952,21 +968,29 @@ namespace
                 ListCount(renders->size())));
             renders->push_back(instructions);
         }
+        nodeMeshes.emplace_back(firstMesh, ListCount(meshes->size()) - firstMesh);
+        }
 
         auto nodes = std::make_shared<std::vector<std::shared_ptr<Node>>>();
         const std::u16string rootName = u"rmMain";
-        const std::u16string geometryName = u"geo1";
         nodes->push_back(MphRead::Mods::MapGen::RawStructs::MakeNode(
             std::u16string_view(rootName),
             0,
             0,
             -1,
             1));
-        nodes->push_back(MphRead::Mods::MapGen::RawStructs::MakeNode(
-            std::u16string_view(geometryName),
-            ListCount(meshes->size()),
-            0,
-            0));
+        for (std::size_t n = 0; n < movers.size(); ++n)
+        {
+            const std::u16string name = n == 0 ? std::u16string(u"geo1")
+                : ::MphRead::NativeRuntime::Utf8ToUtf16("q3model" + std::to_string(movers[n]));
+            nodes->push_back(MphRead::Mods::MapGen::RawStructs::MakeNode(
+                std::u16string_view(name),
+                nodeMeshes[n].second,
+                nodeMeshes[n].first,
+                0,
+                -1,
+                n + 1 < movers.size() ? static_cast<std::int32_t>(n + 2) : -1));
+        }
 
         auto dlists = std::make_shared<std::vector<DisplayList>>(renders->size());
         auto options = std::make_shared<Repack::RepackOptions>();
@@ -1656,15 +1680,11 @@ namespace
         return Assemble(map, def, materials, textures, palettes);
     }
 
-    [[nodiscard]] std::vector<std::uint8_t> BuildCollision(BuiltMap* map)
+    [[nodiscard]] std::vector<std::uint8_t> BuildCollision(const std::vector<BuiltFace*>& solid)
     {
         auto editors = std::make_shared<
             std::vector<std::shared_ptr<CollisionDataEditor>>>();
-        if (map == nullptr)
-        {
-            throw System::NullReferenceException();
-        }
-        for (BuiltFace* face : map->Solid())
+        for (BuiltFace* face : solid)
         {
             if (face == nullptr)
             {
@@ -1756,7 +1776,7 @@ namespace MphRead::Mods::MapGen
 
         std::vector<std::uint8_t> animation;
         auto [model, vertices] = BuildModel(map, &animation);
-        std::vector<std::uint8_t> collision = BuildCollision(map);
+        std::vector<std::uint8_t> collision = BuildCollision(map->Solid());
         std::vector<Editor::EntityEditorBase*>& entityList = map->Entities();
         std::vector<std::uint8_t> entities = Repack::PackEntities(
             std::span<Editor::EntityEditorBase* const>(
@@ -1769,6 +1789,13 @@ namespace MphRead::Mods::MapGen
         FileWriteAllBytes(animPath, animation.empty() ? std::vector<std::uint8_t>(24U) : animation);
         const std::string collisionPath = PathCombine(archiveDir, prefix + "_Collision.bin");
         FileWriteAllBytes(collisionPath, collision);
+        // Each Quake 3 mover's own collision, beside the room's
+        // (Q3MoverEntity).
+        for (const auto& [mover, faces] : map->MoverSolid)
+        {
+            FileWriteAllBytes(PathCombine(archiveDir, prefix + "_q3model" + std::to_string(mover) + "_Collision.bin"),
+                BuildCollision(faces));
+        }
         const std::string entityPath = PathCombine(entityDir, prefix + "_Ent.bin");
         FileWriteAllBytes(entityPath, entities);
         DirectoryCreateDirectory(nodeDir);

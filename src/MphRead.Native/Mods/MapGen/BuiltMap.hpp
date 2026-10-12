@@ -3,6 +3,7 @@
 #include "../../Formats/Enums.hpp"
 
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <vector>
 
@@ -49,6 +50,9 @@ namespace MphRead::Mods::MapGen
         // luxel how much it darkens what is under it, 0 none to 31 black;
         // their materials follow the texture pack's.
         std::vector<std::vector<std::uint8_t>> LightPages{};
+        // Each Quake 3 mover's brushes, by brush model: a collision of its
+        // own that moves with it (MapPacker, Q3MoverEntity).
+        std::map<std::int32_t, std::vector<BuiltFace*>> MoverSolid{};
 
         explicit BuiltMap(MapDefinition* definition) noexcept;
         virtual ~BuiltMap();
@@ -115,6 +119,10 @@ namespace MphRead::Mods::MapGen
         // Overlay: the level's light over a face already drawn, a decal
         // (Q3Import::LightLayer); never collision either.
         bool Overlay = false;
+        // A Quake 3 mover's brush model (a door, a bobbing platform): drawn in
+        // a node of its own, q3model<Mover>, which the room moves
+        // (Q3Movers); -1 for the level itself.
+        std::int32_t Mover = -1;
         // The light at each corner, red green blue, 1 the texture as painted;
         // none for one shade over the whole face.
         std::vector<OpenTK::Mathematics::Vector3> Colors{};

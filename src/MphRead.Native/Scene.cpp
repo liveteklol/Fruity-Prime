@@ -86,6 +86,7 @@ namespace MphRead
         EntityNodeMap result;
         result.Add(EntityType::Platform, nullptr);
         result.Add(EntityType::Object, nullptr);
+        result.Add(EntityType::Q3Mover, nullptr);
         result.Add(EntityType::PlayerSpawn, nullptr);
         result.Add(EntityType::Door, nullptr);
         result.Add(EntityType::ItemSpawn, nullptr);

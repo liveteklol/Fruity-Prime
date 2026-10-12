@@ -30,6 +30,8 @@
 #include "DoorEntity.hpp"
 #include "EnemySpawnEntity.hpp"
 #include "Players/PlayerEntity.hpp"
+#include "../Mods/MapGen/CustomRooms.hpp"
+#include "../Mods/MapGen/Q3Movers.hpp"
 #include "../NativeRuntime/System/Managed.hpp"
 #include "../NativeRuntime/OpenTK/Mathematics.hpp"
 #include "../Formats/Types.hpp"
@@ -1746,6 +1748,24 @@ namespace MphRead::Entities
                 ModelInstance& inst = RequireReference(ManagedListAt(_models.Items(), 0));
                 UpdateTransforms(inst, 0);
                 Scene& scene = RequireReference(_scene);
+                // A translated Quake 3 level's doors, bobbing platforms and
+                // the rest, where they are now (Q3Movers).
+                if (Mods::MapGen::CustomRooms::Q3StepHeight(_roomId) > 0.0F)
+                {
+                    std::vector<Vector3> players;
+                    for (const std::shared_ptr<PlayerEntity>& player : PlayerEntity::Players())
+                    {
+                        if (player != nullptr && (player->LoadFlags() & LoadFlags::Active) == LoadFlags::Active
+                            && player->Health() > 0)
+                        {
+                            Vector3 position{};
+                            player->GetPosition(position);
+                            players.push_back(position);
+                        }
+                    }
+                    Mods::MapGen::Q3Movers::Update(_roomId, scene.FrameCount() + 1, players);
+                    Mods::MapGen::Q3Movers::Apply(_roomId, RequireReference(RequireReference(inst.Model()).Nodes));
+                }
                 if (scene.ProcessFrame())
                 {
                     ClearRoomPartState();

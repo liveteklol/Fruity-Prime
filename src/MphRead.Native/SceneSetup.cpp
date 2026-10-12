@@ -1,3 +1,8 @@
+#include "Entities/Q3MoverEntity.hpp"
+#include "NativeRuntime/System/IO.hpp"
+#include "Mods/MapGen/CustomRooms.hpp"
+#include "Mods/MapGen/Q3Bsp.hpp"
+#include "Mods/MapGen/Q3Movers.hpp"
 #include "SceneSetup.hpp"
 
 #include "Entities/CamSeq/CamSeqEntity.hpp"
@@ -621,6 +626,32 @@ namespace MphRead
         if (!metadata->EntityPath.has_value())
         {
             return results;
+        }
+
+        // A translated Quake 3 level's movers, each with the collision
+        // MapPacker wrote beside the room's (Q3MoverEntity).
+        if (!metadata->CollisionPath.empty()
+            && Mods::MapGen::CustomRooms::Q3StepHeight(metadata->Id) > 0.0F)
+        {
+            if (const std::shared_ptr<Mods::MapGen::Q3Bsp> bsp = Mods::MapGen::CustomRooms::Q3LevelBsp(metadata->Id))
+            {
+                std::string prefix = metadata->CollisionPath;
+                const std::string suffix = "_Collision.bin";
+                if (prefix.size() > suffix.size() && prefix.compare(prefix.size() - suffix.size(), suffix.size(), suffix) == 0)
+                {
+                    prefix.resize(prefix.size() - suffix.size());
+                    for (std::size_t m = 1; m < bsp->Models().size(); ++m)
+                    {
+                        const std::string path = prefix + "_q3model" + std::to_string(m) + suffix;
+                        if (Mods::MapGen::Q3Movers::IsMover(bsp.get(), static_cast<std::int32_t>(m))
+                            && ::MphRead::NativeRuntime::FileExists(Paths::Combine(Paths::FileSystem(), path)))
+                        {
+                            results->push_back(std::make_shared<Entities::Q3MoverEntity>(
+                                scene, metadata->Id, static_cast<std::int32_t>(m), path));
+                        }
+                    }
+                }
+            }
         }
 
         auto entities = Read::GetEntities(*metadata->EntityPath, layerId,

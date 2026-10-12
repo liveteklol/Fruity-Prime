@@ -13,6 +13,7 @@
 #include "MapTexturePack.hpp"
 #include "Q3Bsp.hpp"
 #include "ShaderAnim.hpp"
+#include "Q3Movers.hpp"
 #include "../../Formats/Types.hpp"
 #include "../../NativeRuntime/System/Console.hpp"
 #include "../../NativeRuntime/System/Encoding.hpp"
@@ -375,6 +376,25 @@ namespace MphRead::Mods::MapGen
         }
         std::int32_t layerFaces = 0;
 
+        // The brush models that move (Q3Movers::IsMover), by face.
+        std::vector<std::int32_t> faceMover(bsp->Faces().size(), -1);
+        for (std::size_t m = 1; m < bsp->Models().size(); ++m)
+        {
+            if (!Q3Movers::IsMover(bsp.get(), static_cast<std::int32_t>(m)))
+            {
+                continue;
+            }
+            const Q3Model& model = RequireReference(bsp->Models()[m]);
+            for (std::int32_t f = model.Face(); f < model.Face() + model.FaceCount(); ++f)
+            {
+                if (f >= 0 && static_cast<std::size_t>(f) < faceMover.size())
+                {
+                    faceMover[static_cast<std::size_t>(f)] = static_cast<std::int32_t>(m);
+                }
+            }
+        }
+        std::size_t faceIndex = 0;
+
         std::int32_t skipped = 0;
         std::int32_t patches = 0;
         std::int32_t patchTriangles = 0;
@@ -390,6 +410,7 @@ namespace MphRead::Mods::MapGen
         for (const std::shared_ptr<Q3Face>& faceValue : bsp->Faces())
         {
             Q3Face* face = &RequireReference(faceValue);
+            const std::int32_t mover = faceMover[faceIndex++];
             if (face->Type() != 1 && face->Type() != 2 && face->Type() != 3)
             {
                 skipped = UncheckedAdd(skipped, 1);
@@ -511,6 +532,7 @@ namespace MphRead::Mods::MapGen
             {
                 std::unique_ptr<BuiltFace> builtOwner(built);
                 built = map->OwnFace(std::move(builtOwner));
+                built->Mover = mover;
                 madeFaces.push_back(built);
                 if (sky)
                 {
@@ -537,7 +559,7 @@ namespace MphRead::Mods::MapGen
                     }
                 }
 
-                if (patch && !built->Overlay
+                if (patch && !built->Overlay && mover < 0
                     && (texture->Contents() & Q3Bsp::ContentsSolid) != 0)
                 {
                     map->Solid().push_back(built);
@@ -576,6 +598,7 @@ namespace MphRead::Mods::MapGen
                         auto over = std::make_unique<BuiltFace>(
                             std::move(pointArray), std::move(uvArray), under->Normal(), use.Material, under->Shade());
                         over->Overlay = true;
+                        over->Mover = under->Mover;
                         if (use.Lit)
                         {
                             over->Colors = under->Colors;
@@ -748,6 +771,44 @@ namespace MphRead::Mods::MapGen
                 0,
                 1.0F);
             map->Solid().push_back(map->OwnFace(std::move(face)));
+        }
+
+        // A mover's own brushes, where its brush model keeps them (about its
+        // origin, for one that has one): the collision Q3MoverEntity moves.
+        for (std::size_t m = 1; m < bsp->Models().size(); ++m)
+        {
+            if (!Q3Movers::IsMover(bsp.get(), static_cast<std::int32_t>(m)))
+            {
+                continue;
+            }
+            const Q3Model& model = RequireReference(bsp->Models()[m]);
+            std::vector<BuiltFace*> moverSolid;
+            for (std::int32_t b = model.Brush(); b < model.Brush() + model.BrushCount(); ++b)
+            {
+                Q3Brush* brush = &RequireReference(ManagedListAt(bsp->Brushes(), b));
+                Q3Texture* texture = &RequireReference(ManagedListAt(bsp->Textures(), brush->Texture()));
+                if ((texture->Contents() & (Q3Bsp::ContentsSolid | Q3Bsp::ContentsPlayerClip)) == 0)
+                {
+                    continue;
+                }
+                for (const BrushPolygon& polygon : BrushSides(bsp.get(), brush))
+                {
+                    auto world = std::make_unique<ManagedArray<Vector3>>(polygon.Points.size());
+                    auto texcoords = std::make_unique<ManagedArray<Vector2>>(polygon.Points.size());
+                    for (std::size_t i = 0; i < polygon.Points.size(); ++i)
+                    {
+                        (*world)[i] = ToWorld(polygon.Points[i], unit);
+                    }
+                    const std::vector<float> direction{polygon.Normal.X, polygon.Normal.Y, polygon.Normal.Z};
+                    auto face = std::make_unique<BuiltFace>(
+                        std::move(world), std::move(texcoords), ToDirection(std::addressof(direction)), 0, 1.0F);
+                    moverSolid.push_back(map->OwnFace(std::move(face)));
+                }
+            }
+            if (!moverSolid.empty())
+            {
+                map->MoverSolid.emplace(static_cast<std::int32_t>(m), std::move(moverSolid));
+            }
         }
 
         AddEntities(map.get(), def, bsp.get(), import, verbose);

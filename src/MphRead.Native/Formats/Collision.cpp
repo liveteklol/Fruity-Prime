@@ -1519,6 +1519,11 @@ namespace MphRead::Formats::Collision
                 isEntity);
     }
 
+    std::shared_ptr<CollisionInstance> Collision::GetEntityCollision(const std::string& path)
+    {
+        return GetCollision(path, path, false, -1, true);
+    }
+
     std::shared_ptr<MphCollisionInfo>
     Collision::ReadMphCollision(
         CollisionHeader header,

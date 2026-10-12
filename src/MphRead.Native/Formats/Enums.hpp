@@ -54,6 +54,9 @@ namespace MphRead
         FhBeamProjectile = 117,
         Room = 200,
         Model = 201,
+        // A translated Quake 3 level's mover (Entities::Q3MoverEntity): no
+        // cartridge entity, only collision that moves.
+        Q3Mover = 202,
         All = 255
     };
 

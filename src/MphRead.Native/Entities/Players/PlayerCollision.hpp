@@ -28,6 +28,11 @@ public: \
     [[nodiscard]] bool CheckAltAttackHitEnemy2( \
         ::MphRead::Entities::EnemyInstanceEntity* target); \
     void HandleCollision(::MphRead::Formats::CollisionResult result); \
+    /* What it stood on at its last collision check (a mover carries it). */ \
+    [[nodiscard]] const std::shared_ptr<::MphRead::Formats::Collision::EntityCollision>& StandingEntCol() const noexcept \
+    { \
+        return _standingEntCol; \
+    } \
 private: \
     [[nodiscard]] bool DialancheHitsVolume(const ::MphRead::CollisionVolume& volume) const; \
     [[nodiscard]] std::uint16_t DialanchePlayerDamage() const; \

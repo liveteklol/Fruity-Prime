@@ -1775,7 +1775,8 @@ namespace MphRead::Formats
                 = RequireReference(entityPtr);
 
             if (entity.Type != MphRead::EntityType::Object
-                && entity.Type != MphRead::EntityType::Platform)
+                && entity.Type != MphRead::EntityType::Platform
+                && entity.Type != MphRead::EntityType::Q3Mover)
             {
                 continue;
             }

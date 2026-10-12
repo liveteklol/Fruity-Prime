@@ -566,6 +566,11 @@ namespace MphRead::Formats::Collision
             const MphRead::RoomMetadata* meta,
             std::int32_t roomLayerMask = 0);
 
+        // An entity's collision from a file under the game's files, every
+        // layer of it (a translated Quake 3 mover's, Q3MoverEntity).
+        [[nodiscard]] static std::shared_ptr<CollisionInstance> GetEntityCollision(
+            const std::string& path);
+
         [[nodiscard]] static std::shared_ptr<MphCollisionInfo>
         ReadMphCollision(
             CollisionHeader header,
