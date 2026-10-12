@@ -1,3 +1,4 @@
+#include "../../Mods/MapGen/CustomRooms.hpp"
 #include "../../Mods/WorldEvents.hpp"
 #include "PlayerProcess.hpp"
 
@@ -1358,6 +1359,38 @@ namespace MphRead::Entities
                 flags |= DamageFlags::NoSfx;
             }
             TakeDamage(1, flags, std::nullopt, nullptr);
+        }
+
+        // A Quake 3 level's lava and slime hurt as in Quake (P_WorldEffects):
+        // 30 (lava) or 10 (slime) a time per level of depth, every 700 ms
+        // (the pain debounce), from the moment the hunter is in.
+        {
+            std::int32_t liquid = 0;
+            const std::int32_t depth = _health > 0
+                ? Mods::MapGen::CustomRooms::Q3LiquidLevel(scene().RoomId(), static_cast<Vector3>(Position), liquid)
+                : 0;
+            if (depth == 0)
+            {
+                _q3LiquidTimer = 0;
+            }
+            else if (_q3LiquidTimer > 0)
+            {
+                --_q3LiquidTimer;
+            }
+            else
+            {
+                _q3LiquidTimer = 42;
+                std::int32_t damage = 0;
+                if ((liquid & Mods::MapGen::CustomRooms::Q3ContentsLava) != 0)
+                {
+                    damage += 30 * depth;
+                }
+                if ((liquid & Mods::MapGen::CustomRooms::Q3ContentsSlime) != 0)
+                {
+                    damage += 10 * depth;
+                }
+                TakeDamage(static_cast<std::uint32_t>(damage), DamageFlags::IgnoreInvuln, std::nullopt, nullptr);
+            }
         }
 
         assert(scene().Room() != nullptr);

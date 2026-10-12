@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <cstddef>
 #include <cstdint>
@@ -224,6 +225,38 @@ namespace MphRead::Mods::MapGen
         GameState::MatchTime(-1);
         GameState::ForceEndGame(false);
         PlayerEntity& player = Runtime::RequireReference(Runtime::ManagedListAt(PlayerEntity::Players(), Slot));
+        // FP_PADPROBE_LIQUID=x,y,z (Quake units): the hunter is put there
+        // once spawned and its health logged as it changes, five seconds.
+        if (const char* liquid = std::getenv("FP_PADPROBE_LIQUID"))
+        {
+            if (!TestFlag(player.LoadFlags(), LoadFlags::Spawned))
+            {
+                return;
+            }
+            static std::int32_t last = -1;
+            if (!_placed)
+            {
+                float q[3]{};
+                (void)std::sscanf(liquid, "%f,%f,%f", &q[0], &q[1], &q[2]);
+                const float unit = 35.0F;
+                const Vector3 at(q[0] / unit, q[2] / unit, -q[1] / unit);
+                player.Teleport(at, Vector3(0.0F, 0.0F, 1.0F), _scene->GetNodeRefByPosition(at));
+                player.SetPrevPosition(player.Position);
+                player.SetSpeed(Vector3(0.0F, 0.0F, 0.0F));
+                _placed = true;
+            }
+            if (player.Health() != last)
+            {
+                last = player.Health();
+                Runtime::ConsoleWriteLine("LIQUID frame " + std::to_string(_frame) + " health " + std::to_string(last)
+                    + " y " + F(static_cast<Vector3>(player.Position).Y * 35.0F, "F1"));
+            }
+            if (++_frame > 300 || player.Health() == 0)
+            {
+                Close();
+            }
+            return;
+        }
         if (player.Health() == 0 || !TestFlag(player.LoadFlags(), LoadFlags::Active)
             || !TestFlag(player.LoadFlags(), LoadFlags::Spawned))
         {

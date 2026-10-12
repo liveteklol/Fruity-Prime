@@ -499,6 +499,79 @@ namespace MphRead::Mods::MapGen
         thread_local std::optional<std::array<float, 4>>* fogQuery = nullptr;
         std::vector<Q3Import::FogVolume> fogVolumes;
 
+        // The level's lava and slime brushes: contents, and the planes
+        // (Quake's axes and units) the inside of each is behind.
+        struct LiquidBrush
+        {
+            std::int32_t Contents = 0;
+            std::vector<OpenTK::Mathematics::Vector4> Planes;
+        };
+        std::vector<LiquidBrush> liquidBrushes;
+
+        void ReadLiquids(const Q3Bsp& bsp)
+        {
+            liquidBrushes.clear();
+            constexpr std::int32_t hurts = CustomRooms::Q3ContentsLava | CustomRooms::Q3ContentsSlime;
+            for (const auto& brush : bsp.Brushes())
+            {
+                if (!brush || brush->Texture() < 0
+                    || static_cast<std::size_t>(brush->Texture()) >= bsp.Textures().size()
+                    || !bsp.Textures()[static_cast<std::size_t>(brush->Texture())])
+                {
+                    continue;
+                }
+                const std::int32_t contents = bsp.Textures()[static_cast<std::size_t>(brush->Texture())]->Contents() & hurts;
+                if (contents == 0)
+                {
+                    continue;
+                }
+                LiquidBrush liquid;
+                liquid.Contents = contents;
+                for (std::int32_t i = 0; i < brush->SideCount(); ++i)
+                {
+                    const std::size_t side = static_cast<std::size_t>(brush->FirstSide() + i);
+                    if (side >= bsp.BrushSides().size() || !bsp.BrushSides()[side])
+                    {
+                        continue;
+                    }
+                    const std::int32_t plane = bsp.BrushSides()[side]->Plane();
+                    if (plane < 0 || static_cast<std::size_t>(plane) >= bsp.Planes().size()
+                        || !bsp.Planes()[static_cast<std::size_t>(plane)])
+                    {
+                        continue;
+                    }
+                    const Q3Plane& p = *bsp.Planes()[static_cast<std::size_t>(plane)];
+                    liquid.Planes.emplace_back(p.X(), p.Y(), p.Z(), p.Distance());
+                }
+                if (!liquid.Planes.empty())
+                {
+                    liquidBrushes.push_back(std::move(liquid));
+                }
+            }
+        }
+
+        [[nodiscard]] std::int32_t LiquidAt(float x, float y, float z)
+        {
+            std::int32_t contents = 0;
+            for (const LiquidBrush& brush : liquidBrushes)
+            {
+                bool inside = true;
+                for (const OpenTK::Mathematics::Vector4& plane : brush.Planes)
+                {
+                    if (plane.X * x + plane.Y * y + plane.Z * z - plane.W > 0.0F)
+                    {
+                        inside = false;
+                        break;
+                    }
+                }
+                if (inside)
+                {
+                    contents |= brush.Contents;
+                }
+            }
+            return contents;
+        }
+
         // The level a translated room was read from, kept while the room is
         // played: its tree for Q3Open, its fog volumes for Q3FogAt.
         struct Q3Level
@@ -556,6 +629,7 @@ namespace MphRead::Mods::MapGen
             cachedLevel.reset();
             level.Lighting = Q3Import::Lighting{};
             fogVolumes.clear();
+            liquidBrushes.clear();
             if (Q3StepHeight(roomId) > 0.0F)
             {
                 const ::MphRead::RoomMetadata* meta = ::MphRead::Metadata::GetRoomById(roomId, true);
@@ -571,6 +645,7 @@ namespace MphRead::Mods::MapGen
                             level.Lighting = Q3Import::MakeLighting(cachedLevel.get(),
                                 std::vector<std::string>{*definition->SourcePath()});
                             fogVolumes = level.Lighting.Fogs;
+                            ReadLiquids(*cachedLevel);
                         }
                         catch (...)
                         {
@@ -634,6 +709,34 @@ namespace MphRead::Mods::MapGen
             return true;
         }
         return cachedLevel->Open(position.X * unit, -position.Z * unit, position.Y * unit);
+    }
+
+    std::int32_t CustomRooms::Q3LiquidLevel(
+        std::int32_t roomId, OpenTK::Mathematics::Vector3 feet, std::int32_t& contents)
+    {
+        contents = 0;
+        (void)Q3Open(roomId, feet);
+        if (liquidBrushes.empty())
+        {
+            return 0;
+        }
+        // Quake's PM_SetWaterLevel: a point just above the feet, one at the
+        // waist and one at the eyes (MINS_Z -24, viewheight 26), in Quake's
+        // units and axes -- (x, y, z) is this game's (x, -z, y).
+        const float unit = Q3Convert::UnitsPerUnit;
+        const float x = feet.X * unit;
+        const float y = -feet.Z * unit;
+        const float z = feet.Y * unit;
+        contents = LiquidAt(x, y, z + 1.0F);
+        if (contents == 0)
+        {
+            return 0;
+        }
+        if (LiquidAt(x, y, z + 25.0F) == 0)
+        {
+            return 1;
+        }
+        return LiquidAt(x, y, z + 50.0F) == 0 ? 2 : 3;
     }
 
     std::vector<CustomRooms::FogBox> CustomRooms::Q3FogBoxes(

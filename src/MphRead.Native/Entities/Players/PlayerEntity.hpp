@@ -1009,6 +1009,8 @@ namespace MphRead::Entities
         // Quake's gravity while flying off a Quake 3 jump pad, as a positive
         // fall per frame per frame; 0 when not. JumpPadEntity::Q3Trigger.
         float _q3PadGravity = 0.0F;
+        // Frames until a Quake 3 level's lava or slime hurts again.
+        std::int32_t _q3LiquidTimer = 0;
         // Quake's step up a stair, in a Quake 3 level's rooms (PlayerCollision).
         bool TryQ3StepUp(::OpenTK::Mathematics::Vector3 from, ::OpenTK::Mathematics::Vector3 move);
         // And Quake's air control in that flight (PM_AirMove): the speed it

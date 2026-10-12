@@ -53,6 +53,14 @@ namespace MphRead::Mods::MapGen
         // inside its walls or out in the void around it. Always true in any
         // other room.
         [[nodiscard]] static bool Q3Open(std::int32_t roomId, OpenTK::Mathematics::Vector3 position);
+        // Quake's contents bits for the liquids that hurt, and how deep a
+        // hunter standing at `feet` is in one (Quake's waterlevel: 0 dry, 1
+        // to the ankles, 2 to the waist, 3 under) and which; 0 in any other
+        // room.
+        static constexpr std::int32_t Q3ContentsLava = 0x8;
+        static constexpr std::int32_t Q3ContentsSlime = 0x10;
+        [[nodiscard]] static std::int32_t Q3LiquidLevel(
+            std::int32_t roomId, OpenTK::Mathematics::Vector3 feet, std::int32_t& contents);
         // The Quake 3 level a translated room came from, read once and kept
         // while the room is (Q3Open's); nothing for any other room.
         [[nodiscard]] static std::shared_ptr<Q3Bsp> Q3LevelBsp(std::int32_t roomId);
