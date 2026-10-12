@@ -320,6 +320,9 @@ namespace MphRead
         OpenTK::Mathematics::Vector3 CurrentSpecular{};
         MphRead::PolygonMode PolygonMode = MphRead::PolygonMode::Modulate;
         MphRead::RenderMode RenderMode = MphRead::RenderMode::Normal;
+        // Added to what is behind it, as Quake's GL_ONE GL_ONE stages are: a
+        // translated Quake 3 material named "q<n>+..." (MapPacker).
+        bool Additive = false;
         MatAnimFlags AnimationFlags{};
         MphRead::TexgenMode TexgenMode = MphRead::TexgenMode::None;
         std::int32_t TexcoordAnimationId = 0;

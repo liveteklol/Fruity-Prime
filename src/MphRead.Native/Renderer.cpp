@@ -1059,6 +1059,15 @@ namespace MphRead
             {
                 material.RenderMode = RenderMode::Normal;
             }
+            {
+                std::size_t digits = 1;
+                while (digits < material.Name.size() && material.Name[digits] >= '0' && material.Name[digits] <= '9')
+                {
+                    ++digits;
+                }
+                material.Additive = material.Name.size() > digits && digits > 1
+                    && material.Name[0] == 'q' && material.Name[digits] == '+';
+            }
             for (std::int32_t i = 0; i < static_cast<std::int32_t>(model->Recolors->size()); ++i)
             {
                 combos.insert({material.TextureId, material.PaletteId, i});
@@ -1499,11 +1508,11 @@ namespace MphRead
     }
 
     const NativeRuntime::Rhi::GraphicsPipeline& Scene::ScenePipeline(ScenePass pass,
-        NativeRuntime::Rhi::CullMode cull, NativeRuntime::Rhi::FillMode fill, std::int32_t lineWidth)
+        NativeRuntime::Rhi::CullMode cull, NativeRuntime::Rhi::FillMode fill, std::int32_t lineWidth, bool additive)
     {
         const std::uint32_t key = (static_cast<std::uint32_t>(pass) << 16U)
             | (static_cast<std::uint32_t>(cull) << 12U) | (static_cast<std::uint32_t>(fill) << 8U)
-            | (static_cast<std::uint32_t>(lineWidth) & 0xFFU);
+            | (static_cast<std::uint32_t>(lineWidth) & 0xFFU) | (additive ? 1U << 24U : 0U);
         for (const auto& [recentKey, recent] : _recentPipelines)
             if (recent && recentKey == key) return *recent;
         auto& pipeline = _pipelines[key];
@@ -1513,6 +1522,13 @@ namespace MphRead
             desc.rasterizer.cullMode = cull;
             desc.rasterizer.fillMode = fill;
             desc.rasterizer.lineWidth = static_cast<float>(lineWidth);
+            // Added light: what is there already stays, the item's colour
+            // is added to it by its alpha (A5I3: alpha is how bright).
+            if (additive && !desc.blendAttachments.empty() && desc.blendAttachments.front().blendEnable)
+            {
+                desc.blendAttachments.front().dstColorFactor = NativeRuntime::Rhi::BlendFactor::One;
+                desc.blendAttachments.front().dstAlphaFactor = NativeRuntime::Rhi::BlendFactor::One;
+            }
             pipeline = Gpu().CreateGraphicsPipeline(desc);
         }
         _recentPipelines[_recentPipelineNext] = {key, pipeline.get()};
@@ -3400,6 +3416,7 @@ namespace MphRead
         {
             auto item = _freeRenderItems.front();
             _freeRenderItems.pop();
+            item->Additive = false;
             return item;
         }
         return std::make_shared<MphRead::RenderItem>();
@@ -3426,6 +3443,7 @@ namespace MphRead
         item->Alpha = material.CurrentAlpha * alphaScale;
         item->PolygonMode = material.PolygonMode;
         item->RenderMode = material.RenderMode;
+        item->Additive = material.Additive;
         item->CullingMode = material.Culling;
         item->BillboardMode = billboardMode;
         item->Wireframe = material.Wireframe != 0;
@@ -4211,7 +4229,7 @@ namespace MphRead
         const bool wireframe = _wireframeLevel > 0 || item->Wireframe;
         Commands().SetPipeline(ScenePipeline(_itemPass, cull,
             wireframe ? Rhi::FillMode::Wireframe : Rhi::FillMode::Solid,
-            wireframe ? std::max(1, _wireframeLevel) : 1));
+            wireframe ? std::max(1, _wireframeLevel) : 1, item->Additive));
         if (item->Type == RenderItemType::Mesh)
         {
             DrawGpuMesh(item->MeshModel, item->MeshObject);

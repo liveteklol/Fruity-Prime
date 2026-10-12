@@ -1044,7 +1044,7 @@ private: \
         MphRead::ScenePass pass) const; \
     [[nodiscard]] const MphRead::NativeRuntime::Rhi::GraphicsPipeline& ScenePipeline( \
         MphRead::ScenePass pass, MphRead::NativeRuntime::Rhi::CullMode cull, \
-        MphRead::NativeRuntime::Rhi::FillMode fill, std::int32_t lineWidth); \
+        MphRead::NativeRuntime::Rhi::FillMode fill, std::int32_t lineWidth, bool additive = false); \
     void BeginScenePass(MphRead::ScenePass pass); \
     [[nodiscard]] MphRead::NativeRuntime::Rhi::CommandList& Commands(); \
     void CreateSceneTargets(OpenTK::Mathematics::Vector2i size); \

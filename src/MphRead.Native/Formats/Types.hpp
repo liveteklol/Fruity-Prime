@@ -138,6 +138,8 @@ namespace MphRead
         float Alpha = 0.0F;
         MphRead::PolygonMode PolygonMode = MphRead::PolygonMode::Modulate;
         MphRead::RenderMode RenderMode = MphRead::RenderMode::Normal;
+        // Its material's Additive: blended dst + src x alpha.
+        bool Additive = false;
         MphRead::CullingMode CullingMode = MphRead::CullingMode::Neither;
         MphRead::BillboardMode BillboardMode = MphRead::BillboardMode::None;
         bool Wireframe = false;

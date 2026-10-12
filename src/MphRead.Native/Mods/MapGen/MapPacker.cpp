@@ -1457,7 +1457,11 @@ namespace
             // and the rest), so its name is its own.
             if (!entry.Meta().empty())
             {
-                const std::string prefix = "q" + std::to_string(index) + "_";
+                // "+" marks a moving stage Quake adds (Material::Additive):
+                // a glow that never changes keeps the see-through blend,
+                // which over its own lit fitting reads truer than adding.
+                const std::string prefix = "q" + std::to_string(index)
+                    + (meta.Blend == "add" && meta.Animated() ? "+" : "_");
                 utf8 = prefix + (utf8.size() > 30U - prefix.size() ? utf8.substr(utf8.size() - (30U - prefix.size())) : utf8);
             }
             std::u16string name = Utf8ToUtf16(utf8);
