@@ -14,6 +14,7 @@
 #include "Q3Bsp.hpp"
 #include "ShaderAnim.hpp"
 #include "Q3Movers.hpp"
+#include "Q3Md3.hpp"
 #include "../../Formats/Types.hpp"
 #include "../../NativeRuntime/System/Console.hpp"
 #include "../../NativeRuntime/System/Encoding.hpp"
@@ -611,6 +612,62 @@ namespace MphRead::Mods::MapGen
                         layerFaces = UncheckedAdd(layerFaces, 1);
                     }
                 }
+            }
+        }
+        // The models drawn on movers (Q3Md3), in their movers' nodes, lit as
+        // the texture is painted.
+        if (pack != nullptr)
+        {
+            std::vector<std::string> archives{source};
+            for (std::string& pak : import->ResolveTexturePaks())
+            {
+                archives.push_back(std::move(pak));
+            }
+            const std::vector<Q3Md3::Placed> placed = Q3Md3::Load(bsp.get(), archives);
+            const std::vector<std::string> shaders = Q3Md3::Shaders(placed);
+            std::int32_t modelFaces = 0;
+            for (const Q3Md3::Placed& one : placed)
+            {
+                for (const Q3Md3::Surface& surface : one.Surfaces)
+                {
+                    const auto at = std::find(shaders.begin(), shaders.end(), surface.Shader);
+                    std::int32_t material = 0;
+                    if (!pack->BySourceIndex().TryGetValue(
+                            MapTextureBake::ModelSourceIndex + static_cast<std::int32_t>(at - shaders.begin()), material))
+                    {
+                        continue;
+                    }
+                    const auto [modelWidth, modelHeight] = textureSizes.at(static_cast<std::size_t>(material));
+                    for (std::size_t t = 0; t < surface.Triangles.size(); ++t)
+                    {
+                        auto points = std::make_unique<ManagedArray<Vector3>>(3U);
+                        auto uvs = std::make_unique<ManagedArray<Vector2>>(3U);
+                        for (std::size_t k = 0; k < 3; ++k)
+                        {
+                            const std::vector<float> position{
+                                surface.Triangles[t][k].X, surface.Triangles[t][k].Y, surface.Triangles[t][k].Z};
+                            (*points)[k] = ToWorld(&position, unit);
+                            (*uvs)[k] = Vector2(surface.Texcoords[t][k].X * static_cast<float>(modelWidth),
+                                surface.Texcoords[t][k].Y * static_cast<float>(modelHeight));
+                        }
+                        const Vector3 normal = Vector3::Cross(
+                            Subtract((*points)[1], (*points)[0]), Subtract((*points)[2], (*points)[0]));
+                        if (LengthSquared(normal) < 1.0e-12F)
+                        {
+                            continue;
+                        }
+                        auto face = std::make_unique<BuiltFace>(
+                            std::move(points), std::move(uvs), normal.Normalized(), material, 1.0F);
+                        face->Mover = one.Model;
+                        face->Colors.assign(3U, Vector3(0.5F, 0.5F, 0.5F));
+                        map->Faces().push_back(map->OwnFace(std::move(face)));
+                        modelFaces = UncheckedAdd(modelFaces, 1);
+                    }
+                }
+            }
+            if (verbose && modelFaces > 0)
+            {
+                WriteLine("  " + Runtime::ToString(modelFaces) + " triangles of models drawn on movers");
             }
         }
         if (verbose && layerFaces > 0)
@@ -1949,6 +2006,16 @@ namespace MphRead::Mods::MapGen
             {
                 portalImages.push_back(PathToUtf8(directory / ("portal_" + std::to_string(i) + ".png")));
             }
+            // The movers' models' shaders (Q3Md3).
+            std::vector<std::string> archiveList;
+            for (const std::optional<std::string>& path : *archivePaths)
+            {
+                if (path.has_value())
+                {
+                    archiveList.push_back(*path);
+                }
+            }
+            const std::vector<std::string> modelShaders = Q3Md3::Shaders(Q3Md3::Load(bsp.get(), archiveList));
             std::shared_ptr<MapTextureBake::Result> result
                 = MapTextureBake::Bake(
                     bsp,
@@ -1957,7 +2024,8 @@ namespace MphRead::Mods::MapGen
                     MapTextureBake::DefaultSize,
                     true,
                     &import->TextureAliases(),
-                    &portalImages);
+                    &portalImages,
+                    &modelShaders);
             if (!result)
             {
                 throw System::NullReferenceException();

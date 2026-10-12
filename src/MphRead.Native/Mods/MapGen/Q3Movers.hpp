@@ -29,6 +29,10 @@ namespace MphRead::Mods::MapGen
         // targetname to wait for, no health to be shot open).
         [[nodiscard]] static bool IsMover(const Q3Bsp* bsp, std::int32_t model);
 
+        // Whether a mover's brush model is stored about its entity's origin
+        // (q3map moves one with an origin there) rather than where it stands.
+        [[nodiscard]] static bool IsRelative(const Q3Bsp* bsp, std::int32_t model);
+
         // Brings a translated room's movers to this frame (60 a second), the
         // doors opened by whoever stands at them (positions in this game's
         // space); once a frame, whoever asks first -- the movers' collision

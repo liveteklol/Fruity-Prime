@@ -183,8 +183,7 @@ namespace MphRead::Mods::MapGen
                 mover.Model = model;
                 const std::optional<Vector3> origin = Point(entity, "origin");
                 mover.Origin = origin.value_or(Vector3(0.0F, 0.0F, 0.0F));
-                mover.Relative = origin.has_value()
-                    && OpenTK::Mathematics::LengthSquared(centre) < OpenTK::Mathematics::LengthSquared(centre - mover.Origin);
+                mover.Relative = Q3Movers::IsRelative(bsp, model);
                 if (kind == "func_bobbing")
                 {
                     mover.Type = Kind::Bob;
@@ -411,6 +410,26 @@ namespace MphRead::Mods::MapGen
             return true;
         }
         return kind == "func_door" && Value(*entity, "targetname") == nullptr && Value(*entity, "health") == nullptr;
+    }
+
+    bool Q3Movers::IsRelative(const Q3Bsp* bsp, std::int32_t model)
+    {
+        if (bsp == nullptr || model <= 0 || static_cast<std::size_t>(model) >= bsp->Models().size())
+        {
+            return false;
+        }
+        const Q3Entity* entity = EntityOf(bsp, model);
+        const std::optional<Vector3> origin = entity == nullptr ? std::nullopt : Point(*entity, "origin");
+        if (!origin.has_value())
+        {
+            return false;
+        }
+        const Q3Model& brushes = *bsp->Models()[static_cast<std::size_t>(model)];
+        const std::vector<float>& mins = *brushes.Mins();
+        const std::vector<float>& maxs = *brushes.Maxs();
+        const Vector3 centre((mins[0] + maxs[0]) * 0.5F, (mins[1] + maxs[1]) * 0.5F, (mins[2] + maxs[2]) * 0.5F);
+        return OpenTK::Mathematics::LengthSquared(centre)
+            < OpenTK::Mathematics::LengthSquared(centre - *origin);
     }
 
     void Q3Movers::Update(

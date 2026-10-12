@@ -35,6 +35,9 @@ namespace MphRead::Mods::MapGen
         // over it, an animMap's frames -- from AnimatedSourceIndex up, each
         // saying what it is (MapTexturePack::Entry::Meta).
         static constexpr std::int32_t AnimatedSourceIndex = 0x8000;
+        // A shader of a model drawn on a mover (Q3Md3), ModelSourceIndex +
+        // its place in Q3Md3::Shaders.
+        static constexpr std::int32_t ModelSourceIndex = 0xF000;
 
         class Result final
         {
@@ -65,7 +68,8 @@ namespace MphRead::Mods::MapGen
             std::int32_t size = DefaultSize,
             bool sky = true,
             const std::vector<std::pair<std::string, std::string>>* aliases = nullptr,
-            const std::vector<std::string>* portalImages = nullptr);
+            const std::vector<std::string>* portalImages = nullptr,
+            const std::vector<std::string>* modelShaders = nullptr);
 
         MapTextureBake() = delete;
         MapTextureBake(const MapTextureBake&) = delete;

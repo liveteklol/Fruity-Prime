@@ -1371,7 +1371,8 @@ namespace MphRead::Mods::MapGen
         std::int32_t size,
         bool sky,
         const std::vector<std::pair<std::string, std::string>>* aliases,
-        const std::vector<std::string>* portalImages)
+        const std::vector<std::string>* portalImages,
+        const std::vector<std::string>* modelShaders)
     {
         using namespace MapTextureBakeInterop;
 
@@ -1762,7 +1763,15 @@ namespace MphRead::Mods::MapGen
             return true;
         };
 
-        for (const auto& [index, name, flags] : UsedTextures(bsp, sky))
+        auto used = UsedTextures(bsp, sky);
+        if (modelShaders != nullptr)
+        {
+            for (std::size_t k = 0; k < modelShaders->size(); ++k)
+            {
+                used.emplace_back(ModelSourceIndex + static_cast<std::int32_t>(k), (*modelShaders)[k], 0);
+            }
+        }
+        for (const auto& [index, name, flags] : used)
         {
             if ((flags & Q3Bsp::SurfaceSky) == 0 && bakeAnimated(index, name, flags))
             {
@@ -1828,8 +1837,8 @@ namespace MphRead::Mods::MapGen
             }
             if (image.Width <= 0 || image.Height <= 0)
             {
-                const std::int32_t contents
-                    = RequireReference(bsp->Textures().at(static_cast<std::size_t>(index))).Contents();
+                const std::int32_t contents = static_cast<std::size_t>(index) < bsp->Textures().size()
+                    ? RequireReference(bsp->Textures().at(static_cast<std::size_t>(index))).Contents() : 0;
                 std::optional<MphTextures::Image> standIn = MphTextures::StandIn(name, flags, contents);
                 if (!standIn.has_value())
                 {
