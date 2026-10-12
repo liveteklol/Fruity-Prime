@@ -621,7 +621,7 @@ namespace
         for (const CollisionEntry& entry : RequireReference(info.Entries))
         {
             writer.Write(entry.DataCount);
-            writer.Write(entry.DataStartIndex);
+            writer.Write(static_cast<std::uint16_t>(entry.DataStartIndex));
         }
         const std::int32_t portalOffset = ToIntCount(writer.Position());
         for (const auto& portal : RequireReference(info.Portals))

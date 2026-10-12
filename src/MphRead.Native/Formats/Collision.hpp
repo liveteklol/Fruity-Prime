@@ -175,16 +175,33 @@ namespace MphRead::Formats::Collision
         [[nodiscard]] std::int32_t Axis() const noexcept;
     };
 
+    // A cell of the grid as the file stores it: wc01 in 16 bits, wc32 (a
+    // level too large for them, MapCollisionPacker) in 32.
+    struct RawCollisionEntry final
+    {
+        std::uint16_t DataCount = 0;
+        std::uint16_t DataStartIndex = 0;
+    };
+
+    struct RawCollisionEntry32 final
+    {
+        std::uint32_t DataCount = 0;
+        std::uint32_t DataStartIndex = 0;
+    };
+
+    // A cell as the game holds it: where its faces start may pass 16 bits
+    // once a layer's cells stop sharing runs (ReadMphCollision).
     struct CollisionEntry final
     {
         const std::uint16_t DataCount = 0;
-        const std::uint16_t DataStartIndex = 0;
+        const std::uint16_t Padding2 = 0;
+        const std::uint32_t DataStartIndex = 0;
 
         CollisionEntry() noexcept = default;
 
         constexpr CollisionEntry(
             std::uint16_t dataCount,
-            std::uint16_t dataStartIndex) noexcept
+            std::uint32_t dataStartIndex) noexcept
             : DataCount(dataCount),
               DataStartIndex(dataStartIndex)
         {
@@ -569,7 +586,9 @@ namespace MphRead::Formats::Collision
 
     static_assert(sizeof(CollisionHeader) == 84);
     static_assert(sizeof(CollisionData) == 16);
-    static_assert(sizeof(CollisionEntry) == 4);
+    static_assert(sizeof(CollisionEntry) == 8);
+    static_assert(sizeof(RawCollisionEntry) == 4);
+    static_assert(sizeof(RawCollisionEntry32) == 8);
     static_assert(sizeof(RawCollisionPortal) == 224);
 
     static_assert(sizeof(FhCollisionPortal) == 96);
