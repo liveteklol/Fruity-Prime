@@ -3820,9 +3820,9 @@ namespace MphRead
             boxes.Eye = _cameraPosition;
             if (FogOn())
             {
-                const auto near = Mods::MapGen::CustomRooms::Q3FogBoxes(
+                const auto nearest = Mods::MapGen::CustomRooms::Q3FogBoxes(
                     RoomId(), _cameraPosition, NativeRuntime::Rhi::SceneFogBoxes::Capacity);
-                for (const auto& box : near)
+                for (const auto& box : nearest)
                 {
                     auto& out = boxes.Boxes[static_cast<std::size_t>(boxes.Count++)];
                     out.Min = Vector4(box.Min.X, box.Min.Y, box.Min.Z, box.Depth);
