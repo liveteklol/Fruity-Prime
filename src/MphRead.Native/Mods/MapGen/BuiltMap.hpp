@@ -45,6 +45,10 @@ namespace MphRead::Mods::MapGen
     {
     public:
         std::vector<BotLink> Links{};
+        // The light layer's pages (Q3Import::LightLayer), 128 by 128, each
+        // luxel how much it darkens what is under it, 0 none to 31 black;
+        // their materials follow the texture pack's.
+        std::vector<std::vector<std::uint8_t>> LightPages{};
 
         explicit BuiltMap(MapDefinition* definition) noexcept;
         virtual ~BuiltMap();
@@ -108,6 +112,9 @@ namespace MphRead::Mods::MapGen
         // Sky: drawn sky, which is never collision, so the check that every
         // drawn surface has something solid behind it skips it.
         bool Sky = false;
+        // Overlay: the level's light over a face already drawn, a decal
+        // (Q3Import::LightLayer); never collision either.
+        bool Overlay = false;
         // The light at each corner, red green blue, 1 the texture as painted;
         // none for one shade over the whole face.
         std::vector<OpenTK::Mathematics::Vector3> Colors{};

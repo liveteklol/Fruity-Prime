@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cstdint>
+#include <unordered_map>
+#include <array>
 #include <memory>
 #include <optional>
 #include <string>
@@ -46,6 +48,11 @@ namespace MphRead::Mods::MapGen
             Result(Result&&) = delete;
             Result& operator=(Result&&) = delete;
         };
+
+        // The fog shaders the archives' scripts define, lower-case name to
+        // red, green, blue and the depth the fog is opaque at.
+        [[nodiscard]] static std::unordered_map<std::string, std::array<float, 4>> FogParms(
+            const std::vector<std::string>& archivePaths);
 
         [[nodiscard]] static std::shared_ptr<Result> Bake(
             const std::shared_ptr<Q3Bsp>& bsp,

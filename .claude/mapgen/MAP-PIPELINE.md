@@ -414,10 +414,24 @@ What the level holds comes across by rule, never by hand:
   converted floor past sixteen repeats was clamped and smeared.
 - **The sky** is the level's sky box, six sides at their own size, drawn as a
   box round the level's sky (`tr_sky.c`'s `st_to_vec`).
-- **Light** is Quake's own: each vertex's colour from the .bsp (what
-  `r_vertexLight` draws with), brightened as `R_ColorShiftLightingBytes` does,
-  drawn as a COLOR per vertex. Lightmaps are not: their detail between
-  vertices is lost.
+- **Light** is the level's lightmap, as sharp as Quake draws it
+  (`Q3Import::LightLayer`): each face is lit by the brightest light of its
+  block of the lightmap, as a COLOR per vertex, and a second copy of it --
+  the *light layer*, one 128x128 `PaletteA5I3` texture per lightmap page,
+  black and as see-through as the light is bright, drawn as a decal
+  (`RenderMode::Decal`, mirrored at both edges, which tells the renderer to
+  filter it smoothly whatever the filtering setting) -- darkens it luxel by
+  luxel to the rest: the pools of light on a floor, a pillar's shadow, a
+  lamp's glow on a wall. A face without a lightmap is lit by its vertices
+  (`R_ColorShiftLightingBytes`). Quake's light reaches past white -- twice a
+  texture in full sun -- and vertex light stops at it, so a level's textures
+  are baked twice as bright (`MapTextureBake`'s `Overbright`, not skies) and
+  its light halved (`Q3Import::Light`). A level compiled for Quake Live
+  leaves the faces' lightmap blocks out; they are taken from where the
+  vertices' lightmap coordinates fall.
+- **Multi-stage shaders** -- fire behind a carved grille, lava under a pad's
+  rim -- are composited into one image at bake time, each `blendFunc blend`
+  stage over the opaque one under it (`MapTextureBake`'s `Compose`).
 - **Portals** (`misc_portal_surface` and its `misc_portal_camera`) show the
   view from their camera: rendered by the thumbnail pass once the room is
   built (`ThumbnailGenerator::EnsurePortalViews`, or `-portalviews ROOM`),
@@ -449,7 +463,39 @@ What the level holds comes across by rule, never by hand:
 - **Scale** is measured on where play happens -- the extent of spawns and
   pickups plus a margin -- when a level places enough of them: acid3dm12
   stands in a 16384-unit vista and would otherwise come out at 126 units each.
-- **No fog**: the cartridge's fog colours belong to its rooms.
+- **Fog** is the level's own (`fogparms`, from its scripts or
+  `Q3Fogs.inc`, the base game's): a surface in a fog volume is tinted by how
+  deep under the fog's surface it lies, and while the camera stands inside a
+  volume everything is fogged by distance, opaque past the fog's depth --
+  thinned for a layer much thinner than that depth, since Quake fogs only
+  what a ray crosses inside it (`CustomRooms::Q3FogAt`, `Scene::UpdateUniforms`).
+  The cartridge's fog colours are never added.
+- **A sky of one colour** (`gfx/colors/black` behind q3dm17) is given one of
+  the cartridge's skies, as a sky the level lacks is.
+- **Out of bounds** is a wall: a hunter about to stand where the level's BSP
+  has no cluster -- inside its walls or the void around it -- is put back
+  where it was (`CustomRooms::Q3Open`, every frame, a walk down the tree).
+- **OpenArena's art** stands in for what a level lacks before the
+  cartridge's does: `tools/openarena-pack.py` builds `oa-textures.pk3`
+  (stored, so any one file of it is a range request), `index.json` and
+  `LICENSE.txt` (GPL-2+) for https://net.livetek.fr/fruityprime/openarena/;
+  `OpenArenaTextures::Fetch` gets, for a level being translated, only the
+  files it lacks and keeps them in `_archives/_openarena/openarena.pk3`,
+  read after the level's own archive. Nothing changes when the server
+  cannot be reached. `FP_OPENARENA_URL` points a test at another copy.
+
+**Translation happens once per level, in the background.** At start
+(`CustomRooms::StartGenerating`) the levels added or changed since the last
+start are read on a thread of their own, one at a time, while the launcher
+shows `Preparing maps: NAME (n/N)` at the foot of the front screen
+(`ShellBridge::mapsBuilding`, `Main.qml`). A room loaded before its level is
+ready waits for it, or builds it then (`Scene::AddRoom` -> `EnsureReady`).
+What is built stays built (`translated.txt`) until the .pk3, the translator
+(`Q3Convert::TranslatorVersion`) or the availability of the OpenArena index
+changes; a level that cannot be built is noted (`failed.txt`) and not tried
+again at every start. A large archive (a game's 450 MB pak) is read only
+where it is needed: its directory from its end, each entry when asked for
+(`ZipArchive`, past 32 MB).
 
 **The scale is 35 Quake units to one** (`Q3Convert::UnitsPerUnit`): a Quake
 player is 56 tall and a hunter 1.6, so the level is the size it was built for

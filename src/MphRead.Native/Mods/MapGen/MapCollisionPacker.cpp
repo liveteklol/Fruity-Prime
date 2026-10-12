@@ -352,7 +352,17 @@ namespace MphRead::Mods::MapGen
             }
             else
             {
-                start = ListCount(dataIndices.size());
+                // Neighbouring cells list their faces in the same order, so a
+                // new run often begins with the end of the last one: it
+                // starts inside it.
+                std::size_t overlap = std::min(cell->size(), dataIndices.size());
+                while (overlap > 0
+                    && !std::equal(cell->begin(), cell->begin() + static_cast<std::ptrdiff_t>(overlap),
+                        dataIndices.end() - static_cast<std::ptrdiff_t>(overlap)))
+                {
+                    --overlap;
+                }
+                start = ListCount(dataIndices.size() - overlap);
                 if (start > std::numeric_limits<std::uint16_t>::max())
                 {
                     throw MphRead::ProgramException(
@@ -363,7 +373,7 @@ namespace MphRead::Mods::MapGen
                         + " cells over " + ::MphRead::NativeRuntime::ToString(dataCount)
                         + " faces), and the format indexes them with 16 bits.");
                 }
-                dataIndices.insert(dataIndices.end(), cell->begin(), cell->end());
+                dataIndices.insert(dataIndices.end(), cell->begin() + static_cast<std::ptrdiff_t>(overlap), cell->end());
                 runs.emplace(*cell, start);
             }
             entries.push_back(Entry{

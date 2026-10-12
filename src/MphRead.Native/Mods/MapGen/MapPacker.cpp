@@ -1028,6 +1028,37 @@ namespace
         {
             throw ProgramException("The texture pack is empty.");
         }
+        // The light layer (Q3Import::LightLayer): black, as see-through as the
+        // light is bright, drawn as a decal. Mirrored at both edges, which no
+        // cartridge decal is, is what tells the renderer to filter it
+        // smoothly whatever the texture filtering setting.
+        for (std::size_t page = 0; page < map->LightPages.size(); ++page)
+        {
+            std::vector<std::uint8_t> texels(map->LightPages[page].size());
+            for (std::size_t i = 0; i < texels.size(); ++i)
+            {
+                texels[i] = static_cast<std::uint8_t>((map->LightPages[page][i] & 0x1F) << 3);
+            }
+            textures->push_back(std::make_shared<Repack::TextureInfo>(
+                TextureFormat::PaletteA5I3,
+                false,
+                128,
+                128,
+                std::make_shared<const std::vector<std::uint8_t>>(std::move(texels))));
+            palettes->push_back(std::make_shared<Repack::PaletteInfo>(
+                std::make_shared<const std::vector<std::uint16_t>>(std::vector<std::uint16_t>(8, 0))));
+            const std::u16string name = Utf8ToUtf16("lightmap" + std::to_string(page));
+            materials->push_back(MphRead::Mods::MapGen::RawStructs::MakeMaterial(
+                std::u16string_view(name),
+                ListCount(textures->size()) - 1,
+                ListCount(palettes->size()) - 1,
+                RepeatMode::Mirror,
+                RepeatMode::Mirror,
+                false,
+                ColorRgb(31, 31, 31),
+                ColorRgb(0, 0, 0),
+                MphRead::RenderMode::Decal));
+        }
         return Assemble(map, def, materials, textures, palettes);
     }
 

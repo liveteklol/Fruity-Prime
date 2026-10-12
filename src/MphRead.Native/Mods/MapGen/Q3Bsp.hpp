@@ -346,6 +346,8 @@ namespace MphRead::Mods::MapGen
         [[nodiscard]] Q3FloatArray Surface() const noexcept;
         [[nodiscard]] Q3FloatArray Normal() const noexcept;
         [[nodiscard]] Q3ByteArray Color() const noexcept;
+        // Where the vertex reads its face's lightmap, 0 to 1 across the page.
+        std::array<float, 2> Lightmap{};
 
         [[nodiscard]] virtual bool Equals(const Q3Vertex* other) const noexcept;
         [[nodiscard]] virtual std::int32_t GetHashCode() const noexcept;
@@ -409,6 +411,10 @@ namespace MphRead::Mods::MapGen
         [[nodiscard]] std::int32_t MeshVertCount() const noexcept;
         [[nodiscard]] Q3FloatArray Normal() const noexcept;
         [[nodiscard]] Q3IntArray Size() const noexcept;
+        // Its lightmap page, -1 for a surface lit by its vertices alone.
+        std::int32_t LightmapIndex = -1;
+        // Its block of that page, in luxels: x, y, width, height.
+        std::array<std::int32_t, 4> LightmapRect{};
 
         [[nodiscard]] virtual bool Equals(const Q3Face* other) const noexcept;
         [[nodiscard]] virtual std::int32_t GetHashCode() const noexcept;
@@ -526,8 +532,8 @@ namespace MphRead::Mods::MapGen
     {
     public:
         Q3UsedLumps()
-            : _values(std::make_shared<std::array<std::int32_t, 9>>(
-                std::array<std::int32_t, 9>{0, 1, 2, 7, 8, 9, 10, 11, 13})) {}
+            : _values(std::make_shared<std::array<std::int32_t, 13>>(
+                std::array<std::int32_t, 13>{0, 1, 2, 3, 4, 7, 8, 9, 10, 11, 12, 13, 14})) {}
 
         [[nodiscard]] std::int32_t& operator[](std::size_t index) const { return _values->at(index); }
         [[nodiscard]] auto begin() const noexcept { return _values->begin(); }
@@ -535,7 +541,7 @@ namespace MphRead::Mods::MapGen
         [[nodiscard]] std::size_t size() const noexcept { return _values->size(); }
 
     private:
-        std::shared_ptr<std::array<std::int32_t, 9>> _values;
+        std::shared_ptr<std::array<std::int32_t, 13>> _values;
     };
 
     class Q3Bsp
@@ -574,6 +580,23 @@ namespace MphRead::Mods::MapGen
         [[nodiscard]] const VertexList& Vertices() const noexcept;
         [[nodiscard]] const MeshVertList& MeshVerts() const noexcept;
         [[nodiscard]] const FaceList& Faces() const noexcept;
+        // The lightmap pages, each 128 by 128 RGB, one after another.
+        [[nodiscard]] const std::vector<std::uint8_t>& Lightmaps() const noexcept { return _lightmaps; }
+        static constexpr std::int32_t LightmapSize = 128;
+        // A fog volume: its shader, its brush, and which of the brush's sides
+        // (counted from its first) is the surface seen from outside, -1 none.
+        // A face's Effect is the fog it is in.
+        struct Fog
+        {
+            std::string Shader;
+            std::int32_t Brush = 0;
+            std::int32_t VisibleSide = -1;
+        };
+        [[nodiscard]] const std::vector<Fog>& Fogs() const noexcept { return _fogs; }
+        // Whether a point (Quake's units and axes) is somewhere a player can
+        // be: in a leaf of the tree that belongs to a cluster, not in the
+        // solid or the void outside the level, which are in none.
+        [[nodiscard]] bool Open(float x, float y, float z) const;
         [[nodiscard]] const ModelList& Models() const noexcept;
         [[nodiscard]] const EntityList& Entities() const noexcept;
 
@@ -591,6 +614,18 @@ namespace MphRead::Mods::MapGen
         [[nodiscard]] static std::vector<std::string> ListMaps(const std::string* source);
 
     private:
+        std::vector<std::uint8_t> _lightmaps{};
+        std::vector<Fog> _fogs{};
+        // The tree: each node's plane and its two children (a leaf as
+        // -(leaf + 1)), and each leaf's cluster.
+        struct Node
+        {
+            std::int32_t Plane = 0;
+            std::int32_t Front = 0;
+            std::int32_t Back = 0;
+        };
+        std::vector<Node> _nodes{};
+        std::vector<std::int32_t> _leafClusters{};
         template <typename T>
         class ListStorage final
         {

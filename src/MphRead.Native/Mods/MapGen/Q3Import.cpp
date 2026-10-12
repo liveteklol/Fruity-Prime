@@ -1,4 +1,5 @@
 #include "Q3Import.hpp"
+#include "OpenArenaTextures.hpp"
 #include "NativeRuntime/System/Charconv.hpp"
 
 #include "../../Formats/Formats.hpp"
@@ -22,6 +23,7 @@
 
 #include <algorithm>
 #include <array>
+#include <functional>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -284,6 +286,16 @@ namespace MphRead::Mods::MapGen
 
         std::int32_t unpainted = 0;
         const std::vector<Q3Portal> portals = Portals(bsp.get());
+        Lighting lighting = MakeLighting(bsp.get(), std::vector<std::string>{source});
+        if (pack != nullptr && !bsp->Lightmaps().empty())
+        {
+            LightLayer(lighting, bsp.get());
+            if (!lighting.Pages.empty())
+            {
+                lighting.LayerMaterial = static_cast<std::int32_t>(pack->Entries().size());
+                map->LightPages = lighting.Pages;
+            }
+        }
         std::int32_t portalFaces = 0;
 
         float skySpan = 100.0F;
@@ -440,10 +452,10 @@ namespace MphRead::Mods::MapGen
             MphRead::Enumerable<BuiltFace*> builtFaces = patch
                 ? Tessellate(
                     bsp.get(), face, unit, width, height,
-                    material, sky, import->PatchLevel())
+                    material, sky, import->PatchLevel(), &lighting)
                 : Triangles(
                     bsp.get(), face, unit, width, height,
-                    material, sky);
+                    material, sky, &lighting);
 
             for (BuiltFace* built : builtFaces)
             {
@@ -474,7 +486,7 @@ namespace MphRead::Mods::MapGen
                     }
                 }
 
-                if (patch
+                if (patch && !built->Overlay
                     && (texture->Contents() & Q3Bsp::ContentsSolid) != 0)
                 {
                     map->Solid().push_back(built);
@@ -762,6 +774,399 @@ namespace MphRead::Mods::MapGen
         return map;
     }
 
+    namespace
+    {
+        // Quake 3's own fog shaders, from tools/q3-texture-match.py.
+        struct BaseFog
+        {
+            const char* Shader;
+            float Red;
+            float Green;
+            float Blue;
+            float Distance;
+        };
+        constexpr BaseFog BaseFogs[] = {
+#include "Q3Fogs.inc"
+            {nullptr, 0.0F, 0.0F, 0.0F, 0.0F}};
+    }
+
+    Q3Import::Lighting Q3Import::MakeLighting(Q3Bsp* bsp, const std::vector<std::string>& archives)
+    {
+        Lighting lighting;
+        if (bsp == nullptr)
+        {
+            return lighting;
+        }
+        // The level's own scripts, read only for a level with fog.
+        const auto own = bsp->Fogs().empty()
+            ? std::unordered_map<std::string, std::array<float, 4>>{}
+            : MapTextureBake::FogParms(archives);
+        for (const Q3Bsp::Fog& fog : bsp->Fogs())
+        {
+            FogVolume volume;
+            std::string lower = fog.Shader;
+            for (char& ch : lower)
+            {
+                ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+            }
+            if (const auto found = own.find(lower); found != own.end())
+            {
+                volume.Color = Vector3(found->second[0], found->second[1], found->second[2]);
+                volume.Distance = found->second[3];
+            }
+            else
+            {
+                for (const BaseFog* base = BaseFogs; base->Shader != nullptr; ++base)
+                {
+                    if (lower == base->Shader)
+                    {
+                        volume.Color = Vector3(base->Red, base->Green, base->Blue);
+                        volume.Distance = base->Distance;
+                        break;
+                    }
+                }
+            }
+            if (fog.Brush >= 0 && static_cast<std::size_t>(fog.Brush) < bsp->Brushes().size())
+            {
+                Q3Brush* brush = &RequireReference(ManagedListAt(bsp->Brushes(), fog.Brush));
+                for (std::int32_t i = 0; i < brush->SideCount(); ++i)
+                {
+                    Q3BrushSide* side = &RequireReference(ManagedListAt(bsp->BrushSides(), UncheckedAdd(brush->FirstSide(), i)));
+                    Q3Plane* plane = &RequireReference(ManagedListAt(bsp->Planes(), side->Plane()));
+                    const Vector4 value(plane->X(), plane->Y(), plane->Z(), plane->Distance());
+                    volume.Planes.push_back(value);
+                    if (i == fog.VisibleSide)
+                    {
+                        volume.Surface = value;
+                    }
+                }
+            }
+            lighting.Fogs.push_back(std::move(volume));
+        }
+        // The fog whose brush holds most of the level's box is the air of
+        // the room (q3dm4r's grey haze), not a layer over a pool.
+        if (!bsp->Models().empty() && bsp->Models().front())
+        {
+            const Q3Model& world = *bsp->Models().front();
+            const std::vector<float>& mins = RequireReference(world.Mins().get());
+            const std::vector<float>& maxs = RequireReference(world.Maxs().get());
+            float level = 1.0F;
+            for (std::size_t k = 0; k < 3; ++k)
+            {
+                level *= std::max(1.0F, maxs.at(k) - mins.at(k));
+            }
+            for (FogVolume& volume : lighting.Fogs)
+            {
+                std::array<float, 3> low{mins.at(0), mins.at(1), mins.at(2)};
+                std::array<float, 3> high{maxs.at(0), maxs.at(1), maxs.at(2)};
+                for (const Vector4& plane : volume.Planes)
+                {
+                    const std::array<float, 3> normal{plane.X, plane.Y, plane.Z};
+                    for (std::size_t k = 0; k < 3; ++k)
+                    {
+                        if (normal[k] > 0.999F)
+                        {
+                            high[k] = std::min(high[k], plane.W);
+                        }
+                        else if (normal[k] < -0.999F)
+                        {
+                            low[k] = std::max(low[k], -plane.W);
+                        }
+                    }
+                }
+                float inside = 1.0F;
+                for (std::size_t k = 0; k < 3; ++k)
+                {
+                    inside *= std::max(0.0F, high[k] - low[k]);
+                }
+                volume.Room = volume.Distance > 0.0F && inside >= level * 0.4F;
+            }
+        }
+        return lighting;
+    }
+
+    void Q3Import::LightLayer(Lighting& lighting, Q3Bsp* bsp)
+    {
+        constexpr std::int32_t Size = Q3Bsp::LightmapSize;
+        constexpr std::size_t PageBytes = static_cast<std::size_t>(Size) * Size * 3;
+        const std::vector<std::uint8_t>& raw = bsp->Lightmaps();
+        const std::size_t pages = raw.size() / PageBytes;
+        if (pages == 0)
+        {
+            return;
+        }
+        const auto light = [&](std::size_t page, std::int32_t x, std::int32_t y)
+        {
+            const std::size_t at = page * PageBytes + (static_cast<std::size_t>(y) * Size + x) * 3;
+            const std::vector<std::uint8_t> rgb{raw[at], raw[at + 1], raw[at + 2]};
+            return Light(&rgb);
+        };
+        // How bright a luxel is as stored: Quake's overbright makes most of a
+        // lit floor brighter than white, so the light as drawn (Light) is the
+        // same in the sun and out of it; the stored values still differ.
+        const auto stored = [&](std::size_t page, std::int32_t x, std::int32_t y)
+        {
+            const std::size_t at = page * PageBytes + (static_cast<std::size_t>(y) * Size + x) * 3;
+            return 0.299F * raw[at] + 0.587F * raw[at + 1] + 0.114F * raw[at + 2];
+        };
+        const auto luminance = [](Vector3 c) { return 0.299F * c.X + 0.587F * c.Y + 0.114F * c.Z; };
+        lighting.Pages.assign(pages, std::vector<std::uint8_t>(static_cast<std::size_t>(Size) * Size, 0));
+        for (const std::shared_ptr<Q3Face>& faceValue : bsp->Faces())
+        {
+            Q3Face& face = *faceValue;
+            // A level compiled for Quake Live leaves the block out: it is
+            // where the face's vertices' lightmap coordinates fall.
+            if (face.LightmapIndex >= 0 && (face.LightmapRect[2] <= 0 || face.LightmapRect[3] <= 0))
+            {
+                float lowS = 1.0F, lowT = 1.0F, highS = 0.0F, highT = 0.0F;
+                for (std::int32_t i = 0; i < face.VertexCount(); ++i)
+                {
+                    const Q3Vertex& vertex = RequireReference(ManagedListAt(bsp->Vertices(), UncheckedAdd(face.Vertex(), i)));
+                    lowS = std::min(lowS, vertex.Lightmap[0]);
+                    lowT = std::min(lowT, vertex.Lightmap[1]);
+                    highS = std::max(highS, vertex.Lightmap[0]);
+                    highT = std::max(highT, vertex.Lightmap[1]);
+                }
+                if (highS >= lowS && highT >= lowT)
+                {
+                    const std::int32_t x = std::clamp(static_cast<std::int32_t>(std::floor(lowS * Size)), 0, Size - 1);
+                    const std::int32_t y = std::clamp(static_cast<std::int32_t>(std::floor(lowT * Size)), 0, Size - 1);
+                    const std::int32_t right = std::clamp(static_cast<std::int32_t>(std::ceil(highS * Size)), x + 1, Size);
+                    const std::int32_t bottom = std::clamp(static_cast<std::int32_t>(std::ceil(highT * Size)), y + 1, Size);
+                    face.LightmapRect = {x, y, right - x, bottom - y};
+                }
+            }
+            const auto& [x0, y0, w, h] = face.LightmapRect;
+            if (face.LightmapIndex < 0 || static_cast<std::size_t>(face.LightmapIndex) >= pages
+                || w <= 0 || h <= 0 || x0 < 0 || y0 < 0 || x0 + w > Size || y0 + h > Size)
+            {
+                continue;
+            }
+            const std::array<std::int32_t, 5> key{face.LightmapIndex, x0, y0, w, h};
+            if (lighting.Brightest.contains(key))
+            {
+                continue;
+            }
+            const std::size_t page = static_cast<std::size_t>(face.LightmapIndex);
+            Vector3 brightest(0.0F, 0.0F, 0.0F);
+            float top = 0.0F;
+            for (std::int32_t y = y0; y < y0 + h; ++y)
+            {
+                for (std::int32_t x = x0; x < x0 + w; ++x)
+                {
+                    if (stored(page, x, y) > top)
+                    {
+                        top = stored(page, x, y);
+                        brightest = light(page, x, y);
+                    }
+                }
+            }
+            lighting.Brightest.emplace(key, brightest);
+            // Against the light as drawn: up to white, which with the
+            // textures' overbright is twice their own brightness.
+            const float drawnTop = std::max(luminance(brightest), 1.0F / 255.0F);
+            for (std::int32_t y = y0; y < y0 + h; ++y)
+            {
+                for (std::int32_t x = x0; x < x0 + w; ++x)
+                {
+                    const float dark = 1.0F - std::clamp(luminance(light(page, x, y)) / drawnTop, 0.0F, 1.0F);
+                    lighting.Pages[page][static_cast<std::size_t>(y) * Size + x]
+                        = static_cast<std::uint8_t>(std::lround(dark * 31.0F));
+                }
+            }
+        }
+    }
+
+    // A face's lightmap at (s, t), bilinear across its luxels, as the light
+    // Quake draws it with (R_ColorShiftLightingBytes, like the vertices').
+    Vector3 Q3Import::SampleLightmap(Q3Bsp* bsp, std::int32_t page, Vector2 st)
+    {
+        constexpr std::int32_t Size = Q3Bsp::LightmapSize;
+        const std::vector<std::uint8_t>& pages = bsp->Lightmaps();
+        const std::size_t base = static_cast<std::size_t>(page) * Size * Size * 3;
+        const float x = std::clamp(st.X * Size - 0.5F, 0.0F, static_cast<float>(Size - 1));
+        const float y = std::clamp(st.Y * Size - 0.5F, 0.0F, static_cast<float>(Size - 1));
+        const std::int32_t x0 = static_cast<std::int32_t>(x);
+        const std::int32_t y0 = static_cast<std::int32_t>(y);
+        const std::int32_t x1 = std::min(x0 + 1, Size - 1);
+        const std::int32_t y1 = std::min(y0 + 1, Size - 1);
+        const float fx = x - static_cast<float>(x0);
+        const float fy = y - static_cast<float>(y0);
+        std::vector<std::uint8_t> rgb(3);
+        for (std::size_t c = 0; c < 3; ++c)
+        {
+            const auto at = [&](std::int32_t px, std::int32_t py)
+            {
+                return static_cast<float>(pages[base + (static_cast<std::size_t>(py) * Size + px) * 3 + c]);
+            };
+            const float top = at(x0, y0) * (1.0F - fx) + at(x1, y0) * fx;
+            const float bottom = at(x0, y1) * (1.0F - fx) + at(x1, y1) * fx;
+            rgb[c] = static_cast<std::uint8_t>(std::clamp(std::lround(top * (1.0F - fy) + bottom * fy), 0L, 255L));
+        }
+        return Light(&rgb);
+    }
+
+    // One of the level's triangles as this game draws it: lit by its
+    // lightmap where it has one -- cut finer where the light changes more
+    // across it than its corners can say, down to two luxels -- by its
+    // vertices where it has none, and tinted by the fog it stands in, deeper
+    // in the fog the more of it.
+    std::vector<BuiltFace*> Q3Import::LitFaces(
+        Q3Bsp* bsp, const Lighting* lighting, Q3Face* face,
+        std::array<LitCorner, 3> corners, Vector3 normal,
+        std::int32_t material, float shade, bool sky)
+    {
+        // A patch is already cut fine, and its cells are its collision too.
+        const bool subdivide = face->Type() != 2;
+        std::vector<BuiltFace*> faces;
+        const std::int32_t page = face->LightmapIndex;
+        constexpr std::size_t PageBytes = static_cast<std::size_t>(Q3Bsp::LightmapSize) * Q3Bsp::LightmapSize * 3;
+        const bool lit = !sky && page >= 0
+            && (static_cast<std::size_t>(page) + 1) * PageBytes <= bsp->Lightmaps().size();
+        std::optional<Vector3> layered;
+        if (lit && lighting != nullptr && lighting->LayerMaterial >= 0)
+        {
+            const auto& [x0, y0, w, h] = face->LightmapRect;
+            if (const auto found = lighting->Brightest.find({page, x0, y0, w, h}); found != lighting->Brightest.end())
+            {
+                layered = found->second;
+            }
+        }
+        if (lit)
+        {
+            for (LitCorner& corner : corners)
+            {
+                corner.Color = layered.has_value() ? *layered : SampleLightmap(bsp, page, corner.Lightmap);
+            }
+        }
+        const FogVolume* fog = nullptr;
+        if (lighting != nullptr && face->Effect() >= 0
+            && static_cast<std::size_t>(face->Effect()) < lighting->Fogs.size()
+            && lighting->Fogs[static_cast<std::size_t>(face->Effect())].Distance > 0.0F
+            && !lighting->Fogs[static_cast<std::size_t>(face->Effect())].Room)
+        {
+            fog = &lighting->Fogs[static_cast<std::size_t>(face->Effect())];
+        }
+        const auto middle = [&](const LitCorner& a, const LitCorner& b)
+        {
+            LitCorner m;
+            m.World = Divide(Add(a.World, b.World), 2.0F);
+            m.Quake = Divide(Add(a.Quake, b.Quake), 2.0F);
+            m.Uv = Vector2((a.Uv.X + b.Uv.X) / 2.0F, (a.Uv.Y + b.Uv.Y) / 2.0F);
+            m.Lightmap = Vector2((a.Lightmap.X + b.Lightmap.X) / 2.0F, (a.Lightmap.Y + b.Lightmap.Y) / 2.0F);
+            m.Color = lit ? SampleLightmap(bsp, page, m.Lightmap) : Divide(Add(a.Color, b.Color), 2.0F);
+            return m;
+        };
+        const auto off = [](Vector3 a, Vector3 b)
+        {
+            return std::max(std::fabs(a.X - b.X), std::max(std::fabs(a.Y - b.Y), std::fabs(a.Z - b.Z)));
+        };
+        std::function<void(const std::array<LitCorner, 3>&, std::int32_t)> emit;
+        emit = [&](const std::array<LitCorner, 3>& tri, std::int32_t depth)
+        {
+            if (lit && subdivide && !layered.has_value() && depth < 7)
+            {
+                std::size_t longest = 0;
+                float length = -1.0F;
+                for (std::size_t i = 0; i < 3; ++i)
+                {
+                    const Vector2 a = tri[i].Lightmap;
+                    const Vector2 b = tri[(i + 1) % 3].Lightmap;
+                    const float luxels = std::sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y))
+                        * static_cast<float>(Q3Bsp::LightmapSize);
+                    if (luxels > length)
+                    {
+                        length = luxels;
+                        longest = i;
+                    }
+                }
+                if (length > 4.0F)
+                {
+                    float error = 0.0F;
+                    for (std::size_t i = 0; i < 3; ++i)
+                    {
+                        const LitCorner& a = tri[i];
+                        const LitCorner& b = tri[(i + 1) % 3];
+                        const Vector2 st((a.Lightmap.X + b.Lightmap.X) / 2.0F, (a.Lightmap.Y + b.Lightmap.Y) / 2.0F);
+                        error = std::max(error, off(SampleLightmap(bsp, page, st), Divide(Add(a.Color, b.Color), 2.0F)));
+                    }
+                    const Vector2 centre(
+                        (tri[0].Lightmap.X + tri[1].Lightmap.X + tri[2].Lightmap.X) / 3.0F,
+                        (tri[0].Lightmap.Y + tri[1].Lightmap.Y + tri[2].Lightmap.Y) / 3.0F);
+                    error = std::max(error, off(SampleLightmap(bsp, page, centre),
+                        Divide(Add(Add(tri[0].Color, tri[1].Color), tri[2].Color), 3.0F)));
+                    if (error > 0.08F)
+                    {
+                        const std::size_t a = longest;
+                        const std::size_t b = (longest + 1) % 3;
+                        const std::size_t c = (longest + 2) % 3;
+                        const LitCorner m = middle(tri[a], tri[b]);
+                        emit({tri[a], m, tri[c]}, depth + 1);
+                        emit({m, tri[b], tri[c]}, depth + 1);
+                        return;
+                    }
+                }
+            }
+            std::vector<Vector3> points{tri[0].World, tri[1].World, tri[2].World};
+            std::vector<Vector2> uvs{tri[0].Uv, tri[1].Uv, tri[2].Uv};
+            std::vector<Vector3> colors;
+            if (!sky)
+            {
+                for (const LitCorner& corner : tri)
+                {
+                    Vector3 color = corner.Color;
+                    if (fog != nullptr)
+                    {
+                        // How deep under the fog's surface -- or inside its
+                        // nearest side, for a fog with none -- against the
+                        // depth Quake's fog is opaque at.
+                        float depth = std::numeric_limits<float>::max();
+                        const auto inside = [&corner](const Vector4& plane)
+                        {
+                            return plane.W - (plane.X * corner.Quake.X + plane.Y * corner.Quake.Y + plane.Z * corner.Quake.Z);
+                        };
+                        if (fog->Surface.has_value())
+                        {
+                            depth = inside(*fog->Surface);
+                        }
+                        else
+                        {
+                            for (const Vector4& plane : fog->Planes)
+                            {
+                                depth = std::min(depth, inside(plane));
+                            }
+                        }
+                        const float amount = std::clamp(depth / fog->Distance, 0.0F, 1.0F) * 0.9F;
+                        color = Add(Multiply(color, 1.0F - amount), Multiply(fog->Color, amount));
+                    }
+                    colors.push_back(color);
+                }
+            }
+            if (layered.has_value())
+            {
+                // The layer: the same triangle, at its lightmap coordinates
+                // in luxels of its page's layer.
+                std::vector<Vector3> again = points;
+                std::vector<Vector2> luxels;
+                for (const LitCorner& corner : tri)
+                {
+                    luxels.emplace_back(corner.Lightmap.X * static_cast<float>(Q3Bsp::LightmapSize),
+                        corner.Lightmap.Y * static_cast<float>(Q3Bsp::LightmapSize));
+                }
+                BuiltFace* over = MakeFace(std::move(again), std::move(luxels), normal,
+                    lighting->LayerMaterial + page, shade,
+                    std::vector<Vector3>(3, Vector3(1.0F, 1.0F, 1.0F)));
+                over->Overlay = true;
+                faces.push_back(MakeFace(std::move(points), std::move(uvs), normal, material, shade, std::move(colors)));
+                faces.push_back(over);
+                return;
+            }
+            faces.push_back(MakeFace(std::move(points), std::move(uvs), normal, material, shade, std::move(colors)));
+        };
+        emit(corners, 0);
+        return faces;
+    }
+
     MphRead::Enumerable<BuiltFace*> Q3Import::Triangles(
         Q3Bsp* bsp,
         Q3Face* face,
@@ -769,10 +1174,11 @@ namespace MphRead::Mods::MapGen
         std::int32_t width,
         std::int32_t height,
         std::int32_t material,
-        bool sky)
+        bool sky,
+        const Lighting* lighting)
     {
         return MphRead::Enumerable<BuiltFace*>(
-            [bsp, face, unit, width, height, material, sky]()
+            [bsp, face, unit, width, height, material, sky, lighting]()
                 -> MphRead::NativeRuntime::CoroutineSequence<BuiltFace*>
             {
                 if (face == nullptr || bsp == nullptr)
@@ -787,6 +1193,7 @@ namespace MphRead::Mods::MapGen
                     std::vector<Vector3> points(3);
                     std::vector<Vector2> uvs(3);
                     std::vector<Vector3> lights(3);
+                    std::array<LitCorner, 3> corners{};
                     Vector3 vertexNormal(0.0F, 0.0F, 0.0F);
                     float shade = 0.0F;
 
@@ -822,17 +1229,22 @@ namespace MphRead::Mods::MapGen
                         shade += static_cast<float>(colorSum)
                             / (3.0F * 255.0F);
                         lights[static_cast<std::size_t>(j)] = Light(color);
+                        const std::vector<float>& raw = RequireReference(vertex->Position());
+                        corners[static_cast<std::size_t>(j)] = LitCorner{
+                            points[static_cast<std::size_t>(j)],
+                            Vector3(raw[0], raw[1], raw[2]),
+                            uvs[static_cast<std::size_t>(j)],
+                            Vector2(vertex->Lightmap[0], vertex->Lightmap[1]),
+                            lights[static_cast<std::size_t>(j)]};
                     }
 
                     const Vector3 normal = TriangleNormal(points, vertexNormal,
                         ToDirection(&RequireReference(face->Normal())));
-                    co_yield MakeFace(
-                        std::move(points),
-                        std::move(uvs),
-                        normal,
-                        material,
-                        Shade(shade / 3.0F, sky),
-                        sky ? std::vector<Vector3>{} : std::move(lights));
+                    for (BuiltFace* lit : LitFaces(bsp, lighting, face, corners, normal,
+                             material, Shade(shade / 3.0F, sky), sky))
+                    {
+                        co_yield lit;
+                    }
                 }
             });
     }
@@ -845,10 +1257,11 @@ namespace MphRead::Mods::MapGen
         std::int32_t height,
         std::int32_t material,
         bool sky,
-        std::int32_t level)
+        std::int32_t level,
+        const Lighting* lighting)
     {
         return MphRead::Enumerable<BuiltFace*>(
-            [bsp, face, unit, width, height, material, sky, level]()
+            [bsp, face, unit, width, height, material, sky, level, lighting]()
                 -> MphRead::NativeRuntime::CoroutineSequence<BuiltFace*>
             {
                 if (face == nullptr || bsp == nullptr)
@@ -879,6 +1292,8 @@ namespace MphRead::Mods::MapGen
                         std::vector<Vector3> normals(valueCount);
                         std::vector<float> shades(valueCount);
                         std::vector<Vector3> lights(valueCount);
+                        std::vector<Vector3> quakes(valueCount);
+                        std::vector<Vector2> lightmaps(valueCount);
 
                         for (std::int32_t a = 0; a <= tessLevel; ++a)
                         {
@@ -899,6 +1314,8 @@ namespace MphRead::Mods::MapGen
                                 Vector3 normal(0.0F, 0.0F, 0.0F);
                                 float shade = 0.0F;
                                 Vector3 light(0.0F, 0.0F, 0.0F);
+                                Vector3 quake(0.0F, 0.0F, 0.0F);
+                                Vector2 lightmap(0.0F, 0.0F);
 
                                 for (std::int32_t r = 0; r < 3; ++r)
                                 {
@@ -967,6 +1384,10 @@ namespace MphRead::Mods::MapGen
                                             / (3.0F * 255.0F))
                                             * weight;
                                         light = Add(light, Multiply(Light(color), weight));
+                                        const std::vector<float>& raw = RequireReference(vertex->Position());
+                                        quake = Add(quake, Multiply(Vector3(raw[0], raw[1], raw[2]), weight));
+                                        lightmap = Add(lightmap, Multiply(
+                                            Vector2(vertex->Lightmap[0], vertex->Lightmap[1]), weight));
                                     }
                                 }
 
@@ -979,6 +1400,8 @@ namespace MphRead::Mods::MapGen
                                     : normal.Normalized();
                                 shades[index] = shade;
                                 lights[index] = light;
+                                quakes[index] = quake;
+                                lightmaps[index] = lightmap;
                             }
                         }
 
@@ -986,18 +1409,25 @@ namespace MphRead::Mods::MapGen
                         {
                             for (std::int32_t b = 0; b < tessLevel; ++b)
                             {
-                                co_yield Cell(
-                                    points, uvs, normals, shades, lights,
-                                    dimension, material, sky,
-                                    GridPoint{a, b},
-                                    GridPoint{a, b + 1},
-                                    GridPoint{a + 1, b + 1});
-                                co_yield Cell(
-                                    points, uvs, normals, shades, lights,
-                                    dimension, material, sky,
-                                    GridPoint{a, b},
-                                    GridPoint{a + 1, b + 1},
-                                    GridPoint{a + 1, b});
+                                for (const std::array<GridPoint, 3>& cell : {
+                                         std::array<GridPoint, 3>{GridPoint{a, b}, GridPoint{a, b + 1}, GridPoint{a + 1, b + 1}},
+                                         std::array<GridPoint, 3>{GridPoint{a, b}, GridPoint{a + 1, b + 1}, GridPoint{a + 1, b}}})
+                                {
+                                    BuiltFace* shape = Cell(points, uvs, normals, shades, lights,
+                                        dimension, material, sky, cell[0], cell[1], cell[2]);
+                                    std::unique_ptr<BuiltFace> shapeOwner(shape);
+                                    std::array<LitCorner, 3> corners{};
+                                    for (std::size_t k = 0; k < 3; ++k)
+                                    {
+                                        const std::size_t at = RectIndex(dimension, cell[k].A, cell[k].B);
+                                        corners[k] = LitCorner{points.at(at), quakes.at(at), uvs.at(at), lightmaps.at(at), lights.at(at)};
+                                    }
+                                    for (BuiltFace* lit : LitFaces(bsp, lighting, face, corners, shape->Normal(),
+                                             material, shape->Shade(), sky))
+                                    {
+                                        co_yield lit;
+                                    }
+                                }
                             }
                         }
                     }
@@ -1097,9 +1527,15 @@ namespace MphRead::Mods::MapGen
 
     Vector3 Q3Import::Light(const std::vector<std::uint8_t>* color)
     {
-        float r = static_cast<float>(ManagedAt(color, 0)) * 4.0F;
-        float g = static_cast<float>(ManagedAt(color, 1)) * 4.0F;
-        float b = static_cast<float>(ManagedAt(color, 2)) * 4.0F;
+        // x4 is Quake's shift; the 1.22 brings this game's 5-bit, DS-style
+        // modulation level with ioquake3's picture (measured on lightmapped
+        // levels with no fog, ACID3DM12 and CSU1_A).
+        // Halved for the textures baked twice as bright (MapTextureBake's
+        // Overbright), which leaves light up to twice a texture's own.
+        constexpr float Gain = 4.0F * 1.22F / 2.0F;
+        float r = static_cast<float>(ManagedAt(color, 0)) * Gain;
+        float g = static_cast<float>(ManagedAt(color, 1)) * Gain;
+        float b = static_cast<float>(ManagedAt(color, 2)) * Gain;
         const float most = std::max(r, std::max(g, b));
         if (most > 255.0F)
         {
@@ -1297,6 +1733,21 @@ namespace MphRead::Mods::MapGen
             for (std::string& pak : import->ResolveTexturePaks())
             {
                 archivePaths->push_back(std::move(pak));
+            }
+            // OpenArena's pictures of what the level lacks, after its own and
+            // ahead of the cartridge's stand-ins.
+            std::vector<std::string> shaders;
+            for (const auto& texture : bsp->Textures())
+            {
+                if (texture)
+                {
+                    shaders.push_back(texture->Name().Value());
+                }
+            }
+            OpenArenaTextures::Fetch(*level, shaders);
+            if (std::optional<std::string> openArena = OpenArenaTextures::Pack())
+            {
+                archivePaths->push_back(std::move(*openArena));
             }
 
             // Each portal's view, where CustomRooms keeps it once rendered.

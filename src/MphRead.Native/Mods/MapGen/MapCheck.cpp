@@ -600,7 +600,7 @@ namespace MphRead::Mods::MapGen
             std::map<CellKey, std::size_t> worstIndex;
             for (const Face& face : drawn)
             {
-                if (face.Source->Sky)
+                if (face.Source->Sky || face.Source->Overlay)
                 {
                     continue;
                 }

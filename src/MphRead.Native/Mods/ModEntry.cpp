@@ -1828,9 +1828,11 @@ namespace MphRead::Mods
     {
         const auto [width, height] = ParseSize(args);
 
+        // In the background: the launcher shows how far it is, and a room
+        // loaded before its map is ready waits for it (Scene::AddRoom).
         if (!::HasFlag(args, "mapgen"))
         {
-            MapGen::CustomRooms::GenerateMissing();
+            MapGen::CustomRooms::StartGenerating();
         }
 
         if (::HasFlag(args, "nohelmet"))

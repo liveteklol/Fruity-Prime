@@ -241,6 +241,30 @@ Item {
         Component.onCompleted: Theme.keyboard = controllerKeyboard
     }
 
+    // Quake 3 maps being translated in the background (once each): a bar at
+    // the foot of the front screen while it lasts.
+    Rectangle {
+        parent: stage
+        visible: ShellHost.mapsBuilding && ShellHost.page === "front" && !root.stacked
+        anchors.left: parent.left
+        anchors.bottom: parent.bottom
+        anchors.margins: Math.round(16 * root.uiScale)
+        width: Math.min(parent.width - 2 * anchors.margins, Math.round(420 * root.uiScale))
+        height: progressRow.height + Math.round(16 * root.uiScale)
+        radius: Math.round(8 * root.uiScale)
+        color: "#cc10141c"
+        z: 500
+        ProgressRow {
+            id: progressRow
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.margins: Math.round(12 * root.uiScale)
+            fraction: ShellHost.mapsProgress
+            stage: ShellHost.mapsStage
+        }
+    }
+
     // Until the host says the front screen is ready, something opaque is
     // drawn: a host that is still starting, or that failed, must never look
     // like a black window. Plain primitives only -- no images, no settings,

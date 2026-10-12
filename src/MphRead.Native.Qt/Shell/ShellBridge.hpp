@@ -49,6 +49,11 @@ namespace MphRead::Qt
         // Android's display density (px per dp); 1 everywhere else.
         Q_PROPERTY(double deviceDensity READ DeviceDensity CONSTANT)
         Q_PROPERTY(bool backdropSuspended READ BackdropSuspended WRITE SetBackdropSuspended NOTIFY backdropSuspendedChanged)
+        // Quake 3 maps being translated in the background
+        // (CustomRooms::StartGenerating): whether, how far (0-1), and which.
+        Q_PROPERTY(bool mapsBuilding READ MapsBuilding NOTIFY mapsChanged)
+        Q_PROPERTY(double mapsProgress READ MapsProgress NOTIFY mapsChanged)
+        Q_PROPERTY(QString mapsStage READ MapsStage NOTIFY mapsChanged)
 
     public:
         using LaunchPlan = ::MphRead::Mods::Launcher::LaunchPlan;
@@ -89,6 +94,9 @@ namespace MphRead::Qt
         [[nodiscard]] QString FontOverride() const;
         [[nodiscard]] double DeviceDensity() const;
         [[nodiscard]] bool BackdropSuspended() const { return _backdropSuspended; }
+        [[nodiscard]] bool MapsBuilding() const noexcept { return _mapsBuilding; }
+        [[nodiscard]] double MapsProgress() const noexcept { return _mapsProgress; }
+        [[nodiscard]] QString MapsStage() const { return _mapsStage; }
         void SetBackdropSuspended(bool value) { _backdropSuspended = value; emit backdropSuspendedChanged(); }
 
         void SetSettings(std::shared_ptr<::MphRead::MenuSettings> settings);
@@ -148,6 +156,7 @@ namespace MphRead::Qt
         Q_INVOKABLE QColor suitColour(int hunter, int suit) const;
 
     signals:
+        void mapsChanged();
         void pageChanged();
         void startupChanged();
         void roomsChanged();
@@ -162,6 +171,11 @@ namespace MphRead::Qt
         void backRequested();
 
     private:
+        void pollMaps();
+        bool _mapsBuilding = false;
+        double _mapsProgress = 0.0;
+        QString _mapsStage;
+        bool _mapsSeenBuilding = false;
         Actions _actions;
         QString _page;
         QString _startupState = QStringLiteral("FrontReady");

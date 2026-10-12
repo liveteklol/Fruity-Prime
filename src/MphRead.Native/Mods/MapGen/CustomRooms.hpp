@@ -1,5 +1,8 @@
 #pragma once
 
+#include "../../Formats/Types.hpp"
+
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -41,6 +44,15 @@ namespace MphRead::Mods::MapGen
         // Quake's STEPSIZE in this game's units for a room read from a Quake 3
         // level, 0 for any other: how high a hunter steps up there.
         [[nodiscard]] static float Q3StepHeight(std::int32_t roomId);
+        // False where a room read from a Quake 3 level has nowhere to stand:
+        // inside its walls or out in the void around it. Always true in any
+        // other room.
+        [[nodiscard]] static bool Q3Open(std::int32_t roomId, OpenTK::Mathematics::Vector3 position);
+        // The fog a point of such a room is in, as Quake's fogparms has it
+        // (red, green, blue 0-1, and the distance it is opaque at in this
+        // game's units); none outside every fog volume, and in any other room.
+        [[nodiscard]] static std::optional<std::array<float, 4>> Q3FogAt(
+            std::int32_t roomId, OpenTK::Mathematics::Vector3 position);
         // Where portal i of a translated level's room keeps the view from its
         // camera, and the rooms still without one (ThumbnailGenerator renders
         // them, then they are built again with them).
@@ -52,6 +64,22 @@ namespace MphRead::Mods::MapGen
         [[nodiscard]] static std::int32_t GenerateAll(
             bool force = false, bool verbose = true);
         static void GenerateMissing();
+        // GenerateMissing on a thread of its own, so the launcher is up while
+        // the levels added since the last start are read (once each: what
+        // is built stays built until its .pk3 or the translator changes).
+        // Nothing when it is already running.
+        static void StartGenerating();
+        struct GenerationProgress
+        {
+            std::int32_t Total = 0;
+            std::int32_t Done = 0;
+            std::string Current{};
+            bool Running = false;
+        };
+        [[nodiscard]] static GenerationProgress Progress();
+        // A room about to be loaded: if it is one of these maps and not built
+        // yet, waits for the build running, or builds it now.
+        static void EnsureReady(const std::string& roomName);
 
         [[nodiscard]] static std::optional<std::string> WhyUnplayable(
             const std::string& roomName);
@@ -68,5 +96,6 @@ namespace MphRead::Mods::MapGen
         static void AddTranslated(DefinitionList& results);
         [[nodiscard]] static std::string TranslatorStamp(MapDefinition* def);
         [[nodiscard]] static std::string TranslatorStampPath(MapDefinition* def);
+        [[nodiscard]] static std::string FailedStampPath(MapDefinition* def);
     };
 }

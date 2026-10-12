@@ -532,7 +532,55 @@ namespace MphRead::NativeRuntime
 
     void ZipArchive::ReadCentralDirectory()
     {
-        const std::vector<std::uint8_t> bytes = ReadAll(*_stream);
+        // Up to this size an archive is read whole and the file let go, as
+        // ZipFile.OpenRead's callers have always had it; past it, a game's
+        // 450 MB pak opened for one level would be read whole each time.
+        constexpr std::int64_t WholeAtMost = 32LL * 1024 * 1024;
+        std::vector<std::uint8_t> bytes;
+        // Where bytes[0] lies in the archive, and the archive's length.
+        std::uint64_t base = 0;
+        std::uint64_t total = 0;
+        if (_stream->CanSeek() && _stream->Length() > WholeAtMost)
+        {
+            _streamed = true;
+            total = static_cast<std::uint64_t>(_stream->Length());
+            // The end: the end record, its comment of up to 64 KB, and the
+            // Zip64 locator before it.
+            const std::uint64_t tail = std::min<std::uint64_t>(total, 22 + 0xFFFFU + 20);
+            std::vector<std::uint8_t> end(static_cast<std::size_t>(tail));
+            (void)_stream->Seek(static_cast<std::int64_t>(total - tail), SeekOrigin::Begin);
+            _stream->ReadExactly(end);
+            const std::span<const std::uint8_t> view(end);
+            std::size_t at = end.size() - 22;
+            while (U32(view, at) != EndOfCentralDirectorySignature)
+            {
+                if (at == 0)
+                {
+                    Corrupt("End of Central Directory record could not be found.");
+                }
+                --at;
+            }
+            std::uint64_t offset = U32(view, at + 16);
+            if (offset == Zip32Max && at >= 20 && U32(view, at - 20) == Zip64LocatorSignature)
+            {
+                offset = std::min<std::uint64_t>(offset, U64(view, at - 12));
+            }
+            if (offset >= total)
+            {
+                Corrupt("Central Directory corrupt.");
+            }
+            // From the directory (or the Zip64 end record, which comes
+            // after it) to the end of the file.
+            base = offset;
+            bytes.resize(static_cast<std::size_t>(total - base));
+            (void)_stream->Seek(static_cast<std::int64_t>(base), SeekOrigin::Begin);
+            _stream->ReadExactly(bytes);
+        }
+        else
+        {
+            bytes = ReadAll(*_stream);
+            total = bytes.size();
+        }
         const std::span<const std::uint8_t> archive(bytes);
         if (bytes.size() < 22)
         {
@@ -558,19 +606,20 @@ namespace MphRead::NativeRuntime
         if ((count == 0xFFFFU || offset == Zip32Max) && end >= 20 && U32(archive, end - 20) == Zip64LocatorSignature)
         {
             const std::uint64_t zip64 = U64(archive, end - 12);
-            if (zip64 > bytes.size() || U32(archive, static_cast<std::size_t>(zip64)) != Zip64EndSignature)
+            if (zip64 < base || zip64 - base > bytes.size()
+                || U32(archive, static_cast<std::size_t>(zip64 - base)) != Zip64EndSignature)
             {
                 Corrupt("Zip 64 End of Central Directory Record not where indicated.");
             }
-            count = U64(archive, static_cast<std::size_t>(zip64) + 32);
-            offset = U64(archive, static_cast<std::size_t>(zip64) + 48);
+            count = U64(archive, static_cast<std::size_t>(zip64 - base) + 32);
+            offset = U64(archive, static_cast<std::size_t>(zip64 - base) + 48);
         }
-        if (offset > bytes.size())
+        if (offset < base || offset - base > bytes.size())
         {
             Corrupt("Central Directory corrupt.");
         }
 
-        std::size_t at = static_cast<std::size_t>(offset);
+        std::size_t at = static_cast<std::size_t>(offset - base);
         while (at + 4 <= bytes.size() && U32(archive, at) == CentralHeaderSignature)
         {
             auto entry = std::make_shared<ZipArchiveEntry>();
@@ -641,8 +690,13 @@ namespace MphRead::NativeRuntime
         {
             Corrupt("Number of entries expected in End Of Central Directory does not correspond to number of entries in Central Directory.");
         }
-        // Read mode keeps the bytes: entries are read from them later.
-        _stream = std::make_shared<MemoryStream>(std::vector<std::uint8_t>(bytes), false);
+        // Read mode keeps the bytes: entries are read from them later. A
+        // streamed archive keeps its file instead.
+        if (!_streamed)
+        {
+            _stream = std::make_shared<MemoryStream>(std::move(bytes), false);
+        }
+        (void)total;
     }
 
     std::vector<std::uint8_t> ZipArchive::ReadEntry(const ZipArchiveEntry& entry) const
@@ -650,6 +704,47 @@ namespace MphRead::NativeRuntime
         if (_disposed)
         {
             throw System::ObjectDisposedException("ZipArchive");
+        }
+        if (_streamed)
+        {
+            // The local header, then the entry's bytes after it, from the file.
+            std::vector<std::uint8_t> compressed;
+            {
+                const std::lock_guard<std::mutex> guard(_readLock);
+                const std::int64_t length = _stream->Length();
+                if (entry._localOffset + 30 > static_cast<std::uint64_t>(length))
+                {
+                    Corrupt("A local file header is corrupt.");
+                }
+                std::array<std::uint8_t, 30> header{};
+                (void)_stream->Seek(static_cast<std::int64_t>(entry._localOffset), SeekOrigin::Begin);
+                _stream->ReadExactly(header);
+                const std::span<const std::uint8_t> view(header);
+                if (U32(view, 0) != LocalHeaderSignature)
+                {
+                    Corrupt("A local file header is corrupt.");
+                }
+                const std::uint64_t data = entry._localOffset + 30 + U16(view, 26) + U16(view, 28);
+                if (data > static_cast<std::uint64_t>(length)
+                    || entry._compressedLength > static_cast<std::uint64_t>(length) - data)
+                {
+                    Corrupt("A local file header is corrupt.");
+                }
+                compressed.resize(static_cast<std::size_t>(entry._compressedLength));
+                (void)_stream->Seek(static_cast<std::int64_t>(data), SeekOrigin::Begin);
+                _stream->ReadExactly(compressed);
+            }
+            switch (entry._method)
+            {
+            case MethodStored:
+                return compressed;
+            case MethodDeflate:
+                return InflateBytes(compressed);
+            case MethodDeflate64:
+                return InflateDeflate64(compressed, static_cast<std::size_t>(entry._length));
+            default:
+                Corrupt("The archive entry was compressed using an unsupported compression method.");
+            }
         }
         const std::vector<std::uint8_t>& bytes = static_cast<const MemoryStream&>(*_stream).Buffer();
         const std::span<const std::uint8_t> archive(bytes);

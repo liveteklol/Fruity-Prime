@@ -11,6 +11,8 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
+#include <functional>
 #include <bit>
 #include <cstddef>
 #include <cstdint>
@@ -97,6 +99,8 @@ namespace
     using MphRead::Mods::MapGen::MapTextureBakeInterop::ZipArchive;
 
     constexpr std::int32_t PaletteSize = 256;
+    // How much brighter a lit level texture is baked (Q3Import::Light).
+    constexpr std::int32_t Overbright = 2;
     constexpr std::array<std::string_view, 7> SkySuffixes{
         "_1", "_2", "_ft", "_bk", "_lf", "_rt", "_up"
     };
@@ -261,6 +265,18 @@ namespace
         std::string FirstMap;
         std::string EditorImage;
         std::string SkyBase;
+        // fogparms: red, green, blue and the depth it is opaque at.
+        std::optional<std::array<float, 4>> Fog;
+        // Its stages' images, in the order drawn, each with whether it is
+        // laid over what is under it by its alpha (blendFunc blend) -- the
+        // fire behind a grille, the texture with holes over it.
+        struct Stage
+        {
+            std::string Map;
+            bool Alpha = false;
+            bool Opaque = false;
+        };
+        std::vector<Stage> Stages;
     };
 
     struct ShaderToken final
@@ -369,16 +385,42 @@ namespace
             ++i;
             ShaderScript script;
             std::int32_t depth = 1;
+            ShaderScript::Stage stage;
+            bool blended = false;
             while (i < tokens.size() && depth > 0)
             {
                 const std::string& token = tokens[i].Text;
                 if (token == "{")
                 {
                     ++depth;
+                    if (depth == 2)
+                    {
+                        stage = ShaderScript::Stage{};
+                        blended = false;
+                    }
                 }
                 else if (token == "}")
                 {
+                    if (depth == 2 && !stage.Map.empty())
+                    {
+                        stage.Opaque = !blended;
+                        script.Stages.push_back(stage);
+                    }
                     --depth;
+                }
+                else if (depth == 2 && Lower(token) == "blendfunc")
+                {
+                    blended = true;
+                    std::string mode;
+                    for (std::size_t k = i + 1; k < tokens.size() && tokens[k].Line == tokens[i].Line; ++k)
+                    {
+                        mode += Lower(tokens[k].Text) + " ";
+                    }
+                    if (mode == "gl_one gl_zero ")
+                    {
+                        blended = false;
+                    }
+                    stage.Alpha = mode == "blend " || mode == "gl_src_alpha gl_one_minus_src_alpha ";
                 }
                 else
                 {
@@ -390,6 +432,29 @@ namespace
                             script.EditorImage = *value;
                         }
                     }
+                    else if (depth == 1 && key == "fogparms")
+                    {
+                        // fogparms ( r g b ) distance, the brackets optional
+                        // and spaced as anybody pleased.
+                        std::array<float, 4> values{};
+                        std::size_t found = 0;
+                        for (std::size_t k = i + 1; k < tokens.size() && found < 4
+                            && tokens[k].Line == tokens[i].Line; ++k)
+                        {
+                            std::string text = tokens[k].Text;
+                            text.erase(std::remove(text.begin(), text.end(), '('), text.end());
+                            text.erase(std::remove(text.begin(), text.end(), ')'), text.end());
+                            float value = 0.0F;
+                            if (!text.empty() && ::MphRead::NativeRuntime::SingleTryParseInvariant(text, value))
+                            {
+                                values[found++] = value;
+                            }
+                        }
+                        if (found == 4)
+                        {
+                            script.Fog = values;
+                        }
+                    }
                     else if (depth == 1 && key == "skyparms")
                     {
                         const std::string* value = argument(i, 1);
@@ -398,14 +463,18 @@ namespace
                             script.SkyBase = *value;
                         }
                     }
-                    else if (depth == 2 && script.FirstMap.empty()
+                    else if (depth == 2
                         && (key == "map" || key == "clampmap" || key == "animmap"))
                     {
                         const std::string* value = argument(i, key == "animmap" ? 2 : 1);
                         if (value != nullptr && !value->empty()
                             && (*value)[0] != '$' && (*value)[0] != '*')
                         {
-                            script.FirstMap = *value;
+                            if (script.FirstMap.empty())
+                            {
+                                script.FirstMap = *value;
+                            }
+                            stage.Map = *value;
                         }
                     }
                 }
@@ -413,6 +482,118 @@ namespace
             }
             shaders.try_emplace(name, std::move(script));
         }
+    }
+
+    // A shader that draws an opaque image and then others over it by their
+    // alpha -- fire behind a carved grille, lava under a pad's rim -- as one
+    // image, the way it looks standing still: each layer over the one under
+    // it, at the size of the topmost. A TGA, for the decoder that reads the
+    // rest. Nothing for a shader of one image, or with none laid over.
+    [[nodiscard]] std::optional<std::vector<std::uint8_t>> Compose(
+        const ShaderScript& script,
+        const std::function<std::optional<std::vector<std::uint8_t>>(const std::string&)>& read)
+    {
+        std::size_t base = script.Stages.size();
+        for (std::size_t s = 0; s < script.Stages.size(); ++s)
+        {
+            if (script.Stages[s].Opaque)
+            {
+                base = s;
+                break;
+            }
+        }
+        std::vector<std::size_t> overs;
+        for (std::size_t s = base + 1; s < script.Stages.size(); ++s)
+        {
+            if (script.Stages[s].Alpha)
+            {
+                overs.push_back(s);
+            }
+        }
+        if (base >= script.Stages.size() || overs.empty())
+        {
+            return std::nullopt;
+        }
+        const auto load = [&](const std::string& map) -> std::optional<::MphRead::NativeRuntime::Image>
+        {
+            const auto raw = read(map);
+            if (!raw)
+            {
+                return std::nullopt;
+            }
+            ::MphRead::NativeRuntime::Image image = ::MphRead::NativeRuntime::LoadImage(*raw, 4);
+            if (image.Width <= 0 || image.Height <= 0
+                || image.Pixels.size() < static_cast<std::size_t>(image.Width) * image.Height * 4)
+            {
+                return std::nullopt;
+            }
+            return image;
+        };
+        const auto under = load(script.Stages[base].Map);
+        const auto top = load(script.Stages[overs.back()].Map);
+        if (!under || !top)
+        {
+            return std::nullopt;
+        }
+        const std::int32_t width = top->Width;
+        const std::int32_t height = top->Height;
+        std::vector<float> rgb(static_cast<std::size_t>(width) * height * 3);
+        const auto sample = [](const ::MphRead::NativeRuntime::Image& image, std::int32_t x, std::int32_t y,
+                                std::int32_t width, std::int32_t height)
+        {
+            const std::int32_t sx = std::min(image.Width - 1, x * image.Width / width);
+            const std::int32_t sy = std::min(image.Height - 1, y * image.Height / height);
+            return &image.Pixels[(static_cast<std::size_t>(sy) * image.Width + sx) * 4];
+        };
+        for (std::int32_t y = 0; y < height; ++y)
+        {
+            for (std::int32_t x = 0; x < width; ++x)
+            {
+                const std::uint8_t* p = sample(*under, x, y, width, height);
+                for (std::size_t c = 0; c < 3; ++c)
+                {
+                    rgb[(static_cast<std::size_t>(y) * width + x) * 3 + c] = p[c];
+                }
+            }
+        }
+        for (const std::size_t s : overs)
+        {
+            const auto layer = s == overs.back() ? top : load(script.Stages[s].Map);
+            if (!layer)
+            {
+                continue;
+            }
+            for (std::int32_t y = 0; y < height; ++y)
+            {
+                for (std::int32_t x = 0; x < width; ++x)
+                {
+                    const std::uint8_t* p = sample(*layer, x, y, width, height);
+                    const float a = static_cast<float>(p[3]) / 255.0F;
+                    for (std::size_t c = 0; c < 3; ++c)
+                    {
+                        float& out = rgb[(static_cast<std::size_t>(y) * width + x) * 3 + c];
+                        out = out * (1.0F - a) + static_cast<float>(p[c]) * a;
+                    }
+                }
+            }
+        }
+        std::vector<std::uint8_t> tga(18, 0);
+        tga[2] = 2;
+        tga[12] = static_cast<std::uint8_t>(width & 0xFF);
+        tga[13] = static_cast<std::uint8_t>(width >> 8);
+        tga[14] = static_cast<std::uint8_t>(height & 0xFF);
+        tga[15] = static_cast<std::uint8_t>(height >> 8);
+        tga[16] = 24;
+        tga[17] = 0x20;
+        tga.reserve(tga.size() + rgb.size());
+        for (std::size_t p = 0; p < rgb.size(); p += 3)
+        {
+            for (const std::size_t c : {2U, 1U, 0U})
+            {
+                tga.push_back(static_cast<std::uint8_t>(std::clamp(std::lround(rgb[p + c]), 0L, 255L)));
+            }
+        }
+        return tga;
     }
 
     [[nodiscard]] std::vector<std::tuple<std::int32_t, std::string, std::int32_t>>
@@ -914,6 +1095,44 @@ namespace MphRead::Mods::MapGen
     {
     }
 
+    std::unordered_map<std::string, std::array<float, 4>> MapTextureBake::FogParms(
+        const std::vector<std::string>& archivePaths)
+    {
+        using namespace MapTextureBakeInterop;
+        std::unordered_map<std::string, std::array<float, 4>> result;
+        for (const std::string& path : archivePaths)
+        {
+            if (!FileExists(path) || OrdinalIgnoreCaseEquals(PathGetExtension(path), ".bsp"))
+            {
+                continue;
+            }
+            std::shared_ptr<ZipArchive> archive = OpenZipRead(path);
+            if (!archive)
+            {
+                continue;
+            }
+            std::unordered_map<std::string, ShaderScript> shaders;
+            const std::size_t count = ZipEntryCount(*archive);
+            for (std::size_t i = 0; i < count; ++i)
+            {
+                const std::string lower = Lower(ZipEntryFullName(*archive, i));
+                if (lower.starts_with("scripts/") && lower.ends_with(".shader"))
+                {
+                    const std::vector<std::uint8_t> bytes = ReadZipEntry(*archive, i);
+                    ParseShaderScript(std::string_view(reinterpret_cast<const char*>(bytes.data()), bytes.size()), shaders);
+                }
+            }
+            for (const auto& [name, script] : shaders)
+            {
+                if (script.Fog.has_value())
+                {
+                    result.try_emplace(name, *script.Fog);
+                }
+            }
+        }
+        return result;
+    }
+
     std::shared_ptr<MapTextureBake::Result> MapTextureBake::Bake(
         const std::shared_ptr<Q3Bsp>& bsp,
         const std::shared_ptr<
@@ -989,6 +1208,14 @@ namespace MphRead::Mods::MapGen
             -> std::optional<std::vector<std::uint8_t>>
         {
             const auto script = shaders.find(Lower(name));
+            if (script != shaders.end())
+            {
+                if (auto composed = Compose(script->second, [&](const std::string& map)
+                        { return read(FindImage(files, map)); }))
+                {
+                    return composed;
+                }
+            }
             if (script != shaders.end() && !script->second.FirstMap.empty())
             {
                 if (auto raw = read(FindImage(files, script->second.FirstMap)))
@@ -1056,6 +1283,27 @@ namespace MphRead::Mods::MapGen
                 missing->push_back(raw.has_value() ? name + " (undecodable)" : name);
                 continue;
             }
+            // A sky of one colour -- gfx/colors/black behind q3dm17 -- is a
+            // backdrop Quake leaves to the level; this game gives it one of
+            // the cartridge's skies instead, as it does a sky it lacks.
+            if ((flags & Q3Bsp::SurfaceSky) != 0 && image.Width > 0 && image.Height > 0
+                && image.Pixels.size() >= static_cast<std::size_t>(image.Width) * image.Height * 3)
+            {
+                std::array<std::uint8_t, 3> low{255, 255, 255};
+                std::array<std::uint8_t, 3> high{0, 0, 0};
+                for (std::size_t p = 0; p + 2 < image.Pixels.size(); p += 3)
+                {
+                    for (std::size_t c = 0; c < 3; ++c)
+                    {
+                        low[c] = std::min(low[c], image.Pixels[p + c]);
+                        high[c] = std::max(high[c], image.Pixels[p + c]);
+                    }
+                }
+                if (high[0] - low[0] <= 4 && high[1] - low[1] <= 4 && high[2] - low[2] <= 4)
+                {
+                    image = DecodedImage{};
+                }
+            }
             if (image.Width <= 0 || image.Height <= 0)
             {
                 const std::int32_t contents
@@ -1079,6 +1327,19 @@ namespace MphRead::Mods::MapGen
             {
                 width = NativeSide(image.Width);
                 height = NativeSide(image.Height);
+            }
+            // Overbright, as Quake draws it: a level's light reaches past
+            // white -- twice a texture's brightness in full sun -- and this
+            // game's vertex light stops at white. Its textures are baked
+            // twice as bright and its light halved (Q3Import::Light), which
+            // gives the light the room it has in Quake. Not a sky, which no
+            // light falls on.
+            if ((flags & Q3Bsp::SurfaceSky) == 0)
+            {
+                for (std::uint8_t& value : image.Pixels)
+                {
+                    value = static_cast<std::uint8_t>(std::min(255, value * Overbright));
+                }
             }
             const std::vector<std::uint8_t> decoded = Resample(image, width, height);
             if (decoded.empty())

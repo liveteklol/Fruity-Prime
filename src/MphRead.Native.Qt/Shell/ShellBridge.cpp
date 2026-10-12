@@ -1,4 +1,6 @@
 #include "ShellBridge.hpp"
+#include "../../MphRead.Native/Mods/MapGen/CustomRooms.hpp"
+#include <QtCore/QTimer>
 
 #include "FocusNav.hpp"
 
@@ -50,6 +52,41 @@ namespace MphRead::Qt
     {
         g_current = this;
         refreshVersionLine();
+        auto* timer = new QTimer(this);
+        timer->setInterval(250);
+        QObject::connect(timer, &QTimer::timeout, this, [this]() { pollMaps(); });
+        timer->start();
+    }
+
+    void ShellBridge::pollMaps()
+    {
+        const auto progress = ::MphRead::Mods::MapGen::CustomRooms::Progress();
+        const bool building = progress.Running && progress.Total > 0;
+        const double fraction = progress.Total > 0
+            ? (static_cast<double>(progress.Done) / static_cast<double>(progress.Total)) : 0.0;
+        const QString stage = building
+            ? QString::fromUtf8("Preparing maps: %1 (%2/%3)")
+                .arg(QString::fromStdString(progress.Current))
+                .arg(std::min(progress.Done + 1, progress.Total))
+                .arg(progress.Total)
+            : QString();
+        if (building != _mapsBuilding || fraction != _mapsProgress || stage != _mapsStage)
+        {
+            _mapsBuilding = building;
+            _mapsProgress = fraction;
+            _mapsStage = stage;
+            emit mapsChanged();
+        }
+        // Done: the maps just built are listed with the others.
+        if (building)
+        {
+            _mapsSeenBuilding = true;
+        }
+        else if (_mapsSeenBuilding && !progress.Running)
+        {
+            _mapsSeenBuilding = false;
+            GameFilesChanged();
+        }
     }
 
     ShellBridge::~ShellBridge()

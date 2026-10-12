@@ -288,6 +288,36 @@ namespace MphRead::Mods::MapGen
 {
     const Q3UsedLumps Q3Bsp::UsedLumps{};
 
+    bool Q3Bsp::Open(float x, float y, float z) const
+    {
+        if (_nodes.empty() || _leafClusters.empty())
+        {
+            return true;
+        }
+        std::int32_t index = 0;
+        for (std::size_t guard = 0; index >= 0 && guard < _nodes.size(); ++guard)
+        {
+            if (static_cast<std::size_t>(index) >= _nodes.size())
+            {
+                return true;
+            }
+            const Node& node = _nodes[static_cast<std::size_t>(index)];
+            if (node.Plane < 0 || static_cast<std::size_t>(node.Plane) >= Planes().size() || !Planes()[static_cast<std::size_t>(node.Plane)])
+            {
+                return true;
+            }
+            const Q3Plane& plane = *Planes()[static_cast<std::size_t>(node.Plane)];
+            const float side = plane.X() * x + plane.Y() * y + plane.Z() * z - plane.Distance();
+            index = side >= 0.0F ? node.Front : node.Back;
+        }
+        if (index >= 0)
+        {
+            return true;
+        }
+        const std::size_t leaf = static_cast<std::size_t>(-(index + 1));
+        return leaf >= _leafClusters.size() || _leafClusters[leaf] >= 0;
+    }
+
     std::size_t Q3StringHash::operator()(const std::string& value) const noexcept
     {
         return ::MphRead::NativeRuntime::OrdinalIgnoreCaseHash{}(value);
@@ -622,12 +652,14 @@ namespace MphRead::Mods::MapGen
                     r.ReadSingle(), r.ReadSingle(), r.ReadSingle()});
                 auto surface = std::make_shared<std::vector<float>>(std::initializer_list<float>{
                     r.ReadSingle(), r.ReadSingle()});
-                (void)r.ReadSingle();
-                (void)r.ReadSingle();
+                const float lightmapS = r.ReadSingle();
+                const float lightmapT = r.ReadSingle();
                 auto normal = std::make_shared<std::vector<float>>(std::initializer_list<float>{
                     r.ReadSingle(), r.ReadSingle(), r.ReadSingle()});
                 auto color = std::make_shared<std::vector<std::uint8_t>>(r.ReadBytes(4));
-                return std::make_shared<Q3Vertex>(position, surface, normal, color);
+                auto vertex = std::make_shared<Q3Vertex>(position, surface, normal, color);
+                vertex->Lightmap = {lightmapS, lightmapT};
+                return vertex;
             });
         bsp->_meshVerts = ReadLump<std::int32_t>(reader, offsets[11], 4,
             [](ByteReader& r) { return r.ReadInt32(); });
@@ -641,14 +673,59 @@ namespace MphRead::Mods::MapGen
                 const std::int32_t vertexCount = r.ReadInt32();
                 const std::int32_t meshVert = r.ReadInt32();
                 const std::int32_t meshVertCount = r.ReadInt32();
-                (void)r.ReadInt32();
-                (void)r.ReadBytes(8 + 8 + 12 + 24);
+                const std::int32_t lightmapIndex = r.ReadInt32();
+                std::array<std::int32_t, 4> lightmapRect{};
+                for (std::int32_t& value : lightmapRect)
+                {
+                    value = r.ReadInt32();
+                }
+                (void)r.ReadBytes(12 + 24);
                 auto normal = std::make_shared<std::vector<float>>(std::initializer_list<float>{
                     r.ReadSingle(), r.ReadSingle(), r.ReadSingle()});
                 auto size = std::make_shared<std::vector<std::int32_t>>(std::initializer_list<std::int32_t>{
                     r.ReadInt32(), r.ReadInt32()});
-                return std::make_shared<Q3Face>(texture, effect, type, vertex, vertexCount,
+                auto face = std::make_shared<Q3Face>(texture, effect, type, vertex, vertexCount,
                     meshVert, meshVertCount, normal, size);
+                face->LightmapIndex = lightmapIndex;
+                face->LightmapRect = lightmapRect;
+                return face;
+            });
+        // The lightmaps as they are, and the fog volumes.
+        if (offsets[14].first >= 0 && offsets[14].second > 0
+            && static_cast<std::uint64_t>(offsets[14].first) + static_cast<std::uint64_t>(offsets[14].second) <= bytes.size())
+        {
+            bsp->_lightmaps.assign(bytes.begin() + offsets[14].first,
+                bytes.begin() + offsets[14].first + offsets[14].second);
+        }
+        bsp->_nodes = ReadLump<Node>(reader, offsets[3], 36,
+            [](ByteReader& r)
+            {
+                Node node;
+                node.Plane = r.ReadInt32();
+                node.Front = r.ReadInt32();
+                node.Back = r.ReadInt32();
+                return node;
+            });
+        bsp->_leafClusters = ReadLump<std::int32_t>(reader, offsets[4], 48,
+            [](ByteReader& r) { return r.ReadInt32(); });
+        bsp->_fogs = ReadLump<Fog>(reader, offsets[12], 72,
+            [](ByteReader& r)
+            {
+                const std::vector<std::uint8_t> raw = r.ReadBytes(64);
+                std::string shader;
+                for (const std::uint8_t ch : raw)
+                {
+                    if (ch == 0)
+                    {
+                        break;
+                    }
+                    shader.push_back(static_cast<char>(ch));
+                }
+                Fog fog;
+                fog.Shader = shader;
+                fog.Brush = r.ReadInt32();
+                fog.VisibleSide = r.ReadInt32();
+                return fog;
             });
         return bsp;
     }

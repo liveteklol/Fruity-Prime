@@ -9,6 +9,7 @@
 #include <chrono>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <span>
 #include <string>
 #include <string_view>
@@ -113,6 +114,11 @@ namespace MphRead::NativeRuntime
         bool _disposed = false;
         std::vector<std::shared_ptr<ZipArchiveEntry>> _entries;
         std::shared_ptr<ZipArchiveEntry> _pending;
+        // A large archive (a game's texture pak) is not read whole: its
+        // directory is read from its end, each entry from the file when it is
+        // asked for, one at a time.
+        bool _streamed = false;
+        mutable std::mutex _readLock;
     };
 
     // ZipFile.ExtractToDirectory(archive, destination, overwriteFiles).

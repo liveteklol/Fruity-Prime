@@ -6,6 +6,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -32,6 +33,8 @@ namespace MphRead::Mods::MapGen
 
     class Q3Import final
     {
+        friend class Q3Convert;
+        friend class CustomRooms;
     public:
         [[nodiscard]] static std::shared_ptr<BuiltMap> Build(
             MapDefinition* def, bool verbose = true);
@@ -127,15 +130,65 @@ namespace MphRead::Mods::MapGen
         static constexpr float SkyTiles = 2.0F;
         static constexpr float BrushCellSize = 512.0F;
 
+        // A corner of a triangle on its way to being drawn: where it is in
+        // this game and in Quake, its texture and lightmap coordinates, and
+        // the light at it.
+        struct LitCorner
+        {
+            OpenTK::Mathematics::Vector3 World{};
+            OpenTK::Mathematics::Vector3 Quake{};
+            OpenTK::Mathematics::Vector2 Uv{};
+            OpenTK::Mathematics::Vector2 Lightmap{};
+            OpenTK::Mathematics::Vector3 Color{1.0F, 1.0F, 1.0F};
+        };
+    public:
+        // A fog volume: its colour and the depth it is opaque at (fogparms),
+        // its brush's planes and the one it is seen through, Quake's axes.
+        struct FogVolume
+        {
+            OpenTK::Mathematics::Vector3 Color{};
+            float Distance = 0.0F;
+            std::vector<OpenTK::Mathematics::Vector4> Planes{};
+            std::optional<OpenTK::Mathematics::Vector4> Surface{};
+            // A fog filling most of the level, which a player stands in and
+            // looks through: drawn as the room's distance fog, not on its
+            // surfaces (Q3Convert::Translate).
+            bool Room = false;
+        };
+        struct Lighting
+        {
+            std::vector<FogVolume> Fogs{};
+            // The light layer: the material of page 0's layer (-1 none), the
+            // brightest light of each face's block of a page (page, x, y,
+            // width, height), and the pages.
+            std::int32_t LayerMaterial = -1;
+            std::map<std::array<std::int32_t, 5>, OpenTK::Mathematics::Vector3> Brightest{};
+            std::vector<std::vector<std::uint8_t>> Pages{};
+        };
+        // The level's lightmap as a layer drawn over its faces: each face lit
+        // by the brightest of its own light, and the layer darkening it luxel
+        // by luxel to the rest, as sharp as Quake's own -- the pools of light
+        // on a floor, a torch's glow, a pillar's shadow -- where light at the
+        // corners of its triangles can hold none of them.
+        static void LightLayer(Lighting& lighting, Q3Bsp* bsp);
+        [[nodiscard]] static Lighting MakeLighting(Q3Bsp* bsp, const std::vector<std::string>& archives);
+    private:
+        [[nodiscard]] static OpenTK::Mathematics::Vector3 SampleLightmap(
+            Q3Bsp* bsp, std::int32_t page, OpenTK::Mathematics::Vector2 st);
+        [[nodiscard]] static std::vector<BuiltFace*> LitFaces(
+            Q3Bsp* bsp, const Lighting* lighting, Q3Face* face,
+            std::array<LitCorner, 3> corners, OpenTK::Mathematics::Vector3 normal,
+            std::int32_t material, float shade, bool sky);
+
         [[nodiscard]] static MphRead::Enumerable<BuiltFace*> Triangles(
             Q3Bsp* bsp, Q3Face* face, float unit,
             std::int32_t width, std::int32_t height,
-            std::int32_t material, bool sky);
+            std::int32_t material, bool sky, const Lighting* lighting);
 
         [[nodiscard]] static MphRead::Enumerable<BuiltFace*> Tessellate(
             Q3Bsp* bsp, Q3Face* face, float unit,
             std::int32_t width, std::int32_t height,
-            std::int32_t material, bool sky, std::int32_t level);
+            std::int32_t material, bool sky, std::int32_t level, const Lighting* lighting);
 
         [[nodiscard]] static std::tuple<float, float, float> Weights(float t) noexcept;
 

@@ -1,4 +1,5 @@
 #include "Renderer.hpp"
+#include "Mods/MapGen/CustomRooms.hpp"
 #include "NativeRuntime/System/ErrorDialog.hpp"
 #include "NativeRuntime/System/ExceptionText.hpp"
 #include "Mods/Diagnostics/FramePerformance.hpp"
@@ -464,6 +465,8 @@ namespace MphRead
     void Scene::AddRoom(std::string name, GameMode mode, std::int32_t playerCount,
         BossFlags bossFlags, std::int32_t nodeLayerMask, std::int32_t entityLayerId)
     {
+        // A map translated in the background may not be ready yet.
+        Mods::MapGen::CustomRooms::EnsureReady(name);
         if (_roomLoaded)
         {
             throw ProgramException("Cannot load more than one room in a scene.");
@@ -3808,8 +3811,26 @@ namespace MphRead
         // fog went to whichever program was bound then, and the scene program
         // kept the previous room's -- the launcher backdrop's warm Alinos fog
         // over a Data Shrine match on one renderer, its own green on the other.
-        SetShaderFog();
-        _shaderConstants->SetFogEnabled(_hasFog && FogOn());
+        // In a level read from Quake 3, the fog volume the camera stands in
+        // fogs everything by distance, as Quake's does, while it is there.
+        if (const auto fog = Mods::MapGen::CustomRooms::Q3FogAt(RoomId(), _cameraPosition))
+        {
+            constexpr float Near = 0.0625F;
+            const float distance = std::max((*fog)[3], Near * 2.0F);
+            // Quake's fog thickens with the square root of the distance and
+            // is only opaque well past fogparms' figure: fading from a tenth
+            // of it to twice it reads the same.
+            const float far = 1.0F - Near / (distance * 2.0F);
+            const float start = 1.0F - Near / std::max(distance * 0.1F, Near * 1.5F);
+            _shaderConstants->Set(NativeRuntime::Rhi::SceneFogConstants{
+                Vector4((*fog)[0], (*fog)[1], (*fog)[2], 1.0F), start, far});
+            _shaderConstants->SetFogEnabled(FogOn());
+        }
+        else
+        {
+            SetShaderFog();
+            _shaderConstants->SetFogEnabled(_hasFog && FogOn());
+        }
         _shaderConstants->SetCelBands(Mods::RenderOptions::CelShading() ? Mods::RenderOptions::CelBands() : 0);
         _shaderConstants->SetShowColors(_showColors);
         if (ProcessFrame())
@@ -4851,7 +4872,13 @@ namespace MphRead
     {
         if (item.HasTexture)
         {
-            BindSceneTexture(0, item.TextureBindingId, SamplerFor(FilteringOn(), item.XRepeat, item.YRepeat));
+            // A Quake 3 level's light layer (MapPacker: a decal mirrored at
+            // both edges) is smooth, as Quake's lightmaps are, whatever the
+            // filtering setting; its luxels are a hand's width.
+            const bool lightLayer = item.RenderMode == RenderMode::Decal
+                && item.XRepeat == RepeatMode::Mirror && item.YRepeat == RepeatMode::Mirror;
+            BindSceneTexture(0, item.TextureBindingId,
+                SamplerFor(FilteringOn() || lightLayer, item.XRepeat, item.YRepeat));
             _shaderConstants->SetTexgen(static_cast<std::int32_t>(item.TexgenMode), item.TexcoordMatrix);
         }
         _shaderConstants->SetUseTexture(item.HasTexture && _showTextures);

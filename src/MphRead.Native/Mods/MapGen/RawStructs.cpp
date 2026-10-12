@@ -164,7 +164,8 @@ namespace MphRead::Mods::MapGen
         RepeatMode yRepeat,
         bool lighting,
         ColorRgb diffuse,
-        ColorRgb ambient)
+        ColorRgb ambient,
+        RenderMode renderMode)
     {
         std::vector<std::uint8_t> writer;
         writer.reserve(sizeof(RawMaterial));
@@ -183,7 +184,7 @@ namespace MphRead::Mods::MapGen
         WriteColorRgb(writer, ColorRgb(0, 0, 0));
         WriteByte(writer, 0);
         WriteUInt32(writer, static_cast<std::uint32_t>(PolygonMode::Modulate));
-        WriteByte(writer, static_cast<std::uint8_t>(RenderMode::Normal));
+        WriteByte(writer, static_cast<std::uint8_t>(renderMode));
         WriteByte(writer, 0);
         WriteUInt16(writer, 0);
         WriteUInt32(writer, static_cast<std::uint32_t>(TexgenMode::None));

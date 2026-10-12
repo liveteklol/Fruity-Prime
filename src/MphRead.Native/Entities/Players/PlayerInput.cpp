@@ -1,4 +1,5 @@
 #include "../../Mods/Combat/SyluxMuzzleGuard.hpp"
+#include "../../Mods/MapGen/CustomRooms.hpp"
 #include "PlayerInput.hpp"
 
 #include "PlayerEntity.hpp"
@@ -2289,6 +2290,24 @@ namespace MphRead::Entities
             && _q3PadGravity == 0.0F && _speed.Y <= 0.01F)
         {
             (void)TryQ3StepUp(stepFrom, stepMove);
+        }
+        // A Quake 3 level is sealed: nowhere outside it, or inside its walls,
+        // is anywhere to be. A hunter that would go there -- through a seam
+        // the collision misses -- meets a wall instead.
+        {
+            const std::int32_t room = RequireReference(_scene).RoomId();
+            const Vector3 body(0.0F, 0.3F, 0.0F);
+            if (!Mods::MapGen::CustomRooms::Q3Open(room, static_cast<Vector3>(Position) + body)
+                && Mods::MapGen::CustomRooms::Q3Open(room, stepFrom + body))
+            {
+                Position = stepFrom;
+                _speed.X = 0.0F;
+                _speed.Z = 0.0F;
+                if (_speed.Y > 0.0F)
+                {
+                    _speed.Y = 0.0F;
+                }
+            }
         }
         if (_field449 > 0 && _field449 < 60)
         {
