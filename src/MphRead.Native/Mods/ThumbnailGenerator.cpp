@@ -231,7 +231,9 @@ namespace MphRead::Mods
 
             for (std::string room : MissingThumbnails())
             {
-                if (custom.contains(room))
+                // A map not built yet is drawn once it is (the launcher asks
+                // again then), not built by every worker on its own.
+                if (custom.contains(room) && !MapGen::CustomRooms::WhyUnplayable(room).has_value())
                 {
                     missing.push_back(std::move(room));
                 }

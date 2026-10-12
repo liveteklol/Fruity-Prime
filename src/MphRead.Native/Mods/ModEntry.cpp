@@ -1832,8 +1832,10 @@ namespace MphRead::Mods
         const auto [width, height] = ParseSize(args);
 
         // In the background: the launcher shows how far it is, and a room
-        // loaded before its map is ready waits for it (Scene::AddRoom).
-        if (!::HasFlag(args, "mapgen"))
+        // loaded before its map is ready waits for it (Scene::AddRoom). Not
+        // in a preview worker: the launcher that started it builds the maps,
+        // and ten workers building them all at once wrote over each other.
+        if (!::HasFlag(args, "mapgen") && ValuesAfter(args, "thumbnail").empty())
         {
             MapGen::CustomRooms::StartGenerating();
         }

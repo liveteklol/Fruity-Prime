@@ -60,6 +60,7 @@
 #include <exception>
 #include <chrono>
 #include <iostream>
+#include <thread>
 #include <memory>
 #include <optional>
 #include <string>
@@ -143,6 +144,26 @@ namespace MphRead::Mods::Launcher::Gui
                 {
                     g_bridge->SetRooms(g_rooms, true);
                 }
+                // Previews of the maps just built, out of the way of the menus;
+                // the list is shown again with them once they are drawn.
+                std::thread([]()
+                {
+                    try
+                    {
+                        MphRead::Mods::ThumbnailGenerator::EnsureCustomPreviews();
+                    }
+                    catch (...)
+                    {
+                        return;
+                    }
+                    QMetaObject::invokeMethod(QCoreApplication::instance(), []()
+                    {
+                        if (g_bridge != nullptr)
+                        {
+                            g_bridge->SetRooms(g_rooms, true);
+                        }
+                    }, ::Qt::QueuedConnection);
+                }).detach();
             };
             actions.ToggleFullscreen = []()
             {
