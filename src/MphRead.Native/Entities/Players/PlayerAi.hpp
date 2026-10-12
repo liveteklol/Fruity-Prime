@@ -185,6 +185,14 @@ namespace MphRead::Entities
         std::uint32_t DamageFromHalfturret = 0;
         std::int32_t Field118 = 0;
 
+        // The waypoints a bot is going between, for tools that watch bots
+        // play (MapGen::BotTour): the one it left and the one it heads for.
+        [[nodiscard]] std::pair<std::shared_ptr<Formats::NodeData3>, std::shared_ptr<Formats::NodeData3>>
+            TourNodes() const
+        {
+            return {_node40, _node44};
+        }
+
     private:
         std::shared_ptr<PlayerEntity> _player;
         Scene& _scene;

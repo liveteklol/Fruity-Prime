@@ -36,6 +36,7 @@
 #include "../../MphRead.Native/Mods/PauseMenu.hpp"
 #include "../../MphRead.Native/Mods/Render/UiOverlay.hpp"
 #include "../../MphRead.Native/Mods/ThumbnailGenerator.hpp"
+#include "../../MphRead.Native/Mods/MapGen/CustomRooms.hpp"
 #include "../../MphRead.Native/Mods/WindowMode.hpp"
 #include "../../MphRead.Native/NativeRuntime/System/Console.hpp"
 #include "../../MphRead.Native/NativeRuntime/System/ExceptionText.hpp"
@@ -131,6 +132,12 @@ namespace MphRead::Mods::Launcher::Gui
                     return;
                 }
                 Portable::GameFiles::ApplyPaths();
+                // Maps the server sent: listed now, built in the background.
+                if (MphRead::Mods::MapGen::CustomRooms::TakeDownloaded() > 0)
+                {
+                    MphRead::Mods::MapGen::CustomRooms::Rescan();
+                    MphRead::Mods::MapGen::CustomRooms::StartGenerating();
+                }
                 g_rooms = MphRead::Mods::ThumbnailGenerator::MultiplayerRooms();
                 if (g_bridge != nullptr)
                 {

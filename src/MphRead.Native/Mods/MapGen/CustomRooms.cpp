@@ -1,4 +1,5 @@
 #include "CustomRooms.hpp"
+#include "MapCatalog.hpp"
 #include "../Platform/AppPaths.hpp"
 
 #include "MapBundle.hpp"
@@ -971,6 +972,7 @@ namespace MphRead::Mods::MapGen
         {
             std::mutex Lock;
             CustomRooms::GenerationProgress Progress;
+            std::int32_t Downloaded = 0;
         };
 
         GenerationState& Generation()
@@ -1002,6 +1004,28 @@ namespace MphRead::Mods::MapGen
         }
         std::thread([]()
         {
+            // The server's maps the folder lacks, before anything is built:
+            // they are listed and built once this job is done (TakeDownloaded).
+            try
+            {
+                const std::int32_t arrived = MapCatalog::Sync(
+                    [](const std::string& pack, std::int32_t done, std::int32_t total)
+                    {
+                        GenerationState& state = Generation();
+                        const std::lock_guard<std::mutex> guard(state.Lock);
+                        state.Progress.Downloading = true;
+                        state.Progress.Total = total;
+                        state.Progress.Done = done;
+                        state.Progress.Current = pack;
+                    });
+                GenerationState& state = Generation();
+                const std::lock_guard<std::mutex> guard(state.Lock);
+                state.Downloaded += arrived;
+                state.Progress = GenerationProgress{0, 0, {}, true, false};
+            }
+            catch (...)
+            {
+            }
             try
             {
                 GenerateMissing();
@@ -1014,6 +1038,22 @@ namespace MphRead::Mods::MapGen
             done.Progress.Running = false;
             done.Progress.Current.clear();
         }).detach();
+    }
+
+    std::int32_t CustomRooms::TakeDownloaded()
+    {
+        GenerationState& state = Generation();
+        const std::lock_guard<std::mutex> guard(state.Lock);
+        const std::int32_t arrived = state.Downloaded;
+        state.Downloaded = 0;
+        return arrived;
+    }
+
+    void CustomRooms::Rescan()
+    {
+        CustomRoomsState& state = State();
+        std::lock_guard<std::recursive_mutex> guard(state.Lock);
+        state.Definitions = LoadDefinitions();
     }
 
     CustomRooms::GenerationProgress CustomRooms::Progress()

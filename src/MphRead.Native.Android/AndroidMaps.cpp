@@ -1,3 +1,4 @@
+#include "../MphRead.Native/Mods/MapGen/MapCatalog.hpp"
 #include "AndroidMaps.hpp"
 
 #if !defined(__ANDROID__)
@@ -699,6 +700,11 @@ namespace MphRead::Droid
                 return;
             }
             Mods::Launcher::GameFiles::ApplyPaths();
+            // The server's maps the folder lacks, listed before they are built.
+            if (Mods::MapGen::MapCatalog::Sync() > 0)
+            {
+                Mods::MapGen::CustomRooms::Rescan();
+            }
             Mods::MapGen::CustomRooms::GenerateMissing();
         }
         catch (const std::exception& ex)

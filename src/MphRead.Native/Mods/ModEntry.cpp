@@ -32,6 +32,8 @@
 #include "MapGen/AltFormProbe.hpp"
 #include "MapGen/PadProbe.hpp"
 #include "MapGen/MoverProbe.hpp"
+#include "MapGen/BotTour.hpp"
+#include "MapGen/MapCatalog.hpp"
 #include "MapGen/MphTextures.hpp"
 #include "MapGen/MapCheck.hpp"
 #include "Multiplayer/ResourceAudit.hpp"
@@ -2082,6 +2084,32 @@ namespace MphRead::Mods
         if (const std::optional<std::string> texDump = ValueAfter(args, "mphtexdump"); texDump.has_value())
         {
             SetExitCode(MapGen::MphTextures::Dump(*texDump));
+            return true;
+        }
+
+        // -mapsync: fetches the server's maps the map folder lacks, now.
+        if (::HasFlag(args, "mapsync"))
+        {
+            const std::int32_t arrived = MapGen::MapCatalog::Sync(
+                [](const std::string& pack, std::int32_t done, std::int32_t total)
+                {
+                    WriteLine("[maps] " + pack + " (" + std::to_string(done + 1) + "/" + std::to_string(total) + ")");
+                });
+            WriteLine("[maps] " + std::to_string(arrived) + " downloaded");
+            SetExitCode(0);
+            return true;
+        }
+
+        if (const std::optional<std::string> botTour = ValueAfter(args, "bottour"); botTour.has_value())
+        {
+            std::int32_t players = 6;
+            if (const std::optional<std::string> value = ValueAfter(args, "players"))
+            {
+                (void)Int32TryParseCurrentCulture(*value, players);
+            }
+            double seconds = 120.0;
+            (void)TryParseDoubleInvariant(ValueAfter(args, "seconds"), seconds);
+            SetExitCode(MapGen::BotTour::Run(*botTour, players, seconds));
             return true;
         }
 

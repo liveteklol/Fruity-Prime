@@ -65,7 +65,7 @@ namespace MphRead::Qt
         const double fraction = progress.Total > 0
             ? (static_cast<double>(progress.Done) / static_cast<double>(progress.Total)) : 0.0;
         const QString stage = building
-            ? QString::fromUtf8("Preparing maps: %1 (%2/%3)")
+            ? QString::fromUtf8(progress.Downloading ? "Downloading maps: %1 (%2/%3)" : "Preparing maps: %1 (%2/%3)")
                 .arg(QString::fromStdString(progress.Current))
                 .arg(std::min(progress.Done + 1, progress.Total))
                 .arg(progress.Total)

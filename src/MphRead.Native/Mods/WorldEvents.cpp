@@ -16,6 +16,7 @@ namespace MphRead::Mods
     bool WorldEvents::_watching = false;
     std::array<std::int32_t, static_cast<std::size_t>(WorldEvents::SlotCapacity)> WorldEvents::_jumpPads{};
     std::array<std::int32_t, static_cast<std::size_t>(WorldEvents::SlotCapacity)> WorldEvents::_teleports{};
+    std::array<std::int32_t, static_cast<std::size_t>(WorldEvents::SlotCapacity)> WorldEvents::_pickups{};
     std::array<std::int32_t, static_cast<std::size_t>(WorldEvents::SlotCapacity)> WorldEvents::_lastJumpPadId{};
     std::array<std::int32_t, static_cast<std::size_t>(WorldEvents::SlotCapacity)> WorldEvents::_lastTeleporterId{};
 
@@ -36,6 +37,7 @@ namespace MphRead::Mods
             const std::size_t index = static_cast<std::size_t>(i);
             _jumpPads[index] = 0;
             _teleports[index] = 0;
+            _pickups[index] = 0;
             _lastJumpPadId[index] = -1;
             _lastTeleporterId[index] = -1;
         }
@@ -49,6 +51,19 @@ namespace MphRead::Mods
     std::int32_t WorldEvents::TeleportsFor(std::int32_t slot) noexcept
     {
         return Valid(slot) ? _teleports[static_cast<std::size_t>(slot)] : 0;
+    }
+
+    std::int32_t WorldEvents::PickupsFor(std::int32_t slot) noexcept
+    {
+        return Valid(slot) ? _pickups[static_cast<std::size_t>(slot)] : 0;
+    }
+
+    void WorldEvents::NotePickup(const Entities::PlayerEntity& player) noexcept
+    {
+        if (Watching() && Valid(player.SlotIndex()))
+        {
+            IncrementInPlace(_pickups[static_cast<std::size_t>(player.SlotIndex())]);
+        }
     }
 
     std::int32_t WorldEvents::LastJumpPadId(std::int32_t slot) noexcept

@@ -1,3 +1,4 @@
+#include "../../Mods/WorldEvents.hpp"
 #include "PlayerProcess.hpp"
 
 #include "PlayerEntity.hpp"
@@ -1742,6 +1743,7 @@ namespace MphRead::Entities
             }
             if (pickedUp)
             {
+                Mods::WorldEvents::NotePickup(*this);
                 item.OnPickedUp(this);
             }
         }

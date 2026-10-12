@@ -98,8 +98,16 @@ namespace MphRead::Mods::MapGen
             std::int32_t Done = 0;
             std::string Current{};
             bool Running = false;
+            // Fetching the server's maps first (MapCatalog), not building.
+            bool Downloading = false;
         };
         [[nodiscard]] static GenerationProgress Progress();
+        // Maps the last StartGenerating downloaded, given once: the caller
+        // then lists them (Rescan) and builds them (StartGenerating again).
+        [[nodiscard]] static std::int32_t TakeDownloaded();
+        // Lists the map folder again, for maps that arrived since. Not while
+        // anything else walks the list: the launcher's thread, between jobs.
+        static void Rescan();
         // A room about to be loaded: if it is one of these maps and not built
         // yet, waits for the build running, or builds it now.
         static void EnsureReady(const std::string& roomName);

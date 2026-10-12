@@ -46,6 +46,9 @@ namespace MphRead::Mods::MapGen
         constexpr float Spacing = 6.0F;
         constexpr float Headroom = 1.9F;
         constexpr float StepUp = 1.2F;
+        // A riser a hunter steps over (Quake's 18 units, PlayerInput's
+        // TryQ3StepUp): a stair is not a wall.
+        constexpr float StepHeight = 0.55F;
         constexpr float StepDown = 8.0F;
         constexpr float WalkNormal = 0.7F;
         constexpr std::int32_t MaxNeighbours = 16;
@@ -359,6 +362,107 @@ namespace MphRead::Mods::MapGen
             return false;
         }
 
+        // A waypoint moved off the walls round it, to where a hunter's body
+        // fits (Clearance from each): a bot heading for one it cannot reach
+        // presses into the wall for ever. False where that leaves its floor.
+        constexpr float Clearance = 1.0F;
+
+        [[nodiscard]] bool Extent(const BuiltFace* face, Vector3 point, float low, float high);
+
+        [[nodiscard]] bool Clear(
+            const std::vector<BuiltFace*>* solid,
+            const BucketGrid& grid,
+            Vector3 min,
+            float spacing,
+            Vector3& at)
+        {
+            const float floor = at.Y - 0.5F;
+            for (std::int32_t pass = 0; pass < 3; ++pass)
+            {
+                const std::int32_t column = static_cast<std::int32_t>(std::floor((at.X - min.X) / spacing));
+                const std::int32_t row = static_cast<std::int32_t>(std::floor((at.Z - min.Z) / spacing));
+                Vector3 push(0.0F, 0.0F, 0.0F);
+                std::unordered_set<std::int32_t> seen{};
+                for (std::int32_t dr = -1; dr <= 1; ++dr)
+                {
+                    for (std::int32_t dc = -1; dc <= 1; ++dc)
+                    {
+                        const std::int32_t c = column + dc;
+                        const std::int32_t r = row + dr;
+                        if (c < 0 || r < 0 || c >= grid.Columns || r >= grid.Rows)
+                        {
+                            continue;
+                        }
+                        const auto& bucketValue = BucketAt(grid, UncheckedAdd(UncheckedMultiply(r, grid.Columns), c));
+                        if (!bucketValue)
+                        {
+                            continue;
+                        }
+                        for (const std::int32_t index : *bucketValue)
+                        {
+                            if (!seen.insert(index).second)
+                            {
+                                continue;
+                            }
+                            const BuiltFace* face = (*solid)[static_cast<std::size_t>(index)];
+                            const Vector3 normal = Normal(face);
+                            if (std::fabs(normal.Y) > 0.5F)
+                            {
+                                continue;
+                            }
+                            const float flat = std::sqrt(normal.X * normal.X + normal.Z * normal.Z);
+                            const float distance = Vector3::Dot(normal, at) - Vector3::Dot(normal, (*Points(face))[0]);
+                            if (distance < 0.0F || distance >= Clearance * flat)
+                            {
+                                continue;
+                            }
+                            const Vector3 onFace = Subtract(at, Multiply(normal, distance));
+                            if (!Extent(face, onFace, floor + StepHeight, floor + Headroom))
+                            {
+                                continue;
+                            }
+                            const float gap = Clearance - distance / flat;
+                            push = Add(push, Vector3(normal.X / flat * gap, 0.0F, normal.Z / flat * gap));
+                        }
+                    }
+                }
+                if (LengthSquared(push) < 0.0001F)
+                {
+                    break;
+                }
+                at = Add(at, push);
+            }
+            // Still on its floor, a step at most from where it was.
+            const std::int32_t column = static_cast<std::int32_t>(std::floor((at.X - min.X) / spacing));
+            const std::int32_t row = static_cast<std::int32_t>(std::floor((at.Z - min.Z) / spacing));
+            if (column < 0 || row < 0 || column >= grid.Columns || row >= grid.Rows)
+            {
+                return false;
+            }
+            const auto& bucketValue = BucketAt(grid, UncheckedAdd(UncheckedMultiply(row, grid.Columns), column));
+            if (!bucketValue)
+            {
+                return false;
+            }
+            float best = std::numeric_limits<float>::lowest();
+            for (const std::int32_t index : *bucketValue)
+            {
+                const BuiltFace* face = (*solid)[static_cast<std::size_t>(index)];
+                float y = 0.0F;
+                if (Normal(face).Y >= WalkNormal && Contains(face, at.X, at.Z, y)
+                    && std::fabs(y - floor) <= StepHeight && y > best)
+                {
+                    best = y;
+                }
+            }
+            if (best == std::numeric_limits<float>::lowest())
+            {
+                return false;
+            }
+            at.Y = best + 0.5F;
+            return true;
+        }
+
         [[nodiscard]] std::vector<Node> Sample(
             const std::vector<BuiltFace*>* solid,
             float spacing)
@@ -408,8 +512,13 @@ namespace MphRead::Mods::MapGen
                         {
                             continue;
                         }
+                        Vector3 at(x, y + 0.5F, z);
+                        if (!Clear(solid, grid, min, spacing, at))
+                        {
+                            continue;
+                        }
                         Node node{};
-                        node.Position = Vector3(x, y + 0.5F, z);
+                        node.Position = at;
                         node.Cell = UncheckedAdd(UncheckedMultiply(row, grid.Columns), column);
                         nodes.push_back(std::move(node));
                     }
@@ -479,8 +588,6 @@ namespace MphRead::Mods::MapGen
             Vector3 from,
             Vector3 to)
         {
-            const float low = MathMin(from.Y, to.Y) + 0.3F;
-            const float high = MathMax(from.Y, to.Y) + Headroom;
             std::unordered_set<std::int32_t> seen{};
             for (const std::int32_t cell : Cells(from, to, min, spacing, grid.Columns, grid.Rows))
             {
@@ -510,14 +617,72 @@ namespace MphRead::Mods::MapGen
                     {
                         continue;
                     }
+                    // A wall where it stands above the floor under the path
+                    // more than a step, and below a hunter's head: the
+                    // risers of a stair the path climbs are no higher than
+                    // a step above it where it crosses them.
                     const Vector3 crossing = Add(from, Multiply(Subtract(to, from), start / (start - end)));
-                    if (Extent(face, crossing, low, high))
+                    const float floor = crossing.Y - 0.5F;
+                    if (Extent(face, crossing, floor + StepHeight, floor + Headroom))
                     {
                         return true;
                     }
                 }
             }
             return false;
+        }
+
+        // Whether a hunter walks from one waypoint to another: the floor
+        // under the way, felt a quarter unit at a time, never rises more than
+        // a step at once (a stair, a slope) and is never missing (a gap); it
+        // may drop, which makes the way one way.
+        [[nodiscard]] bool Walkable(
+            const std::vector<BuiltFace*>* solid,
+            const BucketGrid& grid,
+            Vector3 min,
+            float spacing,
+            Vector3 from,
+            Vector3 to)
+        {
+            const float dx = to.X - from.X;
+            const float dz = to.Z - from.Z;
+            const float length = std::sqrt(dx * dx + dz * dz);
+            const std::int32_t steps = std::max<std::int32_t>(1, static_cast<std::int32_t>(std::ceil(length / 0.25F)));
+            float floor = from.Y - 0.5F;
+            for (std::int32_t k = 1; k <= steps; ++k)
+            {
+                const float t = static_cast<float>(k) / static_cast<float>(steps);
+                const float x = from.X + dx * t;
+                const float z = from.Z + dz * t;
+                const std::int32_t column = static_cast<std::int32_t>(std::floor((x - min.X) / spacing));
+                const std::int32_t row = static_cast<std::int32_t>(std::floor((z - min.Z) / spacing));
+                if (column < 0 || row < 0 || column >= grid.Columns || row >= grid.Rows)
+                {
+                    return false;
+                }
+                const auto& bucketValue = BucketAt(grid, UncheckedAdd(UncheckedMultiply(row, grid.Columns), column));
+                if (!bucketValue)
+                {
+                    return false;
+                }
+                float best = std::numeric_limits<float>::lowest();
+                for (const std::int32_t index : *bucketValue)
+                {
+                    const BuiltFace* face = (*solid)[static_cast<std::size_t>(index)];
+                    float y = 0.0F;
+                    if (Normal(face).Y >= WalkNormal && Contains(face, x, z, y)
+                        && y <= floor + StepHeight + 0.02F && y >= floor - StepDown && y > best)
+                    {
+                        best = y;
+                    }
+                }
+                if (best == std::numeric_limits<float>::lowest())
+                {
+                    return false;
+                }
+                floor = best;
+            }
+            return std::fabs(floor - (to.Y - 0.5F)) < 0.3F;
         }
 
         void Connect(
@@ -567,23 +732,20 @@ namespace MphRead::Mods::MapGen
                             {
                                 continue;
                             }
-                            const float rise = nodes[static_cast<std::size_t>(j)].Position.Y - node.Position.Y;
-                            if (rise > StepUp || rise < -StepDown)
-                            {
-                                continue;
-                            }
-                            if (Wall(solid, grid, min, spacing,
-                                node.Position, nodes[static_cast<std::size_t>(j)].Position))
+                            // Up a step, a stair or a slope, or down a drop --
+                            // one way: the drop is met again from below, and
+                            // refused.
+                            const Vector3 to = nodes[static_cast<std::size_t>(j)].Position;
+                            const float rise = to.Y - node.Position.Y;
+                            const float across = std::sqrt(
+                                (to.X - node.Position.X) * (to.X - node.Position.X)
+                                + (to.Z - node.Position.Z) * (to.Z - node.Position.Z));
+                            if (rise > StepUp + across || rise < -StepDown
+                                || Wall(solid, grid, min, spacing, node.Position, to))
                             {
                                 continue;
                             }
                             node.Neighbours.push_back(j);
-                            Node& other = nodes[static_cast<std::size_t>(j)];
-                            if (other.Neighbours.size() < static_cast<std::size_t>(MaxNeighbours)
-                                && !ContainsValue(other.Neighbours, i))
-                            {
-                                other.Neighbours.push_back(i);
-                            }
                         }
                     }
                 }
@@ -680,17 +842,12 @@ namespace MphRead::Mods::MapGen
                     {
                         continue;
                     }
+                    // The way the fine edge goes: a drop stays one way.
                     Node& nodeA = nodes[static_cast<std::size_t>(a)];
                     if (nodeA.Neighbours.size() < static_cast<std::size_t>(MaxNeighbours)
                         && !ContainsValue(nodeA.Neighbours, b))
                     {
                         nodeA.Neighbours.push_back(b);
-                    }
-                    Node& nodeB = nodes[static_cast<std::size_t>(b)];
-                    if (nodeB.Neighbours.size() < static_cast<std::size_t>(MaxNeighbours)
-                        && !ContainsValue(nodeB.Neighbours, a))
-                    {
-                        nodeB.Neighbours.push_back(a);
                     }
                 }
             }
@@ -1066,6 +1223,46 @@ namespace MphRead::Mods::MapGen
             const std::int32_t edges = DegreeSum(fine) / 2;
             std::printf("  [nodes] fine %d nodes, %d edges, largest component %d\n",
                 static_cast<std::int32_t>(fine.size()), edges, Largest(fine));
+            // Each fine node and its component, for looking at where the
+            // graph breaks (FP_NODEDEBUG names the file).
+            const std::string path = *EnvironmentGetVariable("FP_NODEDEBUG");
+            if (path.size() > 1)
+            {
+                std::vector<std::int32_t> component(fine.size(), -1);
+                std::int32_t next = 0;
+                for (std::size_t i = 0; i < fine.size(); ++i)
+                {
+                    if (component[i] != -1)
+                    {
+                        continue;
+                    }
+                    std::deque<std::size_t> queue{i};
+                    component[i] = next;
+                    while (!queue.empty())
+                    {
+                        const std::size_t current = queue.front();
+                        queue.pop_front();
+                        for (const std::int32_t neighbour : fine[current].Neighbours)
+                        {
+                            if (component[static_cast<std::size_t>(neighbour)] == -1)
+                            {
+                                component[static_cast<std::size_t>(neighbour)] = next;
+                                queue.push_back(static_cast<std::size_t>(neighbour));
+                            }
+                        }
+                    }
+                    ++next;
+                }
+                if (FILE* file = std::fopen(path.c_str(), "w"))
+                {
+                    for (std::size_t i = 0; i < fine.size(); ++i)
+                    {
+                        std::fprintf(file, "%.3f,%.3f,%.3f,%d\n", fine[i].Position.X, fine[i].Position.Y,
+                            fine[i].Position.Z, component[i]);
+                    }
+                    std::fclose(file);
+                }
+            }
         }
         float spacing = Spacing;
         std::vector<Node> nodes{};
