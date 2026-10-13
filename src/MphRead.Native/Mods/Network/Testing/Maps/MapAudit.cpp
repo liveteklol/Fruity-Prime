@@ -1,4 +1,5 @@
 #include "Mods/Network/Testing/Maps/MapAudit.hpp"
+#include "Mods/Network/Testing/Maps/MapItemPickupProbe.hpp"
 #include "NativeRuntime/Rhi/SceneBackend.hpp"
 #include "NativeRuntime/OpenTK/GL.hpp"
 #include "Entities/BombEntity.hpp"
@@ -85,11 +86,6 @@ namespace MphRead::Mods::Network
             std::ostringstream stream;
             stream << std::setw(2) << std::setfill('0') << value;
             return stream.str();
-        }
-
-        [[nodiscard]] std::string ItemTypeName(ItemType value)
-        {
-            return ::MphRead::ToString(value);
         }
 
         [[nodiscard]] std::string AfflictionName(Affliction value)
@@ -251,6 +247,7 @@ namespace MphRead::Mods::Network
 
     void MapAudit::Dispose()
     {
+        _itemPickupAudit.reset();
         if (_scene)
         {
             _scene->ReleaseGpuResources();
@@ -282,7 +279,8 @@ namespace MphRead::Mods::Network
         GameMode mode,
         bool bots,
         bool renderProbe,
-        bool itemProbe)
+        bool itemProbe,
+        bool itemPickupProbe)
         : _window(RendererPlatform::CreateWindow(WindowSettings())),
           _room(std::move(room)),
           _players(players),
@@ -336,6 +334,10 @@ namespace MphRead::Mods::Network
         Entities::PlayerEntity::SetPlayerCount(players);
         Entities::PlayerEntity::SetMainPlayerIndex(0);
         _scene->AddRoom(_room, mode, NetLaunch::RoomPlayerCount());
+        if (itemPickupProbe)
+        {
+            _itemPickupAudit = std::make_unique<MapItemPickupProbe>(*_scene, _room);
+        }
     }
 
     MapAudit::~MapAudit() = default;
@@ -352,6 +354,10 @@ namespace MphRead::Mods::Network
     void MapAudit::OnRenderFrame(const RendererPlatform::FrameEventArgs& args)
     {
         GameState::ApplyPause();
+        if (_itemPickupAudit != nullptr)
+        {
+            _itemPickupAudit->Start();
+        }
         _scene->OnSimulationFrame();
         const std::uint64_t frameCountBefore = _scene->FrameCount();
         const std::int32_t draws = std::max<std::int32_t>(1, _drawRate);
@@ -395,6 +401,22 @@ namespace MphRead::Mods::Network
         if (_itemProbe)
         {
             if (!StepItemShots())
+            {
+                Present();
+                _scene->AfterRenderFrame();
+                _window->BaseOnRenderFrame(args);
+                Close();
+                return;
+            }
+            Present();
+            _scene->AfterRenderFrame();
+            _window->BaseOnRenderFrame(args);
+            return;
+        }
+
+        if (_itemPickupAudit != nullptr)
+        {
+            if (!_itemPickupAudit->Step(Entities::PlayerEntity::Main()))
             {
                 Present();
                 _scene->AfterRenderFrame();
@@ -1201,13 +1223,13 @@ namespace MphRead::Mods::Network
             if (entity->Type == EntityType::ItemSpawn)
             {
                 auto spawn = std::dynamic_pointer_cast<Entities::ItemSpawnEntity>(entity);
-                what = ItemTypeName(spawn->Data().ItemType);
+                what = ::MphRead::ToString(spawn->Data().ItemType);
                 spot = AddY(static_cast<Vector3>(entity->Position), 0.65F);
             }
             else if (entity->Type == EntityType::ItemInstance)
             {
                 auto item = std::dynamic_pointer_cast<Entities::ItemInstanceEntity>(entity);
-                what = ItemTypeName(item->ItemType());
+                what = ::MphRead::ToString(item->ItemType());
                 spot = entity->Position;
             }
             else
@@ -1544,6 +1566,15 @@ namespace MphRead::Mods::Network
             return lockjawFailures;
         }
 
+        if (_itemPickupAudit != nullptr)
+        {
+            const std::int32_t attempted = _itemPickupAudit->TargetCount();
+            std::cout << "ITEMPICKUPSWEEP " << _room
+                << " | " << attempted << " pickup(s) tested"
+                << " | " << _itemPickupAudit->FailureCount() << " failed\n";
+            return UncheckedAdd(_itemPickupAudit->FailureCount(), lockjawFailures);
+        }
+
         if (_renderProbe)
         {
             std::cout
@@ -1676,7 +1707,8 @@ namespace MphRead::Mods::Network
         std::optional<std::string> shotDirectory,
         bool renderProbe,
         bool allNodes,
-        bool itemProbe)
+        bool itemProbe,
+        bool itemPickupProbe)
     {
         std::unique_ptr<MapAudit> window;
         std::int32_t result = 1;
@@ -1692,7 +1724,8 @@ namespace MphRead::Mods::Network
                 mode,
                 bots,
                 renderProbe,
-                itemProbe));
+                itemProbe,
+                itemPickupProbe));
 
             window->_scene->ShowAllNodes(allNodes);
 

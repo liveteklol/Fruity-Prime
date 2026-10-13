@@ -8,6 +8,7 @@ using System.Runtime.InteropServices;
 using MphRead.Entities.Enemies;
 using MphRead.Formats;
 using MphRead.Hud;
+using MphRead.Mods.Localization;
 using MphRead.Text;
 using OpenTK.Mathematics;
 
@@ -3727,20 +3728,27 @@ namespace MphRead.Entities
                         end = length;
                     }
                     x = startX;
-                    for (int i = end - 1; i >= start; i--)
+                    float totalWidth = 0;
+                    for (int i = start; i < end; i++)
                     {
-                        int ch = text[i];
-                        int orig = ch;
-                        if ((ch & 0x80) != 0 && i + 1 < text.Length)
-                        {
-                            ch = text[++i] & 0x3F | ((ch & 0x1F) << 6);
-                        }
+                        HudTextLayout.ReadForwardGlyph(text, ref i, end,
+                            out int ch, out _);
                         int index = GlyphIndex(font, ch);
-                        x -= font.Widths[index] * scale * aspectFix;
+                        totalWidth += font.Widths[index] * scale * aspectFix;
+                    }
+
+                    // Preserve the right edge and draw packed glyphs left-to-right.
+                    x = startX - totalWidth;
+                    float cursorX = x;
+                    for (int i = start; i < end; i++)
+                    {
+                        HudTextLayout.ReadForwardGlyph(text, ref i, end,
+                            out int ch, out int orig);
+                        int index = GlyphIndex(font, ch);
                         float offset = font.Offsets[index] * scale + y;
                         if (orig != ' ')
                         {
-                            _textInst.PositionX = x / 256f;
+                            _textInst.PositionX = cursorX / 256f;
                             _textInst.PositionY = offset / 192f;
                             if (color.HasValue)
                             {
@@ -3752,6 +3760,7 @@ namespace MphRead.Entities
                             }
                             _scene.DrawHudObject(_textInst, mode: 1, scale: scale);
                         }
+                        cursorX += font.Widths[index] * scale * aspectFix;
                     }
                     if (end != length)
                     {
@@ -3761,7 +3770,7 @@ namespace MphRead.Entities
                             start = end;
                             y += spacingY;
                         }
-                        while (text[start] == '\n');
+                        while (start < length && text[start] == '\n');
                     }
                 }
                 while (end < length);
@@ -3846,14 +3855,16 @@ namespace MphRead.Entities
             byte category, int messageId, bool dialogHide = false)
         {
             string text = Strings.GetHudMessage(messageId);
-            QueueHudMessage(x, y, Align.Center, 256, 8, new ColorRgba(0x3FEF), 1, duration, category, text, dialogHide);
+            QueueHudMessage(x, y, Align.Center, 256, 8, new ColorRgba(0x3FEF), 1, duration,
+                category, text, dialogHide, Scene.Language);
         }
 
         public void QueueHudMessage(float x, float y, int maxWidth, float duration,
             byte category, int messageId, bool dialogHide = false)
         {
             string text = Strings.GetHudMessage(messageId);
-            QueueHudMessage(x, y, Align.Center, maxWidth, 8, new ColorRgba(0x3FEF), 1, duration, category, text, dialogHide);
+            QueueHudMessage(x, y, Align.Center, maxWidth, 8, new ColorRgba(0x3FEF), 1, duration,
+                category, text, dialogHide, Scene.Language);
         }
 
         public void QueueHudMessage(float x, float y, float duration,
@@ -3869,7 +3880,8 @@ namespace MphRead.Entities
         }
 
         public void QueueHudMessage(float x, float y, Align align, int maxWidth, float fontSize,
-            ColorRgba color, float alpha, float duration, byte category, string text, bool dialogHide = false)
+            ColorRgba color, float alpha, float duration, byte category, string text,
+            bool dialogHide = false, Language? localizedLanguage = null)
         {
             Debug.Assert(text.Length < 256);
             char[] buffer = new char[512];
@@ -3912,6 +3924,7 @@ namespace MphRead.Entities
             message.Category = category;
             message.Lifetime = duration;
             message.DialogHide = dialogHide;
+            message.SourceLanguage = HudMessageLanguage.CaptureSourceLanguage(localizedLanguage, Scene.Language);
         }
 
         private int WrapText(string text, int maxWidth, Span<char> dest, int maxTiles = 0)
@@ -4062,6 +4075,14 @@ namespace MphRead.Entities
                 {
                     HudMessage message = _hudMessageQueue[i];
                     if (message.Lifetime > 0
+                        && HudMessageLanguage.IsStaleLocalizedMessage(message.SourceLanguage, Scene.Language))
+                    {
+                        // Text is stored in the source language's glyph encoding.
+                        // Discard transient notices across a language switch.
+                        message.Lifetime = 0;
+                        continue;
+                    }
+                    if (message.Lifetime > 0
                         && ((message.Category & 1) == 0 || (_scene.FrameCount & (7 * 2)) <= 3 * 2) // todo: FPS stuff
                         && (!GameState.DialogPause || !message.DialogHide))
                     {
@@ -4085,6 +4106,7 @@ namespace MphRead.Entities
             public Align Align { get; set; }
             public char[] Text { get; } = new char[256];
             public bool DialogHide { get; set; }
+            public Language? SourceLanguage { get; set; }
         }
 
         private static readonly IReadOnlyList<HudMessage> _hudMessageQueue = new HudMessage[20]

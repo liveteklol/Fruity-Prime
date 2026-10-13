@@ -223,7 +223,8 @@ namespace MphRead::Entities
         SetFlags2(RemoveFlag(Flags2(), PlayerFlags2::DrawnThirdPerson));
 
         bool drawBiped = false;
-        if (IsMainPlayer() || IsVisible(NodeRef) || ModNodeUnresolved())
+        if (IsMainPlayer() || IsVisible(NodeRef) || ModNodeUnresolved()
+            || ModMayBypassReplicaPartCulling())
         {
             drawBiped = !IsMainPlayer() || CameraType() != Entities::CameraType::First
                 || CameraSequence::Current() != nullptr || _camSwitchTimer < Values().CamSwitchTime * 2;
@@ -603,6 +604,8 @@ namespace MphRead::Entities
 
     void PlayerEntity::DrawShadow()
     {
+        // Mods consumes this draw's result so replica visibility does not raycast again.
+        ModSetReplicaShadowVisible(false);
         if (IsMainPlayer() && CameraType() == Entities::CameraType::First)
         {
             return;
@@ -660,6 +663,7 @@ namespace MphRead::Entities
                     RequireReference(_scene).AddRenderItem(RenderItemType::Particle, alpha,
                         polygonId, color, material.XRepeat, material.YRepeat,
                         material.ScaleS, material.ScaleT, transform, uvsAndVerts, _trailBindingId2);
+                    ModSetReplicaShadowVisible(true);
                 }
             }
         }

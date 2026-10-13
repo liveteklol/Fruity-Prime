@@ -86,7 +86,8 @@ public:                                                                         
     void QueueHudMessage(float x, float y, ::MphRead::Hud::Align align,                        \
         std::int32_t maxWidth, float fontSize, ::MphRead::ColorRgba color, float alpha,        \
         float duration, std::uint8_t category, const std::string& text,                        \
-        bool dialogHide = false);                                                              \
+        bool dialogHide = false, std::optional<::MphRead::Language> localizedLanguage          \
+            = std::nullopt);                                                                   \
     void ProcessHudMessageQueue();                                                             \
 private:                                                                                       \
     struct LocatorInfo final                                                                   \
@@ -116,6 +117,7 @@ private:                                                                        
         ::MphRead::Hud::Align Align = ::MphRead::Hud::Align::Left;                             \
         std::array<char16_t, 256> Text{};                                                      \
         bool DialogHide = false;                                                               \
+        std::optional<::MphRead::Language> SourceLanguage{};                                 \
     };                                                                                         \
     [[nodiscard]] bool ShowScoreboard() const;                                                 \
     void LoadModeRules();                                                                      \

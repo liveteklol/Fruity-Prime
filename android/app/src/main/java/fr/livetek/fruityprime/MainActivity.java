@@ -126,9 +126,9 @@ public final class MainActivity extends Activity
                 new FrameLayout.LayoutParams(
                         FrameLayout.LayoutParams.MATCH_PARENT,
                         FrameLayout.LayoutParams.MATCH_PARENT));
-        // Not a lambda: QtQmlStatusChangeListener is not a functional interface.
         launcher.setStatusChangeListener(new org.qtproject.qt.android.QtQmlStatusChangeListener() {
-            @Override public void onStatusChanged(org.qtproject.qt.android.QtQmlStatus status) {
+            @Override
+            public void onStatusChanged(org.qtproject.qt.android.QtQmlStatus status) {
                 onQmlStatusChanged(status, savedInstanceState);
             }
         });

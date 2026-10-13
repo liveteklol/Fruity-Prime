@@ -35,6 +35,8 @@ namespace MphRead
 
 namespace MphRead::Mods::Network
 {
+    class MapItemPickupProbe;
+
     class MapAudit final : public MphRead::RendererPlatform::WindowEvents
     {
     private:
@@ -164,6 +166,7 @@ namespace MphRead::Mods::Network
 
         std::unique_ptr<MphRead::Scene> _scene;
         const bool _bots;
+        std::unique_ptr<MapItemPickupProbe> _itemPickupAudit{};
 
         MapAudit(
             std::string room,
@@ -172,7 +175,8 @@ namespace MphRead::Mods::Network
             GameMode mode,
             bool bots,
             bool renderProbe,
-            bool itemProbe);
+            bool itemProbe,
+            bool itemPickupProbe);
 
     public:
         MapAudit(const MapAudit&) = delete;
@@ -257,6 +261,7 @@ namespace MphRead::Mods::Network
             std::optional<std::string> shotDirectory = std::nullopt,
             bool renderProbe = false,
             bool allNodes = false,
-            bool itemProbe = false);
+            bool itemProbe = false,
+            bool itemPickupProbe = false);
     };
 }

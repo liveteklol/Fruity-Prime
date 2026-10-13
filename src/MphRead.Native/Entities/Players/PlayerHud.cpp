@@ -2,6 +2,8 @@
 #include "../../Mods/Input/StylusZone.hpp"
 #include "../../Mods/Input/WeaponSelectionDirection.hpp"
 #include "../../Mods/Input/WeaponWheel.hpp"
+#include "../../Mods/Localization/HudMessageLanguage.hpp"
+#include "../../Mods/Localization/HudTextLayout.hpp"
 #include "../../Mods/Multiplayer/TeamVisuals.hpp"
 #include "Mods/Network/Gameplay/Player/NetHudHealth.hpp"
 #include "../../Mods/Render/Radar.hpp"
@@ -2833,21 +2835,29 @@ namespace MphRead::Entities
                     end = length;
                 }
                 x = startX;
-                for (std::int32_t i = end - 1; i >= start; --i)
+                float totalWidth = 0.0F;
+                for (std::int32_t i = start; i < end; ++i)
                 {
-                    std::int32_t ch = ManagedAt(text, i);
-                    const std::int32_t orig = ch;
-                    if ((ch & 0x80) != 0 && i + 1 < static_cast<std::int32_t>(text.size()))
-                    {
-                        ch = ManagedAt(text, ++i) & 0x3F | ((ch & 0x1F) << 6);
-                    }
-                    const std::int32_t index = GlyphIndex(font, ch);
-                    x -= ManagedAt(widths, index) * scale * aspectFix;
+                    const auto glyph = Mods::Localization::HudTextLayout::ReadForwardGlyph(
+                        text, i, end);
+                    const std::int32_t index = GlyphIndex(font, glyph.Value);
+                    totalWidth += ManagedAt(widths, index) * scale * aspectFix;
+                }
+
+                // Preserve the right edge and draw packed glyphs left-to-right.
+                x = startX - totalWidth;
+                float cursorX = x;
+                for (std::int32_t i = start; i < end; ++i)
+                {
+                    const auto glyph = Mods::Localization::HudTextLayout::ReadForwardGlyph(
+                        text, i, end);
+                    const std::int32_t index = GlyphIndex(font, glyph.Value);
                     const float offset = ManagedAt(offsets, index) * scale + y;
-                    if (orig != u' ')
+                    if (glyph.Original != u' ')
                     {
-                        drawGlyph(index, x, offset);
+                        drawGlyph(index, cursorX, offset);
                     }
+                    cursorX += ManagedAt(widths, index) * scale * aspectFix;
                 }
                 if (end != length)
                 {
@@ -2857,7 +2867,7 @@ namespace MphRead::Entities
                         start = end;
                         y += spacingY;
                     }
-                    while (ManagedAt(text, start) == u'\n');
+                    while (start < length && ManagedAt(text, start) == u'\n');
                 }
             }
             while (end < length);
@@ -3021,14 +3031,16 @@ namespace MphRead::Entities
         std::uint8_t category, std::int32_t messageId, bool dialogHide)
     {
         QueueHudMessage(x, y, Hud::Align::Center, 256, 8, ColorRgba(0x3FEF),
-            1, duration, category, Text::Strings::GetHudMessage(messageId), dialogHide);
+            1, duration, category, Text::Strings::GetHudMessage(messageId), dialogHide,
+            Scene::Language());
     }
 
     void PlayerEntity::QueueHudMessage(float x, float y, std::int32_t maxWidth,
         float duration, std::uint8_t category, std::int32_t messageId, bool dialogHide)
     {
         QueueHudMessage(x, y, Hud::Align::Center, maxWidth, 8, ColorRgba(0x3FEF),
-            1, duration, category, Text::Strings::GetHudMessage(messageId), dialogHide);
+            1, duration, category, Text::Strings::GetHudMessage(messageId), dialogHide,
+            Scene::Language());
     }
 
     void PlayerEntity::QueueHudMessage(float x, float y, float duration,
@@ -3048,7 +3060,7 @@ namespace MphRead::Entities
     void PlayerEntity::QueueHudMessage(float x, float y, Hud::Align align,
         std::int32_t maxWidth, float fontSize, ColorRgba color, float alpha,
         float duration, std::uint8_t category, const std::string& text,
-        bool dialogHide)
+        bool dialogHide, std::optional<Language> localizedLanguage)
     {
         const std::u16string managed = ToManagedChars(text);
         assert(managed.size() < 256);
@@ -3094,6 +3106,9 @@ namespace MphRead::Entities
         RequireReference(message).Category = category;
         RequireReference(message).Lifetime = duration;
         RequireReference(message).DialogHide = dialogHide;
+        RequireReference(message).SourceLanguage
+            = Mods::Localization::HudMessageLanguage::CaptureSourceLanguage(
+                localizedLanguage, Scene::Language());
     }
 
     void PlayerEntity::ClearHudMessage(std::int32_t mask)
@@ -3143,7 +3158,16 @@ namespace MphRead::Entities
         {
             for (const auto& item : _hudMessageQueue)
             {
-                const HudMessage& message = RequireReference(item);
+                HudMessage& message = RequireReference(item);
+                if (message.Lifetime > 0
+                    && Mods::Localization::HudMessageLanguage::IsStaleLocalizedMessage(
+                        message.SourceLanguage, Scene::Language()))
+                {
+                    // Text is stored in the source language's glyph encoding.
+                    // Discard transient notices across a language switch.
+                    message.Lifetime = 0;
+                    continue;
+                }
                 if (message.Lifetime > 0
                     && ((message.Category & 1) == 0
                         || (RequireReference(_scene).FrameCount() & (7 * 2)) <= 3 * 2)

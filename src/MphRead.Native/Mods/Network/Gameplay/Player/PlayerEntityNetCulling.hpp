@@ -20,14 +20,17 @@ public: \
         OpenTK::Mathematics::Vector3 position); \
     void ModPlaceAt(OpenTK::Mathematics::Vector3 position); \
     void ModRefreshNodeRef(OpenTK::Mathematics::Vector3 previousPosition); \
-    void ModResolveNetworkNodeRef(); \
+    void ModResolveNetworkNodeRef(OpenTK::Mathematics::Vector3 previousPosition); \
     [[nodiscard]] bool ModNodeUnresolved() const noexcept; \
+    /* Mods policy hook: only remote replicas with a drawn shadow can bypass Part culling. */ \
+    [[nodiscard]] bool ModMayBypassReplicaPartCulling() const noexcept; \
+    /* Called by DrawShadow to publish only the already-computed shadow result to Mods. */ \
+    void ModSetReplicaShadowVisible(bool visible); \
     void ModNetSpawn(OpenTK::Mathematics::Vector3 position, \
         OpenTK::Mathematics::Vector3 facing); \
     [[nodiscard]] static Formats::Culling::NodeRef ModSpawnNodeRef( \
         MphRead::Scene& scene, OpenTK::Mathematics::Vector3 position); \
 private: \
     [[nodiscard]] bool ModIsRemoteNetworkPlayer() const noexcept; \
-    void ModRefreshShadowProjection(); \
-    MphRead::Mods::Network::ReplicaShadowVisibility::Projection _modShadowProjection{}; \
+    MphRead::Mods::Network::ReplicaShadowVisibility::DrawState _modShadowDrawState{}; \
 public:

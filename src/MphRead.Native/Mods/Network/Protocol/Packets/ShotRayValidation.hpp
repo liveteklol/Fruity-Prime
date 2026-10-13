@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Mods/Network/Domain/NetworkVectorRules.hpp"
 #include "NativeRuntime/OpenTK/Mathematics.hpp"
 
 #include <cmath>
@@ -12,7 +13,7 @@ namespace MphRead::Mods::Network::ShotRayValidation
 
     [[nodiscard]] inline bool IsFinite(const OpenTK::Mathematics::Vector3& value) noexcept
     {
-        return std::isfinite(value.X) && std::isfinite(value.Y) && std::isfinite(value.Z);
+        return Domain::IsFiniteVector3(value);
     }
 
     [[nodiscard]] inline bool IsValidDirection(const OpenTK::Mathematics::Vector3& direction) noexcept

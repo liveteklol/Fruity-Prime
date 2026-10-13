@@ -1,4 +1,5 @@
 #include "Mods/Network/Session/SessionSnapshotPublisher.hpp"
+#include "Mods/Network/Domain/NetworkVectorRules.hpp"
 #include "Mods/Network/Session/PeerRegistry.hpp"
 #include "Mods/Network/Gameplay/Replication/PlayerStateSnapshotCapture.hpp"
 #include "Mods/Network/Gameplay/Combat/NetUnlagged.hpp"
@@ -15,7 +16,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -79,8 +79,7 @@ namespace MphRead::Mods::Network
             {
                 break;
             }
-            if (!std::isfinite(player.Position.X) || !std::isfinite(player.Position.Y)
-                || !std::isfinite(player.Position.Z))
+            if (!Domain::IsFiniteVector3(player.Position))
             {
                 NetLog::Event("slot " + Runtime::ToString(static_cast<std::int32_t>(i))
                     + " not published: position is "

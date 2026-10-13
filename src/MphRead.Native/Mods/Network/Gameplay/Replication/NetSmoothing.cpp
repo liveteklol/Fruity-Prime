@@ -1,4 +1,5 @@
 #include "Mods/Network/Gameplay/Replication/NetSmoothing.hpp"
+#include "Mods/Network/Domain/NetworkVectorRules.hpp"
 
 #include "Mods/Network/Session/NetLifecycleTracker.hpp"
 #include "Mods/Network/Diagnostics/NetLog.hpp"
@@ -183,8 +184,7 @@ namespace MphRead::Mods::Network
             {
                 break;
             }
-            if (sample.Sequence == 0 || !std::isfinite(sample.Position.X)
-                || !std::isfinite(sample.Position.Y) || !std::isfinite(sample.Position.Z))
+            if (sample.Sequence == 0 || !Domain::IsFiniteVector3(sample.Position))
             {
                 continue;
             }
@@ -520,7 +520,7 @@ namespace MphRead::Mods::Network
         }
         position = _position[s][index];
         altForm = _altForm[s][index];
-        return std::isfinite(position.X) && std::isfinite(position.Y) && std::isfinite(position.Z);
+        return Domain::IsFiniteVector3(position);
     }
 
     bool NetSmoothing::LookupForm(std::int32_t slot, std::uint32_t frame, ReplicatedFormState& form)

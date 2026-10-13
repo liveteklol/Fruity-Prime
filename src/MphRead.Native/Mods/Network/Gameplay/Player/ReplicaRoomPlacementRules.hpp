@@ -1,9 +1,9 @@
 #pragma once
 
 #include "Formats/Culling.hpp"
+#include "Mods/Network/Domain/NetworkVectorRules.hpp"
 
 #include <cstddef>
-#include <cmath>
 
 namespace MphRead::Mods::Network
 {
@@ -81,7 +81,7 @@ namespace MphRead::Mods::Network
         }
         [[nodiscard]] static bool IsFinite(OpenTK::Mathematics::Vector3 value) noexcept
         {
-            return std::isfinite(value.X) && std::isfinite(value.Y) && std::isfinite(value.Z);
+            return Domain::IsFiniteVector3(value);
         }
         [[nodiscard]] static BoundsResult CheckBounds(
             OpenTK::Mathematics::Vector3 position,
@@ -91,8 +91,7 @@ namespace MphRead::Mods::Network
         {
             minimum = minimum + offset;
             maximum = maximum + offset;
-            if (!std::isfinite(minimum.X) || !std::isfinite(minimum.Y) || !std::isfinite(minimum.Z)
-                || !std::isfinite(maximum.X) || !std::isfinite(maximum.Y) || !std::isfinite(maximum.Z)
+            if (!Domain::IsFiniteVector3(minimum) || !Domain::IsFiniteVector3(maximum)
                 || minimum.X > maximum.X || minimum.Y > maximum.Y || minimum.Z > maximum.Z)
                 return BoundsResult::Invalid;
 

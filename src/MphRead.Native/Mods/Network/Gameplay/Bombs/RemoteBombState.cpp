@@ -1,9 +1,9 @@
 #include "Mods/Network/Gameplay/Bombs/RemoteBombState.hpp"
 
+#include "Mods/Network/Domain/NetworkVectorRules.hpp"
 #include "Mods/Network/Session/NetLifecycleTracker.hpp"
 
 #include <algorithm>
-#include <cmath>
 
 namespace MphRead::Mods::Network
 {
@@ -24,8 +24,7 @@ namespace MphRead::Mods::Network
         for (std::size_t i = 0; i < length; ++i)
         {
             const IntentPacket::Bomb& bomb = intent.Bombs[i];
-            if (bomb.Sequence == 0 || !std::isfinite(bomb.Position.X) || !std::isfinite(bomb.Position.Y)
-                || !std::isfinite(bomb.Position.Z))
+            if (bomb.Sequence == 0 || !Domain::IsFiniteVector3(bomb.Position))
             {
                 continue;
             }

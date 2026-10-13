@@ -1,4 +1,6 @@
 #include "Mods/Network/Gameplay/Claims/Pickup/NetPickupClaims.hpp"
+#include "Mods/Network/Gameplay/Claims/Common/ClientClaimPolicy.hpp"
+#include "Mods/Network/Domain/NetworkVectorRules.hpp"
 
 #include "Mods/Network/Gameplay/Claims/Common/ClaimResend.hpp"
 #include "Mods/Network/Gameplay/Pickups/NetItemState.hpp"
@@ -16,7 +18,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cmath>
 #include <optional>
 
 namespace MphRead::Mods::Network
@@ -41,16 +42,12 @@ namespace MphRead::Mods::Network
             return PickupVerdictPacket::Entry{ claimId, result, sequence };
         }
 
-        [[nodiscard]] bool Finite(OpenTK::Mathematics::Vector3 value)
-        {
-            return std::isfinite(value.X) && std::isfinite(value.Y) && std::isfinite(value.Z);
-        }
     }
 
     bool NetPickupClaims::Claiming()
     {
-        return NetSession::Active() && !NetSession::IsAuthority() && !NetSession::IsHost()
-            && NetSession::LocalSlot() >= 0;
+        return CanSubmitClientClaim(NetSession::Active(),
+            NetSession::IsAuthority(), NetSession::IsHost(), NetSession::LocalSlot());
     }
 
     std::uint16_t NetPickupClaims::Declare(Entities::PlayerEntity& player, const Entities::ItemSpawnEntity& spawner)
@@ -125,7 +122,7 @@ namespace MphRead::Mods::Network
     bool NetPickupClaims::Reachable(std::int32_t slot, const PickupClaimPacket& claim,
         const Entities::PlayerEntity& player, OpenTK::Mathematics::Vector3 item)
     {
-        if (!Finite(claim.Position) || !WithinPickupReach(claim.Position, item))
+        if (!Domain::IsFiniteVector3(claim.Position) || !WithinPickupReach(claim.Position, item))
         {
             return false;
         }

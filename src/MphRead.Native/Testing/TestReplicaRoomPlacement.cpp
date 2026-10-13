@@ -1,3 +1,4 @@
+#include "Mods/Network/Gameplay/Player/ReplicaPlayerPolicy.hpp"
 #include "Mods/Network/Gameplay/Player/ReplicaRoomPlacementRules.hpp"
 #include "Mods/Network/Gameplay/Player/ReplicaShadowVisibility.hpp"
 
@@ -7,6 +8,7 @@
 namespace
 {
     using Rules = MphRead::Mods::Network::ReplicaRoomPlacementRules;
+    using PlayerPolicy = MphRead::Mods::Network::ReplicaPlayerPolicy;
     using NodeRef = MphRead::Formats::Culling::NodeRef;
     using OpenTK::Mathematics::Vector3;
     using OpenTK::Mathematics::Vector4;
@@ -147,24 +149,43 @@ int main()
         "connector indexes outside either backing array are rejected");
 
     using ShadowVisibility = MphRead::Mods::Network::ReplicaShadowVisibility;
-    const ShadowVisibility::Projection groundedShadow{ nullptr, nullptr, -1, true, 2.0F };
-    const ShadowVisibility::FadeState visibleFade{ 1.0F, 100, 0.0F, 0, 180 };
-    passed &= Check(ShadowVisibility::ShouldForceBody(true, groundedShadow, visibleFade),
-        "a remote replica with a drawable shadow projection bypasses Part culling");
-    passed &= Check(!ShadowVisibility::ShouldForceBody(false, groundedShadow, visibleFade),
+
+    const PlayerPolicy::Context remoteClient{ true, false, false, 2, 1, false };
+    passed &= Check(PlayerPolicy::UsesReplicaRoomPlacement(remoteClient)
+        && PlayerPolicy::UsesReplicaShadowVisibility(remoteClient),
+        "a remote human on a non-authority client uses both replica policies");
+
+    const PlayerPolicy::Context localClient{ true, false, false, 1, 1, false };
+    passed &= Check(!PlayerPolicy::UsesReplicaRoomPlacement(localClient)
+        && !PlayerPolicy::UsesReplicaShadowVisibility(localClient),
+        "the local slot keeps the normal scene and camera NodeRef path during state resynchronization");
+    passed &= Check(PlayerPolicy::IsLocalSlot(localClient.slot, localClient.localSlot)
+        && !PlayerPolicy::IsLocalSlot(remoteClient.slot, remoteClient.localSlot),
+        "spawn NodeRef re-search is reserved for non-local network slots");
+
+    const PlayerPolicy::Context authorityClient{ true, false, true, 2, 1, false };
+    passed &= Check(!PlayerPolicy::UsesReplicaRoomPlacement(authorityClient)
+        && PlayerPolicy::UsesReplicaShadowVisibility(authorityClient),
+        "an authority client uses scene placement while still drawing remote human replicas");
+
+    const PlayerPolicy::Context host{ false, true, true, 2, 1, false };
+    passed &= Check(!PlayerPolicy::UsesReplicaRoomPlacement(host)
+        && PlayerPolicy::UsesReplicaShadowVisibility(host),
+        "a host draws remote human replicas without the client room-placement resolver");
+
+    const PlayerPolicy::Context bot{ true, false, false, 2, 1, true };
+    passed &= Check(!PlayerPolicy::UsesReplicaRoomPlacement(bot)
+        && !PlayerPolicy::UsesReplicaShadowVisibility(bot),
+        "bot slots retain their existing non-replica placement and draw behavior");
+
+    const ShadowVisibility::DrawState visibleShadow{ nullptr, nullptr, -1, true };
+    passed &= Check(ShadowVisibility::ShouldForceBody(true, visibleShadow),
+        "a remote replica with a queued visible shadow bypasses Part culling");
+    passed &= Check(!ShadowVisibility::ShouldForceBody(false, visibleShadow),
         "local players and offline bots do not use remote shadow visibility policy");
     passed &= Check(!ShadowVisibility::ShouldForceBody(true,
-            ShadowVisibility::Projection{ nullptr, nullptr, -1, false, 0.0F }, visibleFade),
-        "a frame without a shadow surface keeps normal body culling");
-    passed &= Check(!ShadowVisibility::ShouldForceBody(true,
-            ShadowVisibility::Projection{ nullptr, nullptr, -1, true, 10.0F }, visibleFade),
-        "a shadow at or beyond its ten-unit fade distance does not force the body");
-    passed &= Check(!ShadowVisibility::ShouldForceBody(true, groundedShadow,
-            ShadowVisibility::FadeState{ 0.0F, 100, 0.0F, 0, 180 }),
-        "a fully transparent shadow does not force the body");
-    passed &= Check(!ShadowVisibility::ShouldForceBody(true, groundedShadow,
-            ShadowVisibility::FadeState{ 1.0F, 0, 0.0F, 0, 180 }),
-        "a dead player's fully faded shadow does not force the body");
+            ShadowVisibility::DrawState{ nullptr, nullptr, -1, false }),
+        "a shadow not queued by the native draw path does not force the body");
 
     return passed ? 0 : 1;
 }

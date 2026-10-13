@@ -1,4 +1,6 @@
 #include "Mods/Network/Gameplay/Claims/Hit/NetHitClaims.hpp"
+#include "Mods/Network/Gameplay/Claims/Common/ClientClaimPolicy.hpp"
+#include "Mods/Network/Domain/NetworkVectorRules.hpp"
 #include "Mods/Network/Diagnostics/NetShotDiagnostics.hpp"
 #include "Mods/Network/Gameplay/Claims/Common/ClaimResend.hpp"
 #include "Mods/Network/Gameplay/Weapons/NetShotEvents.hpp"
@@ -121,8 +123,8 @@ namespace MphRead::Mods::Network
 
     bool NetHitClaims::Claiming()
     {
-        return _enabled && NetSession::Active() && !NetSession::IsAuthority() && !NetSession::IsHost()
-            && NetSession::LocalSlot() >= 0;
+        return _enabled && CanSubmitClientClaim(NetSession::Active(),
+            NetSession::IsAuthority(), NetSession::IsHost(), NetSession::LocalSlot());
     }
 
     std::uint16_t NetHitClaims::Declare(PlayerEntity& victim, PlayerEntity& attacker, ::MphRead::BeamType beam,
@@ -563,7 +565,7 @@ namespace MphRead::Mods::Network
         }
         const float reach = claim.Beam == HitClaimPacket::NoBeam ? MeleeRadius : ClaimRadius;
         const OpenTK::Mathematics::Vector3 offset = claim.HitPoint - was;
-        if (!std::isfinite(offset.X) || !std::isfinite(offset.Y) || !std::isfinite(offset.Z)
+        if (!Domain::IsFiniteVector3(offset)
             || offset.LengthSquared() > reach * reach)
         {
             _metrics.Increment(HitClaimMetrics::Counter::RefusedHere);

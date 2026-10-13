@@ -11,35 +11,24 @@ namespace MphRead
 
 namespace MphRead::Mods::Network
 {
-    // Owns the network replica's cached shadow projection and visibility policy.
+    // Owns the replica visibility policy based on the shadow queued by PlayerDraw.
     class ReplicaShadowVisibility final
     {
     public:
         ReplicaShadowVisibility() = delete;
 
-        struct Projection final
+        struct DrawState final
         {
             const MphRead::Scene* scene = nullptr;
             const void* roomIdentity = nullptr;
             std::int32_t roomId = -1;
-            bool hasGround = false;
-            float height = 0.0F;
+            bool shadowDrawn = false;
         };
 
-        struct FadeState final
-        {
-            float currentAlpha = 0.0F;
-            std::int32_t health = 0;
-            float deathCountdown = 0.0F;
-            std::uint16_t respawnTimer = 0;
-            std::uint16_t respawnTime = 0;
-        };
-
-        [[nodiscard]] static Projection FindProjection(MphRead::Scene* scene,
-            OpenTK::Mathematics::Vector3 bodyCenter);
-        [[nodiscard]] static bool MatchesScene(const Projection& projection,
+        [[nodiscard]] static DrawState CaptureVisibleShadow(MphRead::Scene* scene);
+        [[nodiscard]] static bool MatchesScene(const DrawState& state,
             const MphRead::Scene* scene) noexcept;
         [[nodiscard]] static bool ShouldForceBody(bool remoteReplica,
-            const Projection& projection, const FadeState& fade) noexcept;
+            const DrawState& state) noexcept;
     };
 }

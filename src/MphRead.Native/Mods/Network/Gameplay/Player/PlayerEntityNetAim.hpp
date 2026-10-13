@@ -137,7 +137,6 @@ private: \
  \
     [[nodiscard]] OpenTK::Mathematics::Vector3 ModAimVectorTowards( \
         OpenTK::Mathematics::Vector3 target) const; \
-    [[nodiscard]] static bool Finite(OpenTK::Mathematics::Vector3 value) noexcept; \
     [[nodiscard]] std::shared_ptr<PlayerSpawnEntity> ModNearestSpawn( \
         OpenTK::Mathematics::Vector3 position, bool& any); \
  \

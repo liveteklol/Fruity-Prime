@@ -15,6 +15,7 @@
 #include "Mods/Network/Integration/Hooks/NetHooks.hpp"
 #include "Mods/Network/Diagnostics/NetLog.hpp"
 #include "Mods/Network/Gameplay/Player/NetPlayerBridge.hpp"
+#include "Mods/Network/Domain/NetworkVectorRules.hpp"
 #include "Mods/Network/Session/NetSession.hpp"
 #include "Mods/Network/Testing/Harness/NetTestScript.hpp"
 #include "Scene.hpp"
@@ -207,8 +208,12 @@ namespace MphRead::Entities
 
     void PlayerEntity::ModSetAim(OpenTK::Mathematics::Vector3 aim)
     {
-        if (!std::isfinite(aim.X) || !std::isfinite(aim.Y) || !std::isfinite(aim.Z)
-            || !std::isfinite(LengthSquared(aim)) || !(LengthSquared(aim) > 0.0001F))
+        if (!Mods::Network::Domain::IsFiniteVector3(aim))
+        {
+            return;
+        }
+        const float aimLengthSquared = LengthSquared(aim);
+        if (!std::isfinite(aimLengthSquared) || !(aimLengthSquared > 0.0001F))
         {
             return;
         }
@@ -1087,7 +1092,7 @@ namespace MphRead::Entities
     void PlayerEntity::ModRepairVectors()
     {
         const Vector3 facing = (*this)._facingVector;
-        if (Finite(facing))
+        if (Mods::Network::Domain::IsFiniteVector3(facing))
         {
             _modLastGoodFacing = facing;
         }
@@ -1103,7 +1108,7 @@ namespace MphRead::Entities
         }
 
         const Vector3 gun = (*this)._gunVec1;
-        if (Finite(gun))
+        if (Mods::Network::Domain::IsFiniteVector3(gun))
         {
             _modLastGoodGunVec = gun;
         }
@@ -1115,7 +1120,7 @@ namespace MphRead::Entities
         }
 
         const Vector3 positionForFinite = static_cast<Vector3>((*this).Position);
-        if (Finite(positionForFinite))
+        if (Mods::Network::Domain::IsFiniteVector3(positionForFinite))
         {
             _modLastGoodPosition = static_cast<Vector3>((*this).Position);
         }
@@ -1126,23 +1131,16 @@ namespace MphRead::Entities
             Mods::Network::NetLog::Event(("slot " + std::to_string(slot) + " position repaired"));
         }
 
-        if (!Finite((*this).Speed()))
+        if (!Mods::Network::Domain::IsFiniteVector3((*this).Speed()))
         {
             (*this).SetSpeed(OpenTK::Mathematics::Vector3::Zero);
         }
-        if (!Finite((*this)._aimPosition))
+        if (!Mods::Network::Domain::IsFiniteVector3((*this)._aimPosition))
         {
             const Vector3 positionForAim = static_cast<Vector3>((*this).Position);
             const Vector3 gunForAim = (*this)._gunVec1;
             ((*this)._aimPosition = positionForAim + gunForAim);
         }
-    }
-
-    bool PlayerEntity::Finite(OpenTK::Mathematics::Vector3 value) noexcept
-    {
-        return std::isfinite(value.X)
-            && std::isfinite(value.Y)
-            && std::isfinite(value.Z);
     }
 
     void PlayerEntity::ModNetDie()

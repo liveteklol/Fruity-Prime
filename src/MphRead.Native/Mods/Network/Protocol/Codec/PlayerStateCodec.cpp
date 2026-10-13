@@ -1,5 +1,6 @@
 #include "Mods/Network/Protocol/Codec/WirePrimitives.hpp"
 #include "Mods/Network/Protocol/Packets/RealtimePackets.hpp"
+#include "Mods/Network/Domain/NetworkVectorRules.hpp"
 #include "NativeRuntime/System/Managed.hpp"
 
 namespace MphRead::Mods::Network
@@ -30,7 +31,7 @@ namespace MphRead::Mods::Network
     ImpactOffset ImpactOffset::From(::OpenTK::Mathematics::Vector3 offset) noexcept
     {
         ImpactOffset packed{};
-        if (!std::isfinite(offset.X) || !std::isfinite(offset.Y) || !std::isfinite(offset.Z))
+        if (!Domain::IsFiniteVector3(offset))
         {
             return packed;
         }

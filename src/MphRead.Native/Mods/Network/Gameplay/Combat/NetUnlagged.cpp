@@ -1,4 +1,5 @@
 #include "Mods/Network/Gameplay/Combat/NetUnlagged.hpp"
+#include "Mods/Network/Domain/NetworkVectorRules.hpp"
 
 #include "Mods/Network/Gameplay/Player/NetPlayerBridge.hpp"
 #include "Mods/Network/Gameplay/Claims/Hit/NetHitClaims.hpp"
@@ -163,7 +164,7 @@ namespace MphRead::Mods::Network
             return false;
         }
         position = _position[s][index];
-        return std::isfinite(position.X) && std::isfinite(position.Y) && std::isfinite(position.Z);
+        return Domain::IsFiniteVector3(position);
     }
 
     bool NetUnlagged::PassedNear(std::int32_t slot, std::uint16_t expectedGeneration, std::uint16_t expectedLife,
@@ -374,7 +375,7 @@ namespace MphRead::Mods::Network
                 continue;
             }
             const OpenTK::Mathematics::Vector3 error = _position[s][got] - _position[s][wanted];
-            if (!std::isfinite(error.X) || !std::isfinite(error.Y) || !std::isfinite(error.Z))
+            if (!Domain::IsFiniteVector3(error))
             {
                 continue;
             }
@@ -420,7 +421,7 @@ namespace MphRead::Mods::Network
                 continue;
             }
             OpenTK::Mathematics::Vector3 was = _position[s][index];
-            if (!std::isfinite(was.X) || !std::isfinite(was.Y) || !std::isfinite(was.Z))
+            if (!Domain::IsFiniteVector3(was))
             {
                 continue;
             }
@@ -429,7 +430,7 @@ namespace MphRead::Mods::Network
             {
                 const OpenTK::Mathematics::Vector3 then = _position[s][next];
                 const OpenTK::Mathematics::Vector3 travel = then - was;
-                if (std::isfinite(travel.X) && std::isfinite(travel.Y) && std::isfinite(travel.Z)
+                if (Domain::IsFiniteVector3(travel)
                     && OpenTK::Mathematics::LengthSquared(travel) <= 16.0F)
                 {
                     was = was + OpenTK::Mathematics::Multiply(travel, fraction);

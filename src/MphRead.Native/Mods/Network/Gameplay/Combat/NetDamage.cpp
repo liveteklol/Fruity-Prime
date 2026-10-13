@@ -1,5 +1,6 @@
 #include "Mods/Network/Gameplay/Combat/NetDamage.hpp"
 #include "Mods/Network/Gameplay/Combat/HitLocation.hpp"
+#include "Mods/Network/Domain/NetworkVectorRules.hpp"
 
 #include "GameState.hpp"
 #include "Entities/BeamProjectileEntity.hpp"
@@ -22,7 +23,6 @@
 #include <algorithm>
 #include <array>
 #include <bit>
-#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <numbers>
@@ -353,7 +353,7 @@ namespace MphRead::Mods::Network
 
     OpenTK::Mathematics::Vector3 NetDamage::ClampImpulse(OpenTK::Mathematics::Vector3 impulse)
     {
-        if (!std::isfinite(impulse.X) || !std::isfinite(impulse.Y) || !std::isfinite(impulse.Z))
+        if (!Domain::IsFiniteVector3(impulse))
         {
             return OpenTK::Mathematics::Vector3::Zero;
         }

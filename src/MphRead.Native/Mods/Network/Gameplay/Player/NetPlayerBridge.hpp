@@ -166,7 +166,6 @@ namespace MphRead::Mods::Network
         [[maybe_unused]] static constexpr float FastCatchUpAbove = 3.0F;
         static constexpr float DesyncDistance = 30.0F;
         static constexpr float MaxReportedSpeed = 5.0F;
-        static constexpr float PositionLimit = 100000.0F;
         static constexpr std::uint32_t AimHoldCeiling = 90;
         static constexpr std::int32_t DivergedFramesBeforeCorrecting = 60;
         static constexpr IntentButtons PressedButtons = ~(
@@ -176,7 +175,6 @@ namespace MphRead::Mods::Network
 
         [[nodiscard]] static OpenTK::Mathematics::Vector3 InForm(
             Entities::PlayerEntity& player, OpenTK::Mathematics::Vector3 position, bool measuredInAlt);
-        [[nodiscard]] static bool Sane(OpenTK::Mathematics::Vector3 value) noexcept;
         static void Set(Entities::Keybind& bind, bool down, bool pressed = false);
         static void BeginRemoteLife(Entities::PlayerEntity& player, const PlayerState& state);
         [[nodiscard]] static bool Diverged(Entities::PlayerEntity& player, const PlayerState& state, std::int32_t slot);

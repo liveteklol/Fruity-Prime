@@ -1,5 +1,7 @@
 #include "Mods/Network/Gameplay/Player/NetPlayerBridge.hpp"
 #include "Mods/Network/Gameplay/Player/PlayerFormReplication.hpp"
+#include "Mods/Network/Gameplay/Player/ReplicaPlayerPolicy.hpp"
+#include "Mods/Network/Domain/NetworkVectorRules.hpp"
 #include "Mods/Network/Gameplay/Player/NetInputHistory.hpp"
 #include "Mods/Network/Gameplay/Player/NetInputPressReplay.hpp"
 #include "Mods/Network/Gameplay/Player/NetPlayerIntent.hpp"
@@ -101,13 +103,6 @@ namespace MphRead::Mods::Network
         return measuredInAlt ? position - delta : position + delta;
     }
 
-    bool NetPlayerBridge::Sane(OpenTK::Mathematics::Vector3 value) noexcept
-    {
-        return std::isfinite(value.X) && std::isfinite(value.Y) && std::isfinite(value.Z)
-            && std::fabs(value.X) < PositionLimit && std::fabs(value.Y) < PositionLimit
-            && std::fabs(value.Z) < PositionLimit;
-    }
-
     void NetPlayerBridge::RecordPresses(Entities::PlayerEntity& player)
     {
         NetInputHistory::Record(player);
@@ -186,7 +181,7 @@ namespace MphRead::Mods::Network
         {
             return;
         }
-        if (!Sane(intent.Aim))
+        if (!Domain::IsSanePlayerVector(intent.Aim))
         {
             NativeRuntime::IncrementInPlace(_rejectedUpdates);
             NetLog::Event("slot " + std::to_string(player.SlotIndex()) + " intent rejected: aim=" + intent.Aim.ToString());
@@ -325,7 +320,8 @@ namespace MphRead::Mods::Network
         return intent.MatchId != 0 && intent.AuthorityEpoch != 0
             && intent.MatchId == NetSession::CurrentMatchId() && intent.AuthorityEpoch == NetSession::AuthorityEpoch()
             && intent.LifeId != 0 && NetPlayerLifecycle::Matches(slot, intent.SlotGeneration, intent.LifeId)
-            && HasFlag(intent.Buttons, IntentButtons::InPlayState) && Sane(intent.Aim);
+            && HasFlag(intent.Buttons, IntentButtons::InPlayState)
+            && Domain::IsSanePlayerVector(intent.Aim);
     }
 
     bool NetPlayerBridge::AimTrusted(std::int32_t slot)
@@ -372,7 +368,9 @@ namespace MphRead::Mods::Network
             // Resolve the final authority pose directly. Spawn applies a
             // temporary vertical lift; walking from that pose can cross into
             // the wrong Part where map levels overlap.
-            Move(player, state.Position, true);
+            Move(player, state.Position,
+                !ReplicaPlayerPolicy::IsLocalSlot(
+                    player.SlotIndex(), NetSession::LocalSlot()));
             player.ModSetSpawnFacing(state.Facing);
             if (state.Health == 0)
             {
@@ -389,7 +387,9 @@ namespace MphRead::Mods::Network
         {
             return;
         }
-        if (!Sane(state.Position) || !Sane(state.Speed) || !Sane(state.Facing)
+        if (!Domain::IsSanePlayerVector(state.Position)
+            || !Domain::IsSanePlayerVector(state.Speed)
+            || !Domain::IsSanePlayerVector(state.Facing)
             || ((state.WeavelFlags & PlayerState::WeavelFlagMorphing) != 0
                 && (state.WeavelFlags & PlayerState::WeavelFlagUnmorphing) != 0)
             || (((state.WeavelFlags & (PlayerState::WeavelFlagMorphing | PlayerState::WeavelFlagUnmorphing)) == 0)
@@ -400,7 +400,8 @@ namespace MphRead::Mods::Network
                 && ((state.WeavelFlags & ~PlayerState::WeavelFlagsKnown) != 0
                     || state.FormTransitionProgress() != 0
                     || ((state.WeavelFlags & PlayerState::WeavelFlagTurretActive) != 0
-                        && (!Sane(state.HalfturretPosition) || state.HalfturretHealth == 0)))))
+                        && (!Domain::IsSanePlayerVector(state.HalfturretPosition)
+                            || state.HalfturretHealth == 0)))))
         {
             NativeRuntime::IncrementInPlace(_rejectedUpdates);
             return;
@@ -646,7 +647,8 @@ namespace MphRead::Mods::Network
             return;
         }
         direction = intent.Aim;
-        if (Sane(intent.Position) && LengthSquared(intent.Position) > 0.0001F)
+        if (Domain::IsSanePlayerVector(intent.Position)
+            && LengthSquared(intent.Position) > 0.0001F)
         {
             from = intent.Position + (drawnMuzzle - static_cast<OpenTK::Mathematics::Vector3>(shooter.Position));
         }
@@ -710,7 +712,8 @@ namespace MphRead::Mods::Network
         // The aim was taken from where the shooter really stood, which on a
         // pad is several units from the puppet drawn here: test the ray from
         // there, then draw the turned shot from the gun this player can see.
-        if (!Sane(aimedFrom) || !(LengthSquared(aimedFrom) > 0.0001F))
+        if (!Domain::IsSanePlayerVector(aimedFrom)
+            || !(LengthSquared(aimedFrom) > 0.0001F))
         {
             aimedFrom = origin;
         }
@@ -875,7 +878,7 @@ namespace MphRead::Mods::Network
 
     void NetPlayerBridge::ApplyReportedPosition(Entities::PlayerEntity& player, const IntentPacket& intent)
     {
-        if (!Sane(intent.Position))
+        if (!Domain::IsSanePlayerVector(intent.Position))
         {
             NativeRuntime::IncrementInPlace(_rejectedUpdates);
             return;
@@ -916,7 +919,8 @@ namespace MphRead::Mods::Network
         // This path restores the authority's simulation position before local
         // collision and movement processing. The rendered replica is sampled
         // from NetSmoothing later, when ApplyState applies the snapshot.
-        if (!Sane(state.Position) || VectorEquals(state.Position, OpenTK::Mathematics::Vector3::Zero))
+        if (!Domain::IsSanePlayerVector(state.Position)
+            || VectorEquals(state.Position, OpenTK::Mathematics::Vector3::Zero))
         {
             return;
         }
@@ -925,7 +929,8 @@ namespace MphRead::Mods::Network
 
     void NetPlayerBridge::RestoreReportedPosition(Entities::PlayerEntity& player, const IntentPacket& intent)
     {
-        if (!Sane(intent.Position) || VectorEquals(intent.Position, OpenTK::Mathematics::Vector3::Zero)
+        if (!Domain::IsSanePlayerVector(intent.Position)
+            || VectorEquals(intent.Position, OpenTK::Mathematics::Vector3::Zero)
             || StaleSinceSpawn(player, intent) || FrozenInPlace(player))
         {
             return;
@@ -953,7 +958,7 @@ namespace MphRead::Mods::Network
             const std::uint32_t elapsed = std::min(frame - _lastReportFrame[s], 8U);
             const OpenTK::Mathematics::Vector3 travelled = reported - _lastReportPosition[s];
             const float step = Length(travelled);
-            if (!Sane(travelled) || step > SnapDistance)
+            if (!Domain::IsSanePlayerVector(travelled) || step > SnapDistance)
             {
                 player.SetSpeed(OpenTK::Mathematics::Vector3::Zero);
             }
@@ -989,7 +994,7 @@ namespace MphRead::Mods::Network
         player.SetPrevPosition(position);
         if (resolveNodeFromPosition)
         {
-            player.ModResolveNetworkNodeRef();
+            player.ModResolveNetworkNodeRef(previous);
         }
         else
         {

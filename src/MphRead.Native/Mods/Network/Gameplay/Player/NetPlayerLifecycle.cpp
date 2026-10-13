@@ -1,4 +1,5 @@
 #include "Mods/Network/Gameplay/Player/NetPlayerLifecycle.hpp"
+#include "Mods/Network/Domain/NetworkVectorRules.hpp"
 #include "Mods/Network/Gameplay/Pickups/NetPowerUps.hpp"
 #include "Mods/Network/Gameplay/StatusEffects/FreezeStatusEffectPolicy.hpp"
 #include "Mods/Network/Bots/NetBotRoles.hpp"
@@ -53,11 +54,6 @@ namespace MphRead::Mods::Network
             return nullptr;
         }
 
-        [[nodiscard]] bool Sane(const OpenTK::Mathematics::Vector3& value) noexcept
-        {
-            return std::isfinite(value.X) && std::isfinite(value.Y) && std::isfinite(value.Z)
-                && std::abs(value.X) < 100000 && std::abs(value.Y) < 100000 && std::abs(value.Z) < 100000;
-        }
     }
 
     std::int64_t NetPlayerLifecycle::StaleLifeStates = 0;
@@ -246,8 +242,10 @@ namespace MphRead::Mods::Network
     bool NetPlayerLifecycle::AcceptState(const PlayerState& state, std::uint32_t frame)
     {
         const std::int32_t slot = state.SlotIndex;
-        if (slot >= static_cast<std::int32_t>(_slots.size()) || !Sane(state.Position) || !Sane(state.Speed)
-            || !Sane(state.Facing))
+        if (slot >= static_cast<std::int32_t>(_slots.size())
+            || !Domain::IsSanePlayerVector(state.Position)
+            || !Domain::IsSanePlayerVector(state.Speed)
+            || !Domain::IsSanePlayerVector(state.Facing))
         {
             return false;
         }

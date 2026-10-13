@@ -1,5 +1,6 @@
 #include "Mods/Network/Protocol/Codec/WirePrimitives.hpp"
 #include "Mods/Network/Protocol/Packets/ClaimPackets.hpp"
+#include "Mods/Network/Domain/NetworkVectorRules.hpp"
 
 namespace MphRead::Mods::Network
 {
@@ -57,7 +58,7 @@ namespace MphRead::Mods::Network
         packet.Impact.X = static_cast<std::int8_t>(At(src, 61));
         packet.Impact.Y = static_cast<std::int8_t>(At(src, 62));
         packet.Impact.Z = static_cast<std::int8_t>(At(src, 63));
-        if (!std::isfinite(packet.Impulse.X) || !std::isfinite(packet.Impulse.Y) || !std::isfinite(packet.Impulse.Z)
+        if (!Domain::IsFiniteVector3(packet.Impulse)
             || packet.Impulse.LengthSquared() > 4.0F)
         {
             packet.Impulse = ::OpenTK::Mathematics::Vector3::Zero;
