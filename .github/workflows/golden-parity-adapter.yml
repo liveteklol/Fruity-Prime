@@ -30,20 +30,20 @@ jobs:
 
     steps:
       - name: Checkout adapter source
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           path: adapter-source
 
       - name: Checkout exact Phase 3 baseline
         if: matrix.target == 'phase3'
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           ref: 13c49e35f2a314662c7cc639e5e56fa784ac8bfd
           path: target
 
       - name: Checkout exact Phase 4 source
         if: matrix.target == 'phase4'
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           path: target
@@ -84,12 +84,12 @@ jobs:
     runs-on: windows-2025
     steps:
       - name: Checkout adapter source
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           path: adapter-source
 
       - name: Checkout exact Phase 4 source
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           path: target
@@ -112,7 +112,7 @@ jobs:
           git -C target status --short
 
       - name: Cache vcpkg binary archives
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ${{ github.workspace }}/.cache/vcpkg/archives
           key: golden-parity-vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}

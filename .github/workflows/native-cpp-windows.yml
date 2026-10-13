@@ -37,16 +37,31 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Prepare vcpkg binary cache directory
         shell: pwsh
         run: New-Item -ItemType Directory -Force -Path $env:VCPKG_DEFAULT_BINARY_CACHE | Out-Null
 
       - name: Set up MSVC environment for Ninja
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
+        shell: pwsh
+        run: |
+          # Replaces ilammy/msvc-dev-cmd, which still runs on Node 20.
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $vs = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $vs) { throw 'Visual Studio with the MSVC x64 tools was not found' }
+          $vcvars = Join-Path $vs 'VC\Auxiliary\Build\vcvarsall.bat'
+          if (-not (Test-Path $vcvars)) { throw "vcvarsall.bat not found at $vcvars" }
+          $before = @{}
+          Get-ChildItem Env: | ForEach-Object { $before[$_.Name] = $_.Value }
+          $dump = cmd /c "`"$vcvars`" x64 > nul && set"
+          if ($LASTEXITCODE -ne 0) { throw "vcvarsall.bat x64 failed with exit code $LASTEXITCODE" }
+          foreach ($line in $dump) {
+            if ($line -match '^([^=]+)=(.*)$') {
+              $name = $Matches[1]; $value = $Matches[2]
+              if ($before[$name] -ne $value) { "$name=$value" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8 }
+            }
+          }
 
       - name: Set up pinned Windows vcpkg
         id: vcpkg
@@ -73,7 +88,7 @@ jobs:
       - name: Restore vcpkg binary cache
         id: vcpkg-cache
         continue-on-error: true
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         with:
           path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
           key: native-vcpkg-windows-v2-${{ runner.arch }}-${{ steps.vcpkg.outputs.commit }}-${{ steps.vcpkg.outputs.compiler }}-${{ hashFiles('tools/ci/dependencies/windows-owners.txt') }}
@@ -114,7 +129,7 @@ jobs:
       - name: Save vcpkg binary cache
         if: steps.vcpkg-cache.outputs.cache-hit != 'true'
         continue-on-error: true
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         with:
           path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
           key: native-vcpkg-windows-v2-${{ runner.arch }}-${{ steps.vcpkg.outputs.commit }}-${{ steps.vcpkg.outputs.compiler }}-${{ hashFiles('tools/ci/dependencies/windows-owners.txt') }}

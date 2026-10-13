@@ -36,7 +36,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Verify GCC toolchain
         shell: bash
@@ -59,7 +59,7 @@ jobs:
       - name: Restore apt package cache
         id: apt-cache
         continue-on-error: true
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         with:
           path: ${{ env.APT_CACHE_DIR }}
           key: native-apt-v1-${{ runner.os }}-${{ runner.arch }}-gcc-${{ steps.apt-deps.outputs.digest }}-${{ hashFiles('.github/workflows/native-cpp-linux.yml') }}
@@ -87,7 +87,7 @@ jobs:
       - name: Save apt package cache
         if: steps.apt-cache.outputs.cache-hit != 'true'
         continue-on-error: true
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         with:
           path: ${{ env.APT_CACHE_DIR }}
           key: native-apt-v1-${{ runner.os }}-${{ runner.arch }}-gcc-${{ steps.apt-deps.outputs.digest }}-${{ hashFiles('.github/workflows/native-cpp-linux.yml') }}
@@ -113,7 +113,7 @@ jobs:
       - name: Restore vcpkg binary cache
         id: vcpkg-cache
         continue-on-error: true
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         with:
           path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
           key: native-vcpkg-v1-${{ runner.os }}-${{ runner.arch }}-gcc-${{ steps.vcpkg.outputs.commit }}
@@ -131,7 +131,7 @@ jobs:
       - name: Save vcpkg binary cache
         if: steps.vcpkg-cache.outputs.cache-hit != 'true'
         continue-on-error: true
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         with:
           path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
           key: native-vcpkg-v1-${{ runner.os }}-${{ runner.arch }}-gcc-${{ steps.vcpkg.outputs.commit }}
