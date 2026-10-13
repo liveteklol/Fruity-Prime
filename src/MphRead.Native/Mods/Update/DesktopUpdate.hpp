@@ -43,6 +43,10 @@ namespace MphRead::Mods::Update
     private:
         [[nodiscard]] static std::string Staging();
         [[nodiscard]] static std::string StagedBuild();
+        // Where the binary sits inside an unpacked package, relative to its root:
+        // "" at the top, "bin" for the Windows and Linux installs, the .app bundle
+        // on macOS. Nothing when the package holds no binary.
+        [[nodiscard]] static std::optional<std::string> BinaryDirectory(const std::string& root);
         static void SetLastError(std::optional<std::string> value);
         static void WaitForExit(std::int32_t pid);
         static void Copy(const std::string& source, const std::string& target);

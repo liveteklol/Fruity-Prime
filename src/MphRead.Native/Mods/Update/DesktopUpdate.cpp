@@ -654,6 +654,46 @@ namespace MphRead::Mods::Update
         return StagedBuild();
     }
 
+    std::optional<std::string> DesktopUpdate::BinaryDirectory(const std::string& root)
+    {
+        namespace fs = std::filesystem;
+        const std::string name = UpdateCheck::BinaryName();
+        const fs::path top = PathFromUtf8(root);
+        std::error_code error;
+        if (fs::is_regular_file(top / PathFromUtf8(name), error))
+        {
+            return std::string();
+        }
+        // The installs put it one directory down (bin/, or the macOS bundle's
+        // Contents/MacOS), so look a few levels in, shallowest first.
+        std::optional<fs::path> best;
+        std::size_t bestDepth = 0;
+        fs::recursive_directory_iterator iterator(top, fs::directory_options::skip_permission_denied, error);
+        for (; !error && iterator != fs::recursive_directory_iterator(); iterator.increment(error))
+        {
+            if (iterator.depth() > 4)
+            {
+                iterator.disable_recursion_pending();
+                continue;
+            }
+            std::error_code typeError;
+            if (iterator->path().filename() == PathFromUtf8(name) && iterator->is_regular_file(typeError))
+            {
+                const std::size_t depth = static_cast<std::size_t>(iterator.depth());
+                if (!best.has_value() || depth < bestDepth)
+                {
+                    best = iterator->path().parent_path().lexically_relative(top);
+                    bestDepth = depth;
+                }
+            }
+        }
+        if (!best.has_value())
+        {
+            return std::nullopt;
+        }
+        return PathToUtf8(*best);
+    }
+
     std::optional<std::string> DesktopUpdate::LastError()
     {
         const std::shared_ptr<const std::string> value
@@ -737,13 +777,13 @@ namespace MphRead::Mods::Update
             ::MphRead::NativeRuntime::ArchiveExtractToDirectory(archive, stagedBuild, zip);
             FileDelete(archive);
 
-            const std::string binary = PathCombine(stagedBuild, UpdateCheck::BinaryName());
-            if (!FileExists(binary))
+            const std::optional<std::string> directory = BinaryDirectory(stagedBuild);
+            if (!directory.has_value())
             {
                 SetLastError("the package does not contain " + UpdateCheck::BinaryName());
                 return false;
             }
-            MakeExecutable(binary);
+            MakeExecutable(PathCombine(PathCombine(stagedBuild, *directory), UpdateCheck::BinaryName()));
             return true;
         }
         catch (const std::exception& ex)
@@ -768,17 +808,58 @@ namespace MphRead::Mods::Update
         try
         {
             const std::string stagedBuild = StagedBuild();
-            const std::string binary = PathCombine(stagedBuild, UpdateCheck::BinaryName());
+            const std::optional<std::string> directory = BinaryDirectory(stagedBuild);
+            if (!directory.has_value())
+            {
+                throw std::runtime_error("the package does not contain " + UpdateCheck::BinaryName());
+            }
+            const std::string binaryDirectory = PathCombine(stagedBuild, *directory);
+            const std::string binary = PathCombine(binaryDirectory, UpdateCheck::BinaryName());
+            // A package that keeps its binary in a subdirectory replaces the
+            // install as a whole: the target is the running binary's directory
+            // less that subdirectory, so the libraries and plugins beside it
+            // are updated too. A flat install keeps the old behaviour.
+            std::string target = AppContextBaseDirectory();
+            if (!directory->empty())
+            {
+                namespace fs = std::filesystem;
+                const fs::path running = PathFromUtf8(target).lexically_normal();
+                const fs::path relative = PathFromUtf8(*directory).lexically_normal();
+                fs::path root = running;
+                bool matches = true;
+                for (auto part = relative.end(); part != relative.begin();)
+                {
+                    --part;
+                    if (part->empty())
+                    {
+                        continue;
+                    }
+                    if (root.filename().empty())
+                    {
+                        root = root.parent_path();
+                    }
+                    if (root.filename() != *part)
+                    {
+                        matches = false;
+                        break;
+                    }
+                    root = root.parent_path();
+                }
+                if (matches && !root.empty())
+                {
+                    target = PathToUtf8(root);
+                }
+            }
             std::vector<std::string> arguments;
             arguments.emplace_back("-" + std::string(ApplyFlag));
-            arguments.push_back(AppContextBaseDirectory());
+            arguments.push_back(target);
             arguments.push_back(std::to_string(CurrentProcessId()));
             if (relaunchArgs.has_value())
             {
                 arguments.emplace_back(RelaunchSeparator);
                 arguments.insert(arguments.end(), relaunchArgs->begin(), relaunchArgs->end());
             }
-            StartProcess(binary, stagedBuild, arguments);
+            StartProcess(binary, binaryDirectory, arguments);
             return true;
         }
         catch (const std::exception& ex)
@@ -804,7 +885,25 @@ namespace MphRead::Mods::Update
     {
         std::cout << "[update] applying to " << target << '\n';
         WaitForExit(waitFor);
-        const std::string source = AppContextBaseDirectory();
+        // The staged package as a whole when its binary sits in a subdirectory
+        // and the install has the same shape (see Launch); otherwise just the
+        // directory this process runs from, as before.
+        std::string source = AppContextBaseDirectory();
+        std::string binaryDirectory = target;
+        try
+        {
+            const std::string stagedBuild = StagedBuild();
+            const std::optional<std::string> directory = BinaryDirectory(stagedBuild);
+            if (directory.has_value() && !directory->empty()
+                && FileExists(PathCombine(PathCombine(target, *directory), UpdateCheck::BinaryName())))
+            {
+                source = stagedBuild;
+                binaryDirectory = PathCombine(target, *directory);
+            }
+        }
+        catch (...)
+        {
+        }
         try
         {
             Copy(source, target);
@@ -827,11 +926,11 @@ namespace MphRead::Mods::Update
 
         try
         {
-            const std::string binary = PathCombine(target, UpdateCheck::BinaryName());
+            const std::string binary = PathCombine(binaryDirectory, UpdateCheck::BinaryName());
             MakeExecutable(binary);
             const std::span<const std::string> arguments = relaunchArgs.has_value()
                 ? *relaunchArgs : std::span<const std::string>{};
-            StartProcess(binary, target, arguments);
+            StartProcess(binary, binaryDirectory, arguments);
         }
         catch (const std::exception& ex)
         {
