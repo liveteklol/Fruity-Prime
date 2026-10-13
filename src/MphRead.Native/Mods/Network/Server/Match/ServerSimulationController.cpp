@@ -35,6 +35,11 @@ namespace MphRead::Mods::Network
         return HasSimulation() && _simulation->Running();
     }
 
+    std::int64_t ServerSimulationController::ConsecutiveStepFailures() const noexcept
+    {
+        return HasSimulation() ? _simulation->ConsecutiveStepFailures() : 0;
+    }
+
     bool ServerSimulationController::HasSimulation() const noexcept
     {
         return _simulation != nullptr;

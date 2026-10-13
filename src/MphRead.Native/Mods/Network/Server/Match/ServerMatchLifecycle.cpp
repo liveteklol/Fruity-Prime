@@ -86,8 +86,62 @@ namespace MphRead::Mods::Network
         _ports.Voting->BroadcastMapChoices();
     }
 
+    bool ServerMatchLifecycle::RecoverFromBrokenRoom(double now)
+    {
+        if (now - _recoveredAt < RecoveryCooldownSeconds || _ports.Lobby->Phase() != SessionPhase::InMatch)
+        {
+            return false;
+        }
+        const std::string broken = CurrentDefinition().RoomKey.value_or("");
+        const auto known = [this](const std::string& room)
+        {
+            return std::any_of(_brokenRooms.begin(), _brokenRooms.end(), [&](const std::string& other)
+            {
+                return Runtime::StringEqualsOrdinalIgnoreCase(other, room);
+            });
+        };
+        if (!broken.empty() && !known(broken))
+        {
+            _brokenRooms.push_back(broken);
+        }
+        std::string room;
+        GameMode mode = GameMode::Battle;
+        if (!_previousRoom.empty() && !known(_previousRoom))
+        {
+            room = _previousRoom;
+            mode = _previousMode;
+        }
+        else
+        {
+            for (const std::shared_ptr<const RotationEntry>& entry : (*_ports.Rotation)->Entries())
+            {
+                if (!known(entry->RoomKey))
+                {
+                    room = entry->RoomKey;
+                    mode = entry->Mode;
+                    break;
+                }
+            }
+        }
+        _recoveredAt = now;
+        if (room.empty())
+        {
+            Log("the room \"" + broken + "\" cannot be played and there is no other map to go back to");
+            return false;
+        }
+        Log("the room \"" + broken + "\" cannot be played (every simulation step fails); going back to " + room);
+        (*_ports.Rotation)->PlayNext(room, mode);
+        AdvanceMap(now);
+        return true;
+    }
+
     void ServerMatchLifecycle::AdvanceMap(double now)
     {
+        if (const std::shared_ptr<const RotationEntry> before = (*_ports.Rotation)->Current())
+        {
+            _previousRoom = before->RoomKey;
+            _previousMode = before->Mode;
+        }
         const std::shared_ptr<const RotationEntry> entry = (*_ports.Rotation)->Advance();
         _ports.Lobby->SetPhase(SessionPhase::InMatch);
         const MatchDefinition nextDefinition = CurrentDefinition();

@@ -33,6 +33,8 @@ namespace MphRead::Mods::Network
         [[nodiscard]] static bool Available(std::string& reason);
         [[nodiscard]] bool HasSimulation() const noexcept;
         [[nodiscard]] bool Running() const noexcept;
+        // Steps in a row that threw; 0 while the match is healthy.
+        [[nodiscard]] std::int64_t ConsecutiveStepFailures() const noexcept;
         void Advance(double now);
         void Stop();
 

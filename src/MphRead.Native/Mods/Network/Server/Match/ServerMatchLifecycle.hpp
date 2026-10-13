@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace MphRead::Mods::Network
 {
@@ -69,6 +70,10 @@ namespace MphRead::Mods::Network
         [[nodiscard]] double EndSequenceFor() const;
         void EndMatch(double now, const std::string& reason);
         void AdvanceMap(double now);
+        // The room the match rotated onto cannot be stepped (every step throws):
+        // go back to the last map that worked, or the first that has not failed.
+        // False when there is nowhere to go back to.
+        bool RecoverFromBrokenRoom(double now);
         void StartSimulation();
         void SynchronizeSimulationState(double now);
         void HandleMatchEnd(const ReceivedPacket& packet, double now);
@@ -76,8 +81,14 @@ namespace MphRead::Mods::Network
     private:
         static constexpr double ReadyWaitSeconds = 30.0;
         static constexpr double AllReadySeconds = 5.0;
+        static constexpr double RecoveryCooldownSeconds = 10.0;
 
         [[nodiscard]] MatchDefinition CurrentDefinition() const;
+
+        std::string _previousRoom{};
+        GameMode _previousMode = GameMode::Battle;
+        std::vector<std::string> _brokenRooms{};
+        double _recoveredAt = -1000.0;
         void Log(const std::string& message) const;
 
         Ports _ports;

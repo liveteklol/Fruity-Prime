@@ -53,6 +53,14 @@ namespace MphRead::Mods::Network
                 && ports.matchLifecycle.Simulating())
             {
                 ports.simulation.Advance(now);
+                // A room that cannot be stepped (a map voted in whose files are
+                // missing, say) fails every step for ever and the players sit in
+                // it unspawned: after two seconds of nothing but failures, go
+                // back to a map that works.
+                if (ports.simulation.ConsecutiveStepFailures() >= 120)
+                {
+                    (void)ports.matchLifecycle.RecoverFromBrokenRoom(now);
+                }
                 ports.botIntentRelay.RelayFrame(ports.session.Clock.ReadFrame(),
                     ports.session.Identity.ReadMatchId(), ports.session.Identity.ReadAuthorityEpoch(),
                     ports.maxPlayers, &ports.transport, ports.peers);

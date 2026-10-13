@@ -61,6 +61,8 @@ namespace MphRead::Mods::Network
         [[nodiscard]] double WorstStepSeconds() const noexcept { return _worstStepSeconds; }
         [[nodiscard]] std::int64_t OverrunSteps() const noexcept { return _overrunSteps; }
         [[nodiscard]] std::int64_t StepFailures() const noexcept { return _stepFailures; }
+        // Steps in a row that threw, since the last one that did not.
+        [[nodiscard]] std::int64_t ConsecutiveStepFailures() const noexcept { return _consecutiveStepFailures; }
         [[nodiscard]] std::int64_t DroppedSteps() const noexcept { return _droppedSteps; }
         [[nodiscard]] std::int64_t Stalls() const noexcept { return _stalls; }
 
@@ -76,6 +78,7 @@ namespace MphRead::Mods::Network
         double _worstStepSeconds = 0.0;
         std::int64_t _overrunSteps = 0;
         std::int64_t _stepFailures = 0;
+        std::int64_t _consecutiveStepFailures = 0;
         std::int64_t _droppedSteps = 0;
         std::int64_t _stalls = 0;
 

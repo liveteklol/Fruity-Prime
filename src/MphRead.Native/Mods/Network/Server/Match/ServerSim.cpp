@@ -170,6 +170,7 @@ namespace MphRead::Mods::Network
             _worstStepSeconds = 0.0;
             _overrunSteps = 0;
             _stepFailures = 0;
+            _consecutiveStepFailures = 0;
             _droppedSteps = 0;
             _stalls = 0;
             _accumulator = 0.0;
@@ -198,11 +199,13 @@ namespace MphRead::Mods::Network
         try
         {
             _scene->OnSimulationFrame();
+            _consecutiveStepFailures = 0;
         }
         catch (...)
         {
             const std::exception_ptr exception = std::current_exception();
             IncrementInPlace(_stepFailures);
+            IncrementInPlace(_consecutiveStepFailures);
             if (_stepFailures == 1)
             {
                 std::cout << "[sim] step failed: " << Runtime::ExceptionToString(exception) << '\n';
