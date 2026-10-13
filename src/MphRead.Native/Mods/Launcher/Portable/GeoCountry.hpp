@@ -22,6 +22,7 @@ namespace MphRead::Mods::Launcher::Gui
 
     private:
         static void Load();
+        [[nodiscard]] static std::vector<std::uint8_t> ReadTable();
 
         static inline std::vector<std::uint32_t> _first{};
         static inline std::vector<std::uint8_t> _index{};
