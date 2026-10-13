@@ -163,6 +163,13 @@ namespace MphRead::Mods::Network
                 MapVote::Apply(VoteStatePacket::Read(payload));
             }
             break;
+        case PacketType::MapWant:
+            // The server wants a pack this player holds for a map they voted on.
+            if (NetSession::Role() == NetRole::Client && !NetSession::IsPlayback())
+            {
+                NetSession::AnswerMapWant(payload);
+            }
+            break;
         case PacketType::MapChoices:
             if (NetSession::Role() == NetRole::Client && payload.size() >= MapChoicesPacket::Size)
             {

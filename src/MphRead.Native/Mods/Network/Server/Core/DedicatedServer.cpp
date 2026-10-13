@@ -465,6 +465,16 @@ namespace MphRead::Mods::Network
         _mapVoting.HandleMapPick(packet.Sender, packet.Payload(), now);
     }
 
+    void DedicatedServer::HandleMapOffer(const ReceivedPacket& packet, double now)
+    {
+        _mapVoting.HandleMapOffer(packet.Sender, packet.Payload(), now);
+    }
+
+    void DedicatedServer::HandleMapChunk(const ReceivedPacket& packet, double now)
+    {
+        _mapVoting.HandleMapChunk(packet.Sender, packet.Payload(), now);
+    }
+
     void DedicatedServer::HandleHitClaim(const ReceivedPacket& packet, double now)
     {
         _claimChannel.ReceiveHitClaim(packet, now,

@@ -166,6 +166,8 @@ namespace MphRead::Mods::Network
         void HandleMatchEnd(const ReceivedPacket& packet, double now);
         void HandleVote(const ReceivedPacket& packet, double now);
         void HandleMapPick(const ReceivedPacket& packet, double now);
+        void HandleMapOffer(const ReceivedPacket& packet, double now);
+        void HandleMapChunk(const ReceivedPacket& packet, double now);
         void HandleHitClaim(const ReceivedPacket& packet, double now);
         void HandlePickupClaim(const ReceivedPacket& packet, double now);
         void HandleChat(const ReceivedPacket& packet, double now);

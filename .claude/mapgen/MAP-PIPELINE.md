@@ -1021,6 +1021,38 @@ listed and crashing. With nothing shipping, the APK now logs
   (see Bots): they read Quake's level through the same waypoints, not its
   own `.aas`.
 
+## Handing a custom map to a server that does not have it
+
+**Implemented (C++), for the one case that matters first: a player calls a
+vote for a level the server has never seen.** Packet types 32-34 carry it, the
+`.pk3` itself travels (no `.fpmap`), and the server pulls rather than being
+pushed at:
+
+1. `callvote` names a room the server cannot resolve; instead of "no map
+   called", `ServerMapVoting::StartVote` calls `ServerMapUpload::Begin`, which
+   sends the proposer a `MapWant` with Count 0.
+2. The client (`SessionMapUpload`) finds a `.pk3`/`.zip` in its map folder
+   whose `Q3Bsp::ListMaps` holds that level and answers `MapOffer`: size and
+   SHA-256. Nothing is read from anywhere but the map folder.
+3. The server asks for windows of 32 chunks of 1000 bytes (`MapWant`), the
+   client sends them as `MapChunk`, the server keeps the window full and asks
+   again from the first hole after a second of silence (10 s gives up).
+4. On the last chunk the server checks the hash, stores the file as
+   `maps/uploaded/<first 16 hex of the hash>.pk3` (its name, never the
+   sender's), re-reads it (`ListMaps` must contain the level), rescans the map
+   folder (`CustomRooms::Rescan`, `Metadata::AppendLateRooms`) and then starts
+   the vote the player asked for.
+
+Limits: 48 MB, one transfer at a time per server, only the proposer's own
+connection, and `-nomapupload` turns it off. Additive, so no protocol bump:
+a build that does not know the types drops them and the vote is refused as
+before. **Not done:** the *other* clients still fetch the map the way they
+always did, from `net.livetek.fr` (`MapCatalog`) when the server rotates to it;
+a map that exists only on the proposer's disk and the server's therefore does
+not reach them. Test: `fruity_map_upload_tests` (`Testing/TestMapUpload.cpp`),
+the production server and client code over a real loopback socket with 20%
+loss; run on Linux and on an Android x86_64 emulator.
+
 ## Handing a custom map to a client that does not have it
 
 **Not implemented. The packet numbers are spent, and that is the whole of it.**
@@ -1028,7 +1060,8 @@ listed and crashing. With nothing shipping, the APK now logs
 `PacketType` 32-35 are reserved for it -- `MapOffer` (the server names the map,
 its hash and its size), `MapWant` (the client asks for the bytes from offset N),
 `MapChunk` (one piece of the `.fpmap`), `MapDone` (the client has it and it
-hashes right). Nothing in this build sends or answers any of them.
+hashes right). Server-to-client delivery is still unbuilt; the types 32-34 are
+used the other way round, by the client-to-server upload described above.
 
 They were spent early on purpose. `NetConfig.ProtocolVersion` 7 already refuses
 every client built before it, for reasons that have nothing to do with map

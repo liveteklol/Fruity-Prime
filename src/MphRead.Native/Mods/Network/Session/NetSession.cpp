@@ -5,6 +5,7 @@
 #include "Mods/Network/Session/SessionAdmissionChannel.hpp"
 #include "Mods/Network/Session/SessionChatChannel.hpp"
 #include "Mods/Network/Session/SessionVoteChannel.hpp"
+#include "Mods/Network/Session/SessionMapUpload.hpp"
 #include "Mods/Network/Session/SessionSnapshotPublisher.hpp"
 #include "Mods/Network/Session/SessionSnapshotReceiver.hpp"
 #include "Mods/Network/Session/SessionIntentPublisher.hpp"
@@ -263,6 +264,11 @@ namespace MphRead::Mods::Network
     void NetSession::SendVote(std::uint8_t kind, const std::string& roomKey)
     {
         SessionVoteChannel::SendVote(_context._connection, _context._runtime.Role(), kind, roomKey);
+    }
+
+    void NetSession::AnswerMapWant(std::span<const std::uint8_t> payload)
+    {
+        SessionMapUpload::Answer(_context._connection, _context._runtime.Role(), payload);
     }
 
     void NetSession::SendMapPick(const std::string& roomKey)

@@ -56,6 +56,7 @@
 #include "MapGen/Q3Convert.hpp"
 #include "NativeRuntime/System/ExceptionText.hpp"
 #include "Mods/Network/Server/Core/DedicatedServer.hpp"
+#include "Mods/Network/Server/Lobby/ServerMapUpload.hpp"
 #include "Mods/Network/Replay/DemoInfo.hpp"
 #include "Mods/Network/Testing/Combat/HealthSimulationTest.hpp"
 #include "Mods/Network/Bots/ServerBots.hpp"
@@ -1781,6 +1782,7 @@ namespace MphRead::Mods
             }
         }
         server.AllowMapVotes(!::HasFlag(args, "novote"));
+        Network::ServerMapUpload::Enabled(!::HasFlag(args, "nomapupload"));
         server.AutoUpdate(true);
         // Whether this server will also open *extra* matches, on ports of its
         // own, for players who ask. Off unless an admin says a range.

@@ -1,5 +1,6 @@
 #include "Mods/Network/Server/Lobby/ServerMapVoting.hpp"
 #include "Mods/Network/Domain/MapVoteRules.hpp"
+#include "Mods/Network/Server/Lobby/ServerMapUpload.hpp"
 
 #include "GameState.hpp"
 #include "Metadata/Metadata.hpp"
@@ -28,9 +29,39 @@ namespace MphRead::Mods::Network
         }
     }
 
-    ServerMapVoting::ServerMapVoting(ServerMapVotingHost& host) noexcept
-        : _host(host), _voteMode(GameMode::Battle)
+    ServerMapVoting::ServerMapVoting(ServerMapVotingHost& host)
+        : _host(host), _upload(std::make_unique<ServerMapUpload>(host)), _voteMode(GameMode::Battle)
     {
+        // The pack has arrived and the map is listed: the vote the player
+        // asked for can start as if the server had always had it.
+        _upload->OnArrived([this](const std::shared_ptr<Peer>& peer, const std::string& roomKey, double now)
+        {
+            StartVote(peer, roomKey, now);
+        });
+    }
+
+    ServerMapVoting::~ServerMapVoting() = default;
+
+    void ServerMapVoting::HandleMapOffer(const std::shared_ptr<System::Net::IPEndPoint>& sender,
+        std::span<const std::uint8_t> payload, double now)
+    {
+        const std::shared_ptr<Peer> peer = _host.VotingPeers().Find(sender);
+        if (peer != nullptr && peer->SlotIndex >= 0)
+        {
+            _host.MarkVotingPeerSeen(peer, now);
+            _upload->HandleOffer(peer, payload, now);
+        }
+    }
+
+    void ServerMapVoting::HandleMapChunk(const std::shared_ptr<System::Net::IPEndPoint>& sender,
+        std::span<const std::uint8_t> payload, double now)
+    {
+        const std::shared_ptr<Peer> peer = _host.VotingPeers().Find(sender);
+        if (peer != nullptr && peer->SlotIndex >= 0)
+        {
+            _host.MarkVotingPeerSeen(peer, now);
+            _upload->HandleChunk(peer, payload, now);
+        }
     }
 
     ServerMapVoting::PeerVoteState& ServerMapVoting::StateFor(const Peer& peer)
@@ -47,10 +78,12 @@ namespace MphRead::Mods::Network
     void ServerMapVoting::ForgetPeer(std::uint32_t clientId) noexcept
     {
         _peerStates.erase(clientId);
+        _upload->Cancel(clientId);
     }
 
     void ServerMapVoting::Update(double now)
     {
+        _upload->Update(now);
         Tally(now);
         BroadcastVoteState(now);
     }
@@ -303,6 +336,12 @@ namespace MphRead::Mods::Network
         const std::optional<std::string> resolved = ResolveRoomKey(roomKey);
         if (!resolved.has_value())
         {
+            // Unknown here: ask the proposer for the pack. If it arrives the
+            // vote starts from the callback; if not they are told why.
+            if (_upload->Begin(peer, Runtime::StringTrim(roomKey), now))
+            {
+                return;
+            }
             _host.TellVotingPeer(peer, "no map called \"" + roomKey + "\"");
             return;
         }

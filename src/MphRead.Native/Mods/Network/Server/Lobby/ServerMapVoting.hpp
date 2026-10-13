@@ -22,6 +22,7 @@ namespace MphRead
 namespace MphRead::Mods::Network
 {
     class DedicatedServer;
+    class ServerMapUpload;
 
     // Narrow services the map-vote policy needs from the server loop.
     class ServerMapVotingHost
@@ -49,7 +50,14 @@ namespace MphRead::Mods::Network
     class ServerMapVoting final
     {
     public:
-        explicit ServerMapVoting(ServerMapVotingHost& host) noexcept;
+        explicit ServerMapVoting(ServerMapVotingHost& host);
+        ~ServerMapVoting();
+
+        // A player's game answering a request for a map the server lacks.
+        void HandleMapOffer(const std::shared_ptr<System::Net::IPEndPoint>& sender,
+            std::span<const std::uint8_t> payload, double now);
+        void HandleMapChunk(const std::shared_ptr<System::Net::IPEndPoint>& sender,
+            std::span<const std::uint8_t> payload, double now);
 
         void HandleVote(const std::shared_ptr<System::Net::IPEndPoint>& sender,
             std::span<const std::uint8_t> payload, double now);
@@ -95,6 +103,7 @@ namespace MphRead::Mods::Network
         void BroadcastVoteState(double now);
 
         ServerMapVotingHost& _host;
+        std::unique_ptr<ServerMapUpload> _upload;
         bool _voteRunning = false;
         std::string _voteRoom{};
         GameMode _voteMode;

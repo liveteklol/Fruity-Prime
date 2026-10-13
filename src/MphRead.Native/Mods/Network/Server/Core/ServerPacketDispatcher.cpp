@@ -59,6 +59,12 @@ namespace MphRead::Mods::Network
         case PacketType::MapPick:
             server.HandleMapPick(packet, now);
             break;
+        case PacketType::MapOffer:
+            server.HandleMapOffer(packet, now);
+            break;
+        case PacketType::MapChunk:
+            server.HandleMapChunk(packet, now);
+            break;
         case PacketType::HitClaim:
             server.HandleHitClaim(packet, now);
             break;

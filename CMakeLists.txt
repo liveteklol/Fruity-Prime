@@ -480,6 +480,30 @@ if(BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)
     add_executable(fruity_map_vote_rules_tests "${FRUITY_MPHREAD_ROOT}/Testing/TestMapVoteRules.cpp")
     target_compile_features(fruity_map_vote_rules_tests PRIVATE cxx_std_20)
     add_test(NAME FruityPrime.MapVoteRules COMMAND fruity_map_vote_rules_tests)
+    # The map upload is built from its own sources rather than the engine
+    # library: the test replaces the engine's map folder and room list (it needs
+    # no game files) and linking the library would pull the real ones in.
+    file(GLOB FRUITY_MAP_UPLOAD_RUNTIME CONFIGURE_DEPENDS
+        "${FRUITY_MPHREAD_ROOT}/NativeRuntime/System/*.cpp"
+        "${FRUITY_MPHREAD_ROOT}/Mods/Network/Transport/*.cpp"
+        "${FRUITY_MPHREAD_ROOT}/Mods/Network/Protocol/Codec/*.cpp")
+    list(FILTER FRUITY_MAP_UPLOAD_RUNTIME EXCLUDE REGEX "/ArchiveFile[.]cpp$")
+    add_executable(fruity_map_upload_tests
+        "${FRUITY_MPHREAD_ROOT}/Testing/TestMapUpload.cpp"
+        "${FRUITY_MPHREAD_ROOT}/Mods/Network/Server/Lobby/ServerMapUpload.cpp"
+        "${FRUITY_MPHREAD_ROOT}/Mods/Network/Session/SessionMapUpload.cpp"
+        "${FRUITY_MPHREAD_ROOT}/Mods/Network/Session/SessionConnection.cpp"
+        "${FRUITY_MPHREAD_ROOT}/Mods/Network/Server/Core/ServerPeerRegistry.cpp"
+        "${FRUITY_MPHREAD_ROOT}/NativeRuntime/OpenTK/Mathematics.cpp"
+        ${FRUITY_MAP_UPLOAD_RUNTIME})
+    target_include_directories(fruity_map_upload_tests PRIVATE "${FRUITY_MPHREAD_ROOT}")
+    target_link_libraries(fruity_map_upload_tests PRIVATE Threads::Threads ZLIB::ZLIB)
+    target_compile_features(fruity_map_upload_tests PRIVATE cxx_std_20)
+    if(FRUITY_STOP_TOKEN_OPTIONS)
+        target_compile_options(fruity_map_upload_tests PRIVATE ${FRUITY_STOP_TOKEN_OPTIONS})
+        target_link_options(fruity_map_upload_tests PRIVATE ${FRUITY_STOP_TOKEN_OPTIONS})
+    endif()
+    add_test(NAME FruityPrime.MapUpload COMMAND fruity_map_upload_tests)
     add_executable(fruity_rescued_hit_ledger_tests
         "${FRUITY_MPHREAD_ROOT}/Testing/TestRescuedHitLedger.cpp"
         "${FRUITY_MPHREAD_ROOT}/Mods/Network/Gameplay/Claims/Hit/RescuedHitLedger.cpp")

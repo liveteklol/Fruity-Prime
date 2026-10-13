@@ -111,6 +111,8 @@ namespace MphRead::Mods::Network
         static void SendChat(const std::string& text);
         static void SendVote(std::uint8_t kind, const std::string& roomKey);
         static void SendMapPick(const std::string& roomKey);
+        // The server asked for a map pack this player holds (see SessionMapUpload).
+        static void AnswerMapWant(std::span<const std::uint8_t> payload);
 
         static void AcceptSlotIntent(std::int32_t slot, IntentPacket intent);
         [[nodiscard]] static std::int64_t IntentsOutOfOrder() noexcept { return _context._replicaStream.IntentsOutOfOrder(); }
