@@ -147,7 +147,7 @@ jobs:
       # Separate archives by pinned ports, compiler and dependency recipe.
       - name: Cache vcpkg binary archives
         id: vcpkg-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
           key: native-vcpkg-windows-v2-${{ runner.arch }}-${{ steps.vcpkg.outputs.commit }}-${{ steps.vcpkg.outputs.compiler }}-${{ hashFiles('tools/ci/dependencies/windows-game.txt') }}
@@ -179,14 +179,14 @@ jobs:
       # Save before the long game build so cancellation does not lose dependencies.
       - name: Save vcpkg binary archives after install
         if: steps.vcpkg-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
           key: native-vcpkg-windows-v2-${{ runner.arch }}-${{ steps.vcpkg.outputs.commit }}-${{ steps.vcpkg.outputs.compiler }}-${{ hashFiles('tools/ci/dependencies/windows-game.txt') }}
 
       - name: Upload dependency cache diagnostics
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: vcpkg-cache-windows-${{ github.run_id }}
           retention-days: 7
@@ -258,7 +258,7 @@ jobs:
         run: sccache --show-stats
 
       - name: Upload Windows build
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: FruityPrime-cpp-windows-${{ github.run_number }}
           if-no-files-found: error
@@ -295,7 +295,7 @@ jobs:
       # Reuse one archive per pinned dependency/toolchain set, rather than per run.
       - name: Cache vcpkg binary archives
         id: native-deps-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
           key: native-deps-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.vcpkg.outputs.commit }}-${{ steps.vcpkg.outputs.compiler }}-${{ hashFiles('tools/ci/dependencies/linux.txt') }}
@@ -351,14 +351,14 @@ jobs:
 
       - name: Save native dependency cache immediately after install
         if: steps.native-deps-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
           key: native-deps-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.vcpkg.outputs.commit }}-${{ steps.vcpkg.outputs.compiler }}-${{ hashFiles('tools/ci/dependencies/linux.txt') }}
 
       - name: Upload native dependency cache diagnostics
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: native-deps-cache-linux-${{ github.run_id }}
           retention-days: 7
@@ -374,7 +374,7 @@ jobs:
         run: echo "COMPILER_CACHE_WEEK=$(date -u +%G-%V)" >> "$GITHUB_ENV"
 
       - name: Set up ccache
-        uses: hendrikmuhs/ccache-action@v1.2
+        uses: hendrikmuhs/ccache-action@v1.2.24
         with:
           key: native-ccache-${{ runner.os }}-${{ runner.arch }}-gcc-game-${{ env.COMPILER_CACHE_WEEK }}
           restore-keys: |
@@ -493,7 +493,7 @@ jobs:
         run: tar -C build/native/dist -czf build/native/FruityPrime-linux.tar.gz .
 
       - name: Upload Linux build
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: FruityPrime-cpp-linux-${{ github.run_number }}
           if-no-files-found: error
@@ -516,7 +516,7 @@ jobs:
           tools/check-dedicated-server.sh "$RUNNER_TEMP/server-x64"
 
       - name: Upload Linux dedicated server
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: FruityPrime-cpp-server-linux-x64-${{ github.run_number }}
           if-no-files-found: error
@@ -540,7 +540,7 @@ jobs:
         run: echo "COMPILER_CACHE_WEEK=$(date -u +%G-%V)" >> "$GITHUB_ENV"
 
       - name: Set up ccache
-        uses: hendrikmuhs/ccache-action@v1.2
+        uses: hendrikmuhs/ccache-action@v1.2.24
         with:
           key: native-ccache-${{ runner.os }}-${{ runner.arch }}-gcc-server-${{ env.COMPILER_CACHE_WEEK }}
           max-size: 500M
@@ -611,7 +611,7 @@ jobs:
           tools/check-dedicated-server.sh "$RUNNER_TEMP/server-arm64"
 
       - name: Upload arm64 dedicated server
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: FruityPrime-cpp-server-linux-arm64-${{ github.run_number }}
           if-no-files-found: error
@@ -644,7 +644,7 @@ jobs:
 
       - name: Cache vcpkg binary archives
         id: native-deps-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
           key: native-deps-macos-v1-${{ runner.arch }}-${{ steps.vcpkg.outputs.commit }}-${{ steps.vcpkg.outputs.compiler }}-${{ hashFiles('tools/ci/dependencies/macos.txt') }}
@@ -680,7 +680,7 @@ jobs:
 
       - name: Save macOS dependencies after install
         if: steps.native-deps-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
           key: native-deps-macos-v1-${{ runner.arch }}-${{ steps.vcpkg.outputs.commit }}-${{ steps.vcpkg.outputs.compiler }}-${{ hashFiles('tools/ci/dependencies/macos.txt') }}
@@ -691,7 +691,7 @@ jobs:
         run: echo "COMPILER_CACHE_WEEK=$(date -u +%G-%V)" >> "$GITHUB_ENV"
 
       - name: Set up ccache
-        uses: hendrikmuhs/ccache-action@v1.2
+        uses: hendrikmuhs/ccache-action@v1.2.24
         with:
           key: native-ccache-${{ runner.os }}-${{ runner.arch }}-clang-game-${{ env.COMPILER_CACHE_WEEK }}
           max-size: 500M
@@ -731,7 +731,7 @@ jobs:
         run: tar -C build/native/dist -czf build/native/FruityPrime-macos.tar.gz .
 
       - name: Upload macOS build
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: FruityPrime-cpp-macos-${{ github.run_number }}
           if-no-files-found: error

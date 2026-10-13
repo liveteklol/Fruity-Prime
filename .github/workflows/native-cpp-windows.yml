@@ -73,7 +73,7 @@ jobs:
       - name: Restore vcpkg binary cache
         id: vcpkg-cache
         continue-on-error: true
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
           key: native-vcpkg-windows-v2-${{ runner.arch }}-${{ steps.vcpkg.outputs.commit }}-${{ steps.vcpkg.outputs.compiler }}-${{ hashFiles('tools/ci/dependencies/windows-owners.txt') }}
@@ -114,7 +114,7 @@ jobs:
       - name: Save vcpkg binary cache
         if: steps.vcpkg-cache.outputs.cache-hit != 'true'
         continue-on-error: true
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
           key: native-vcpkg-windows-v2-${{ runner.arch }}-${{ steps.vcpkg.outputs.commit }}-${{ steps.vcpkg.outputs.compiler }}-${{ hashFiles('tools/ci/dependencies/windows-owners.txt') }}
@@ -163,7 +163,7 @@ jobs:
 
       - name: Upload native build diagnostics
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: native-cpp-msvc-${{ github.sha }}
           if-no-files-found: warn

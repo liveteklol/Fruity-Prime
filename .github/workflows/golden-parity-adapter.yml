@@ -112,7 +112,7 @@ jobs:
           git -C target status --short
 
       - name: Cache vcpkg binary archives
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ github.workspace }}/.cache/vcpkg/archives
           key: golden-parity-vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}
@@ -286,7 +286,7 @@ jobs:
 
       - name: Upload MSVC parity linker diagnostics
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: golden-parity-msvc-link-diagnostics-${{ github.sha }}
           path: golden-parity-msvc-diagnostics

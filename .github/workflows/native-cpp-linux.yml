@@ -59,7 +59,7 @@ jobs:
       - name: Restore apt package cache
         id: apt-cache
         continue-on-error: true
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: ${{ env.APT_CACHE_DIR }}
           key: native-apt-v1-${{ runner.os }}-${{ runner.arch }}-gcc-${{ steps.apt-deps.outputs.digest }}-${{ hashFiles('.github/workflows/native-cpp-linux.yml') }}
@@ -87,7 +87,7 @@ jobs:
       - name: Save apt package cache
         if: steps.apt-cache.outputs.cache-hit != 'true'
         continue-on-error: true
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: ${{ env.APT_CACHE_DIR }}
           key: native-apt-v1-${{ runner.os }}-${{ runner.arch }}-gcc-${{ steps.apt-deps.outputs.digest }}-${{ hashFiles('.github/workflows/native-cpp-linux.yml') }}
@@ -113,7 +113,7 @@ jobs:
       - name: Restore vcpkg binary cache
         id: vcpkg-cache
         continue-on-error: true
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
           key: native-vcpkg-v1-${{ runner.os }}-${{ runner.arch }}-gcc-${{ steps.vcpkg.outputs.commit }}
@@ -131,7 +131,7 @@ jobs:
       - name: Save vcpkg binary cache
         if: steps.vcpkg-cache.outputs.cache-hit != 'true'
         continue-on-error: true
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
           key: native-vcpkg-v1-${{ runner.os }}-${{ runner.arch }}-gcc-${{ steps.vcpkg.outputs.commit }}
@@ -139,7 +139,7 @@ jobs:
       # Object-file cache for our own sources: an unchanged translation unit
       # is not recompiled on the next push.
       - name: Set up ccache
-        uses: hendrikmuhs/ccache-action@v1.2
+        uses: hendrikmuhs/ccache-action@v1.2.24
         with:
           key: native-ccache-${{ runner.os }}-${{ runner.arch }}-gcc
           max-size: 1G
@@ -176,7 +176,7 @@ jobs:
 
       - name: Upload native build diagnostics
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: native-cpp-gcc-${{ github.sha }}
           if-no-files-found: warn

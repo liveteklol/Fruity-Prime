@@ -95,7 +95,7 @@ jobs:
       - name: Restore pinned Android SDK and NDK cache
         id: android-sdk-cache
         continue-on-error: true
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: ${{ env.ANDROID_SDK_ROOT }}
           key: native-android-sdk-v2-${{ runner.os }}-${{ runner.arch }}-cmdline-12266719-${{ hashFiles('cmake/FruityNativeConfig.cmake', '.github/workflows/native-cpp-android.yml') }}
@@ -104,7 +104,7 @@ jobs:
             native-android-sdk-v2-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Set up Android SDK command-line tools
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
         with:
           cmdline-tools-version: "12266719"
           packages: "platform-tools"
@@ -130,7 +130,7 @@ jobs:
       - name: Save pinned Android SDK and NDK cache
         if: steps.android-sdk-cache.outputs.cache-hit != 'true'
         continue-on-error: true
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: ${{ env.ANDROID_SDK_ROOT }}
           key: native-android-sdk-v2-${{ runner.os }}-${{ runner.arch }}-cmdline-12266719-${{ hashFiles('cmake/FruityNativeConfig.cmake', '.github/workflows/native-cpp-android.yml') }}
@@ -153,7 +153,7 @@ jobs:
 
       - name: Restore Android vcpkg binary cache
         id: vcpkg-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
           key: native-android-vcpkg-v1-${{ matrix.abi }}-${{ steps.vcpkg.outputs.commit }}-${{ hashFiles('.github/workflows/native-cpp-android.yml') }}
@@ -181,7 +181,7 @@ jobs:
       - name: Save Android vcpkg binary cache
         if: steps.vcpkg-cache.outputs.cache-hit != 'true'
         continue-on-error: true
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
           key: native-android-vcpkg-v1-${{ matrix.abi }}-${{ steps.vcpkg.outputs.commit }}-${{ hashFiles('.github/workflows/native-cpp-android.yml') }}
@@ -192,7 +192,7 @@ jobs:
         run: echo "COMPILER_CACHE_WEEK=$(date -u +%G-%V)" >> "$GITHUB_ENV"
 
       - name: Set up ccache
-        uses: hendrikmuhs/ccache-action@v1.2
+        uses: hendrikmuhs/ccache-action@v1.2.24
         with:
           key: native-ccache-android-${{ matrix.abi }}-${{ env.COMPILER_CACHE_WEEK }}
           max-size: 500M
@@ -267,7 +267,7 @@ jobs:
           python3 tools/qt/prepare-android.py --build-dir "build/native-android-${{ matrix.abi }}" --abi "${{ matrix.abi }}" --host "$QT_HOST_PATH" --output "build/native-android-${{ matrix.abi }}/qt-package"
 
       - name: Upload Android shared library
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: native-cpp-android-so-${{ matrix.abi }}-${{ github.sha }}
           if-no-files-found: error
@@ -276,7 +276,7 @@ jobs:
 
       - name: Upload Android native build diagnostics
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: native-cpp-android-diagnostics-${{ matrix.abi }}-${{ github.sha }}
           if-no-files-found: warn
@@ -312,7 +312,7 @@ jobs:
           java-version: "17"
 
       - name: Set up Android SDK command-line tools
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
         with:
           cmdline-tools-version: "12266719"
           packages: "platform-tools"
@@ -331,7 +331,7 @@ jobs:
             "build-tools;${ANDROID_BUILD_TOOLS}"
 
       - name: Download native ABI libraries
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           pattern: native-cpp-android-so-*
           path: native-artifacts
@@ -367,7 +367,7 @@ jobs:
           printf 'APK version: %s (%s)\n' "$version_name" "$version_code"
 
       - name: Restore stable development signing key
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.android/debug.keystore
           key: fruity-prime-native-android-debug-keystore-v1
@@ -409,7 +409,7 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v5
         with:
           gradle-version: "8.9"
 
@@ -454,7 +454,7 @@ jobs:
             || { echo "::error::this APK is not signed with the published release's key"; exit 1; }
 
       - name: Upload installable APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: FruityPrime-cpp-android-${{ github.run_number }}
           if-no-files-found: error
@@ -488,7 +488,7 @@ jobs:
           ref: ${{ inputs.checkout_ref || github.sha }}
 
       - name: Download APK
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: FruityPrime-cpp-android-${{ github.run_number }}
           path: apk
@@ -512,7 +512,7 @@ jobs:
 
       - name: Upload startup evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: android-startup-smoke-api${{ matrix.api }}-${{ github.run_number }}
           if-no-files-found: ignore
