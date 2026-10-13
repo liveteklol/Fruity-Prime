@@ -205,7 +205,7 @@ namespace MphRead.Mods.Launcher
                             break;
                         case "server_port":
                             if (Int32.TryParse(value, NumberStyles.Integer,
-                                CultureInfo.InvariantCulture, out int port))
+                                CultureInfo.InvariantCulture, out int port) && port > 0 && port <= 65535)
                             {
                                 ServerPort = port;
                             }

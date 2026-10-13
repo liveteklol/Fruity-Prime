@@ -556,8 +556,10 @@ namespace MphRead::Qt
         {
             return;
         }
+        // A row's endpoint leaves the port off when it is the default one, so
+        // a bare host has to mean that port and not zero.
         std::string host;
-        std::int32_t port = 0;
+        std::int32_t port = Network::NetConfig::DefaultPort;
         if (!ParseEndpoint(_firstLive.toStdString(), host, port))
         {
             return;

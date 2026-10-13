@@ -511,7 +511,7 @@ namespace MphRead::Mods::Launcher
                 else if (key == "server_port")
                 {
                     std::int32_t port = 0;
-                    if (Int32TryParseInvariant(value, port))
+                    if (Int32TryParseInvariant(value, port) && port > 0 && port <= 65535)
                     {
                         _serverPort = port;
                     }
