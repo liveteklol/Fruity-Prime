@@ -145,8 +145,15 @@ jobs:
           git init $root
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           git -C $root remote add origin https://github.com/microsoft/vcpkg.git
-          git -C $root fetch --depth 1 origin 07f4812200df3d3c931c0c8a6081d3b21fe2bf9f
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # A fetch that stalls is dropped after a minute under 1 kB/s and tried
+          # again, rather than holding the job for however long the network
+          # takes to give up.
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=60 -C $root fetch --depth 1 origin 07f4812200df3d3c931c0c8a6081d3b21fe2bf9f
+            if ($LASTEXITCODE -eq 0) { break }
+            if ($attempt -eq 3) { exit $LASTEXITCODE }
+            Start-Sleep -Seconds 10
+          }
           git -C $root checkout --detach FETCH_HEAD
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $env:VCPKG_ROOT = $root
@@ -298,7 +305,14 @@ jobs:
           root="${RUNNER_TEMP}/fruity-vcpkg"
           git init "$root"
           git -C "$root" remote add origin https://github.com/microsoft/vcpkg.git
-          git -C "$root" fetch --depth 1 origin 07f4812200df3d3c931c0c8a6081d3b21fe2bf9f
+          # A fetch that stalls is dropped after a minute under 1 kB/s and tried
+          # again, rather than holding the job for however long the network
+          # takes to give up (one run waited 18 minutes, then lost the connection).
+          for attempt in 1 2 3; do
+            git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=60 -C "$root" fetch --depth 1 origin 07f4812200df3d3c931c0c8a6081d3b21fe2bf9f && break
+            if [ "$attempt" = 3 ]; then exit 1; fi
+            sleep 10
+          done
           git -C "$root" checkout --detach FETCH_HEAD
           "$root/bootstrap-vcpkg.sh" -disableMetrics
           echo "root=$root" >> "$GITHUB_OUTPUT"
@@ -655,7 +669,14 @@ jobs:
           root="${RUNNER_TEMP}/fruity-vcpkg"
           git init "$root"
           git -C "$root" remote add origin https://github.com/microsoft/vcpkg.git
-          git -C "$root" fetch --depth 1 origin 07f4812200df3d3c931c0c8a6081d3b21fe2bf9f
+          # A fetch that stalls is dropped after a minute under 1 kB/s and tried
+          # again, rather than holding the job for however long the network
+          # takes to give up (one run waited 18 minutes, then lost the connection).
+          for attempt in 1 2 3; do
+            git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=60 -C "$root" fetch --depth 1 origin 07f4812200df3d3c931c0c8a6081d3b21fe2bf9f && break
+            if [ "$attempt" = 3 ]; then exit 1; fi
+            sleep 10
+          done
           git -C "$root" checkout --detach FETCH_HEAD
           "$root/bootstrap-vcpkg.sh" -disableMetrics
           echo "root=$root" >> "$GITHUB_OUTPUT"
