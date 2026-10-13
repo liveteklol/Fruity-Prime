@@ -195,8 +195,13 @@ jobs:
         uses: hendrikmuhs/ccache-action@v1.2.24
         with:
           key: native-ccache-android-${{ matrix.abi }}-${{ env.COMPILER_CACHE_WEEK }}
-          max-size: 500M
-          append-timestamp: false
+          restore-keys: |
+            native-ccache-android-${{ matrix.abi }}
+          max-size: 1G
+          append-timestamp: true
+          # Branches and pull requests restore master's cache and add nothing:
+          # one new entry per push would fill the repository's 10 GB.
+          save: ${{ github.ref_name == github.event.repository.default_branch }}
 
       - name: Install Qt Quick host and Android kit
         shell: bash
