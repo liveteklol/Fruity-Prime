@@ -158,7 +158,24 @@ jobs:
             kind=$(basename "$dir" | sed -E 's/-[0-9]+$//')
             case "$kind" in
               FruityPrime-cpp-windows)
-                ( cd "$dir" && zip -qr "$GITHUB_WORKSPACE/dist/FruityPrime-$TAG-win-x64.zip" . ) ;;
+                # FruityPrime.exe has to sit at the top of the zip. Every
+                # updater already in the field (the C# builds, v0.1-v0.10, and
+                # the first C++ ones) looks for it there, copies the unpacked
+                # directory over the install and restarts the exe it finds, so
+                # a zip with it under bin/ fails with "the package does not
+                # contain fruityprime.exe". The install tree puts the exe and
+                # the DLLs in bin/ and plugins/ and qml/ beside it; hoist bin/
+                # up one level and point qt.conf at itself instead of at "..".
+                ( cd "$dir"
+                  if [ -d bin ]; then
+                    cp -a bin/. .
+                    rm -rf bin
+                    sed -i -E 's/^Prefix[[:space:]]*=[[:space:]]*\.\.[[:space:]]*$/Prefix = ./' qt.conf
+                  fi
+                  test -f FruityPrime.exe
+                  grep -qE '^Prefix = \.$' qt.conf
+                  test -d plugins && test -d qml
+                  zip -qr "$GITHUB_WORKSPACE/dist/FruityPrime-$TAG-win-x64.zip" . ) ;;
               FruityPrime-cpp-linux)
                 cp "$dir/FruityPrime-linux.tar.gz" "dist/FruityPrime-$TAG-linux-x64.tar.gz" ;;
               FruityPrime-cpp-macos)
@@ -194,7 +211,7 @@ jobs:
           **Beta build of the C++ port.** You bring your own Metroid Prime Hunters cartridge
           dump; no game data is included here and none is downloaded.
 
-          - **Windows** -- the `win-x64` zip, run `bin\FruityPrime.exe`
+          - **Windows** -- the `win-x64` zip, run `FruityPrime.exe`
           - **Linux** -- the `linux-x64` tarball, run `bin/FruityPrime`
           - **macOS** -- the `osx-arm64` tarball, open `FruityPrime.app`
           - **Android** -- the `android` APK; it contains arm64-v8a and x86_64 native libraries
