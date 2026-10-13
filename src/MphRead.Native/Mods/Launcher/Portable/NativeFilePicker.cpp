@@ -48,6 +48,31 @@ namespace MphRead::Mods::Launcher
             return std::async(std::launch::async, std::move(function)).share();
         }
 
+#if defined(_WIN32)
+        // The game's own window, when nobody published it: the one this thread
+        // has active, else the foreground window if this process owns it.
+        // A fullscreen game window is topmost, and a dialog with no owner is
+        // not, so it opened behind the game where nobody could see it; owned
+        // by the game it is always in front.
+        [[nodiscard]] void* OwnWindow()
+        {
+            if (const HWND active = ::GetActiveWindow(); active != nullptr)
+            {
+                return active;
+            }
+            if (const HWND foreground = ::GetForegroundWindow(); foreground != nullptr)
+            {
+                DWORD process = 0;
+                ::GetWindowThreadProcessId(foreground, &process);
+                if (process == ::GetCurrentProcessId())
+                {
+                    return foreground;
+                }
+            }
+            return nullptr;
+        }
+#endif
+
         [[nodiscard]] std::string Replace(std::string text, const std::string& from, const std::string& to)
         {
             std::size_t at = 0;
@@ -152,6 +177,12 @@ namespace MphRead::Mods::Launcher
 #if defined(_WIN32)
         auto result = std::make_shared<std::promise<std::optional<std::string>>>();
         std::shared_future<std::optional<std::string>> future = result->get_future().share();
+        // Looked up here, on the thread that called, since the window a
+        // thread has active is that thread's to say.
+        if (owner == nullptr)
+        {
+            owner = OwnWindow();
+        }
         std::thread thread([result, title, description, extension, owner]
         {
             const HRESULT apartment = ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
