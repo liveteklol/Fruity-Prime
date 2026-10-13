@@ -1396,6 +1396,37 @@ namespace MphRead::Entities
             }
         }
 
+        // A Quake 3 level's trigger_hurt (a pit, a field of spikes) hurts as
+        // Quake's hurt_touch: a hit every 100 ms, every second for a SLOW one,
+        // for as long as the hunter's box is in it. A hit of 99 or more is
+        // the death the level means.
+        {
+            bool slow = false;
+            const std::int32_t damage = _health > 0
+                ? Mods::MapGen::CustomRooms::Q3HurtAt(scene().RoomId(), static_cast<Vector3>(Position), slow)
+                : 0;
+            if (damage == 0)
+            {
+                _q3HurtTimer = 0;
+            }
+            else if (_q3HurtTimer > 0)
+            {
+                --_q3HurtTimer;
+            }
+            else
+            {
+                _q3HurtTimer = slow ? 60 : 6;
+                if (damage >= 99)
+                {
+                    TakeDamage(0, DamageFlags::Death, std::nullopt, nullptr);
+                }
+                else
+                {
+                    TakeDamage(static_cast<std::uint32_t>(damage), DamageFlags::IgnoreInvuln, std::nullopt, nullptr);
+                }
+            }
+        }
+
         assert(scene().Room() != nullptr);
         RoomEntity& room = RequireReference(scene().Room());
         if (GameState::Multiplayer() && room.Meta().HasLimits)

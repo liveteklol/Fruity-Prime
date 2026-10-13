@@ -66,6 +66,11 @@ namespace MphRead::Mods::MapGen
         static constexpr std::int32_t Q3ContentsSlime = 0x10;
         [[nodiscard]] static std::int32_t Q3LiquidLevel(
             std::int32_t roomId, OpenTK::Mathematics::Vector3 feet, std::int32_t& contents);
+        // The worst trigger_hurt the hunter's box touches, as Quake's hurt_touch
+        // has it: the damage a hit does (0 for none) and whether the trigger
+        // is the SLOW kind, hurting once a second rather than ten times.
+        [[nodiscard]] static std::int32_t Q3HurtAt(
+            std::int32_t roomId, OpenTK::Mathematics::Vector3 feet, bool& slow);
         // The Quake 3 level a translated room came from, read once and kept
         // while the room is (Q3Open's); nothing for any other room.
         [[nodiscard]] static std::shared_ptr<Q3Bsp> Q3LevelBsp(std::int32_t roomId);

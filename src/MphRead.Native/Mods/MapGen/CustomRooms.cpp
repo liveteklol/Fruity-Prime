@@ -20,6 +20,7 @@
 #include "../../NativeRuntime/System/IO.hpp"
 #include "../../NativeRuntime/System/Managed.hpp"
 #include "../../NativeRuntime/System/Globalization.hpp"
+#include "../../NativeRuntime/System/Number.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -554,6 +555,89 @@ namespace MphRead::Mods::MapGen
             }
         }
 
+        // The level's trigger_hurt boxes (Quake's axes and units): a pit that
+        // kills, a floor of spikes. A brush model, so the box is its bounds.
+        struct HurtBox
+        {
+            std::array<float, 3> Low{};
+            std::array<float, 3> High{};
+            std::int32_t Damage = 5;
+            bool Slow = false;
+        };
+        std::vector<HurtBox> hurtBoxes;
+
+        void ReadHurts(const Q3Bsp& bsp)
+        {
+            hurtBoxes.clear();
+            const auto field = [](const Q3Entity& entity, const char* key) -> const std::string*
+            {
+                for (const auto& [name, value] : entity)
+                {
+                    if (Q3StringEqual{}(name, std::string(key)))
+                    {
+                        return &value;
+                    }
+                }
+                return nullptr;
+            };
+            for (const std::shared_ptr<Q3Entity>& entity : bsp.Entities())
+            {
+                if (!entity)
+                {
+                    continue;
+                }
+                const std::string* classname = field(*entity, "classname");
+                const std::string* model = field(*entity, "model");
+                if (classname == nullptr || model == nullptr || model->size() < 2 || (*model)[0] != '*'
+                    || ::MphRead::NativeRuntime::StringCompareOrdinalIgnoreCase(*classname, "trigger_hurt") != 0)
+                {
+                    continue;
+                }
+                std::int32_t index = 0;
+                std::int32_t flags = 0;
+                std::int32_t damage = 5;
+                if (!::MphRead::NativeRuntime::Int32TryParseInvariant(model->substr(1), index) || index <= 0
+                    || static_cast<std::size_t>(index) >= bsp.Models().size() || !bsp.Models()[static_cast<std::size_t>(index)])
+                {
+                    continue;
+                }
+                if (const std::string* text = field(*entity, "spawnflags"))
+                {
+                    (void)::MphRead::NativeRuntime::Int32TryParseInvariant(*text, flags);
+                }
+                // START_OFF waits for a trigger_multiple to switch it on:
+                // not read, so it stays off.
+                if ((flags & 1) != 0)
+                {
+                    continue;
+                }
+                if (const std::string* text = field(*entity, "dmg"))
+                {
+                    (void)::MphRead::NativeRuntime::Int32TryParseInvariant(*text, damage);
+                }
+                if (damage <= 0)
+                {
+                    continue;
+                }
+                const Q3Model& brushes = *bsp.Models()[static_cast<std::size_t>(index)];
+                const std::vector<float>& mins = *brushes.Mins();
+                const std::vector<float>& maxs = *brushes.Maxs();
+                if (mins.size() < 3 || maxs.size() < 3)
+                {
+                    continue;
+                }
+                HurtBox box;
+                for (std::size_t k = 0; k < 3; ++k)
+                {
+                    box.Low[k] = mins[k];
+                    box.High[k] = maxs[k];
+                }
+                box.Damage = damage;
+                box.Slow = (flags & 16) != 0;
+                hurtBoxes.push_back(box);
+            }
+        }
+
         [[nodiscard]] std::int32_t LiquidAt(float x, float y, float z)
         {
             std::int32_t contents = 0;
@@ -634,6 +718,7 @@ namespace MphRead::Mods::MapGen
             level.Lighting = Q3Import::Lighting{};
             fogVolumes.clear();
             liquidBrushes.clear();
+            hurtBoxes.clear();
             if (Q3StepHeight(roomId) > 0.0F)
             {
                 const ::MphRead::RoomMetadata* meta = ::MphRead::Metadata::GetRoomById(roomId, true);
@@ -650,6 +735,7 @@ namespace MphRead::Mods::MapGen
                                 std::vector<std::string>{*definition->SourcePath()});
                             fogVolumes = level.Lighting.Fogs;
                             ReadLiquids(*cachedLevel);
+                            ReadHurts(*cachedLevel);
                         }
                         catch (...)
                         {
@@ -741,6 +827,37 @@ namespace MphRead::Mods::MapGen
             return 1;
         }
         return LiquidAt(x, y, z + 50.0F) == 0 ? 2 : 3;
+    }
+
+    std::int32_t CustomRooms::Q3HurtAt(
+        std::int32_t roomId, OpenTK::Mathematics::Vector3 feet, bool& slow)
+    {
+        slow = false;
+        (void)Q3Open(roomId, feet);
+        if (hurtBoxes.empty())
+        {
+            return 0;
+        }
+        // The hunter's box in Quake's units and axes -- (x, y, z) is this
+        // game's (x, -z, y) -- 30 wide and 56 tall from the feet (the player
+        // box, mins -15 -15 -24, maxs 15 15 32, about its origin).
+        const float unit = Q3Convert::UnitsPerUnit;
+        const float x = feet.X * unit;
+        const float y = -feet.Z * unit;
+        const float z = feet.Y * unit;
+        std::int32_t worst = 0;
+        for (const HurtBox& box : hurtBoxes)
+        {
+            if (x + 15.0F >= box.Low[0] && x - 15.0F <= box.High[0]
+                && y + 15.0F >= box.Low[1] && y - 15.0F <= box.High[1]
+                && z + 56.0F >= box.Low[2] && z <= box.High[2]
+                && box.Damage > worst)
+            {
+                worst = box.Damage;
+                slow = box.Slow;
+            }
+        }
+        return worst;
     }
 
     std::vector<CustomRooms::FogBox> CustomRooms::Q3FogBoxes(

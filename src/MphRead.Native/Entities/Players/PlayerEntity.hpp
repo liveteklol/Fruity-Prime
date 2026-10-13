@@ -1014,6 +1014,7 @@ namespace MphRead::Entities
         float _q3PadGravity = 0.0F;
         // Frames until a Quake 3 level's lava or slime hurts again.
         std::int32_t _q3LiquidTimer = 0;
+        std::int32_t _q3HurtTimer = 0;
         // Quake's step up a stair, in a Quake 3 level's rooms (PlayerCollision).
         bool TryQ3StepUp(::OpenTK::Mathematics::Vector3 from, ::OpenTK::Mathematics::Vector3 move);
         // And Quake's air control in that flight (PM_AirMove): the speed it
