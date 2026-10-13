@@ -1461,7 +1461,38 @@ namespace MphRead::Mods::MapGen
             }
         }
 
-        if (def == nullptr || !NeedsGenerating(def))
+        if (def == nullptr)
+        {
+            return std::nullopt;
+        }
+
+        // A build that failed is remembered (failed.txt) and NeedsGenerating
+        // then says "nothing to do" so the level is not retried at every
+        // start -- which is the opposite of playable. Read what went wrong.
+        std::string failure;
+        bool failed = false;
+        if (def->Translated())
+        {
+            std::ifstream failedFile(PathFromUtf8(FailedStampPath(def)));
+            std::string stamp;
+            if (std::getline(failedFile, stamp) && stamp == TranslatorStamp(def))
+            {
+                failed = true;
+                std::getline(failedFile, failure);
+            }
+        }
+        bool unbuilt = failed || NeedsGenerating(def);
+        if (!unbuilt)
+        {
+            // Built as far as the stamps know, but the room is read from its
+            // collision file: a folder that was cleared or never written (a
+            // device whose game files moved) leaves the stamps standing and
+            // the file missing.
+            const std::string collision = PathCombine(ArchiveDirectory(def),
+                ::MphRead::NativeRuntime::ToLowerInvariant(def->Name()) + "_Collision.bin");
+            unbuilt = !FileExists(collision);
+        }
+        if (!unbuilt)
         {
             return std::nullopt;
         }
@@ -1475,8 +1506,9 @@ namespace MphRead::Mods::MapGen
 
         return def->Name()
             + " could not be built from " + file
-            + ", so there is no room to load. "
-              "The [mapgen] line above says what went wrong with it.";
+            + (failure.empty()
+                ? std::string(", so there is no room to load. The [mapgen] line above says what went wrong with it.")
+                : ": " + failure);
     }
 
     bool CustomRooms::NeedsGenerating(MapDefinition* def)
