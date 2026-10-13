@@ -3,6 +3,7 @@
 #include "Mods/Network/Server/Lobby/ServerMapVoting.hpp"
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -32,6 +33,7 @@ namespace MphRead::Mods::Network
         static constexpr double OfferSeconds = 5.0;
         static constexpr double StallResendSeconds = 1.0;
         static constexpr double StallGiveUpSeconds = 10.0;
+        static constexpr double BuildGiveUpSeconds = 180.0;
 
         explicit ServerMapUpload(ServerMapVotingHost& host) noexcept;
 
@@ -51,11 +53,12 @@ namespace MphRead::Mods::Network
         [[nodiscard]] bool Active() const noexcept { return _phase != Phase::Idle; }
 
     private:
-        enum class Phase : std::uint8_t { Idle, AwaitOffer, Receiving };
+        enum class Phase : std::uint8_t { Idle, AwaitOffer, Receiving, Building };
 
         void SendWant(std::uint32_t chunkIndex, std::uint32_t count);
         void Fail(const std::string& why);
         void Finish(double now);
+        void Complete(double now);
         void Reset();
         [[nodiscard]] std::uint32_t ChunkCount() const noexcept;
 
@@ -71,6 +74,12 @@ namespace MphRead::Mods::Network
         std::vector<bool> _have{};
         std::uint32_t _contiguous = 0;
         std::uint32_t _wantedEnd = 0;
+        // The room is made playable (its collision and node files built) on a
+        // thread of its own, so the server keeps answering while it runs.
+        std::shared_ptr<std::atomic<int>> _build{};
+        std::string _builtRoom{};
+        std::string _builtFile{};
+        double _buildStarted = 0.0;
         Arrived _arrived{};
         std::array<std::uint8_t, NetConfig::MaxPacketSize> _scratch{};
     };

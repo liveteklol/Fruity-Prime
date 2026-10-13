@@ -1040,8 +1040,11 @@ pushed at:
 4. On the last chunk the server checks the hash, stores the file as
    `maps/uploaded/<first 16 hex of the hash>.pk3` (its name, never the
    sender's), re-reads it (`ListMaps` must contain the level), rescans the map
-   folder (`CustomRooms::Rescan`, `Metadata::AppendLateRooms`) and then starts
-   the vote the player asked for.
+   folder (`CustomRooms::Rescan`, `Metadata::AppendLateRooms`), builds the room's
+   collision and node files (`CustomRooms::EnsureReady`, on a thread of its own,
+   then `WhyUnplayable` must be empty) and only then starts the vote the player
+   asked for. A level that is listed but not built rotates the match onto a room
+   the server cannot read, and every step then fails.
 
 Limits: 48 MB, one transfer at a time per server, only the proposer's own
 connection, and `-nomapupload` turns it off. Additive, so no protocol bump:

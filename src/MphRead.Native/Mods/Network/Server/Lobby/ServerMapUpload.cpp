@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <fstream>
 #include <system_error>
+#include <thread>
 
 namespace MphRead::Mods::Network
 {
@@ -170,6 +171,18 @@ namespace MphRead::Mods::Network
             Reset();
             return;
         }
+        if (_phase == Phase::Building)
+        {
+            if (_build != nullptr && _build->load() == 1)
+            {
+                Complete(now);
+            }
+            else if (now - _buildStarted > BuildGiveUpSeconds)
+            {
+                Fail("preparing " + _builtRoom + " took too long");
+            }
+            return;
+        }
         const double quiet = now - _lastProgress;
         if (_phase == Phase::AwaitOffer)
         {
@@ -215,6 +228,9 @@ namespace MphRead::Mods::Network
         _data = {};
         _have.clear();
         _roomKey.clear();
+        _builtRoom.clear();
+        _builtFile.clear();
+        _build.reset();
         _bytes = 0;
         _contiguous = 0;
         _wantedEnd = 0;
@@ -288,8 +304,54 @@ namespace MphRead::Mods::Network
             return;
         }
         _host.LogVote("received " + *resolved + " (" + std::to_string(_bytes) + " bytes) into " + file.string());
+        // Listed is not loadable: the room's collision and node files are made
+        // from the level on first use (the launcher does it when a match is
+        // about to load, the server at start), and a vote that passes before
+        // they exist rotates the match onto a room that cannot be read.
+        // Build them now, off the server's loop.
+        _builtRoom = *resolved;
+        _builtFile = file.string();
+        _buildStarted = now;
+        _lastProgress = now;
+        _data = {};
+        _have.clear();
+        _phase = Phase::Building;
+        _build = std::make_shared<std::atomic<int>>(0);
+        _host.TellVotingPeer(_peer, "received " + _builtRoom + "; preparing it");
+        std::thread([room = _builtRoom, state = _build]()
+        {
+            try
+            {
+                MapGen::CustomRooms::EnsureReady(room);
+            }
+            catch (...)
+            {
+            }
+            state->store(1);
+        }).detach();
+    }
+
+    void ServerMapUpload::Complete(double now)
+    {
+        const std::optional<std::string> why = MapGen::CustomRooms::WhyUnplayable(_builtRoom);
+        if (why.has_value())
+        {
+            std::error_code error;
+            std::filesystem::remove(_builtFile, error);
+            try
+            {
+                MapGen::CustomRooms::Rescan();
+                (void)::MphRead::Metadata::AppendLateRooms();
+            }
+            catch (...)
+            {
+            }
+            Fail(_builtRoom + " cannot be played here: " + *why);
+            return;
+        }
+        _host.LogVote("built " + _builtRoom);
         const PeerHandle peer = _peer;
-        const std::string room = *resolved;
+        const std::string room = _builtRoom;
         Reset();
         if (_arrived != nullptr)
         {

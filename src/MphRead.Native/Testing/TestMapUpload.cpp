@@ -30,11 +30,22 @@ namespace
 {
     std::string g_mapDirectory;
     std::set<std::string> g_rooms;
+    bool g_unplayable = false;
+    int g_built = 0;
 }
 
 namespace MphRead::Mods::MapGen
 {
     const std::string& CustomRooms::MapDirectory() { return g_mapDirectory; }
+    void CustomRooms::EnsureReady(const std::string&)
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(150));
+        ++g_built;
+    }
+    std::optional<std::string> CustomRooms::WhyUnplayable(const std::string&)
+    {
+        return g_unplayable ? std::optional<std::string>("its files were not built") : std::nullopt;
+    }
     void CustomRooms::Rescan()
     {
         g_rooms.clear();
@@ -268,6 +279,19 @@ int main(int, char** argv)
         Check(rig.Arrived && rig.ArrivedRoom == "TESTLEVEL", "clean: the room is listed and the vote can start");
         Check(!Uploaded(rig).empty() && ReadFile(Uploaded(rig)) == data, "clean: stored file is byte-identical");
         Check(!rig.Upload.Active(), "clean: transfer is finished");
+        Check(g_built == 1, "clean: the room's files were built before the vote started");
+    }
+
+    {   // The room cannot be built: the vote must not start and the file must go.
+        Rig rig(base + "/unplayable");
+        WritePack(rig.ClientDir() + "/arena.pk3", 50000);
+        g_unplayable = true;
+        g_mapDirectory = rig.ServerDir();
+        Check(rig.Upload.Begin(rig.Peer, "TESTLEVEL", rig.Now), "unplayable: server asks");
+        rig.Pump(20);
+        g_unplayable = false;
+        Check(!rig.Arrived && !rig.Upload.Active(), "unplayable: no vote is started");
+        Check(Uploaded(rig).empty(), "unplayable: the file is removed");
     }
 
     {   // One chunk in five lost on the way to the server.
