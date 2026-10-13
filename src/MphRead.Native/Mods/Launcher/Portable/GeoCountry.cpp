@@ -1,5 +1,6 @@
 #include "GeoCountry.hpp"
 
+#include "../../DebugLog.hpp"
 #include "../../../NativeRuntime/System/AssetLoader.hpp"
 #include "../../../NativeRuntime/System/Managed.hpp"
 #include "../../../NativeRuntime/System/Streams.hpp"
@@ -127,11 +128,21 @@ namespace MphRead::Mods::Launcher::Gui
             _codes = std::move(codes);
             _first = std::move(first);
             _index = std::move(index);
+            DebugLog::Line("geo", "country table loaded: " + std::to_string(_first.size()) + " ranges");
         }
-        catch (const std::exception&)
+        catch (const std::exception& ex)
         {
             // A build without the table shows the neutral badge rather than
-            // no browser.
+            // no browser -- and says why in the debug log, since a badge
+            // with no flag looks the same whatever the reason.
+            DebugLog::Line("geo", std::string("country table not loaded: ") + ex.what());
+            // The first look can come before the game's files are in place (on
+            // Android they are copied as the app starts): try again a few
+            // times rather than for ever or never.
+            if (++_failures < 3)
+            {
+                _tried = false;
+            }
         }
     }
 }

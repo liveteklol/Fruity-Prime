@@ -27,5 +27,6 @@ namespace MphRead::Mods::Launcher::Gui
         static inline std::vector<std::uint8_t> _index{};
         static inline std::vector<std::string> _codes{};
         static inline bool _tried = false;
+        static inline int _failures = 0;
     };
 }
