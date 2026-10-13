@@ -711,6 +711,47 @@ namespace MphRead::Mods::MapGen
             WriteLine("  " + Runtime::ToString(layerFaces) + " faces of moving shaders' layers laid over the rest");
         }
 
+        if ((skyBox || !cloudMaterials.empty()) && skyMin.X <= skyMax.X && !bsp->Models().empty())
+        {
+            // Sky surfaces cover only part of a level (Q3DM6 has none under
+            // its platforms), so a box fitted to them cuts through the
+            // middle of the level. Quake's sky is at infinity: the box takes
+            // in the whole level, with room to spare.
+            const Q3Model& world = RequireReference(bsp->Models().front());
+            const std::vector<float>& wMin = RequireReference(world.Mins());
+            const std::vector<float>& wMax = RequireReference(world.Maxs());
+            const Vector3 levelMin(wMin[0], wMin[1], wMin[2]);
+            const Vector3 levelMax(wMax[0], wMax[1], wMax[2]);
+            skyMin = ComponentMin(skyMin, levelMin);
+            skyMax = ComponentMax(skyMax, levelMax);
+            // As much room as the vertices' range at this scale allows.
+            const float reach = 8.0F * std::pow(2.0F, static_cast<float>(def->ScaleFactor())) * 0.995F;
+            const auto fits = [&](Vector3 low, Vector3 high)
+            {
+                for (std::int32_t corner = 0; corner < 8; ++corner)
+                {
+                    const Vector3 world = ToWorld(Vector3(
+                        (corner & 1) != 0 ? high.X : low.X,
+                        (corner & 2) != 0 ? high.Y : low.Y,
+                        (corner & 4) != 0 ? high.Z : low.Z), unit);
+                    if (std::fabs(world.X) > reach || std::fabs(world.Y) > reach || std::fabs(world.Z) > reach)
+                    {
+                        return false;
+                    }
+                }
+                return true;
+            };
+            for (const float share : {8.0F, 16.0F, 32.0F, 0.0F})
+            {
+                const Vector3 margin = share > 0.0F ? Divide(Subtract(skyMax, skyMin), share) : Vector3(0.0F, 0.0F, 0.0F);
+                if (share == 0.0F || fits(Subtract(skyMin, margin), Add(skyMax, margin)))
+                {
+                    skyMin = Subtract(skyMin, margin);
+                    skyMax = Add(skyMax, margin);
+                    break;
+                }
+            }
+        }
         if (skyBox && skyMin.X <= skyMax.X)
         {
             AddSkyBox(map.get(), skyMin, skyMax, unit, skyMaterials, textureSizes);

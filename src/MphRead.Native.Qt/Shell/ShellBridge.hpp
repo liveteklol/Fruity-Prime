@@ -176,6 +176,7 @@ namespace MphRead::Qt
         double _mapsProgress = 0.0;
         QString _mapsStage;
         bool _mapsSeenBuilding = false;
+        std::int32_t _mapsListVersion = 0;
         Actions _actions;
         QString _page;
         QString _startupState = QStringLiteral("FrontReady");

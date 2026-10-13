@@ -116,6 +116,9 @@ namespace MphRead::Mods::MapGen
         // A pack fetched outside StartGenerating (the Download maps page):
         // TakeDownloaded gives it as the others.
         static void NoteDownloaded(std::int32_t count);
+        // Counts the times the list of maps changed while the job ran: the launcher refreshes its rooms when it
+        // moves, with no restart.
+        [[nodiscard]] static std::int32_t ListVersion();
         // Lists the map folder again, for maps that arrived since. Not while
         // anything else walks the list: the launcher's thread, between jobs.
         static void Rescan();

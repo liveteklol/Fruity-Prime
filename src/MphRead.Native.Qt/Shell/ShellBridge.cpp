@@ -95,6 +95,13 @@ namespace MphRead::Qt
             _mapsStage = stage;
             emit mapsChanged();
         }
+        // Maps fetched at start are listed as soon as they arrive, before
+        // they are built: no restart to see them.
+        if (const std::int32_t version = ::MphRead::Mods::MapGen::CustomRooms::ListVersion(); version != _mapsListVersion)
+        {
+            _mapsListVersion = version;
+            GameFilesChanged();
+        }
         // Done: the maps just built are listed with the others.
         if (building)
         {

@@ -22,6 +22,8 @@
 #include "../../NativeRuntime/System/Globalization.hpp"
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <thread>
 #include <cmath>
 #include <array>
@@ -186,6 +188,8 @@ namespace
     struct CustomRoomsState final
     {
         std::shared_ptr<CustomRooms::DefinitionList> Definitions{};
+        // Lists replaced by Rescan, kept alive for whoever still walks them.
+        std::vector<std::shared_ptr<CustomRooms::DefinitionList>> Retired{};
         std::int32_t FirstId = -1;
         std::recursive_mutex Lock;
         std::string MapDirectory;
@@ -1076,7 +1080,27 @@ namespace MphRead::Mods::MapGen
             std::mutex Lock;
             CustomRooms::GenerationProgress Progress;
             std::int32_t Downloaded = 0;
+            // Maps listed again since the launcher last looked.
+            std::int32_t ListVersion = 0;
+            // StartGenerating asked while the job ran: it goes round again.
+            bool Again = false;
         };
+
+        // Matches about to load a map not built yet: the background job
+        // leaves the build lock to them (EnsureReady).
+        std::atomic<std::int32_t>& UrgentBuilds()
+        {
+            static std::atomic<std::int32_t> count{0};
+            return count;
+        }
+
+        void YieldToUrgent()
+        {
+            while (UrgentBuilds().load() > 0)
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(25));
+            }
+        }
 
         GenerationState& Generation()
         {
@@ -1101,6 +1125,7 @@ namespace MphRead::Mods::MapGen
             const std::lock_guard<std::mutex> guard(state.Lock);
             if (state.Progress.Running)
             {
+                state.Again = true;
                 return;
             }
             state.Progress = GenerationProgress{0, 0, {}, true};
@@ -1121,25 +1146,42 @@ namespace MphRead::Mods::MapGen
                         state.Progress.Done = done;
                         state.Progress.Current = pack;
                     });
+                if (arrived > 0)
+                {
+                    // Listed at once, so the new maps are built and offered
+                    // without the game being started again (ListVersion).
+                    Rescan();
+                }
                 GenerationState& state = Generation();
                 const std::lock_guard<std::mutex> guard(state.Lock);
-                state.Downloaded += arrived;
                 state.Progress = GenerationProgress{0, 0, {}, true, false};
+                if (arrived > 0)
+                {
+                    ++state.ListVersion;
+                }
             }
             catch (...)
             {
             }
-            try
+            for (;;)
             {
-                GenerateMissing();
+                try
+                {
+                    GenerateMissing();
+                }
+                catch (...)
+                {
+                }
+                GenerationState& done = Generation();
+                const std::lock_guard<std::mutex> guard(done.Lock);
+                if (!done.Again)
+                {
+                    done.Progress.Running = false;
+                    done.Progress.Current.clear();
+                    break;
+                }
+                done.Again = false;
             }
-            catch (...)
-            {
-            }
-            GenerationState& done = Generation();
-            const std::lock_guard<std::mutex> guard(done.Lock);
-            done.Progress.Running = false;
-            done.Progress.Current.clear();
         }).detach();
     }
 
@@ -1150,6 +1192,13 @@ namespace MphRead::Mods::MapGen
         const std::int32_t arrived = state.Downloaded;
         state.Downloaded = 0;
         return arrived;
+    }
+
+    std::int32_t CustomRooms::ListVersion()
+    {
+        GenerationState& state = Generation();
+        const std::lock_guard<std::mutex> guard(state.Lock);
+        return state.ListVersion;
     }
 
     void CustomRooms::NoteDownloaded(std::int32_t count)
@@ -1163,7 +1212,12 @@ namespace MphRead::Mods::MapGen
     {
         CustomRoomsState& state = State();
         std::lock_guard<std::recursive_mutex> guard(state.Lock);
-        state.Definitions = LoadDefinitions();
+        std::shared_ptr<DefinitionList> fresh = LoadDefinitions();
+        if (state.Definitions)
+        {
+            state.Retired.push_back(std::move(state.Definitions));
+        }
+        state.Definitions = std::move(fresh);
     }
 
     CustomRooms::GenerationProgress CustomRooms::Progress()
@@ -1175,21 +1229,29 @@ namespace MphRead::Mods::MapGen
 
     void CustomRooms::EnsureReady(const std::string& roomName)
     {
-        const DefinitionList* definitions = nullptr;
+        DefinitionList definitions;
         try
         {
-            definitions = &Definitions();
+            definitions = Definitions();
         }
         catch (...)
         {
             return;
         }
-        for (const std::shared_ptr<MapDefinition>& def : *definitions)
+        for (const std::shared_ptr<MapDefinition>& def : definitions)
         {
             if (::MphRead::NativeRuntime::StringCompareOrdinalIgnoreCase(def->Name(), roomName) != 0)
             {
                 continue;
             }
+            // First in the queue: the background job lets go of the lock
+            // after the map it is on, and builds nothing else until this
+            // one is.
+            struct Urgent
+            {
+                Urgent() { UrgentBuilds().fetch_add(1); }
+                ~Urgent() { UrgentBuilds().fetch_sub(1); }
+            } urgent;
             const std::lock_guard<std::recursive_mutex> guard(BuildLock());
             try
             {
@@ -1210,10 +1272,10 @@ namespace MphRead::Mods::MapGen
 
     void CustomRooms::GenerateMissing()
     {
-        const DefinitionList* definitions = nullptr;
+        DefinitionList definitions;
         try
         {
-            definitions = &Definitions();
+            definitions = Definitions();
         }
         catch (...)
         {
@@ -1223,7 +1285,7 @@ namespace MphRead::Mods::MapGen
         // The lock is held one map at a time, so a match about to load a map
         // (EnsureReady) waits for the one being built, not for all of them.
         std::vector<std::shared_ptr<MapDefinition>> missing;
-        for (const std::shared_ptr<MapDefinition>& def : *definitions)
+        for (const std::shared_ptr<MapDefinition>& def : definitions)
         {
             try
             {
@@ -1251,6 +1313,8 @@ namespace MphRead::Mods::MapGen
                 const std::lock_guard<std::mutex> guard(state.Lock);
                 state.Progress.Current = def->InGameName().value_or(def->Name());
             }
+            // A match waiting on a map goes first (EnsureReady).
+            YieldToUrgent();
             try
             {
                 const std::lock_guard<std::recursive_mutex> building(BuildLock());

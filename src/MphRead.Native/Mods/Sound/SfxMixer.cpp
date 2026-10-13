@@ -732,23 +732,34 @@ namespace MphRead::Mods::Sound
 
     void SfxMixer::Sample(const Buffer& buffer, double cursor, float& left, float& right)
     {
+        // Cubic (Catmull-Rom) through the four frames round the cursor: the
+        // cartridge's samples are 8 to 22 kHz, and a straight line between
+        // two of them -- what played them before -- is what made short
+        // effects such as the Lockjaw's sound muffled and grainy beside the
+        // rest.
         std::int32_t frame = DotNetDoubleToInt32(cursor);
         if (frame < 0)
         {
             frame = 0;
         }
-        const std::int32_t next = std::min(frame + 1, buffer.Frames - 1);
-        const float blend = static_cast<float>(cursor - frame);
-        if (buffer.Channels == 2)
+        const std::int32_t last = buffer.Frames - 1;
+        const std::int32_t before = std::max(frame - 1, 0);
+        const std::int32_t next = std::min(frame + 1, last);
+        const std::int32_t after = std::min(frame + 2, last);
+        const float t = static_cast<float>(cursor - frame);
+        const std::size_t channels = static_cast<std::size_t>(buffer.Channels == 2 ? 2 : 1);
+        const auto cubic = [&](std::size_t channel)
         {
-            left = Lerp(buffer.Data[static_cast<std::size_t>(frame) * 2],
-                buffer.Data[static_cast<std::size_t>(next) * 2], blend);
-            right = Lerp(buffer.Data[static_cast<std::size_t>(frame) * 2 + 1],
-                buffer.Data[static_cast<std::size_t>(next) * 2 + 1], blend);
-            return;
-        }
-        left = right = Lerp(buffer.Data[static_cast<std::size_t>(frame)],
-            buffer.Data[static_cast<std::size_t>(next)], blend);
+            const float p0 = buffer.Data[static_cast<std::size_t>(before) * channels + channel];
+            const float p1 = buffer.Data[static_cast<std::size_t>(frame) * channels + channel];
+            const float p2 = buffer.Data[static_cast<std::size_t>(next) * channels + channel];
+            const float p3 = buffer.Data[static_cast<std::size_t>(after) * channels + channel];
+            return p1 + 0.5F * t * (p2 - p0
+                + t * (2.0F * p0 - 5.0F * p1 + 4.0F * p2 - p3
+                + t * (3.0F * (p1 - p2) + p3 - p0)));
+        };
+        left = cubic(0);
+        right = channels == 2 ? cubic(1) : left;
     }
 
     float SfxMixer::Lerp(float a, float b, float t)
