@@ -14,6 +14,8 @@
 #include "../MphRead.Native/Mods/Launcher/Portable/GameFiles.hpp"
 #include "../MphRead.Native/Mods/Launcher/Portable/LauncherPrefs.hpp"
 #include "../MphRead.Native/Mods/Launcher/Portable/NativeFilePicker.hpp"
+#include "../MphRead.Native/Mods/MapGen/CustomRooms.hpp"
+#include "../MphRead.Native/Metadata/Metadata.hpp"
 
 #include <QtCore/QMetaObject>
 #include <QtCore/QTimer>
@@ -28,6 +30,8 @@
 #include <exception>
 #include <memory>
 #include <mutex>
+#include <set>
+#include <string>
 #include <string_view>
 #include <thread>
 
@@ -161,9 +165,19 @@ namespace MphRead::Droid
         // background, once per process, and the deck reloads when done.
         void RenderMissingPreviews(bool ready)
         {
-            static std::atomic<bool> started{false};
-            if (!ready || started.exchange(true)) return;
-            if (Mods::ThumbnailGenerator::MissingThumbnails().empty()) return;
+            // Again whenever a room without a preview turns up that was not
+            // tried before (a map just downloaded), never twice for the same
+            // room: one that will not render must not be redrawn at every
+            // return to the front screen. Called on the Qt thread only.
+            static std::atomic<bool> running{false};
+            static std::set<std::string> tried;
+            if (!ready || running.load()) return;
+            bool fresh = false;
+            for (const std::string& room : Mods::ThumbnailGenerator::MissingThumbnails())
+            {
+                fresh = tried.insert(room).second || fresh;
+            }
+            if (!fresh || running.exchange(true)) return;
             auto task = Mods::ThumbnailHost::RenderMissingAsync([](const std::string& line)
             {
                 __android_log_write(ANDROID_LOG_INFO, "FruityPrime", line.c_str());
@@ -175,6 +189,7 @@ namespace MphRead::Droid
                 {
                     __android_log_write(ANDROID_LOG_WARN, "FruityPrime", error.what());
                 }
+                running.store(false);
                 OnQt([] { BuildRoomList(Mods::Launcher::GameFiles::Ready()); });
             }).detach();
         }
@@ -249,7 +264,27 @@ int main(int argc, char** argv)
     actions.Resume = [] { OnActivity([callback = resume](auto& activity) { if (callback) callback(); else activity.OnBackPressed(); }); };
     actions.Leave = [] { OnActivity([callback = leave](auto& activity) { if (callback) callback(); else activity.EndMatch(); }); };
     actions.QuitMatch = [] { OnActivity([callback = quit](auto& activity) { if (callback) callback(); else activity.Finish(); }); };
-    actions.GameFilesChanged = [] { MphRead::Droid::QuickFront(); };
+    actions.GameFilesChanged = []
+    {
+        // As the desktop does: a pack that arrived is read, its rooms added to
+        // the game's lists (made once, when it started) and built; the front
+        // screen then lists them. Without this the pack sat on the disk and
+        // the Custom set stayed empty until the next start.
+        try
+        {
+            if (MphRead::Mods::MapGen::CustomRooms::TakeDownloaded() > 0)
+            {
+                MphRead::Mods::MapGen::CustomRooms::Rescan();
+                (void)MphRead::Metadata::AppendLateRooms();
+                MphRead::Mods::MapGen::CustomRooms::StartGenerating();
+            }
+        }
+        catch (const std::exception& error)
+        {
+            __android_log_write(ANDROID_LOG_WARN, "FruityPrime", error.what());
+        }
+        MphRead::Droid::QuickFront();
+    };
     bridge = std::make_unique<Bridge>(std::move(actions));
     bridge->SetStartup(QStringLiteral("BootingQt"));
     // Every Quick window the view creates is watched for its first frame.
