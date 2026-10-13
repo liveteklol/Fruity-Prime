@@ -50,10 +50,10 @@ env:
 jobs:
   phase4_legacy_gl_audit:
     name: phase4 / legacy OpenGL static audit
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout C++ source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ inputs.checkout_ref || github.sha }}
       - name: Reject display lists and immediate vertex submission
@@ -61,10 +61,10 @@ jobs:
 
   phase5_shader_interface_audit:
     name: phase5 / shader interface static audit
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout C++ source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ inputs.checkout_ref || github.sha }}
       - name: Reject built-in vertex attributes and a drifted shader interface
@@ -72,10 +72,10 @@ jobs:
 
   phase9_frontend_gl_audit:
     name: phase9 / frontend OpenGL static audit
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout C++ source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ inputs.checkout_ref || github.sha }}
       - name: Reject direct OpenGL in the renderer frontend
@@ -83,10 +83,10 @@ jobs:
 
   phase11_gl_boundary_audit:
     name: phase11 / OpenGL dependency classification
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout C++ source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ inputs.checkout_ref || github.sha }}
       - name: Reject unclassified OpenGL dependencies
@@ -96,10 +96,10 @@ jobs:
 
   phase26_rhi_isolation_audit:
     name: phase26 / RHI backend isolation
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout C++ source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ inputs.checkout_ref || github.sha }}
       - name: Native GL and Vulkan only inside their backends
