@@ -6,8 +6,8 @@
 #include "Mods/Headless.hpp"
 #include "Mods/MapPick.hpp"
 #include "Mods/Multiplayer/TeamVisuals.hpp"
-#include "Mods/Network/NetMatchEnd.hpp"
-#include "Mods/Network/NetSession.hpp"
+#include "Mods/Network/Session/NetMatchEnd.hpp"
+#include "Mods/Network/Session/NetSession.hpp"
 #if defined(MPHREAD_SHELL)
 #include "Mods/Launcher/Shell.hpp"
 #endif

@@ -8,7 +8,7 @@
 #include "MapGen/MapDefinition.hpp"
 #include "../Metadata/Metadata.hpp"
 #include "../Metadata/Rooms.hpp"
-#include "Network/NetLaunch.hpp"
+#include "Mods/Network/Integration/Launch/NetLaunch.hpp"
 #include "../Read.hpp"
 #include "../NativeRuntime/System/Encoding.hpp"
 #include "../NativeRuntime/System/IO.hpp"

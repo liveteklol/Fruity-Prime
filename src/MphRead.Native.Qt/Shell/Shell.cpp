@@ -31,8 +31,8 @@
 #include "../../MphRead.Native/Mods/Launcher/Portable/GameFiles.hpp"
 #include "../../MphRead.Native/Mods/Launcher/Portable/LauncherPrefs.hpp"
 #include "../../MphRead.Native/Mods/Launcher/Portable/MatchStart.hpp"
-#include "../../MphRead.Native/Mods/Network/NetHostSession.hpp"
-#include "../../MphRead.Native/Mods/Network/NetSession.hpp"
+#include "Mods/Network/Integration/Launch/NetHostSession.hpp"
+#include "Mods/Network/Session/NetSession.hpp"
 #include "../../MphRead.Native/Mods/PauseMenu.hpp"
 #include "../../MphRead.Native/Mods/Render/UiOverlay.hpp"
 #include "../../MphRead.Native/Mods/ThumbnailGenerator.hpp"
@@ -887,6 +887,11 @@ namespace MphRead::Mods::Launcher::Gui
         }
         g_endMatch = true;
         g_pending = WithRoomKey(*g_played, std::move(roomKey));
+    }
+
+    void Shell::LaunchOnStart(LaunchPlan plan)
+    {
+        g_pending = std::move(plan);
     }
 
     void Shell::PointerMoved(double x, double y)

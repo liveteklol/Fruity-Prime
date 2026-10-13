@@ -1,6 +1,8 @@
 # Opponents that move instead of teleporting
 
-Code: `Mods/Network/NetSmoothing.cs`. Protocol 7.
+Code: `src/MphRead.Native/Mods/Network/Gameplay/Replication/NetSmoothing.{cpp,hpp}`.
+The shared playout-clock protocol began in protocol 7; current gameplay tracks
+reuse the same clock without changing the wire layout.
 
 ## The fault
 
@@ -35,8 +37,61 @@ past everything that has arrived, it is pinned and the puppet holds.
 |---|---|
 | `Record(frame, states)` | called from `NetSession.HandleSnapshot`, so what is buffered is exactly what the authority said — which is also what its own rewind history holds under that number |
 | `Tick()` | `NetHooks.AfterSimulation`, once a simulation frame, before anything reads a position |
-| `Sample(slot)` | `NetPlayerBridge.RestoreSnapshotPosition` |
+| `Sample(slot)` | `NetPlayerBridge.ApplyState` applies the remote display pose; `RestoreSnapshotPosition` keeps client-side simulation and collision on the latest authority position |
+| `SampleForm(slot)` | `NetPlayerBridge.ApplyState` applies the remote form transition at the same read frame as the puppet position and holds its native morph/unmorph clip at that sampled phase; the owner's predicted clip stays on the local simulation clock |
+| `SampleTrackedPosition(slot, sequence)` | remote visual tracks such as bomb draw poses and their visible lifetime |
 | `AckPoint()` | `NetPlayerBridge.CaptureIntent` |
+
+The same playout clock also drives remote form-animation direction/progress and
+moving bomb presentation. `ApplyState` samples the remote display pose and
+form from one read frame after simulation; the earlier snapshot-position
+restore is only for client-side simulation/collision and does not feed the
+display. The sampled form is applied before converting the sampled pose through
+the entity's form-specific origin, so a stable morph/unmorph commit cannot
+shift the actor by one form's coordinate offset. Remote Morph/Unmorph clips are
+held at the sampled phase each simulation tick, so native playback cannot run
+ahead of the remote pose or bomb tracks. The local owner's input starts the
+native clip immediately. Authority transition progress does not seek or pause
+the owner's clip. If a stable authority form arrives while the local
+Morph/Unmorph clip is still active, `OwnerFormPredictionPolicy` defers that
+correction until the native transition ends; the server continues to own the
+form used for authoritative gameplay.
+On a client using this presentation path, a relayed Morph input edge is not
+replayed into the puppet controls: replicated form state owns when that
+transition starts, using the latest snapshot until the playout ring can be
+sampled. The authority/host and `-nointerp` paths keep their existing immediate
+input behavior. The buffered presentation path applies its sampled transition
+even if native playback finished early; the latest-snapshot path retains the
+completed-transition protection for delayed authoritative state.
+When a stable form sample reaches the buffered read point, its form bit is
+applied immediately instead of passing through the latest-snapshot
+reconciliation grace; that grace would otherwise leave the displayed form
+behind the same clock that already completed its animation.
+Weavel keeps its separate turret lifecycle policy, while its morph/unmorph
+clip phase and stable-form commit follow that clock too. A stable buffered
+sample finalizes Weavel's displayed form immediately; the 90-frame transition
+stall policy is only the latest-snapshot fallback before the presentation ring
+can be sampled. Turret presence, health, and position still come from the
+authority. Discrete attack animations start from
+replicated press edges (including server-bot intent), then advance in the
+native simulation; they are not replayed by rewinding gameplay input. Bomb
+gameplay position remains the latest owner-reported coordinate, bomb damage
+and detonation remain owner/authority decisions, and projectile spawn origins
+still come from the fired-shot event. Smoothing a displayed actor or object
+must not recalculate an attack's origin from that display pose.
+
+When packet loss leaves a hole at the playout frame, `Sample` and `SampleForm`
+bracket the read point with the nearest received authority frames. They do not
+fall forward to the newest unsmoothed state. Slot/life boundaries still stop
+sampling, and a movement step over four units is held at the near position.
+Remote player culling `NodeRef` is derived from the displayed world position
+after sampling because it is local room state, not a replicated field. The
+network placement path resolves it from that position instead of trusting a
+portal walk whose active portal may have changed between snapshots.
+A later draw-time attempt to share the body's map-part visibility gate with
+its shadow made remote bots disappear in human play and was reverted.
+Shadow-only and missing-body behavior still need human visual acceptance after
+a revised fix.
 
 The read point advances one per frame and is steered toward `newest - Delay` by
 a twentieth of the error — which closes half of any gap in fourteen frames at a
@@ -90,8 +145,9 @@ both wrong in the first version:
   buffering is one where a player will notice something whatever is done, and
   paying for it in rewind depth is the wrong place.
 
-`-nointerp` turns it off; `-relayedpuppets` turns it off along with the snapshot
-owning puppet positions at all, which is the full protocol-6 arm.
+Interpolation is on by default; `-nointerp` turns it off for a run.
+`-relayedpuppets` also turns it off and makes relayed intents own puppet
+positions, which is the full protocol-6 arm.
 
 ## Prerequisite: the snapshot owns the puppet
 

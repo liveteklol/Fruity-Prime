@@ -1,14 +1,15 @@
 #include "AimCheck.hpp"
-#include "../Network/ServerSim.hpp"
+#include "Mods/Network/Server/Match/ServerSim.hpp"
+#include "Mods/Network/Session/NetSession.hpp"
 #include "../../Entities/Players/PlayerEntity.hpp"
 #include "../../GameState.hpp"
 #include "../../Scene.hpp"
 #include "../../NativeRuntime/System/ExceptionText.hpp"
 #include "../Input/HostTouch.hpp"
 #include "../Render/FrameTiming.hpp"
-#include "../Network/NetPlayerBridge.hpp"
-#include "../Network/NetPlayerLifecycle.hpp"
-#include "../Network/NetHooks.hpp"
+#include "Mods/Network/Gameplay/Player/NetPlayerBridge.hpp"
+#include "Mods/Network/Gameplay/Player/NetPlayerLifecycle.hpp"
+#include "Mods/Network/Integration/Hooks/NetHooks.hpp"
 #include <chrono>
 #include <cstdlib>
 #include <cmath>
@@ -37,7 +38,8 @@ namespace MphRead::Mods::Diagnostics
         int result = 1;
         try
         {
-            if (!sim.Start(room, GameMode::Battle, 4, [](auto) {}, [] {}))
+            if (!sim.Start(room, GameMode::Battle, 4, [](auto) {}, [] {},
+                    Network::MakeNetSessionServerSimulationPort()))
                 throw std::runtime_error("asset-backed scene could not start");
             auto roster = Network::RosterPacket::Create();
             roster.MatchId = 1; roster.AuthorityEpoch = 1; roster.Revision = 1; roster.Count = 4;
@@ -370,7 +372,7 @@ namespace MphRead::Mods::Diagnostics
                     && OpenTK::Mathematics::Equal(facing, remote._facingVector), "4slot camera projection has no second Follow");
                 const auto target = remote.CameraInfo()->Position + OpenTK::Mathematics::Multiply(remote._gunVec1, Fixed::ToFloat(remote.Values().AimDistance));
                 check(OpenTK::Mathematics::Equal(target, remote._aimPosition), "post-camera target uses actual camera position");
-                const auto accepted = Network::NetSession::RemoteIntents[slot].Aim;
+                const auto accepted = Network::NetSession::RemoteIntent(static_cast<std::size_t>(slot)).Aim;
                 for (int fault = 0; fault < 6; ++fault)
                 {
                     auto invalid = intent;
@@ -382,7 +384,7 @@ namespace MphRead::Mods::Diagnostics
                     if (fault == 4) ++invalid.MatchId;
                     if (fault == 5) ++invalid.AuthorityEpoch;
                     Network::NetSession::AcceptSlotIntent(slot, invalid);
-                    check(OpenTK::Mathematics::Equal(accepted, Network::NetSession::RemoteIntents[slot].Aim),
+                    check(OpenTK::Mathematics::Equal(accepted, Network::NetSession::RemoteIntent(static_cast<std::size_t>(slot)).Aim),
                         "4slot duplicate/reorder/generation/life/stream rejects changed aim");
                 }
                 Network::NetPlayerBridge::NoteSpawn(slot);

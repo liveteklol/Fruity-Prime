@@ -4,7 +4,7 @@
 
 #include "../Formats/Collision.hpp"
 #include "../Formats/Entity.hpp"
-#include "../Mods/Network/DemoPlayback.hpp"
+#include "Mods/Network/Replay/DemoPlayback.hpp"
 #include "../Messaging.hpp"
 #include "../Read.hpp"
 #include "../Renderer.hpp"

@@ -55,36 +55,39 @@
 #include "MapGen/Q3Bsp.hpp"
 #include "MapGen/Q3Convert.hpp"
 #include "NativeRuntime/System/ExceptionText.hpp"
-#include "Network/DedicatedServer.hpp"
-#include "Network/DemoInfo.hpp"
-#include "Network/HealthSimulationTest.hpp"
-#include "Network/HitRig.hpp"
-#include "Network/LocalServer.hpp"
-#include "Network/MapAudit.hpp"
-#include "Network/MapRotation.hpp"
-#include "Network/MechanicsDump.hpp"
-#include "Network/NetCheckClient.hpp"
-#include "Network/NetConnectCommand.hpp"
-#include "Network/NetDiagnostics.hpp"
-#include "Network/NetHooks.hpp"
-#include "Network/NetHitClaims.hpp"
-#include "Network/NetHitPrediction.hpp"
-#include "Network/NetPlayerBridge.hpp"
-#include "Network/HitLocation.hpp"
-#include "Network/NetLag.hpp"
+#include "Mods/Network/Server/Core/DedicatedServer.hpp"
+#include "Mods/Network/Replay/DemoInfo.hpp"
+#include "Mods/Network/Testing/Combat/HealthSimulationTest.hpp"
+#include "Mods/Network/Bots/ServerBots.hpp"
+#include "Mods/Network/Testing/Pickups/PowerUpSimulationTest.hpp"
+#include "Mods/Network/Testing/Combat/HitRig.hpp"
+#include "Mods/Network/Server/Core/LocalServer.hpp"
+#include "Mods/Network/Testing/Maps/MapAudit.hpp"
+#include "Mods/Network/Server/Match/MapRotation.hpp"
+#include "Mods/Network/Diagnostics/MechanicsDump.hpp"
+#include "Mods/Network/Testing/Harness/NetCheckClient.hpp"
+#include "Mods/Network/Integration/Launch/NetConnectCommand.hpp"
+#include "Mods/Network/Diagnostics/NetDiagnostics.hpp"
+#include "Mods/Network/Integration/Hooks/NetHooks.hpp"
+#include "Mods/Network/Gameplay/Claims/Hit/NetHitClaims.hpp"
+#include "Mods/Network/Gameplay/Combat/NetHitPrediction.hpp"
+#include "Mods/Network/Gameplay/Player/NetPlayerBridge.hpp"
+#include "Mods/Network/Gameplay/Combat/HitLocation.hpp"
+#include "Mods/Network/Transport/NetLag.hpp"
 #include "MapGen/MapDefinition.hpp"
-#include "Network/NetMaster.hpp"
-#include "Network/NetSmoothing.hpp"
-#include "Network/NetStatus.hpp"
-#include "Network/NetUnlagged.hpp"
-#include "Network/SpireAltPoseCheck.hpp"
+#include "Mods/Network/Discovery/NetMaster.hpp"
+#include "Mods/Network/Gameplay/Replication/NetSmoothing.hpp"
+#include "Mods/Network/Discovery/NetStatus.hpp"
+#include "Mods/Network/Gameplay/Combat/NetUnlagged.hpp"
+#include "Mods/Network/Testing/Combat/SpireAltPoseCheck.hpp"
 #include "Diagnostics/WeavelAltFormCheck.hpp"
 #include "Diagnostics/AimCheck.hpp"
-#include "Network/DialancheCombatCheck.hpp"
-#include "Network/NetCombatCheck.hpp"
+#include "Mods/Network/Testing/Combat/DialancheCombatCheck.hpp"
+#include "Mods/Network/Testing/Combat/NetCombatCheck.hpp"
+#include "Mods/Network/Testing/Lobby/NetLobbyTest.hpp"
 #include "Diagnostics/LockjawEnemyCheck.hpp"
-#include "Network/ServerSimCheck.hpp"
-#include "Network/WeaponDps.hpp"
+#include "Mods/Network/Testing/Simulation/ServerSimCheck.hpp"
+#include "Mods/Network/Testing/Combat/WeaponDps.hpp"
 #include "Render/Crosshair.hpp"
 #include "Render/FrameTiming.hpp"
 #include "Render/FrameTimingCheck.hpp"
@@ -1763,6 +1766,20 @@ namespace MphRead::Mods
         server.FriendlyFire(::HasFlag(args, "friendlyfire"));
         server.ShadowFreeze(!::HasFlag(args, "noshadowfreeze"));
         server.AffinityWeapons(::HasFlag(args, "affinityweapons"));
+        // -bots N [-botlevel L]: the game's own AI in the top N slots.
+        if (const std::optional<std::string> bots = ValueAfter(args, "bots"); bots.has_value())
+        {
+            std::int32_t count = 0;
+            std::int32_t level = Network::ServerBots::DefaultLevel;
+            if (const std::optional<std::string> botLevel = ValueAfter(args, "botlevel"); botLevel.has_value())
+            {
+                static_cast<void>(Int32TryParseCurrentCulture(*botLevel, level));
+            }
+            if (Int32TryParseCurrentCulture(*bots, count))
+            {
+                server.Bots(count, level);
+            }
+        }
         server.AllowMapVotes(!::HasFlag(args, "novote"));
         server.AutoUpdate(true);
         // Whether this server will also open *extra* matches, on ports of its
@@ -1881,6 +1898,19 @@ namespace MphRead::Mods
             healthRoom.has_value())
         {
             SetExitCode(Network::HealthSimulationTest::Run(*healthRoom));
+            return true;
+        }
+
+        if (const std::optional<std::string> powerUpRoom = ValueAfter(args, "powerupsimtest");
+            powerUpRoom.has_value())
+        {
+            SetExitCode(Network::PowerUpSimulationTest::Run(*powerUpRoom));
+            return true;
+        }
+
+        if (::HasFlag(args, "netlobbytest"))
+        {
+            SetExitCode(Network::NetLobbyTest::Run());
             return true;
         }
 
@@ -2478,13 +2508,23 @@ namespace MphRead::Mods
             {
                 rejoinAt = parsedRejoin;
             }
-            Network::NetCheckClient::ShowWindow = ::HasFlag(args, "hudshots");
-            Network::NetCheckClient::Headless = ::HasFlag(args, "headless") && !Network::NetCheckClient::ShowWindow;
+            const bool showHudWindow = ::HasFlag(args, "hudshots");
+            Network::NetCheckClient::SetShowWindow(showHudWindow);
+            if (::HasFlag(args, "ai"))
+            {
+                std::int32_t aiLevel = Network::ServerBots::DefaultLevel;
+                if (const std::optional<std::string> value = ValueAfter(args, "ai"); value.has_value())
+                {
+                    static_cast<void>(Int32TryParseCurrentCulture(*value, aiLevel));
+                }
+                Network::NetCheckClient::SetAiLevel(aiLevel);
+            }
+            Network::NetCheckClient::SetHeadless(::HasFlag(args, "headless") && !showHudWindow);
             const std::optional<std::string> mapVote = ValueAfter(args, "mapvote");
             std::int32_t mapVoteRow = -1;
             if (mapVote.has_value() && Int32TryParseCurrentCulture(*mapVote, mapVoteRow))
             {
-                Network::NetCheckClient::MapVoteRow = std::max(0, mapVoteRow);
+                Network::NetCheckClient::SetMapVoteRow(std::max(0, mapVoteRow));
             }
             const int color = ValueAfter(args, "recolor").has_value()
                 ? ParseRecolor(args)

@@ -23,9 +23,12 @@
 #include "../../Strings.hpp"
 #include "../../Metadata/Metadata.hpp"
 #include "../../Metadata/Weapons.hpp"
-#include "../../Mods/Network/NetHooks.hpp"
-#include "../../Mods/Network/NetHealthSync.hpp"
-#include "../../Mods/Network/NetPlayerBridge.hpp"
+#include "Mods/Network/Integration/Hooks/NetHooks.hpp"
+#include "Mods/Network/Gameplay/Pickups/NetItemState.hpp"
+#include "Mods/Network/Gameplay/Pickups/NetPowerUpPrediction.hpp"
+#include "Mods/Network/Gameplay/Pickups/NetPowerUps.hpp"
+#include "Mods/Network/Domain/PowerUps.hpp"
+#include "Mods/Network/Gameplay/Player/NetPlayerBridge.hpp"
 #include "../../Mods/Multiplayer/MapResourceRules.hpp"
 #include "../../Sound/Sfx.hpp"
 #include "../../Utility/Rng.hpp"
@@ -1611,7 +1614,12 @@ namespace MphRead::Entities
         {
             std::shared_ptr<ItemInstanceEntity> itemPtr = enumerator.Current();
             ItemInstanceEntity& item = RequireReference(itemPtr);
-            if (!Mods::Network::NetHealthSync::OwnsPickup(item) || item.DespawnTimer() == 0)
+            if (item.DespawnTimer() == 0)
+            {
+                continue;
+            }
+            const Mods::Network::PickupRoute route = Mods::Network::NetItemState::Route(*this, item);
+            if (route == Mods::Network::PickupRoute::None)
             {
                 continue;
             }
@@ -1647,6 +1655,14 @@ namespace MphRead::Entities
                     _soundSource.PlayFreeSfx(sfx);
                 }
             };
+
+            if (route == Mods::Network::PickupRoute::Claim)
+            {
+                // Shown taken and running here now; the authority's answer
+                // confirms it or takes it back (NetPowerUpPrediction).
+                Mods::Network::NetPowerUpPrediction::Predict(*this, item);
+                continue;
+            }
 
             bool pickedUp = false;
             const ItemType itemType = item.ItemType();
@@ -1703,38 +1719,17 @@ namespace MphRead::Entities
                 PickUpWeapon(itemType);
                 break;
             case ItemType::DoubleDamage:
-                pickedUp = true;
-                _timeSincePickup = 0;
-                _doubleDmgTimer = 900 * 2;
-                if (IsMainPlayer())
-                {
-                    _soundSource.PlayFreeSfx(SfxId::DOUBLE_DAMAGE_POWER_UP);
-                    UpdateDoubleDamageSfx(0, true);
-                    UpdateDoubleDamageSpeed(1);
-                }
-                break;
             case ItemType::Cloak:
-                pickedUp = true;
-                _timeSincePickup = 0;
-                _cloakTimer = 900 * 2;
-                _flags2 |= PlayerFlags2::Cloaking;
-                if (IsMainPlayer())
-                {
-                    _soundSource.PlayFreeSfx(SfxId::CLOAK_POWER_UP);
-                    UpdateCloakSfx(0, true);
-                }
-                break;
             case ItemType::Deathalt:
                 pickedUp = true;
-                _timeSincePickup = 0;
-                _deathaltTimer = 900 * 2;
-                if (!IsAltForm() && !IsMorphing())
+                if (route == Mods::Network::PickupRoute::Authority)
                 {
-                    static_cast<void>(TrySwitchForms(true));
+                    // Granted, recorded and published (NetPowerUps).
+                    Mods::Network::NetPowerUps::GrantContact(*this, itemType);
                 }
-                if (IsMainPlayer())
+                else
                 {
-                    _soundSource.PlayFreeSfx(SfxId::DOUBLE_DAMAGE_POWER_UP);
+                    GrantItemEffect(itemType, Mods::Network::PowerUpFrames);
                 }
                 break;
             case ItemType::EnergyTank:
@@ -1802,6 +1797,116 @@ namespace MphRead::Entities
                 Mods::WorldEvents::NotePickup(*this);
                 item.OnPickedUp(this);
             }
+        }
+    }
+
+    void PlayerEntity::GrantItemEffect(ItemType type, std::uint16_t frames, bool announce)
+    {
+        if (frames == 0)
+        {
+            return;
+        }
+        switch (type)
+        {
+        case ItemType::DoubleDamage:
+            _timeSincePickup = 0;
+            _doubleDmgTimer = frames;
+            if (IsMainPlayer())
+            {
+                if (announce)
+                {
+                    _soundSource.PlayFreeSfx(SfxId::DOUBLE_DAMAGE_POWER_UP);
+                }
+                UpdateDoubleDamageSfx(0, true);
+                UpdateDoubleDamageSpeed(1);
+            }
+            break;
+        case ItemType::Cloak:
+            _timeSincePickup = 0;
+            _cloakTimer = frames;
+            _flags2 |= PlayerFlags2::Cloaking;
+            if (IsMainPlayer())
+            {
+                if (announce)
+                {
+                    _soundSource.PlayFreeSfx(SfxId::CLOAK_POWER_UP);
+                }
+                UpdateCloakSfx(0, true);
+            }
+            break;
+        case ItemType::Deathalt:
+            _timeSincePickup = 0;
+            _deathaltTimer = frames;
+            if (!IsAltForm() && !IsMorphing())
+            {
+                static_cast<void>(TrySwitchForms(true));
+            }
+            if (IsMainPlayer() && announce)
+            {
+                _soundSource.PlayFreeSfx(SfxId::DOUBLE_DAMAGE_POWER_UP);
+            }
+            break;
+        default:
+            break;
+        }
+    }
+
+    void PlayerEntity::SetItemEffectFrames(ItemType type, std::uint16_t frames)
+    {
+        switch (type)
+        {
+        case ItemType::DoubleDamage:
+            if (frames == 0 && _doubleDmgTimer > 0 && IsMainPlayer())
+            {
+                UpdateDoubleDamageSfx(0, false);
+                if (_doubleDmgEffect)
+                {
+                    RequireReference(_scene).UnlinkEffectEntry(_doubleDmgEffect);
+                    _doubleDmgEffect.reset();
+                }
+            }
+            _doubleDmgTimer = frames;
+            break;
+        case ItemType::Cloak:
+            if (frames > 0)
+            {
+                _cloakTimer = frames;
+                _flags2 |= PlayerFlags2::Cloaking;
+            }
+            else if (TestFlag(_flags2, PlayerFlags2::Cloaking))
+            {
+                _cloakTimer = 0;
+                _flags2 &= ~PlayerFlags2::Cloaking;
+                _targetAlpha = 1.0F;
+                _soundSource.PlayFreeSfx(SfxId::CLOAK_OFF);
+                if (IsMainPlayer())
+                {
+                    UpdateCloakSfx(0, false);
+                }
+            }
+            break;
+        case ItemType::Deathalt:
+            _deathaltTimer = frames;
+            break;
+        default:
+            break;
+        }
+    }
+
+    std::uint16_t PlayerEntity::ItemEffectFrames(ItemType type) const noexcept
+    {
+        switch (type)
+        {
+        case ItemType::DoubleDamage:
+            return _doubleDmgTimer;
+        case ItemType::Cloak:
+            // Trace's stand-still camouflage counts in the same timer; only the
+            // item's cloak is a power-up.
+            return TestFlag(_flags2, PlayerFlags2::Cloaking) ? _cloakTimer : std::uint16_t{ 0 };
+        case ItemType::Deathalt:
+            return _deathaltTimer;
+        default:
+            return 0;
         }
     }
 

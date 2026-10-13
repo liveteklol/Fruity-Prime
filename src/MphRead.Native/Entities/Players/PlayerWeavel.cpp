@@ -3,7 +3,7 @@
 #include "../../Scene.hpp"
 #include "../../Mods/Gameplay/NativeGameplayClock.hpp"
 #include "../../NativeRuntime/System/Managed.hpp"
-#include "../../Mods/Network/NetLog.hpp"
+#include "Mods/Network/Diagnostics/NetLog.hpp"
 
 #include <string>
 
@@ -220,6 +220,14 @@ namespace MphRead::Entities
         {
             _halfturret->Die(); // no merge of authority HP during replica reconciliation
         }
+    }
+
+    void PlayerEntity::ModFinalizeWeavelPresentationForm(bool desiredAlt)
+    {
+        if (_hunter != Hunter::Weavel) return;
+        _weavelReplicaTransition.Close();
+        _weavelAltLife = desiredAlt;
+        FinalizeWeavelForm(desiredAlt);
     }
 
 }

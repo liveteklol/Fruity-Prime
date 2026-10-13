@@ -2,8 +2,8 @@
 #include "../../Scene.hpp"
 #include "../../Mods/InputSettings.hpp"
 #include <tuple>
-#include "../../Mods/Network/NetSession.hpp"
-#include "../../Mods/Network/NetHooks.hpp"
+#include "Mods/Network/Session/NetSession.hpp"
+#include "Mods/Network/Integration/Hooks/NetHooks.hpp"
 #include <algorithm>
 #include <cmath>
 

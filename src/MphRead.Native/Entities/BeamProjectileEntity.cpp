@@ -4,8 +4,8 @@
 
 #include "../Mods/Combat/BeamObstacleTrace.hpp"
 #include "../Mods/Combat/SyluxMuzzleGuard.hpp"
-#include "../Mods/Network/NetHitClaims.hpp"
-#include "../Mods/Network/NetUnlagged.hpp"
+#include "Mods/Network/Gameplay/Claims/Hit/NetHitClaims.hpp"
+#include "Mods/Network/Gameplay/Combat/NetUnlagged.hpp"
 #include "../Features.hpp"
 #include "../GameState.hpp"
 #include "../MemoryArrays.hpp"
@@ -13,16 +13,16 @@
 #include "../Metadata/SoundMeta.hpp"
 #include "../Metadata/Weapons.hpp"
 #include "../Messaging.hpp"
-#include "../Mods/Network/NetDamage.hpp"
-#include "../Mods/Network/HitLocation.hpp"
-#include "../Mods/Network/NetPlayerBridge.hpp"
+#include "Mods/Network/Gameplay/Combat/NetDamage.hpp"
+#include "Mods/Network/Gameplay/Combat/HitLocation.hpp"
+#include "Mods/Network/Gameplay/Player/NetPlayerBridge.hpp"
 #include "../Mods/Headless.hpp"
-#include "../Mods/Network/NetHitPrediction.hpp"
-#include "../Mods/Network/NetLog.hpp"
-#include "../Mods/Network/ContinuousWeaponPhase.hpp"
-#include "../Mods/Network/NetPlayerLifecycle.hpp"
-#include "../Mods/Network/NetSession.hpp"
-#include "../Mods/Network/NetShotDiagnostics.hpp"
+#include "Mods/Network/Gameplay/Combat/NetHitPrediction.hpp"
+#include "Mods/Network/Diagnostics/NetLog.hpp"
+#include "Mods/Network/Gameplay/Weapons/ContinuousWeaponPhase.hpp"
+#include "Mods/Network/Gameplay/Player/NetPlayerLifecycle.hpp"
+#include "Mods/Network/Session/NetSession.hpp"
+#include "Mods/Network/Diagnostics/NetShotDiagnostics.hpp"
 #include "../Mods/Multiplayer/TeamLayout.hpp"
 #include "../Read.hpp"
 #include "../Scene.hpp"
@@ -692,8 +692,7 @@ namespace MphRead::Entities
             }
             if (Mods::Network::NetLog::Enabled())
             {
-                ::MphRead::NativeRuntime::IncrementInPlace(
-                    ManagedAt(Mods::Network::NetDamage::PlayerChecks, Index(player.SlotIndex())));
+                Mods::Network::NetDamageMetrics::RecordPlayerCheck(player.SlotIndex());
             }
             const bool hasHalfturret = player.Hunter() == Hunter::Weavel
                 && TestFlag(player.Flags2(), PlayerFlags2::Halfturret);
@@ -774,10 +773,8 @@ namespace MphRead::Entities
                 Mods::Network::NetDamage::NotePlayerOverlap(_owner.get(), player);
                 if (Mods::Network::NetLog::Enabled())
                 {
-                    ::MphRead::NativeRuntime::IncrementInPlace(
-                        ManagedAt(Mods::Network::NetDamage::PlayerOverlaps, Index(player.SlotIndex())));
-                    ::MphRead::NativeRuntime::IncrementInPlace(
-                        ManagedAt(Mods::Network::NetDamage::PlayerAccepted, Index(player.SlotIndex())));
+                    Mods::Network::NetDamageMetrics::RecordPlayerOverlap(player.SlotIndex());
+                    Mods::Network::NetDamageMetrics::RecordPlayerAccepted(player.SlotIndex());
                 }
                 minDist = playerRes.Distance;
                 anyRes = playerRes;
@@ -787,8 +784,7 @@ namespace MphRead::Entities
             }
             else if (hitPlayer && Mods::Network::NetLog::Enabled())
             {
-                ::MphRead::NativeRuntime::IncrementInPlace(
-                    ManagedAt(Mods::Network::NetDamage::PlayerOverlaps, Index(player.SlotIndex())));
+                Mods::Network::NetDamageMetrics::RecordPlayerOverlap(player.SlotIndex());
             }
 
             if (hasHalfturret && _owner.get() != playerTurret.get())
@@ -1885,16 +1881,16 @@ namespace MphRead::Entities
         {
             namespace Net = Mods::Network;
             const std::int32_t slot = firingPlayer->SlotIndex();
-            const bool remoteSlot = slot >= 0 && slot < static_cast<std::int32_t>(Net::NetSession::RemoteIntents.size());
+            const bool remoteSlot = slot >= 0 && slot < static_cast<std::int32_t>(Net::NetSession::RemotePlayerSlots);
             // NetFrame advances before input and Spawn. The owner's intent is
             // captured on that same step; a remote intent supplies its own
             // frame plus the number of local steps since it arrived.
-            phase = Net::NetSession::ContinuousPhase.Resolve(slot, RequireReference(scene).FrameCount(),
+            phase = Net::SharedContinuousWeaponPhase().Resolve(slot, RequireReference(scene).FrameCount(),
                 Net::NetSession::Active() && !firingPlayer->IsBot(),
                 Net::NetSession::LocalSlot() >= 0 && slot == Net::NetSession::LocalSlot(),
                 Net::NetSession::NetFrame(),
-                remoteSlot && Net::NetSession::RemoteIntentValid[static_cast<std::size_t>(slot)],
-                remoteSlot ? Net::NetSession::RemoteIntents[static_cast<std::size_t>(slot)].Frame : 0U,
+                remoteSlot && Net::NetSession::HasRemoteIntent(slot),
+                remoteSlot ? Net::NetSession::RemoteIntent(static_cast<std::size_t>(slot)).Frame : 0U,
                 remoteSlot ? Net::NetSession::RemoteIntentAge(slot) : std::numeric_limits<std::uint32_t>::max(),
                 sharedPhase);
         }
@@ -2140,6 +2136,8 @@ namespace MphRead::Entities
             beamRef.ModContinuousPhase = phase;
             beamRef.ModHasSharedContinuousPhase = sharedPhase;
             Mods::Network::NetPlayerLifecycle::StampProjectile(beamRef, parent);
+            beamRef.ModDoubleDamage = TestFlag(spawnFlags, BeamSpawnFlags::DoubleDamage)
+                || (parent != nullptr && parent->ModDoubleDamage);
             beamRef._beam = weapon.Beam;
             beamRef._beamKind = weapon.BeamKind;
             if (preHit && i == 0)
@@ -2317,11 +2315,7 @@ namespace MphRead::Entities
 
             if (beamRef._beam == BeamType::ShockCoil && RequireReference(owner).Type == EntityType::Player)
             {
-                ::MphRead::NativeRuntime::IncrementInPlace(Mods::Network::NetDamage::ShockCoilSpawned);
-                if (beamRef._target)
-                {
-                    ::MphRead::NativeRuntime::IncrementInPlace(Mods::Network::NetDamage::ShockCoilAcquired);
-                }
+                Mods::Network::NetDamageMetrics::RecordShockCoil(beamRef._target != nullptr);
             }
             if (Mods::Network::NetSession::Active() && TestFlag(weapon.Flags, WeaponFlags::Continuous))
             {

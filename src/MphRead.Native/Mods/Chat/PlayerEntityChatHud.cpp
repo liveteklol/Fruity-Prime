@@ -3,7 +3,7 @@
 #include "../../Entities/Players/PlayerEntity.hpp"
 #include "../../Features.hpp"
 #include "../../Scene.hpp"
-#include "../Network/NetProtocol.hpp"
+#include "Mods/Network/Protocol/NetProtocol.hpp"
 #include "ChatFont.hpp"
 #include "../../NativeRuntime/System/Managed.hpp"
 

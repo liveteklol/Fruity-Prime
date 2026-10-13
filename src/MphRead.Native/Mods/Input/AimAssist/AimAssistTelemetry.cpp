@@ -3,7 +3,7 @@
 #include "AimAssistDebug.hpp"
 #include "../AimInputSourceTracker.hpp"
 #include "../../SpectatorMode.hpp"
-#include "../../Network/NetSession.hpp"
+#include "Mods/Network/Session/NetSession.hpp"
 #include "../../../Entities/Players/PlayerEntity.hpp"
 #include "../../../Formats/Enums.hpp"
 #include "../../../NativeRuntime/System/AppDomain.hpp"

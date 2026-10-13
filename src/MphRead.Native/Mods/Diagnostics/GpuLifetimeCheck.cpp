@@ -8,7 +8,7 @@
 #include "../../NativeRuntime/Rhi/SceneBackend.hpp"
 #include "../../Renderer.hpp"
 #include "../../Scene.hpp"
-#include "../Network/NetLaunch.hpp"
+#include "Mods/Network/Integration/Launch/NetLaunch.hpp"
 #include "../../NativeRuntime/System/ProcessMemory.hpp"
 
 #include <algorithm>

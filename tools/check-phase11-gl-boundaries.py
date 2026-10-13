@@ -26,8 +26,8 @@ DIAGNOSTICS = {
     'Mods/Diagnostics/GpuLifetimeCheck.cpp',
     'Mods/MapGen/AltFormProbe.cpp',
     'Mods/ScreenCapture.cpp', 'Mods/ThumbnailCapture.cpp', 'Mods/ThumbnailCapture.hpp',
-    'Mods/Network/MapAudit.cpp', 'Mods/Network/NetCheckClient.cpp',
-    'Mods/Network/WeaponDps.cpp',
+    'Mods/Network/Testing/Maps/MapAudit.cpp', 'Mods/Network/Testing/Harness/NetCheckClient.cpp',
+    'Mods/Network/Testing/Combat/WeaponDps.cpp',
 }
 
 def category(path):

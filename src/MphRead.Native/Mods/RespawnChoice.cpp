@@ -7,9 +7,9 @@
 
 #include "../Entities/Players/PlayerEntity.hpp"
 #include "../Formats/Types.hpp"
-#include "Network/DemoClip.hpp"
-#include "Network/NetSession.hpp"
-#include "Network/PlayerColors.hpp"
+#include "Mods/Network/Replay/DemoClip.hpp"
+#include "Mods/Network/Session/NetSession.hpp"
+#include "Mods/Network/Gameplay/Player/PlayerColors.hpp"
 #include "../NativeRuntime/System/Managed.hpp"
 
 #include <cstddef>
@@ -57,7 +57,7 @@ namespace MphRead::Mods
             {
                 std::shared_ptr<Entities::PlayerEntity> thirdMain = Entities::PlayerEntity::Main();
                 const std::int32_t slot = RequireReference(thirdMain).SlotIndex();
-                return Network::PlayerColors::Choice.at(static_cast<std::size_t>(slot));
+                return Network::PlayerColors::ChoiceFor(slot);
             }
         }
         return Launcher::LauncherPrefs::LastColor();
@@ -122,10 +122,10 @@ namespace MphRead::Mods
         }
         if (RequireReference(player).SlotIndex() >= 0
             && RequireReference(player).SlotIndex()
-                < static_cast<std::int32_t>(Network::PlayerColors::Choice.size()))
+                < static_cast<std::int32_t>(Network::PlayerColors::SlotCount()))
         {
             const std::int32_t slot = RequireReference(player).SlotIndex();
-            Network::PlayerColors::Choice.at(static_cast<std::size_t>(slot)) = color;
+            Network::PlayerColors::SetChoice(slot, color);
         }
         if (Network::NetSession::Active())
         {

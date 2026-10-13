@@ -23,6 +23,9 @@
 #include <chrono>
 #include <cmath>
 #include <csignal>
+#ifdef _MSC_VER
+#include <intrin.h>
+#endif
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -201,7 +204,11 @@ namespace
     void DebugBreak()
     {
 #ifndef NDEBUG
+#ifdef _MSC_VER
+        __debugbreak();
+#else
         std::raise(SIGTRAP);
+#endif
 #endif
     }
 

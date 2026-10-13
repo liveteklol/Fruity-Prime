@@ -245,13 +245,35 @@ def run_case(name, out_dir, timeout, allow_first_frame_retry=True):
         and "startup_timeout flags=3 reason=Qt never presented a frame" in log
         and bool(pid)
     )
-    if retryable_first_frame:
+    # A clean API 35 emulator can sometimes stall before the initial QML
+    # status notification on its first process launch after APK install.
+    # This is distinct from the frame-present retry above: QML/native/front
+    # have NOT been proven ready, so keep the failed first attempt as
+    # diagnostics and require a completely successful second cold launch.
+    retryable_first_qml = (
+        name == "normal"
+        and allow_first_frame_retry
+        and failures == [
+            "missing marker qml_status_ready",
+            "missing marker native_create_ok",
+            "missing marker front_published",
+            "missing marker first_qt_frame_presented",
+        ]
+        and "activity_on_create sdk=35 device=Google/sdk_gphone" in log
+        and "startup_timeout flags=0 reason=the menus never became ready" in log
+        and bool(pid)
+    )
+    if retryable_first_frame or retryable_first_qml:
         for suffix in ("logcat.txt", "screen.raw"):
             source = os.path.join(out_dir, "%s-%s" % (name, suffix))
             preserved = os.path.join(out_dir, "%s-attempt1-%s" % (name, suffix))
             if os.path.exists(source):
                 os.replace(source, preserved)
-        print("RETRY %s: first Qt frame was not presented after successful native/front startup" % name)
+        if retryable_first_qml:
+            print("RETRY normal: API 35 emulator's first launch never reported QML READY; "
+                  "attempt 1 saved for diagnosis")
+        else:
+            print("RETRY %s: first Qt frame was not presented after successful native/front startup" % name)
         adb("shell", "rm", "-f", MARKER, check=False)
         adb("shell", "setprop", PROPERTY, "0", check=False)
         return run_case(name, out_dir, timeout, allow_first_frame_retry=False)

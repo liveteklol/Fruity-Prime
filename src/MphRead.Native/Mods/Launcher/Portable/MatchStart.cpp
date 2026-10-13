@@ -10,9 +10,9 @@
 #include "../../../Menu.hpp"
 #include "../../../Renderer.hpp"
 #include "../../MapGen/CustomRooms.hpp"
-#include "../../Network/DemoPlayback.hpp"
-#include "../../Network/NetLaunch.hpp"
-#include "../../Network/NetSession.hpp"
+#include "Mods/Network/Replay/DemoPlayback.hpp"
+#include "Mods/Network/Integration/Launch/NetLaunch.hpp"
+#include "Mods/Network/Session/NetSession.hpp"
 
 #include <algorithm>
 #include <cstddef>

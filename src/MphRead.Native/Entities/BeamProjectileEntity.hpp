@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../Mods/Network/NetShotDiagnostics.hpp"
+#include "Mods/Network/Diagnostics/NetShotDiagnostics.hpp"
 
 #include "../Formats/CollisionDetection.hpp"
 #include "../Formats/Culling.hpp"
@@ -145,6 +145,10 @@ namespace MphRead::Entities
         // projectile left with, on the shooter's own machine; 0 for none.
         // What a hit claim names its shot by.
         std::uint32_t ModShotSequence = 0;
+        // Launched with its shooter's double damage: what a hit claim for it
+        // says (HitClaimPacket::FlagDoubled), for the authority to hold
+        // against the double damage it granted.
+        bool ModDoubleDamage = false;
         // A remote player's shot drawn on a third machine: the ack of the
         // intent that fired it, which is the shooter's own ModLaunchFrame for
         // the same shot (diagnostic only -- Mods.Network.HitLocation).

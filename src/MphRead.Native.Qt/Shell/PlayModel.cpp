@@ -10,14 +10,14 @@
 #include "../../MphRead.Native/Mods/Launcher/Portable/LauncherPrefs.hpp"
 #include "../../MphRead.Native/Mods/Launcher/Portable/LaunchPlan.hpp"
 #include "../../MphRead.Native/Mods/Launcher/Portable/NativeFilePicker.hpp"
-#include "../../MphRead.Native/Mods/Network/DemoFile.hpp"
-#include "../../MphRead.Native/Mods/Network/DemoLibrary.hpp"
-#include "../../MphRead.Native/Mods/Network/DemoPlayback.hpp"
-#include "../../MphRead.Native/Mods/Network/MapVote.hpp"
-#include "../../MphRead.Native/Mods/Network/NetLaunch.hpp"
-#include "../../MphRead.Native/Mods/Network/NetMaster.hpp"
-#include "../../MphRead.Native/Mods/Network/NetSession.hpp"
-#include "../../MphRead.Native/Mods/Network/NetStatus.hpp"
+#include "Mods/Network/Replay/DemoFile.hpp"
+#include "Mods/Network/Replay/DemoLibrary.hpp"
+#include "Mods/Network/Replay/DemoPlayback.hpp"
+#include "Mods/Network/UI/Voting/MapVote.hpp"
+#include "Mods/Network/Integration/Launch/NetLaunch.hpp"
+#include "Mods/Network/Discovery/NetMaster.hpp"
+#include "Mods/Network/Session/NetSession.hpp"
+#include "Mods/Network/Discovery/NetStatus.hpp"
 #include "../../MphRead.Native/NativeRuntime/System/Globalization.hpp"
 #include "../../MphRead.Native/NativeRuntime/System/Number.hpp"
 #include "../../MphRead.Native/NativeRuntime/System/Tasks.hpp"
@@ -215,6 +215,7 @@ namespace MphRead::Qt
     void PlayModel::Rebuild()
     {
         stopPolling();
+        ++_generation;
         _servers.clear();
         emit serversChanged();
         _asked = _replied = _live = 0;
@@ -385,14 +386,20 @@ namespace MphRead::Qt
 
     void PlayModel::reloadServers()
     {
+        ++_generation;
         _servers.clear();
         _replied = 0;
         _live = 0;
+        _firstLive.clear();
         emit serversChanged();
         if (UseSample)
         {
             for (const Sample& sample : Samples)
             {
+                if (sample.Ping < 0)
+                {
+                    continue;
+                }
                 QVariantMap row;
                 row.insert(QStringLiteral("name"), QString::fromUtf8(sample.Name));
                 row.insert(QStringLiteral("endpoint"), QString::fromUtf8(sample.Endpoint));
@@ -417,13 +424,14 @@ namespace MphRead::Qt
         SetNote(Q("Asking " + Launcher::LauncherPrefs::MasterHost() + "..."), TextDim);
         const QPointer<PlayModel> self(this);
         const std::weak_ptr<int> lifetime = _lifetime;
-        Runtime::TaskRun([self, lifetime]()
+        const int generation = _generation;
+        Runtime::TaskRun([self, lifetime, generation]()
         {
             const Network::MasterListResult result = Network::NetMasterClient::Query(
                 Launcher::LauncherPrefs::MasterHost(), Launcher::LauncherPrefs::MasterPort());
-            Post(self, lifetime, [result](PlayModel& model)
+            Post(self, lifetime, [generation, result](PlayModel& model)
             {
-                if (model._finished || model._face != 0)
+                if (model._finished || model._face != 0 || generation != model._generation)
                 {
                     return;
                 }
@@ -450,31 +458,33 @@ namespace MphRead::Qt
 
     void PlayModel::AddServer(const Network::MasterListing& listing)
     {
+        // A row appears once its server answers. The directory can still list
+        // a server that went away, and picking a row that is not there would
+        // join the address beside the list instead.
         QVariantMap row;
         row.insert(QStringLiteral("name"), Q(listing.ServerName.empty() ? listing.Endpoint() : listing.ServerName));
         row.insert(QStringLiteral("endpoint"), Q(listing.Endpoint()));
-        row.insert(QStringLiteral("asking"), true);
-        const int index = static_cast<int>(_servers.size());
-        _servers.push_back(row);
-        emit serversChanged();
         const QPointer<PlayModel> self(this);
         const std::weak_ptr<int> lifetime = _lifetime;
-        Runtime::TaskRun([self, lifetime, index, address = listing.Address, port = listing.Port]()
+        const int generation = _generation;
+        Runtime::TaskRun([self, lifetime, generation, row, address = listing.Address, port = listing.Port]()
         {
             const Network::ServerStatus status = Network::NetStatus::Query(address, port, false);
-            Post(self, lifetime, [index, status](PlayModel& model)
+            Post(self, lifetime, [generation, row, status](PlayModel& model)
             {
-                if (index >= model._servers.size())
+                if (generation != model._generation)
                 {
                     return;
                 }
-                model.SetStatus(index, status);
                 ++model._replied;
                 if (status.Online)
                 {
                     ++model._live;
+                    model._servers.push_back(row);
+                    model.SetStatus(static_cast<int>(model._servers.size()) - 1, status);
+                    emit model.serversChanged();
+                    model.OfferLive(row.value(QStringLiteral("endpoint")).toString());
                 }
-                emit model.serversChanged();
                 model.Answered();
             });
         });
@@ -519,9 +529,48 @@ namespace MphRead::Qt
                 _live += row.toMap().value(QStringLiteral("answered")).toBool() ? 1 : 0;
             }
         }
-        SetNote(_replied < _asked
-            ? QStringLiteral("asking %1 servers… %2 answered").arg(_asked).arg(_replied)
-            : QStringLiteral("%1 of %2 answered. Click one to join.").arg(_live).arg(_asked), TextDim);
+        if (_replied < _asked)
+        {
+            SetNote(QStringLiteral("asking %1 servers… %2 answered").arg(_asked).arg(_replied), TextDim);
+        }
+        else if (_live == 0)
+        {
+            SetNote(QStringLiteral("None of the %1 listed servers answered.").arg(_asked), Warm);
+        }
+        else
+        {
+            SetNote(QStringLiteral("%1 of %2 answered. Click one to join.").arg(_live).arg(_asked), TextDim);
+        }
+    }
+
+    // The remembered address stops being offered once it does not answer and
+    // the directory has a server that does: the first one to answer takes its
+    // place, in the field and in the launcher preferences.
+    void PlayModel::OfferLive(const QString& endpoint)
+    {
+        if (_firstLive.isEmpty())
+        {
+            _firstLive = endpoint;
+        }
+        if (!_savedDead || _firstLive.isEmpty() || _firstLive == ServerEndpoint())
+        {
+            return;
+        }
+        std::string host;
+        std::int32_t port = 0;
+        if (!ParseEndpoint(_firstLive.toStdString(), host, port))
+        {
+            return;
+        }
+        _savedDead = false;
+        if (_endpoint.isEmpty() || _endpoint == ServerEndpoint())
+        {
+            _endpoint = _firstLive;
+        }
+        Launcher::LauncherPrefs::ServerAddress(host);
+        Launcher::LauncherPrefs::ServerPort(port);
+        Launcher::LauncherPrefs::Save();
+        emit serverEndpointChanged();
     }
 
     void PlayModel::queryStatus(const QString& endpoint)
@@ -549,11 +598,20 @@ namespace MphRead::Qt
             }
             Post(self, lifetime, [token, host, port, status](PlayModel& model)
             {
-                if (token.stop_requested() || model._finished || model._face != 0 || model._asked > 0)
+                if (token.stop_requested() || model._finished || model._face != 0)
                 {
                     return;
                 }
                 const std::string where = host + ":" + std::to_string(port);
+                if (!status.Online && Q(where) == model.ServerEndpoint())
+                {
+                    model._savedDead = true;
+                    model.OfferLive(QString());
+                }
+                if (model._asked > 0)
+                {
+                    return;
+                }
                 model.SetNote(Q(status.Online ? where + " -- " + Describe(status)
                                               : where + " -- no answer. It may be off, or UDP may be blocked."),
                     status.Online ? Good : Warm);
@@ -578,9 +636,6 @@ namespace MphRead::Qt
         Launcher::LauncherPrefs::PlayerName(name);
         Launcher::LauncherPrefs::LastHunter(hunter);
         Launcher::LauncherPrefs::LastColor(suit);
-        Launcher::LauncherPrefs::ServerAddress(host);
-        Launcher::LauncherPrefs::ServerPort(port);
-        Launcher::LauncherPrefs::LastKind(static_cast<std::int32_t>(Launcher::LaunchKind::Online));
         Launcher::LauncherPrefs::Save();
 
         const QPointer<PlayModel> self(this);
@@ -588,7 +643,7 @@ namespace MphRead::Qt
         Runtime::TaskRun([self, lifetime, host, port, name, hunter]()
         {
             const bool joined = Network::NetLaunch::Connect(host, port, name, hunter);
-            Post(self, lifetime, [port, name, hunter, joined](PlayModel& model)
+            Post(self, lifetime, [host, port, name, hunter, joined](PlayModel& model)
             {
                 model.SetBusy(false, QStringLiteral("join"));
                 if (!joined)
@@ -598,6 +653,12 @@ namespace MphRead::Qt
                     model.StartPolling();
                     return;
                 }
+                // Only a server that took us is remembered: a dead address
+                // saved here would be the one offered on every later launch.
+                Launcher::LauncherPrefs::ServerAddress(host);
+                Launcher::LauncherPrefs::ServerPort(port);
+                Launcher::LauncherPrefs::LastKind(static_cast<std::int32_t>(Launcher::LaunchKind::Online));
+                Launcher::LauncherPrefs::Save();
                 Launcher::LaunchPlan::Init init;
                 init.Kind = Launcher::LaunchKind::Online;
                 init.Hunter = hunter;

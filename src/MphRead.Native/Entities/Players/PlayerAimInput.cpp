@@ -4,9 +4,9 @@
 #include "../../Mods/Input/GamepadInput.hpp"
 #include "../../Mods/Input/StylusZone.hpp"
 #include "../../Mods/Gameplay/NativeGameplayClock.hpp"
-#include "../../Mods/Network/NetSession.hpp"
-#include "../../Mods/Network/NetHooks.hpp"
-#include "../../Mods/Network/NetTestScript.hpp"
+#include "Mods/Network/Session/NetSession.hpp"
+#include "Mods/Network/Integration/Hooks/NetHooks.hpp"
+#include "Mods/Network/Testing/Harness/NetTestScript.hpp"
 #include "../../Entities/CamSeq/CameraSequence.hpp"
 #include "../../Mods/SpectatorMode.hpp"
 #include <cmath>

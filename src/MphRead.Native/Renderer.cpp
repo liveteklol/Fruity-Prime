@@ -62,14 +62,17 @@
 #include "Mods/Input/PointerInput.hpp"
 #include "Mods/Input/StylusZone.hpp"
 #include "Mods/Input/WeaponWheel.hpp"
-#include "Mods/Network/DemoClip.hpp"
-#include "Mods/Network/DemoPlayback.hpp"
-#include "Mods/Network/DemoRecorder.hpp"
-#include "Mods/Network/NetHitClaims.hpp"
-#include "Mods/Network/NetHitPrediction.hpp"
-#include "Mods/Network/NetHooks.hpp"
-#include "Mods/Network/NetSession.hpp"
-#include "Mods/Network/NetLaunch.hpp"
+#include "Mods/Network/Replay/DemoClip.hpp"
+#include "Mods/Network/Replay/DemoPlayback.hpp"
+#include "Mods/Network/Replay/DemoRecorder.hpp"
+#include "Mods/Network/Gameplay/Claims/Hit/NetHitClaims.hpp"
+#include "Mods/Network/Gameplay/Combat/NetHitPrediction.hpp"
+#include "Mods/Network/Gameplay/Claims/Pickup/NetPickupClaims.hpp"
+#include "Mods/Network/Gameplay/Pickups/NetPowerUpPrediction.hpp"
+#include "Mods/Network/Gameplay/Pickups/NetPowerUps.hpp"
+#include "Mods/Network/Integration/Hooks/NetHooks.hpp"
+#include "Mods/Network/Session/NetSession.hpp"
+#include "Mods/Network/Integration/Launch/NetLaunch.hpp"
 #include "Mods/Render/Crosshair.hpp"
 #include "Mods/Render/DesktopGlContext.hpp"
 #include "Mods/Render/FrameTiming.hpp"
@@ -84,7 +87,7 @@
 #include "Mods/DebugLog.hpp"
 #include "Mods/Input/GamepadDesktop.hpp"
 #include "Mods/Launcher/Portable/LauncherPrefs.hpp"
-#include "Mods/Network/MapVote.hpp"
+#include "Mods/Network/UI/Voting/MapVote.hpp"
 #include "Mods/PauseMenu.hpp"
 #include "Mods/WindowMode.hpp"
 #include "Formats/Types.hpp"
@@ -1856,6 +1859,9 @@ namespace MphRead
                 UpdateScene();
             }
             Mods::Network::NetHitClaims::Tick();
+            Mods::Network::NetPowerUps::Observe();
+            Mods::Network::NetPickupClaims::Tick();
+            Mods::Network::NetPowerUpPrediction::Tick();
             Mods::Network::NetHooks::AfterSimulation();
             Mods::Network::NetHitPrediction::Tick();
             if (!Mods::Headless::Active())
@@ -4463,7 +4469,11 @@ namespace MphRead
 
     void Scene::DrawHudLayer(const std::shared_ptr<LayerInfo>& info)
     {
-        if (info->BindingId == -1)
+        // At alpha 0 the layer shader writes nothing a blend keeps, yet the
+        // quad still covers the whole screen. Pro mode HUD sets the helmet and
+        // visor to 0 every frame, so that was three full-screen blended passes
+        // of fill for no pixel, which a phone's GPU pays for in frame time.
+        if (info->BindingId == -1 || info->Alpha <= 0.0F)
         {
             return;
         }

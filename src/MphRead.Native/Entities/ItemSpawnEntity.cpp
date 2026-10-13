@@ -1,8 +1,9 @@
 #include "ItemSpawnEntity.hpp"
 #include "Players/PlayerEntity.hpp"
 #include "../Mods/Multiplayer/MapResourceRules.hpp"
-#include "../Mods/Network/NetHealthSync.hpp"
-#include "../Mods/Network/NetSession.hpp"
+#include "Mods/Network/Gameplay/Pickups/NetItemState.hpp"
+#include "Mods/Network/Gameplay/Pickups/NetPowerUpPrediction.hpp"
+#include "Mods/Network/Session/NetSession.hpp"
 
 #include "../GameState.hpp"
 #include "../MemoryArrays.hpp"
@@ -128,15 +129,15 @@ namespace MphRead::Entities
     void ItemSpawnEntity::Initialize()
     {
         EntityBase::Initialize();
-        Mods::Network::NetHealthSync::Register(*this);
+        Mods::Network::NetItemState::Register(*this);
         (void)RequireReference(_scene).TryGetEntity(
             _data.NotifyEntityId,
             _pickupNotifyEntity);
     }
 
-    Mods::Network::HealthSpawnState ItemSpawnEntity::ModHealthState() const
+    Mods::Network::ItemSpawnState ItemSpawnEntity::ModItemState() const
     {
-        return Mods::Network::HealthSpawnState{
+        return Mods::Network::ItemSpawnState{
             _item != nullptr && _item->DespawnTimer() != 0, Active, _spawnCooldown, _spawnCount, _lastPickerSlot};
     }
 
@@ -163,10 +164,10 @@ namespace MphRead::Entities
                 _invPos,
                 _parent->CollisionTransform());
         }
-        if (Mods::Network::NetHealthSync::IsReplica() && Mods::Multiplayer::MapResourceRules::IsHealth(_data.ItemType))
+        if (Mods::Network::NetItemState::Mirrors(*this))
         {
-            Mods::Network::HealthSpawnState state{};
-            if (Mods::Network::NetHealthSync::TryGet(static_cast<std::int16_t>(Id), state))
+            Mods::Network::ItemSpawnState state{};
+            if (Mods::Network::NetItemState::TryGet(static_cast<std::int16_t>(Id), state))
             {
                 Active = state.Active;
                 _spawnCooldown = state.Cooldown;
@@ -182,7 +183,8 @@ namespace MphRead::Entities
                     }
                     _item->SetDespawnTimer(0);
                 }
-                else if (state.Available && _item == nullptr)
+                else if (state.Available && _item == nullptr
+                    && !Mods::Network::NetPowerUpPrediction::Holds(static_cast<std::int16_t>(Id), state.SpawnCount))
                 {
                     _item = SpawnItem(_data.ItemType, TypeExtensions::AddY(Position, 0.65F), NodeRef, _scene);
                     if (_item != nullptr)
@@ -216,7 +218,8 @@ namespace MphRead::Entities
                 _spawnCooldown = static_cast<std::uint16_t>(
                     static_cast<std::int32_t>(_data.SpawnInterval) * 2);
                 ++_spawnCount;
-                if (Mods::Multiplayer::MapResourceRules::IsHealth(_data.ItemType))
+                Mods::Network::NetItemState::NoteSpawned(*this);
+                if (Mods::Network::NetItemState::ServerOwned(_data.ItemType))
                 {
                     _lastPickerSlot = -1;
                 }
@@ -240,7 +243,7 @@ namespace MphRead::Entities
 
     void ItemSpawnEntity::OnItemPickedUp(PlayerEntity* picker)
     {
-        if (Mods::Multiplayer::MapResourceRules::IsHealth(_data.ItemType))
+        if (Mods::Network::NetItemState::ServerOwned(_data.ItemType))
         {
             _lastPickerSlot = picker == nullptr ? static_cast<std::int8_t>(-1)
                 : static_cast<std::int8_t>(picker->SlotIndex());

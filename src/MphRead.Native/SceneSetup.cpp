@@ -15,9 +15,12 @@
 #include "Menu.hpp"
 #include "Mods/Multiplayer/MapResourceRules.hpp"
 #include "Mods/ThumbnailMode.hpp"
-#include "Mods/Network/NetHealthSync.hpp"
-#include "Mods/Network/NetLaunch.hpp"
-#include "Mods/Network/NetSession.hpp"
+#include "Mods/Network/Gameplay/Pickups/NetItemState.hpp"
+#include "Mods/Network/Gameplay/Claims/Pickup/NetPickupClaims.hpp"
+#include "Mods/Network/Gameplay/Pickups/NetPowerUpPrediction.hpp"
+#include "Mods/Network/Gameplay/Pickups/NetPowerUps.hpp"
+#include "Mods/Network/Integration/Launch/NetLaunch.hpp"
+#include "Mods/Network/Session/NetSession.hpp"
 #include "NativeRuntime/System/Runtime.hpp"
 #include "Sound/Music.hpp"
 #include "Sound/Sfx.hpp"
@@ -574,7 +577,10 @@ namespace MphRead
             (*collision).Active = false;
         }
         room->Setup(metadata->Name, metadata, collision, nodeLayerMask, metadata->Id);
-        Mods::Network::NetHealthSync::BeginRoom();
+        Mods::Network::NetItemState::BeginRoom();
+        Mods::Network::NetPickupClaims::Reset();
+        Mods::Network::NetPowerUps::Reset();
+        Mods::Network::NetPowerUpPrediction::Reset();
         const Mods::Multiplayer::ResourceSpawnProfile resources = IsMode(mode, GameMode::SinglePlayer)
             ? Mods::Multiplayer::ResourceSpawnProfile::Low
             : Mods::Network::NetSession::Active()

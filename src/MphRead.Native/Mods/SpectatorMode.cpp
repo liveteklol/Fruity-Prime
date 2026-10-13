@@ -3,7 +3,7 @@
 #include "../Entities/Players/PlayerEntity.hpp"
 #include "../GameState.hpp"
 #include "../Scene.hpp"
-#include "Network/NetHooks.hpp"
+#include "Mods/Network/Integration/Hooks/NetHooks.hpp"
 #include "../NativeRuntime/System/Managed.hpp"
 #include "../Formats/Types.hpp"
 
@@ -27,6 +27,13 @@ namespace
     using MphRead::Entities::LoadFlags;
     using MphRead::Entities::PlayerEntity;
 
+    void EnsureHudReady(PlayerEntity& player)
+    {
+        if (!player.HudReady())
+        {
+            player.SetUpHud();
+        }
+    }
 }
 
 
@@ -157,10 +164,7 @@ namespace MphRead::Mods
         const std::shared_ptr<PlayerEntity> target
             = ManagedAt(PlayerEntity::Players(), slot);
         PlayerEntity& targetRef = RequireReference(target);
-        if (!(targetRef).HudReady())
-        {
-            (targetRef).SetUpHud();
-        }
+        EnsureHudReady(targetRef);
         PlayerEntity::SetMainPlayerIndex(slot);
         Entities::CameraInfo& cameraInfo = RequireReference(targetRef.CameraInfo());
         const Formats::Culling::NodeRef nodeRef = targetRef.NodeRef;
@@ -175,15 +179,21 @@ namespace MphRead::Mods
         }
         const std::int32_t localSlot = Network::NetHooks::LocalSlot();
         PlayerEntity::SetMainPlayerIndex(localSlot);
+        PlayerEntity* localPlayer = nullptr;
+        const auto& players = PlayerEntity::Players();
+        if (localSlot >= 0 && static_cast<std::size_t>(localSlot) < players.size())
+        {
+            localPlayer = std::addressof(RequireReference(ManagedAt(players, localSlot)));
+            EnsureHudReady(*localPlayer);
+        }
         _isSpectating = false;
         _showScoreboard = false;
         _cameraRequest = false;
 
-        if (localSlot >= 0
+        if (localPlayer != nullptr
             && static_cast<std::size_t>(localSlot) < GameState::Points().size())
         {
-            RequireReference(ManagedAt(PlayerEntity::Players(), localSlot))
-                .ModSetSpectating(false);
+            localPlayer->ModSetSpectating(false);
             std::int32_t& pointTarget = ManagedAt(GameState::Points(), localSlot);
             const std::int32_t pointValue = ManagedAt(GameState::Points(), localSlot);
             pointTarget = std::min<std::int32_t>(0, pointValue);

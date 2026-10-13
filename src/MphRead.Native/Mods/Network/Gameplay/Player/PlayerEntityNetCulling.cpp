@@ -1,0 +1,305 @@
+#include "Mods/Network/Gameplay/Player/PlayerEntityNetCulling.hpp"
+
+#include "Entities/EntityBase.hpp"
+#include "Entities/RoomEntity.hpp"
+#include "Entities/Players/PlayerEntity.hpp"
+#include "Mods/Network/Diagnostics/NetLog.hpp"
+#include "Mods/Network/Gameplay/Player/NetPlayerBridge.hpp"
+#include "Mods/Network/Gameplay/Player/ReplicaRoomPlacement.hpp"
+#include "Mods/Network/Gameplay/Player/ReplicaShadowVisibility.hpp"
+#include "Mods/Network/Session/NetSession.hpp"
+#include "NativeRuntime/OpenTK/Mathematics.hpp"
+#include "Scene.hpp"
+
+#include <cstdint>
+#include <memory>
+#include <string>
+
+using ::OpenTK::Mathematics::LengthSquared;
+using ::OpenTK::Mathematics::Multiply;
+
+namespace MphRead::Entities
+{
+    using Vector3 = OpenTK::Mathematics::Vector3;
+
+    Formats::Culling::NodeRef PlayerEntity::ModWalkNodeRef(
+        MphRead::Scene& scene,
+        Formats::Culling::NodeRef current,
+        Vector3 previous,
+        Vector3 position)
+    {
+        if (current == Formats::Culling::NodeRef::None
+            || LengthSquared(position - previous) >= _nodeWalkStepMax * _nodeWalkStepMax)
+        {
+            return Formats::Culling::NodeRef::None;
+        }
+
+        Formats::Culling::NodeRef walked
+            = scene.UpdateNodeRef(current, previous, position);
+        if (walked.PartIndex == -1
+            || !scene.PartCouldContain(walked.PartIndex, position))
+        {
+            return Formats::Culling::NodeRef::None;
+        }
+        return walked;
+    }
+
+    void PlayerEntity::ModPlaceAt(Vector3 position)
+    {
+        const Vector3 previous = static_cast<Vector3>((*this).Position);
+        ((*this).Position = position);
+        (*this).SetPrevPosition(position);
+        ModRefreshNodeRef(previous);
+    }
+
+    void PlayerEntity::ModRefreshNodeRef(Vector3 previousPosition)
+    {
+        (*this)._volume = CollisionVolume::Move((*this)._volumeUnxf, (*this).Position);
+        ModRefreshShadowProjection();
+        MphRead::Scene& scene = (*(*this)._scene);
+        const Formats::Culling::NodeRef currentForWalk = (*this).NodeRef;
+        const Vector3 positionForWalk = static_cast<Vector3>((*this).Position);
+        Formats::Culling::NodeRef walked = ModWalkNodeRef(
+            scene, currentForWalk, previousPosition, positionForWalk);
+        if (walked != Formats::Culling::NodeRef::None)
+        {
+            if (!scene.IsNodeRefVisible(walked))
+            {
+                // Portal walking can retain a valid but stale part while a
+                // smoothed replica crosses a culling boundary. The shadow is
+                // drawn before the body, so that stale hidden part produces a
+                // shadow-only player. Re-resolve this hidden case by position.
+                const Formats::Culling::NodeRef positionNode
+                    = scene.GetNodeRefByPosition(positionForWalk);
+                if (positionNode != Formats::Culling::NodeRef::None)
+                {
+                    if (positionNode.PartIndex != walked.PartIndex
+                        && Mods::Network::NetLog::Enabled())
+                    {
+                        Mods::Network::NetLog::Event("[player-node] repaired hidden replica slot="
+                            + std::to_string(SlotIndex())
+                            + " stale=" + std::to_string(walked.PartIndex)
+                            + "/" + std::to_string(walked.NodeIndex)
+                            + " position=" + std::to_string(positionNode.PartIndex)
+                            + "/" + std::to_string(positionNode.NodeIndex)
+                            + " at=" + std::to_string(positionForWalk.X)
+                            + "," + std::to_string(positionForWalk.Y)
+                            + "," + std::to_string(positionForWalk.Z));
+                    }
+                    walked = positionNode;
+                    _modNodeUnresolved = false;
+                }
+                else
+                {
+                    // Drawing the body is safer than rejecting it on a stale
+                    // culling node when the current position has no room node.
+                    _modNodeUnresolved = true;
+                    Mods::Network::NetPlayerBridge::RecordUnresolvedNodeLookup();
+                }
+            }
+            else
+            {
+                _modNodeUnresolved = false;
+            }
+            ((*this).NodeRef = walked);
+            return;
+        }
+
+        const Vector3 position = static_cast<Vector3>((*this).Position);
+        Formats::Culling::NodeRef found = scene.GetNodeRefByPosition(position);
+        if (found.PartIndex == -1)
+        {
+            found = scene.GetNodeRefByPosition((*this)._volume.SpherePosition);
+        }
+        if (found.PartIndex == -1)
+        {
+            found = scene.GetNodeRefByPosition(position
+                + Multiply(Vector3::UnitY, 0.5F));
+        }
+        if (found.PartIndex == -1)
+        {
+            found = scene.GetNodeRefByPosition(position
+                - Multiply(Vector3::UnitY, 0.5F));
+        }
+        if (found.PartIndex != -1)
+        {
+            ((*this).NodeRef = found);
+            _modNodeUnresolved = false;
+            return;
+        }
+
+        _modNodeUnresolved = true;
+        Mods::Network::NetPlayerBridge::RecordUnresolvedNodeLookup();
+        const Formats::Culling::NodeRef currentForCheck = (*this).NodeRef;
+        if (currentForCheck != Formats::Culling::NodeRef::None)
+        {
+            ((*this).NodeRef = scene.UpdateNodeRef(currentForCheck,
+                previousPosition, position));
+        }
+    }
+
+    void PlayerEntity::ModResolveNetworkNodeRef()
+    {
+        // A networked pose is sampled between authority snapshots and can
+        // cross more than one portal in a single update. Rebuild its culling
+        // location from the same displayed world position instead of walking
+        // the previous NodeRef, whose portal may no longer be active here.
+        (*this)._volume = CollisionVolume::Move((*this)._volumeUnxf, (*this).Position);
+        ModRefreshShadowProjection();
+        MphRead::Scene& scene = (*(*this)._scene);
+        const Vector3 position = static_cast<Vector3>((*this).Position);
+        const Formats::Culling::NodeRef previous = (*this).NodeRef;
+        const bool wasUnresolved = _modNodeUnresolved;
+        const Vector3 bodyCenter = _volume.SpherePosition;
+        const bool clientReplicaMode = Mods::Network::NetSession::IsClient()
+            && !Mods::Network::NetSession::IsAuthority();
+        const bool useReplicaPlacement = clientReplicaMode
+            && SlotIndex() != Mods::Network::NetSession::LocalSlot() && !IsBot();
+        const auto room = useReplicaPlacement ? scene.Room() : nullptr;
+
+        bool ambiguous = false;
+        const auto lookup = [&](Vector3 probe)
+        {
+            if (!room) return scene.GetNodeRefByPosition(probe);
+            const auto resolution = Mods::Network::ReplicaRoomPlacement::Find(
+                room.get(), probe, bodyCenter);
+            ambiguous = Mods::Network::ReplicaRoomPlacementRules::StopsProbeFallback(resolution.state);
+            return resolution.state == Mods::Network::ReplicaRoomPlacementRules::State::Resolved
+                ? resolution.node : Formats::Culling::NodeRef::None;
+        };
+        // Every fallback probe must place the same current-form collision
+        // center. No retained simulation/presentation node is trusted here.
+        Formats::Culling::NodeRef found = lookup(bodyCenter);
+        if (found.PartIndex == -1 && !ambiguous)
+        {
+            found = lookup(position);
+        }
+        if (found.PartIndex == -1 && !ambiguous)
+        {
+            found = lookup(position + Multiply(Vector3::UnitY, 0.5F));
+        }
+        if (found.PartIndex == -1 && !ambiguous)
+        {
+            found = lookup(position - Multiply(Vector3::UnitY, 0.5F));
+        }
+
+        if (found.PartIndex != -1)
+        {
+            ((*this).NodeRef = found);
+            _modNodeUnresolved = false;
+            if (IsMainPlayer())
+            {
+                _cameraInfo->NodeRef = found;
+            }
+            if ((wasUnresolved || previous.PartIndex != found.PartIndex)
+                && Mods::Network::NetLog::Enabled())
+            {
+                Mods::Network::NetLog::Event("[player-node] resolved presentation position slot="
+                    + std::to_string(SlotIndex())
+                    + " from=" + std::to_string(previous.PartIndex)
+                    + "/" + std::to_string(previous.NodeIndex)
+                    + " to=" + std::to_string(found.PartIndex)
+                    + "/" + std::to_string(found.NodeIndex)
+                    + " visible=" + (scene.IsNodeRefVisible(found) ? std::string("true") : std::string("false"))
+                    + " at=" + std::to_string(position.X)
+                    + "," + std::to_string(position.Y)
+                    + "," + std::to_string(position.Z));
+            }
+
+            return;
+        }
+
+        _modNodeUnresolved = true;
+        Mods::Network::NetPlayerBridge::RecordUnresolvedNodeLookup();
+        if (!wasUnresolved && Mods::Network::NetLog::Enabled())
+        {
+            Mods::Network::NetLog::Event("[player-node] unresolved presentation position slot="
+                + std::to_string(SlotIndex())
+                + " retained=" + std::to_string(previous.PartIndex)
+                + "/" + std::to_string(previous.NodeIndex)
+                + " at=" + std::to_string(position.X)
+                + "," + std::to_string(position.Y)
+                + "," + std::to_string(position.Z));
+        }
+    }
+
+    void PlayerEntity::ModRefreshShadowProjection()
+    {
+        _modShadowProjection = {};
+        if (!ModIsRemoteNetworkPlayer())
+        {
+            return;
+        }
+
+        MphRead::Scene& scene = (*(*this)._scene);
+        _modShadowProjection = Mods::Network::ReplicaShadowVisibility::FindProjection(
+            &scene, _volume.SpherePosition);
+    }
+
+    bool PlayerEntity::ModNodeUnresolved() const noexcept
+    {
+        if (_modNodeUnresolved) return true;
+        if (!ModIsRemoteNetworkPlayer())
+        {
+            return false;
+        }
+
+        const MphRead::Scene* scene = (*this)._scene;
+        if (!Mods::Network::ReplicaShadowVisibility::MatchesScene(
+            _modShadowProjection, scene))
+        {
+            return false;
+        }
+        const Mods::Network::ReplicaShadowVisibility::FadeState fade{
+            CurAlpha(), Health(), DeathCountdown(), RespawnTimer(), RespawnTime() };
+        return Mods::Network::ReplicaShadowVisibility::ShouldForceBody(
+            true, _modShadowProjection, fade);
+    }
+
+    bool PlayerEntity::ModIsRemoteNetworkPlayer() const noexcept
+    {
+        return (Mods::Network::NetSession::IsClient() || Mods::Network::NetSession::IsHost())
+            && SlotIndex() != Mods::Network::NetSession::LocalSlot()
+            && !IsBot();
+    }
+
+    void PlayerEntity::ModNetSpawn(Vector3 position, Vector3 facing)
+    {
+        const Vector3 forward = LengthSquared(facing) > 0.0001F
+            ? facing.Normalized()
+            : Vector3(0.0F, 0.0F, -1.0F);
+        const Vector3 up = Vector3::UnitY;
+        MphRead::Scene& scene = (*(*this)._scene);
+        const Formats::Culling::NodeRef nodeRef = ModSpawnNodeRef(scene, position);
+        (*this).Spawn(position, forward, up, nodeRef, true);
+        ModRefreshShadowProjection();
+    }
+
+    Formats::Culling::NodeRef PlayerEntity::ModSpawnNodeRef(
+        MphRead::Scene& scene, Vector3 position)
+    {
+        std::shared_ptr<EntityBase> closest{};
+        float closestDist = 2.0F * 2.0F;
+        auto enumerator = scene.Entities().GetEnumerator();
+        while (enumerator.MoveNext())
+        {
+            const std::shared_ptr<EntityBase> entity = enumerator.Current();
+            if (entity->Type != MphRead::EntityType::PlayerSpawn
+                || entity->NodeRef == Formats::Culling::NodeRef::None)
+            {
+                continue;
+            }
+            const float dist = LengthSquared(static_cast<Vector3>(entity->Position) - position);
+            if (dist < closestDist)
+            {
+                closestDist = dist;
+                closest = entity;
+            }
+        }
+        if (closest != nullptr)
+        {
+            return closest->NodeRef;
+        }
+        return scene.GetNodeRefByPosition(position);
+    }
+}

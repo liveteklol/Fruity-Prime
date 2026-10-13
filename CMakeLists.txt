@@ -109,9 +109,21 @@ unset(FRUITY_PHASE5_SHADER_SOURCE)
 unset(FRUITY_PHASE4_SOURCE)
 unset(FRUITY_PHASE4_DISPLAY_LIST_REGEX)
 
-# Runtime decoder tests have their own executable below. Keep its main() out
-# of the production archive while retaining the repository's Native/Testing
-# source location.
+# A small set of legacy interactive diagnostics under Testing/ are still
+# product code: the game exposes them through its developer console. Keep
+# those owners in the library, and keep every standalone Test*.cpp executable
+# out of the production archive. This boundary is based on source ownership,
+# rather than a growing hand-maintained list of individual test files.
+set(FRUITY_NATIVE_RUNTIME_TEST_SUPPORT_SOURCES
+    "${FRUITY_MPHREAD_ROOT}/Testing/TestEffects.cpp"
+    "${FRUITY_MPHREAD_ROOT}/Testing/TestLogic.cpp"
+    "${FRUITY_MPHREAD_ROOT}/Testing/TestMisc.cpp"
+    "${FRUITY_MPHREAD_ROOT}/Testing/TestOverlay.cpp"
+    "${FRUITY_MPHREAD_ROOT}/Testing/TestParse.cpp"
+    "${FRUITY_MPHREAD_ROOT}/Testing/TestPlayer.cpp"
+    "${FRUITY_MPHREAD_ROOT}/Testing/TestPrint.cpp"
+    "${FRUITY_MPHREAD_ROOT}/Testing/TestWeapons.cpp")
+
 set(FRUITY_RENDERER_GEOMETRY_TEST_SOURCE
     "${FRUITY_MPHREAD_ROOT}/Testing/TestRendererGeometry.cpp")
 set(FRUITY_RENDERER_GPU_MESH_TEST_SOURCE
@@ -180,35 +192,10 @@ add_custom_target(fruity_golden_capture_provenance
         "${CMAKE_CURRENT_SOURCE_DIR}/cmake/GenerateGoldenCaptureProvenance.cmake"
     COMMENT "Refreshing GoldenCapture source provenance"
     VERBATIM)
-list(REMOVE_ITEM MPHREAD_NATIVE_SOURCES
-    "${FRUITY_MPHREAD_ROOT}/Testing/TestSyluxMuzzleGuard.cpp"
-    "${FRUITY_MPHREAD_ROOT}/Testing/TestOpenGlUniformState.cpp"
-    "${FRUITY_MPHREAD_ROOT}/Testing/TestNativeTouchState.cpp"
-    "${FRUITY_MPHREAD_ROOT}/Testing/TestNativeAimRules.cpp"
-    "${FRUITY_MPHREAD_ROOT}/Testing/TestDialancheNativeCollision.cpp"
-    "${FRUITY_MPHREAD_ROOT}/Testing/TestWeavelAltFormParity.cpp"
-    "${FRUITY_MPHREAD_ROOT}/Testing/TestIntentTouchPayload.cpp"
-    "${FRUITY_MPHREAD_ROOT}/Testing/TestFrameTelemetry.cpp"
-    "${FRUITY_MPHREAD_ROOT}/Testing/TestVulkanNvidiaReflex.cpp"
-    "${FRUITY_VULKAN_FRAME_SLOTS_TEST_SOURCE}"
-    "${FRUITY_VULKAN_FRAME_SCHEDULER_TEST_SOURCE}"
-    "${FRUITY_VULKAN_SYNCHRONIZATION_TEST_SOURCE}"
-    "${FRUITY_VULKAN_RGB_TRANSFER_TEST_SOURCE}"
-    "${FRUITY_VULKAN_RESOURCES_TEST_SOURCE}"
-    "${FRUITY_MPHREAD_ROOT}/Testing/TestVulkanErrors.cpp"
-    "${FRUITY_MPHREAD_ROOT}/Testing/TestReadback.cpp"
-    "${FRUITY_RENDERER_GEOMETRY_TEST_SOURCE}"
-    "${FRUITY_RENDERER_GPU_MESH_TEST_SOURCE}"
-    "${FRUITY_SHADER_INTERFACE_TEST_SOURCE}"
-    "${FRUITY_RHI_LIFETIME_TEST_SOURCE}"
-    "${FRUITY_MEMORY_ADMISSION_TEST_SOURCE}"
-    "${FRUITY_VULKAN_PIPELINE_CACHE_TEST_SOURCE}"
-    "${FRUITY_VULKAN_FEATURE_PROBE_TEST_SOURCE}"
-    "${FRUITY_VULKAN_COMMAND_SLOTS_TEST_SOURCE}"
-    "${FRUITY_VULKAN_DESCRIPTOR_TEST_SOURCE}"
-    "${FRUITY_VULKAN_UPLOAD_TEST_SOURCE}"
-    "${FRUITY_VULKAN_UNIFORMS_TEST_SOURCE}"
-    "${FRUITY_GOLDEN_CAPTURE_VALIDATION_TEST_SOURCE}")
+list(REMOVE_ITEM MPHREAD_NATIVE_SOURCES ${FRUITY_NATIVE_RUNTIME_TEST_SUPPORT_SOURCES})
+list(FILTER MPHREAD_NATIVE_SOURCES EXCLUDE REGEX "/Testing/Test[^/]*[.]cpp$")
+list(APPEND MPHREAD_NATIVE_SOURCES ${FRUITY_NATIVE_RUNTIME_TEST_SUPPORT_SOURCES})
+list(SORT MPHREAD_NATIVE_SOURCES)
 
 # The window, event loop and menus on the desktop: a QWindow with Qt Quick
 # menus rendered on the GPU into a texture the game composites
@@ -379,6 +366,313 @@ if(BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)
     target_link_libraries(fruity_intent_touch_payload_tests PRIVATE fruity_mphread_native)
     target_compile_features(fruity_intent_touch_payload_tests PRIVATE cxx_std_20)
     add_test(NAME FruityPrime.IntentTouchPayload COMMAND fruity_intent_touch_payload_tests)
+    add_executable(fruity_network_lobby_tests "${CMAKE_CURRENT_SOURCE_DIR}/tools/testing/TestNetLobby.cpp")
+    target_link_libraries(fruity_network_lobby_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_network_lobby_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.NetworkLobby COMMAND fruity_network_lobby_tests)
+    add_executable(fruity_network_protocol_golden_tests "${CMAKE_CURRENT_SOURCE_DIR}/tools/testing/TestNetworkProtocolGolden.cpp")
+    target_link_libraries(fruity_network_protocol_golden_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_network_protocol_golden_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.NetworkProtocol31Golden COMMAND fruity_network_protocol_golden_tests
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/testing/golden/network-protocol-v31.hex")
+    add_test(NAME FruityPrime.NetworkProtocol30GoldenPreserved COMMAND Python3::Interpreter
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/testing/check-network-protocol-v30-golden.py"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/testing/golden/network-protocol-v30.hex")
+    add_executable(fruity_timed_effect_sync_tests
+        "${FRUITY_MPHREAD_ROOT}/Testing/TestTimedEffectSync.cpp")
+    target_include_directories(fruity_timed_effect_sync_tests PRIVATE "${FRUITY_MPHREAD_ROOT}")
+    target_compile_features(fruity_timed_effect_sync_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.TimedEffectSync COMMAND fruity_timed_effect_sync_tests)
+    add_executable(fruity_remote_player_channel_tests "${CMAKE_CURRENT_SOURCE_DIR}/tools/testing/TestRemotePlayerChannel.cpp")
+    target_link_libraries(fruity_remote_player_channel_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_remote_player_channel_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.RemotePlayerChannel COMMAND fruity_remote_player_channel_tests)
+    add_executable(fruity_net_input_history_tests "${FRUITY_MPHREAD_ROOT}/Testing/TestNetInputHistory.cpp")
+    target_link_libraries(fruity_net_input_history_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_net_input_history_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.NetworkInputHistory COMMAND fruity_net_input_history_tests)
+    add_executable(fruity_net_input_press_replay_tests "${FRUITY_MPHREAD_ROOT}/Testing/TestNetInputPressReplay.cpp")
+    target_link_libraries(fruity_net_input_press_replay_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_net_input_press_replay_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.NetworkInputPressReplay COMMAND fruity_net_input_press_replay_tests)
+    add_executable(fruity_net_smoothing_tests "${FRUITY_MPHREAD_ROOT}/Testing/TestNetSmoothing.cpp")
+    target_link_libraries(fruity_net_smoothing_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_net_smoothing_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.NetworkSmoothingTimeline COMMAND fruity_net_smoothing_tests)
+    add_executable(fruity_replica_room_placement_tests
+        "${FRUITY_MPHREAD_ROOT}/Testing/TestReplicaRoomPlacement.cpp")
+    target_link_libraries(fruity_replica_room_placement_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_replica_room_placement_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.ReplicaRoomPlacement COMMAND fruity_replica_room_placement_tests)
+    add_executable(fruity_net_inbox_tests "${FRUITY_MPHREAD_ROOT}/Testing/TestBoundedInbox.cpp")
+    target_link_libraries(fruity_net_inbox_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_net_inbox_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.NetworkBoundedInbox COMMAND fruity_net_inbox_tests)
+    add_executable(fruity_session_authority_state_tests "${FRUITY_MPHREAD_ROOT}/Testing/TestSessionAuthorityState.cpp")
+    target_link_libraries(fruity_session_authority_state_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_session_authority_state_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.SessionAuthorityState COMMAND fruity_session_authority_state_tests)
+    add_executable(fruity_client_connection_health_tests "${FRUITY_MPHREAD_ROOT}/Testing/TestClientConnectionHealth.cpp")
+    target_link_libraries(fruity_client_connection_health_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_client_connection_health_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.ClientConnectionHealth COMMAND fruity_client_connection_health_tests)
+    add_executable(fruity_client_replica_stream_tests "${FRUITY_MPHREAD_ROOT}/Testing/TestClientReplicaStream.cpp")
+    target_link_libraries(fruity_client_replica_stream_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_client_replica_stream_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.ClientReplicaStream COMMAND fruity_client_replica_stream_tests)
+    add_executable(fruity_session_match_identity_tests "${FRUITY_MPHREAD_ROOT}/Testing/TestSessionMatchIdentity.cpp")
+    target_link_libraries(fruity_session_match_identity_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_session_match_identity_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.SessionMatchIdentity COMMAND fruity_session_match_identity_tests)
+    add_executable(fruity_server_snapshot_stream_tests "${FRUITY_MPHREAD_ROOT}/Testing/TestServerSnapshotStream.cpp")
+    target_link_libraries(fruity_server_snapshot_stream_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_server_snapshot_stream_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.ServerSnapshotStream COMMAND fruity_server_snapshot_stream_tests)
+    add_executable(fruity_server_snapshot_validator_tests
+        "${FRUITY_MPHREAD_ROOT}/Testing/TestServerSnapshotValidator.cpp")
+    target_link_libraries(fruity_server_snapshot_validator_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_server_snapshot_validator_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.ServerSnapshotValidator COMMAND fruity_server_snapshot_validator_tests)
+    add_executable(fruity_server_intent_validator_tests
+        "${FRUITY_MPHREAD_ROOT}/Testing/TestServerIntentValidator.cpp")
+    target_link_libraries(fruity_server_intent_validator_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_server_intent_validator_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.ServerIntentValidator COMMAND fruity_server_intent_validator_tests)
+    add_executable(fruity_server_peer_intent_state_tests
+        "${FRUITY_MPHREAD_ROOT}/Testing/TestServerPeerIntentState.cpp")
+    target_link_libraries(fruity_server_peer_intent_state_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_server_peer_intent_state_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.ServerPeerIntentState COMMAND fruity_server_peer_intent_state_tests)
+    add_executable(fruity_server_handshake_tests
+        "${FRUITY_MPHREAD_ROOT}/Testing/TestServerHandshake.cpp")
+    target_link_libraries(fruity_server_handshake_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_server_handshake_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.ServerHandshake COMMAND fruity_server_handshake_tests)
+    add_executable(fruity_server_peer_identity_channel_tests
+        "${FRUITY_MPHREAD_ROOT}/Testing/TestServerPeerIdentityChannel.cpp")
+    target_link_libraries(fruity_server_peer_identity_channel_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_server_peer_identity_channel_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.ServerPeerIdentityChannel COMMAND fruity_server_peer_identity_channel_tests)
+    add_executable(fruity_server_match_rotation_controller_tests
+        "${FRUITY_MPHREAD_ROOT}/Testing/TestServerMatchRotationController.cpp")
+    target_link_libraries(fruity_server_match_rotation_controller_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_server_match_rotation_controller_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.ServerMatchRotationController COMMAND fruity_server_match_rotation_controller_tests)
+    add_executable(fruity_freeze_timeline_tests
+        "${FRUITY_MPHREAD_ROOT}/Testing/TestFreezeTimeline.cpp"
+        "${FRUITY_MPHREAD_ROOT}/Mods/Network/Testing/Harness/FreezeTimeline.cpp")
+    target_include_directories(fruity_freeze_timeline_tests PRIVATE "${FRUITY_MPHREAD_ROOT}")
+    target_compile_features(fruity_freeze_timeline_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.FreezeTimeline COMMAND fruity_freeze_timeline_tests)
+    add_executable(fruity_form_reconciliation_tests "${FRUITY_MPHREAD_ROOT}/Testing/TestFormReconciliation.cpp")
+    target_link_libraries(fruity_form_reconciliation_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_form_reconciliation_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.FormReconciliation COMMAND fruity_form_reconciliation_tests)
+    add_executable(fruity_shot_ray_validation_tests
+        "${FRUITY_MPHREAD_ROOT}/Testing/TestShotRayValidation.cpp")
+    target_include_directories(fruity_shot_ray_validation_tests PRIVATE "${FRUITY_MPHREAD_ROOT}")
+    target_compile_features(fruity_shot_ray_validation_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.ShotRayValidation COMMAND fruity_shot_ray_validation_tests)
+    add_executable(fruity_map_vote_rules_tests "${FRUITY_MPHREAD_ROOT}/Testing/TestMapVoteRules.cpp")
+    target_compile_features(fruity_map_vote_rules_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.MapVoteRules COMMAND fruity_map_vote_rules_tests)
+    add_executable(fruity_rescued_hit_ledger_tests
+        "${FRUITY_MPHREAD_ROOT}/Testing/TestRescuedHitLedger.cpp"
+        "${FRUITY_MPHREAD_ROOT}/Mods/Network/Gameplay/Claims/Hit/RescuedHitLedger.cpp")
+    target_include_directories(fruity_rescued_hit_ledger_tests PRIVATE "${FRUITY_MPHREAD_ROOT}")
+    target_compile_features(fruity_rescued_hit_ledger_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.RescuedHitLedger COMMAND fruity_rescued_hit_ledger_tests)
+    add_executable(fruity_hit_claim_outbox_tests "${FRUITY_MPHREAD_ROOT}/Testing/TestHitClaimOutbox.cpp")
+    target_link_libraries(fruity_hit_claim_outbox_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_hit_claim_outbox_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.HitClaimOutbox COMMAND fruity_hit_claim_outbox_tests)
+    add_executable(fruity_claim_damage_policy_tests "${FRUITY_MPHREAD_ROOT}/Testing/TestClaimDamagePolicy.cpp")
+    target_link_libraries(fruity_claim_damage_policy_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_claim_damage_policy_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.ClaimDamagePolicy COMMAND fruity_claim_damage_policy_tests)
+    add_executable(fruity_claim_impact_rules_tests "${FRUITY_MPHREAD_ROOT}/Testing/TestClaimImpactRules.cpp")
+    target_link_libraries(fruity_claim_impact_rules_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_claim_impact_rules_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.ClaimImpactRules COMMAND fruity_claim_impact_rules_tests)
+    add_executable(fruity_hit_claim_death_state_tests "${FRUITY_MPHREAD_ROOT}/Testing/TestHitClaimDeathState.cpp")
+    target_link_libraries(fruity_hit_claim_death_state_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_hit_claim_death_state_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.HitClaimDeathState COMMAND fruity_hit_claim_death_state_tests)
+    add_executable(fruity_hit_claim_metrics_tests "${FRUITY_MPHREAD_ROOT}/Testing/TestHitClaimMetrics.cpp")
+    target_link_libraries(fruity_hit_claim_metrics_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_hit_claim_metrics_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.HitClaimMetrics COMMAND fruity_hit_claim_metrics_tests)
+    add_executable(fruity_hit_claim_rate_limiter_tests "${FRUITY_MPHREAD_ROOT}/Testing/TestHitClaimRateLimiter.cpp")
+    target_link_libraries(fruity_hit_claim_rate_limiter_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_hit_claim_rate_limiter_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.HitClaimRateLimiter COMMAND fruity_hit_claim_rate_limiter_tests)
+    add_executable(fruity_authority_hit_ledger_tests "${FRUITY_MPHREAD_ROOT}/Testing/TestAuthorityHitLedger.cpp")
+    target_link_libraries(fruity_authority_hit_ledger_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_authority_hit_ledger_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.AuthorityHitLedger COMMAND fruity_authority_hit_ledger_tests)
+    add_executable(fruity_authority_hit_inbox_tests "${FRUITY_MPHREAD_ROOT}/Testing/TestAuthorityHitInbox.cpp")
+    target_link_libraries(fruity_authority_hit_inbox_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_authority_hit_inbox_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.AuthorityHitInbox COMMAND fruity_authority_hit_inbox_tests)
+    add_executable(fruity_demo_frame_clock_tests "${FRUITY_MPHREAD_ROOT}/Testing/TestDemoFrameClock.cpp")
+    target_link_libraries(fruity_demo_frame_clock_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_demo_frame_clock_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.DemoFrameClock COMMAND fruity_demo_frame_clock_tests)
+    add_executable(fruity_session_runtime_state_tests "${FRUITY_MPHREAD_ROOT}/Testing/TestSessionRuntimeState.cpp")
+    target_link_libraries(fruity_session_runtime_state_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_session_runtime_state_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.SessionRuntimeState COMMAND fruity_session_runtime_state_tests)
+    add_executable(fruity_session_traffic_metrics_tests "${FRUITY_MPHREAD_ROOT}/Testing/TestSessionTrafficMetrics.cpp")
+    target_link_libraries(fruity_session_traffic_metrics_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_session_traffic_metrics_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.SessionTrafficMetrics COMMAND fruity_session_traffic_metrics_tests)
+    add_executable(fruity_session_player_identity_tests "${FRUITY_MPHREAD_ROOT}/Testing/TestSessionPlayerIdentity.cpp")
+    target_link_libraries(fruity_session_player_identity_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_session_player_identity_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.SessionPlayerIdentity COMMAND fruity_session_player_identity_tests)
+    add_executable(fruity_client_lobby_state_tests "${FRUITY_MPHREAD_ROOT}/Testing/TestClientLobbyState.cpp")
+    target_link_libraries(fruity_client_lobby_state_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_client_lobby_state_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.ClientLobbyState COMMAND fruity_client_lobby_state_tests)
+    add_executable(fruity_session_connection_tests "${FRUITY_MPHREAD_ROOT}/Testing/TestSessionConnection.cpp")
+    target_link_libraries(fruity_session_connection_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_session_connection_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.SessionConnection COMMAND fruity_session_connection_tests)
+    add_executable(fruity_session_simulation_callbacks_tests
+        "${FRUITY_MPHREAD_ROOT}/Testing/TestSessionSimulationCallbacks.cpp")
+    target_link_libraries(fruity_session_simulation_callbacks_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_session_simulation_callbacks_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.SessionSimulationCallbacks
+        COMMAND fruity_session_simulation_callbacks_tests)
+    add_executable(fruity_hit_claim_replay_ledger_tests "${FRUITY_MPHREAD_ROOT}/Testing/TestHitClaimReplayLedger.cpp")
+    target_link_libraries(fruity_hit_claim_replay_ledger_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_hit_claim_replay_ledger_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.HitClaimReplayLedger COMMAND fruity_hit_claim_replay_ledger_tests)
+    add_executable(fruity_hit_verdict_outbox_tests "${FRUITY_MPHREAD_ROOT}/Testing/TestHitVerdictOutbox.cpp")
+    target_link_libraries(fruity_hit_verdict_outbox_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_hit_verdict_outbox_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.HitVerdictOutbox COMMAND fruity_hit_verdict_outbox_tests)
+    add_executable(fruity_hit_claim_intent_history_tests
+        "${FRUITY_MPHREAD_ROOT}/Testing/TestHitClaimIntentHistory.cpp")
+    target_link_libraries(fruity_hit_claim_intent_history_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_hit_claim_intent_history_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.HitClaimIntentHistory COMMAND fruity_hit_claim_intent_history_tests)
+    add_executable(fruity_pickup_claim_outbox_tests
+        "${FRUITY_MPHREAD_ROOT}/Testing/TestPickupClaimOutbox.cpp")
+    target_link_libraries(fruity_pickup_claim_outbox_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_pickup_claim_outbox_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.PickupClaimOutbox COMMAND fruity_pickup_claim_outbox_tests)
+    add_executable(fruity_prediction_book_tests "${FRUITY_MPHREAD_ROOT}/Testing/TestPredictionBook.cpp")
+    target_link_libraries(fruity_prediction_book_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_prediction_book_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.PredictionBook COMMAND fruity_prediction_book_tests)
+    add_executable(fruity_pickup_claim_replay_ledger_tests
+        "${FRUITY_MPHREAD_ROOT}/Testing/TestPickupClaimReplayLedger.cpp")
+    target_link_libraries(fruity_pickup_claim_replay_ledger_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_pickup_claim_replay_ledger_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.PickupClaimReplayLedger COMMAND fruity_pickup_claim_replay_ledger_tests)
+    add_executable(fruity_pickup_prediction_fault_tests
+        "${FRUITY_MPHREAD_ROOT}/Testing/TestPickupPredictionFaults.cpp")
+    target_link_libraries(fruity_pickup_prediction_fault_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_pickup_prediction_fault_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.PickupPredictionFaults COMMAND fruity_pickup_prediction_fault_tests)
+    add_executable(fruity_server_peer_registry_tests "${FRUITY_MPHREAD_ROOT}/Testing/TestServerPeerRegistry.cpp")
+    target_link_libraries(fruity_server_peer_registry_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_server_peer_registry_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.ServerPeerRegistry COMMAND fruity_server_peer_registry_tests)
+    add_executable(fruity_peer_registry_tests "${FRUITY_MPHREAD_ROOT}/Testing/TestPeerRegistry.cpp")
+    target_link_libraries(fruity_peer_registry_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_peer_registry_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.PeerRegistry COMMAND fruity_peer_registry_tests)
+    add_executable(fruity_server_peer_identity_tests "${FRUITY_MPHREAD_ROOT}/Testing/TestServerPeerIdentity.cpp")
+    target_link_libraries(fruity_server_peer_identity_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_server_peer_identity_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.ServerPeerIdentity COMMAND fruity_server_peer_identity_tests)
+    add_executable(fruity_server_peer_profile_tests
+        "${FRUITY_MPHREAD_ROOT}/Testing/TestServerPeerProfile.cpp")
+    target_link_libraries(fruity_server_peer_profile_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_server_peer_profile_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.ServerPeerProfile COMMAND fruity_server_peer_profile_tests)
+    add_executable(fruity_server_match_state_builder_tests
+        "${FRUITY_MPHREAD_ROOT}/Testing/TestServerMatchStateBuilder.cpp")
+    target_link_libraries(fruity_server_match_state_builder_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_server_match_state_builder_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.ServerMatchStateBuilder COMMAND fruity_server_match_state_builder_tests)
+    add_executable(fruity_server_lobby_state_tests "${FRUITY_MPHREAD_ROOT}/Testing/TestServerLobbyState.cpp")
+    target_link_libraries(fruity_server_lobby_state_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_server_lobby_state_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.ServerLobbyState COMMAND fruity_server_lobby_state_tests)
+    add_executable(fruity_server_lobby_peer_state_tests
+        "${FRUITY_MPHREAD_ROOT}/Testing/TestServerLobbyPeerState.cpp")
+    target_link_libraries(fruity_server_lobby_peer_state_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_server_lobby_peer_state_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.ServerLobbyPeerState COMMAND fruity_server_lobby_peer_state_tests)
+    add_executable(fruity_server_lobby_command_processor_tests
+        "${FRUITY_MPHREAD_ROOT}/Testing/TestServerLobbyCommandProcessor.cpp")
+    target_link_libraries(fruity_server_lobby_command_processor_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_server_lobby_command_processor_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.ServerLobbyCommandProcessor COMMAND fruity_server_lobby_command_processor_tests)
+    add_executable(fruity_server_lobby_load_barrier_tests
+        "${FRUITY_MPHREAD_ROOT}/Testing/TestServerLobbyLoadBarrier.cpp")
+    target_link_libraries(fruity_server_lobby_load_barrier_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_server_lobby_load_barrier_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.ServerLobbyLoadBarrier COMMAND fruity_server_lobby_load_barrier_tests)
+    add_executable(fruity_server_lobby_ownership_policy_tests
+        "${FRUITY_MPHREAD_ROOT}/Testing/TestServerLobbyOwnershipPolicy.cpp")
+    target_link_libraries(fruity_server_lobby_ownership_policy_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_server_lobby_ownership_policy_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.ServerLobbyOwnershipPolicy COMMAND fruity_server_lobby_ownership_policy_tests)
+    add_executable(fruity_server_session_state_builder_tests
+        "${FRUITY_MPHREAD_ROOT}/Testing/TestServerSessionStateBuilder.cpp")
+    target_link_libraries(fruity_server_session_state_builder_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_server_session_state_builder_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.ServerSessionStateBuilder COMMAND fruity_server_session_state_builder_tests)
+    add_executable(fruity_freeze_prediction_ledger_tests
+        "${FRUITY_MPHREAD_ROOT}/Testing/TestFreezePredictionLedger.cpp")
+    target_link_libraries(fruity_freeze_prediction_ledger_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_freeze_prediction_ledger_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.FreezePredictionLedger COMMAND fruity_freeze_prediction_ledger_tests)
+    add_executable(fruity_burn_status_effect_policy_tests
+        "${FRUITY_MPHREAD_ROOT}/Testing/TestBurnStatusEffectPolicy.cpp")
+    target_link_libraries(fruity_burn_status_effect_policy_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_burn_status_effect_policy_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.BurnStatusEffectPolicy COMMAND fruity_burn_status_effect_policy_tests)
+    add_executable(fruity_net_session_simulation_adapter_tests
+        "${FRUITY_MPHREAD_ROOT}/Testing/TestNetSessionSimulationAdapter.cpp")
+    target_link_libraries(fruity_net_session_simulation_adapter_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_net_session_simulation_adapter_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.NetSessionSimulationAdapter
+        COMMAND fruity_net_session_simulation_adapter_tests)
+    add_executable(fruity_server_slot_identity_tests "${FRUITY_MPHREAD_ROOT}/Testing/TestServerSlotIdentity.cpp")
+    target_link_libraries(fruity_server_slot_identity_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_server_slot_identity_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.ServerSlotIdentity COMMAND fruity_server_slot_identity_tests)
+    add_executable(fruity_session_lobby_synchronizer_tests
+        "${FRUITY_MPHREAD_ROOT}/Testing/TestSessionLobbySynchronizer.cpp")
+    target_link_libraries(fruity_session_lobby_synchronizer_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_session_lobby_synchronizer_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.SessionLobbySynchronizer COMMAND fruity_session_lobby_synchronizer_tests)
+    add_executable(fruity_server_authority_state_tests "${FRUITY_MPHREAD_ROOT}/Testing/TestServerAuthorityState.cpp")
+    target_link_libraries(fruity_server_authority_state_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_server_authority_state_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.ServerAuthorityState COMMAND fruity_server_authority_state_tests)
+    add_executable(fruity_server_peer_liveness_tests "${FRUITY_MPHREAD_ROOT}/Testing/TestServerPeerLiveness.cpp")
+    target_link_libraries(fruity_server_peer_liveness_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_server_peer_liveness_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.ServerPeerLiveness COMMAND fruity_server_peer_liveness_tests)
+    add_executable(fruity_net_fault_queue_tests "${CMAKE_CURRENT_SOURCE_DIR}/tools/testing/TestNetFaultQueue.cpp")
+    target_link_libraries(fruity_net_fault_queue_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_net_fault_queue_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.NetFaultQueue COMMAND fruity_net_fault_queue_tests)
+    add_executable(fruity_peer_chat_rate_limiter_tests "${FRUITY_MPHREAD_ROOT}/Testing/TestPeerChatRateLimiter.cpp")
+    target_link_libraries(fruity_peer_chat_rate_limiter_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_peer_chat_rate_limiter_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.PeerChatRateLimiter COMMAND fruity_peer_chat_rate_limiter_tests)
+    add_executable(fruity_net_damage_metrics_tests
+        "${FRUITY_MPHREAD_ROOT}/Testing/TestNetDamageMetrics.cpp")
+    target_link_libraries(fruity_net_damage_metrics_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_net_damage_metrics_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.NetDamageMetrics COMMAND fruity_net_damage_metrics_tests)
     add_executable(fruity_opengl_uniform_tests
         "${FRUITY_MPHREAD_ROOT}/Testing/TestOpenGlUniformState.cpp"
         "${FRUITY_MPHREAD_ROOT}/NativeRuntime/FrameTelemetry.cpp")
@@ -610,7 +904,15 @@ if(NOT ANDROID)
     find_package(glfw3 CONFIG REQUIRED)
     target_link_libraries(fruity_mphread_native PUBLIC glfw)
 
-    find_library(FRUITY_OPENAL_LIBRARY NAMES openal OpenAL OpenAL32)
+    if(MSVC AND VCPKG_INSTALLED_DIR AND VCPKG_TARGET_TRIPLET
+        AND EXISTS "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/lib/OpenAL32.lib")
+        # Do not let a nearby MSYS2 installation win the generic search: its
+        # GNU archive is not a valid input for the MSVC linker.
+        set(FRUITY_OPENAL_LIBRARY
+            "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/lib/OpenAL32.lib")
+    else()
+        find_library(FRUITY_OPENAL_LIBRARY NAMES openal OpenAL OpenAL32)
+    endif()
     if(FRUITY_OPENAL_LIBRARY)
         # Sfx.cpp calls al*/alc* directly on every desktop platform. macOS
         # therefore needs an actual link dependency too; the runtime dylib
@@ -932,4 +1234,15 @@ else()
     find_package(CURL REQUIRED)
     find_package(LibArchive REQUIRED)
     target_link_libraries(fruity_mphread_native PUBLIC CURL::libcurl LibArchive::LibArchive)
+endif()
+
+# Test executables link the native owner, which includes Qt Core/Gui/Qml/Quick
+# on desktop. Their vcpkg DLLs are copied beside each executable, while Qt's
+# shared runtime remains in the selected Qt kit's bin directory.
+if(WIN32 AND MSVC AND BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)
+    get_property(FRUITY_TESTS DIRECTORY PROPERTY TESTS)
+    foreach(_test IN LISTS FRUITY_TESTS)
+        set_property(TEST "${_test}" APPEND PROPERTY ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${QT6_INSTALL_PREFIX}/${QT6_INSTALL_BINS}")
+    endforeach()
 endif()

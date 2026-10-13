@@ -65,6 +65,9 @@ namespace MphRead::Mods::Launcher::Gui
         static void RequestShots(std::string directory);
         static void AfterDraw(MphRead::RenderWindow& window);
         static void PlayAnother(std::string roomKey);
+        // A match decided before the window opened (-connect): started on the
+        // first frame, as a press of JOIN would have started it.
+        static void LaunchOnStart(LaunchPlan plan);
 
         static void PointerMoved(double x, double y);
         static void PointerButton(OpenTK::Windowing::GraphicsLibraryFramework::MouseButton button,

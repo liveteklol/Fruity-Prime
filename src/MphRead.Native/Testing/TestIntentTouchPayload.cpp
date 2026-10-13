@@ -1,11 +1,22 @@
 // The Morph Ball touch block of IntentPacket: what an owner reports so the
 // authority can run the same touch roll and touch/shoulder boost branches.
-#include "../Mods/Network/NetProtocol.hpp"
-#include "../Mods/Network/LocalShotLog.hpp"
-#include "../Mods/Network/DeathaltWitness.hpp"
-#include "../Mods/Network/RemoteBombState.hpp"
-#include "../Mods/Network/RemoteShotQueue.hpp"
-#include "../Mods/Network/ShotEventLedger.hpp"
+#include "Mods/Network/Protocol/NetProtocol.hpp"
+#include "Mods/Network/Gameplay/Weapons/LocalShotLog.hpp"
+#include "Mods/Network/Gameplay/Claims/Common/ClaimResend.hpp"
+#include "Mods/Network/Protocol/ConnectionSecret.hpp"
+#include "Mods/Network/Gameplay/Claims/Hit/ClaimDamageBound.hpp"
+#include "Mods/Network/Gameplay/StatusEffects/TimedEffectSync.hpp"
+#include "Mods/Network/Gameplay/Pickups/ItemAuthority.hpp"
+#include "Mods/Network/Gameplay/Pickups/PickupReach.hpp"
+#include "Mods/Network/Gameplay/Pickups/PowerUpLedger.hpp"
+#include "Mods/Network/Gameplay/Pickups/PredictionBook.hpp"
+#include "Mods/Network/Protocol/PowerUpSync.hpp"
+#include "Mods/Network/Transport/InboxShedding.hpp"
+#include "Mods/Network/Gameplay/Pickups/PredictionMatch.hpp"
+#include "Mods/Network/Gameplay/Bombs/RemoteBombState.hpp"
+#include "Mods/Network/Gameplay/Bombs/NetBombs.hpp"
+#include "Mods/Network/Gameplay/Weapons/RemoteShotQueue.hpp"
+#include "Mods/Network/Gameplay/Weapons/ShotEventLedger.hpp"
 #include "../Mods/Input/HostTouch.hpp"
 #include "../Mods/Input/TouchInputAdapter.hpp"
 #include "../Entities/Players/MorphBallBoostStateMachine.hpp"
@@ -15,11 +26,13 @@
 #include <cstdio>
 #include <initializer_list>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 #include <tuple>
 #include <vector>
 
 using MphRead::Mods::Network::IntentPacket;
+using MphRead::Mods::Network::ReconcileTimedEffect;
 using namespace MphRead::Mods::Input;
 namespace Boost = MphRead::Entities::MorphBallBoostStateMachine;
 namespace Rules = MphRead::Entities::MorphBallTouchRules;
@@ -67,9 +80,9 @@ namespace
         shot.ShotHistory[1] = {42, 104, Id(BeamType::OmegaCannon), 37, 99,
             OpenTK::Mathematics::Vector3(4, 5, 6), OpenTK::Mathematics::Vector3(0, 1, 0)};
         shot.ShotHistoryLength = 2;
-        std::vector<std::uint8_t> bytes(IntentPacket::ShotFullSize);
+        std::vector<std::uint8_t> bytes(IntentPacket::MaxWireSize);
         shot.Write(bytes);
-        const IntentPacket noRay = IntentPacket::Read(bytes);
+        const IntentPacket noRay = IntentPacket::Read(std::span(bytes).first(shot.WireSize()));
         Expect(!noRay.HasShot, "a frame that fired nothing carries no ray of its own");
         Expect(noRay.ShotHistoryLength == 2 && noRay.ShotHistory[1].Sequence == 42
             && noRay.ShotHistory[1].Frame == 104 && noRay.ShotHistory[1].WeaponId == Id(BeamType::OmegaCannon)
@@ -99,24 +112,15 @@ namespace
         claimBytes[70] = 0x7F;
         Expect(HitClaimPacket::Read(claimBytes).Cause == HitClaimPacket::CauseHit, "a cause nobody knows is a plain hit");
 
-        // A shooter's Death Alt is taken from what the authority saw of it.
-        MphRead::Mods::Network::DeathaltWitness witness;
-        Expect(!witness.Vouches(2, 100), "nobody seen with one: not vouched for");
-        witness.Observe(2, true, 100);
-        witness.Observe(2, false, 140);
-        Expect(witness.Vouches(2, 100 + MphRead::Mods::Network::DeathaltWitness::SlackFrames),
-            "a claim a trip behind the power-up running out is still its");
-        Expect(!witness.Vouches(2, 101 + MphRead::Mods::Network::DeathaltWitness::SlackFrames),
-            "past the slack it is not");
-        Expect(!witness.Vouches(3, 100), "and one player's Death Alt is not another's");
-        witness.Forget(2);
-        Expect(!witness.Vouches(2, 100), "a new life starts unseen");
+        claim.Flags = HitClaimPacket::FlagDoubled;
+        claim.Write(claimBytes);
+        Expect(HitClaimPacket::Read(claimBytes).Flags == HitClaimPacket::FlagDoubled, "a doubled hit says so");
 
         shot.HasShot = true;
         shot.ShotOrigin = OpenTK::Mathematics::Vector3(1, 2, 3);
         shot.ShotDirection = OpenTK::Mathematics::Vector3(0, 0, -1);
         shot.Write(bytes);
-        const IntentPacket withRay = IntentPacket::Read(bytes);
+        const IntentPacket withRay = IntentPacket::Read(std::span(bytes).first(shot.WireSize()));
         Expect(withRay.HasShot && Near(withRay.ShotOrigin.Y, 2.0F) && Near(withRay.ShotDirection.Z, -1.0F)
             && withRay.ShotHistory[1].Sequence == 42,
             "this frame's ray and the history share the payload");
@@ -127,14 +131,30 @@ namespace
         coil.ShotOrigin = OpenTK::Mathematics::Vector3(1, 2, 3);
         coil.ShotDirection = OpenTK::Mathematics::Vector3(1, 0, 0);
         coil.Write(bytes);
-        const IntentPacket coilRead = IntentPacket::Read(bytes);
+        const IntentPacket coilRead = IntentPacket::Read(std::span(bytes).first(coil.WireSize()));
         Expect(coilRead.HasShot && coilRead.ShotHistoryLength == 0, "continuous fire keeps its ray without an event");
 
-        bytes[static_cast<std::size_t>(IntentPacket::FullSize + IntentPacket::ShotSize)] = 0xFF;
+        // Only what there is: an idle intent is the fixed part and one byte.
+        IntentPacket idle{};
+        Expect(idle.WireSize() == static_cast<std::size_t>(IntentPacket::FullSize) + 1, "an idle intent carries no sections");
+        idle.HasBombs = true;
+        Expect(idle.WireSize() == static_cast<std::size_t>(IntentPacket::FullSize) + 3,
+            "a report of no bombs is two bytes");
+        Expect(shot.WireSize() == static_cast<std::size_t>(IntentPacket::FullSize) + 1 + IntentPacket::ShotSize
+            + 1 + 2 * IntentPacket::ShotEventSize, "a ray and two shots, and nothing else");
+        Expect(static_cast<std::size_t>(IntentPacket::MaxWireSize) < 388, "never larger than the fixed layout was");
+
+        // A section cut short is absent, never half read; a corrupt count
+        // is clamped, and then only read if every entry it names is there.
+        shot.Write(bytes);
+        const std::size_t whole = shot.WireSize();
+        Expect(IntentPacket::Read(std::span(bytes).first(whole - 1)).ShotHistoryLength == 0,
+            "a history missing its last byte is not read");
+        Expect(IntentPacket::Read(std::span(bytes).first(static_cast<std::size_t>(IntentPacket::FullSize))).ShotHistoryLength == 0,
+            "an intent without the sections has no history");
+        bytes[static_cast<std::size_t>(IntentPacket::FullSize + 1 + IntentPacket::ShotSize)] = 0xFF;
         Expect(IntentPacket::Read(bytes).ShotHistoryLength == IntentPacket::ShotHistoryCount,
             "a corrupt history count is clamped");
-        Expect(IntentPacket::Read(std::span(bytes).first(static_cast<std::size_t>(IntentPacket::FullSize))).ShotHistoryLength == 0,
-            "an intent without the block has no history");
     }
 
     // The receiver: the event's weapon is the shot's, once per sequence.
@@ -231,7 +251,7 @@ namespace
                 "the projectiles spawned after a shot carry its sequence");
         }
         IntentPacket intent{};
-        log.Fill(intent);
+        log.Fill(intent, 106);
         Expect(intent.ShotHistoryLength == IntentPacket::ShotHistoryCount
             && intent.ShotHistory[0].Sequence == 3 && intent.ShotHistory[3].Sequence == 6,
             "the history keeps the newest shots, oldest first");
@@ -242,11 +262,25 @@ namespace
         after.WeaponId = Id(BeamType::PowerBeam);
         static_cast<void>(log.Record(after));
         IntentPacket respawned{};
-        log.Fill(respawned);
+        log.Fill(respawned, 200);
         Expect(respawned.ShotHistoryLength == 1 && respawned.ShotHistory[0].Sequence == 7,
             "a new life empties the history but never reuses a sequence");
         Expect(intent.ShotHistory[3].Charge == 5 && intent.ShotHistory[3].AckFrame == 95,
             "the charge and the world are recorded with the shot");
+        // Repeated only while a receiver could still fire it.
+        IntentPacket later{};
+        log.Fill(later, 200 + LocalShotLog::RepeatFrames);
+        Expect(later.ShotHistoryLength == 1, "a shot is repeated for RepeatFrames");
+        log.Fill(later, 201 + LocalShotLog::RepeatFrames);
+        Expect(later.ShotHistoryLength == 0, "and then no longer sent");
+
+        // A claim's resend is timed from its last send.
+        using MphRead::Mods::Network::ClaimResendDue;
+        Expect(ClaimResendDue(0, 6, 0, 0, 10), "first chance: sent");
+        Expect(!ClaimResendDue(1, 6, 9, 0, 10) && ClaimResendDue(1, 6, 10, 0, 10), "then once the interval has passed");
+        Expect(ClaimResendDue(1, 6, 13, 0, 10), "a send held back by a full packet goes on the next chance");
+        Expect(ClaimResendDue(2, 6, 17, 12, 5), "a shorter interval measured since applies at once");
+        Expect(!ClaimResendDue(6, 6, 100, 0, 10), "never past the most sends");
     }
 
     // The authority's record of a shooter's shots, for the claims naming them.
@@ -399,27 +433,31 @@ namespace
         using OpenTK::Mathematics::Vector3;
 
         IntentPacket sent = WithBombs(50, {{7, Vector3(1, 2, 3)}, {8, Vector3(4, 5, 6)}});
-        std::vector<std::uint8_t> bytes(IntentPacket::BombFullSize);
+        std::vector<std::uint8_t> bytes(IntentPacket::MaxWireSize);
         sent.Write(bytes);
-        const IntentPacket read = IntentPacket::Read(bytes);
+        const IntentPacket read = IntentPacket::Read(std::span(bytes).first(sent.WireSize()));
         Expect(read.HasBombs && read.BombsLength == 2 && read.Bombs[1].Sequence == 8
             && Near(read.Bombs[1].Position.Y, 5.0F), "the standing bombs ride the intent");
         IntentPacket none{};
         none.HasBombs = true;
         none.Write(bytes);
-        Expect(IntentPacket::Read(bytes).HasBombs && IntentPacket::Read(bytes).BombsLength == 0,
+        Expect(IntentPacket::Read(std::span(bytes).first(none.WireSize())).HasBombs
+            && IntentPacket::Read(std::span(bytes).first(none.WireSize())).BombsLength == 0,
             "no bombs is a report too");
         IntentPacket gone = WithBombs(60, {{9, Vector3(1, 1, 1)}, {10, Vector3(2, 2, 2), true}});
         gone.Write(bytes);
         Expect(!IntentPacket::Read(bytes).Bombs[0].Gone && IntentPacket::Read(bytes).Bombs[1].Gone,
             "a bomb just gone is still reported, as gone");
-        std::vector<std::uint8_t> older(IntentPacket::ShotFullSize);
-        sent.Write(older);
-        Expect(!IntentPacket::Read(older).HasBombs, "a payload without the block reports nothing");
+        IntentPacket quiet{};
+        quiet.Write(bytes);
+        Expect(!IntentPacket::Read(std::span(bytes).first(quiet.WireSize())).HasBombs,
+            "an intent without the section reports nothing");
 
         RemoteBombState state;
         Expect(!state.Active(), "a player who never reported lays its own");
-        state.Receive(WithBombs(100, {{1, Vector3(1, 0, 0)}, {2, Vector3(2, 0, 0)}}));
+        Expect(!state.Receive(quiet), "an intent without a bomb section is not a complete bomb report");
+        Expect(state.Receive(WithBombs(100, {{1, Vector3(1, 0, 0)}, {2, Vector3(2, 0, 0)}})),
+            "the first complete bomb report is accepted");
         auto plan = state.Reconcile({});
         Expect(state.Active() && plan.LayCount == 2 && plan.Lay[0].Sequence == 1 && plan.DetonateCount == 0,
             "reported bombs are laid, oldest first");
@@ -430,22 +468,26 @@ namespace
         Expect(plan.LayCount == 0 && plan.DetonateCount == 0, "and once");
 
         // The owner's second bomb went off: the copy's follows.
-        state.Receive(WithBombs(110, {{1, Vector3(1, 0, 0)}}));
+        Expect(state.Receive(WithBombs(110, {{1, Vector3(1, 0, 0)}})),
+            "a newer complete bomb report is accepted");
         plan = state.Reconcile(both);
         Expect(plan.DetonateCount == 1 && plan.Detonate[0] == 2, "a bomb no longer reported is detonated");
         // An older intent still listing it changes nothing.
-        state.Receive(WithBombs(105, {{1, Vector3(1, 0, 0)}, {2, Vector3(2, 0, 0)}, {3, Vector3(3, 0, 0)}}));
+        Expect(!state.Receive(WithBombs(105, {{1, Vector3(1, 0, 0)}, {2, Vector3(2, 0, 0)}, {3, Vector3(3, 0, 0)}})),
+            "a stale bomb report is rejected");
         plan = state.Reconcile(both);
         Expect(plan.DetonateCount == 1 && plan.LayCount == 0, "an out-of-date report is ignored");
 
         // A bomb detonated here early (it never is, by touch) is not laid again.
         const std::uint32_t one[] = {1};
-        state.Receive(WithBombs(120, {{1, Vector3(1, 0, 0)}, {2, Vector3(2, 0, 0)}}));
+        Expect(state.Receive(WithBombs(120, {{1, Vector3(1, 0, 0)}, {2, Vector3(2, 0, 0)}})),
+            "a newer bomb report remains accepted");
         plan = state.Reconcile(one);
         Expect(plan.LayCount == 0, "a sequence laid once is never laid again");
 
         // A bomb that cannot be placed yet is planned again until it is.
-        state.Receive(WithBombs(130, {{3, Vector3(3, 0, 0)}}));
+        Expect(state.Receive(WithBombs(130, {{3, Vector3(3, 0, 0)}})),
+            "a later report for a not-yet-placeable bomb is accepted");
         plan = state.Reconcile({});
         Expect(plan.LayCount == 1 && plan.Lay[0].Sequence == 3, "a bomb not yet placed is still planned");
         plan = state.Reconcile({});
@@ -455,6 +497,16 @@ namespace
         state.Receive(WithBombs(135, {{3, Vector3(7, 0, 0)}}));
         Expect(state.StandingAt(3).has_value() && Near(state.StandingAt(3)->X, 7.0F) && !state.StandingAt(2).has_value(),
             "a standing bomb's place is the owner's");
+
+        MphRead::Mods::Network::NetBombs::Forget(1);
+        MphRead::Mods::Network::NetBombs::Receive(1, WithBombs(200, {{41, Vector3(4, 5, 6)}}));
+        const auto networkPlace = MphRead::Mods::Network::NetBombs::ReportedPosition(1, 41);
+        Expect(networkPlace.has_value() && Near(networkPlace->X, 4.0F)
+            && Near(networkPlace->Y, 5.0F) && Near(networkPlace->Z, 6.0F)
+            && !MphRead::Mods::Network::NetBombs::ReportedPosition(-1, 41).has_value()
+            && !MphRead::Mods::Network::NetBombs::ReportedPosition(1, 0).has_value(),
+            "runtime bomb replication exposes only a valid standing sequence and its exact reported XYZ");
+        MphRead::Mods::Network::NetBombs::Forget(1);
 
         // A bomb that stood for a frame: laid here as it goes off.
         state.Laid(3);
@@ -551,6 +603,406 @@ namespace
         }
         Expect(localBoosts == 2 && remoteBoosts == 2, "both gestures fire one TouchBoost each on each machine");
         HostTouch::Withdraw();
+    }
+
+    void ConnectionIdentity()
+    {
+        using MphRead::Mods::Network::ConnectionSecret;
+        using MphRead::Mods::Network::HelloPacket;
+        using MphRead::Mods::Network::MayRebind;
+        ConnectionSecret held{};
+        held.fill(0x5A);
+        ConnectionSecret other = held;
+        other[15] ^= 1U;
+        Expect(MayRebind(held, held), "the secret a slot was opened with moves it");
+        Expect(!MayRebind(held, other), "one bit wrong does not");
+        Expect(!MayRebind(ConnectionSecret{}, ConnectionSecret{}), "an unset secret proves nothing");
+
+        HelloPacket hello{};
+        hello.Protocol = 28;
+        hello.Slot = 3;
+        hello.ClientId = 0xA1B2C3D4U;
+        hello.Secret = held;
+        std::vector<std::uint8_t> bytes(HelloPacket::Size);
+        hello.Write(bytes);
+        const HelloPacket read = HelloPacket::Read(bytes);
+        Expect(read.Protocol == 28 && read.Slot == 3 && read.ClientId == 0xA1B2C3D4U && read.Secret == held,
+            "a hello reads back as written");
+        const HelloPacket probe = HelloPacket::Read(std::span(bytes).first(2));
+        Expect(probe.Protocol == 28 && probe.ClientId == 0 && probe.Slot == 3
+            && !MphRead::Mods::Network::IsSet(probe.Secret), "a probe's hello leaves the rest unset");
+    }
+
+    void InboxShedding()
+    {
+        using MphRead::Mods::Network::PacketType;
+        using MphRead::Mods::Network::ShedIndex;
+        const auto type = [](PacketType t) { return t; };
+        const std::vector<PacketType> mixed{ PacketType::Welcome, PacketType::MatchState, PacketType::Snapshot,
+            PacketType::Intent };
+        const auto snapshot = ShedIndex(mixed, type);
+        Expect(snapshot.has_value() && *snapshot == 2,
+            "a full queue selects the oldest replaceable snapshot before a welcome");
+        const std::vector<PacketType> control{ PacketType::HitVerdict, PacketType::MapChange };
+        Expect(!ShedIndex(control, type), "important packets are not implicit overflow victims");
+        Expect(!ShedIndex(std::vector<PacketType>{}, type), "an empty queue has no replacement candidate");
+    }
+
+    void PredictionMatching()
+    {
+        using MphRead::Mods::Network::AnsweredShot;
+        using MphRead::Mods::Network::MatchPrediction;
+        using MphRead::Mods::Network::PredictedShot;
+        // Power Beam (bucket 0) fired at 10 and 12, a Missile (bucket 2) at 11.
+        const std::vector<PredictedShot> waiting{ { 0, 10, false }, { 2, 11, false }, { 0, 12, false } };
+        Expect(MatchPrediction(waiting, AnsweredShot{ 2, std::nullopt }) == 1,
+            "a Missile hit retires the Missile, not the older Power Beam shot");
+        Expect(MatchPrediction(waiting, AnsweredShot{ 0, std::uint8_t{ 12 } }) == 2,
+            "a named launch frame picks that very shot");
+        Expect(MatchPrediction(waiting, AnsweredShot{ 0, std::uint8_t{ 99 } }) == 0,
+            "an unknown launch frame falls back to the oldest of the weapon");
+        Expect(MatchPrediction(waiting, AnsweredShot{ 5, std::nullopt }) == 0,
+            "a weapon with nothing waiting falls back to the oldest");
+        const std::vector<PredictedShot> refused{ { 2, 11, true }, { 2, 13, false } };
+        Expect(MatchPrediction(refused, AnsweredShot{ 2, std::uint8_t{ 11 } }) == 1,
+            "a refused claim is never the answer");
+        Expect(MatchPrediction(std::vector<PredictedShot>{}, AnsweredShot{ 0, std::nullopt }) == 0,
+            "nothing waiting is offset zero");
+    }
+
+    // One client's view of one power-up: the effect it shows, its book of
+    // pickups the authority has not ruled on, and what the snapshots say --
+    // driven through every order the answers can come in.
+    struct PickupClient
+    {
+        using PowerUp = MphRead::Mods::Network::PowerUp;
+        MphRead::Mods::Network::PredictionBook Book{};
+        PowerUp Kind = PowerUp::DoubleDamage;
+        std::uint16_t Local = 0;
+        std::uint8_t SeenSequence = 0;
+        std::uint16_t Life = 1;
+        bool Alive = true;
+        std::uint32_t Now = 1000;
+
+        void Step(std::uint32_t frames)
+        {
+            Now += frames;
+            Local = static_cast<std::uint16_t>(Local > frames ? Local - frames : 0U);
+        }
+        void Predict(std::uint16_t claim)
+        {
+            Book.Add(claim, Kind, static_cast<std::int16_t>(claim), 1, Life, Now, Local);
+            Local = MphRead::Mods::Network::PowerUpFrames;
+        }
+        void Answer(std::uint16_t claim, bool granted, std::uint8_t sequence = 0)
+        {
+            if (const auto rollback = Book.Settle(claim, granted, sequence, Now, Life, Alive))
+            {
+                Local = rollback->Frames;
+            }
+        }
+        void Snapshot(std::uint8_t sequence, std::uint16_t remaining)
+        {
+            using namespace MphRead::Mods::Network;
+            switch (ReconcilePowerUp(PowerUpReport{ sequence, remaining }, SeenSequence, Local, Book.Awaiting(Kind), Alive))
+            {
+            case PowerUpStep::Start:
+            case PowerUpStep::Retime:
+            case PowerUpStep::Resume:
+                Local = remaining;
+                break;
+            case PowerUpStep::End:
+                Local = 0;
+                break;
+            case PowerUpStep::Keep:
+                break;
+            }
+            SeenSequence = sequence;
+            Book.Seen(Kind, sequence);
+        }
+        // A double damage of 900 frames already running under grant 3.
+        void Holding()
+        {
+            Local = 900;
+            Snapshot(3, 900);
+        }
+        [[nodiscard]] bool Near(std::uint16_t expected) const
+        {
+            return Local + 1 >= expected && Local <= expected + 1;
+        }
+    };
+
+    void PredictionOrders()
+    {
+        {
+            // A second pickup refused while the first grant still runs.
+            PickupClient client;
+            client.Holding();
+            client.Predict(1);
+            client.Step(30);
+            client.Answer(1, false);
+            Expect(client.Near(870), "a refused pickup puts the running grant back, less the time since");
+            client.Snapshot(3, 870);
+            Expect(client.Near(870), "and the snapshots agree with it");
+        }
+        {
+            // A then B; A refused, then B refused.
+            PickupClient client;
+            client.Holding();
+            client.Predict(1);
+            client.Step(10);
+            client.Predict(2);
+            client.Step(10);
+            client.Answer(1, false);
+            Expect(client.Local == 1790, "an earlier refusal leaves a later pickup's effect alone");
+            client.Step(10);
+            client.Answer(2, false);
+            Expect(client.Near(870), "and the later refusal goes back to what ran before either");
+        }
+        {
+            // A then B; B refused, then A refused.
+            PickupClient client;
+            client.Holding();
+            client.Predict(1);
+            client.Step(10);
+            client.Predict(2);
+            client.Step(10);
+            client.Answer(2, false);
+            Expect(client.Near(1780), "a later refusal goes back to the earlier pickup, still waiting");
+            client.Step(10);
+            client.Answer(1, false);
+            Expect(client.Near(870), "and the earlier refusal to what ran before it");
+        }
+        for (const bool snapshotFirst : { false, true })
+        {
+            // A granted, B refused: the verdicts and the snapshot in both orders.
+            PickupClient client;
+            client.Holding();
+            client.Predict(1);
+            client.Step(10);
+            client.Predict(2);
+            client.Step(5);
+            client.Answer(1, true, 4);
+            if (snapshotFirst)
+            {
+                client.Snapshot(4, 1785);
+                client.Step(5);
+                client.Answer(2, false);
+            }
+            else
+            {
+                client.Step(5);
+                client.Answer(2, false);
+                client.Snapshot(4, 1780);
+            }
+            Expect(client.Near(1780), snapshotFirst
+                ? "A granted, its snapshot, then B refused: A's grant shows"
+                : "A granted, B refused, then A's snapshot: A's grant shows");
+        }
+        {
+            // A refused, B granted.
+            PickupClient client;
+            client.Holding();
+            client.Predict(1);
+            client.Step(10);
+            client.Predict(2);
+            client.Step(5);
+            client.Answer(1, false);
+            client.Step(5);
+            client.Answer(2, true, 4);
+            client.Snapshot(4, 1790);
+            Expect(client.Near(1790), "A refused, B granted: B's grant shows");
+        }
+        {
+            // Three pickups, refused middle, first, last.
+            PickupClient client;
+            client.Holding();
+            client.Predict(1);
+            client.Step(10);
+            client.Predict(2);
+            client.Step(10);
+            client.Predict(3);
+            client.Step(10);
+            client.Answer(2, false);
+            Expect(client.Local == 1790, "a refusal in the middle leaves the newest alone");
+            client.Answer(1, false);
+            Expect(client.Local == 1790, "so does the oldest's");
+            client.Answer(3, false);
+            Expect(client.Near(870), "the last refusal goes back to what ran before all three");
+        }
+        {
+            // Dying with a pickup waiting, refused while dead.
+            PickupClient client;
+            client.Holding();
+            client.Predict(1);
+            client.Step(10);
+            client.Alive = false;
+            client.Local = 0;
+            client.Answer(1, false);
+            Expect(client.Local == 0, "nothing is put back onto a dead player");
+        }
+        {
+            // A pickup from the last life refused in the next, with one waiting in it.
+            PickupClient client;
+            client.Holding();
+            client.Predict(1);
+            client.Step(10);
+            client.Local = 0;
+            client.Life = 2;
+            client.Book.BeginLife(2);
+            client.Answer(1, false);
+            Expect(client.Local == 0, "a respawn drops the last life's pickups");
+            client.Predict(2);
+            client.Step(10);
+            client.Answer(2, false);
+            Expect(client.Local == 0, "and the new life's refusal goes back to the new life's nothing");
+        }
+        {
+            // Both lives' pickups still waiting when the respawn is noticed late.
+            PickupClient client;
+            client.Holding();
+            client.Predict(1);
+            client.Step(10);
+            client.Local = 0;
+            client.Life = 2;
+            client.Predict(2);
+            client.Step(10);
+            client.Answer(1, false);
+            Expect(client.Local == 1790, "another life's refusal hands nothing on and rolls nothing back");
+        }
+    }
+
+    void PowerUpAuthority()
+    {
+        using namespace MphRead::Mods::Network;
+        // The ledger: when each grant ran, by the world frame of the contact.
+        PowerUpLedger ledger;
+        Expect(!ledger.RanAt(2, PowerUp::Deathalt, 100, 1), "nothing granted: nothing ran");
+        const PowerUpLedger::Grant first = ledger.Begin(2, PowerUp::Deathalt, 100, PowerUpFrames, 1);
+        Expect(first.Sequence == 1 && first.Expire == 100 + PowerUpFrames, "a grant runs its full time from the contact");
+        Expect(ledger.RanAt(2, PowerUp::Deathalt, 100, 1) && !ledger.RanAt(2, PowerUp::Deathalt, 99, 1),
+            "from the contact on, never before it");
+        Expect(ledger.RanAt(2, PowerUp::Deathalt, 99 + PowerUpFrames, 1) && !ledger.RanAt(2, PowerUp::Deathalt, 100 + PowerUpFrames, 1),
+            "up to its last frame and not one past it");
+        Expect(!ledger.RanAt(3, PowerUp::Deathalt, 150, 1) && !ledger.RanAt(2, PowerUp::Cloak, 150, 1),
+            "one player's power-up is not another's, nor another kind");
+        ledger.End(2, PowerUp::Deathalt, 400);
+        Expect(ledger.RanAt(2, PowerUp::Deathalt, 399, 1) && !ledger.RanAt(2, PowerUp::Deathalt, 400, 1),
+            "a death ends it exactly there");
+        const PowerUpLedger::Grant second = ledger.Begin(2, PowerUp::Deathalt, 1000, PowerUpFrames, 1);
+        Expect(second.Sequence == 2 && ledger.RanAt(2, PowerUp::Deathalt, 200, 1),
+            "a new grant keeps the old one's record for hits judged late");
+        ledger.Begin(2, PowerUp::Deathalt, 1100, PowerUpFrames, 1);
+        Expect(ledger.Current(2, PowerUp::Deathalt).Start == 1100 && !ledger.RanAt(2, PowerUp::Deathalt, 1100 + PowerUpFrames, 1)
+            && ledger.RanAt(2, PowerUp::Deathalt, 1099, 1), "picked up again: the old one ends where the new begins");
+        Expect(!ledger.RanAt(2, PowerUp::Deathalt, 1500, 2), "a later life of the same player does not have it");
+        ledger.EndAll(2, 1200);
+        Expect(ledger.RanAt(2, PowerUp::Deathalt, 1199, 1) && !ledger.RanAt(2, PowerUp::Deathalt, 1200, 1),
+            "a new life ends every grant still running");
+        ledger.Forget(2);
+        Expect(!ledger.RanAt(2, PowerUp::Deathalt, 1100, 1), "a new occupant has nothing");
+        std::uint8_t sequence = 0;
+        for (int i = 0; i < 40; ++i)
+        {
+            sequence = NextGrantSequence(sequence);
+            Expect(sequence >= 1 && sequence <= MaxGrantSequence, "a sequence fits its five bits and is never 0");
+        }
+
+        // The wire: five bits of sequence, eleven of frames left.
+        const PowerUpReport report{ 31, PowerUpFrames };
+        Expect(UnpackReport(PackReport(report)).Sequence == 31 && UnpackReport(PackReport(report)).Remaining == PowerUpFrames,
+            "a report survives the wire");
+        Expect(UnpackReport(PackReport(PowerUpReport{ 1, 5000 })).Remaining == RemainingMask, "frames are clamped, not wrapped");
+
+        // A client's copy: corrected, never assigned each snapshot.
+        Expect(ReconcilePowerUp({ 4, 1700 }, 3, 0, false, true) == PowerUpStep::Start, "a grant not shown here starts");
+        Expect(ReconcilePowerUp({ 4, 1700 }, 3, 0, false, false) == PowerUpStep::Keep, "but not on a dead copy");
+        Expect(ReconcilePowerUp({ 4, 1700 }, 3, 1704, false, true) == PowerUpStep::Keep,
+            "a predicted one a few frames off is left alone");
+        Expect(ReconcilePowerUp({ 4, 1700 }, 3, 1790, false, true) == PowerUpStep::Retime, "one far off is retimed");
+        Expect(ReconcilePowerUp({ 4, 1650 }, 4, 1700, false, true) == PowerUpStep::Keep, "the same grant counts down on its own");
+        Expect(ReconcilePowerUp({ 4, 0 }, 4, 12, false, true) == PowerUpStep::End, "the authority's has ended: so does this");
+        Expect(ReconcilePowerUp({ 3, 0 }, 3, 1790, true, true) == PowerUpStep::Keep,
+            "a prediction the snapshots have not caught up with is not ended");
+        Expect(ReconcilePowerUp({ 4, 900 }, 4, 0, false, true) == PowerUpStep::Resume,
+            "a grant still running that this copy lost is put back");
+        Expect(ReconcilePowerUp({ 4, 6 }, 4, 0, false, true) == PowerUpStep::Keep,
+            "not its last few frames: those two copies merely ended apart");
+        Expect(ReconcilePowerUp({ 4, 900 }, 4, 0, true, true) == PowerUpStep::Keep
+            && ReconcilePowerUp({ 4, 900 }, 4, 0, false, false) == PowerUpStep::Keep,
+            "nor while a prediction waits, nor on a dead copy");
+
+        // Who settles a pickup.
+        PickupContext context{};
+        Expect(RouteFor(context) == PickupRoute::Local, "offline: this machine");
+        context = PickupContext{ true, false, true, true, true, true };
+        Expect(RouteFor(context) == PickupRoute::Claim, "a client's own player and a power-up: predicted and claimed");
+        context.OwnPlayer = false;
+        Expect(RouteFor(context) == PickupRoute::None, "somebody else's contact: the authority's word");
+        context = PickupContext{ true, false, true, true, false, true };
+        Expect(RouteFor(context) == PickupRoute::None, "health is not predicted");
+        context.Authority = true;
+        Expect(RouteFor(context) == PickupRoute::Authority, "the authority hands it out itself");
+        context = PickupContext{ true, false, false, true, true, true };
+        Expect(RouteFor(context) == PickupRoute::Local, "an item no spawner put out stays local");
+
+        // The common timer lifecycle keeps a locally predicted freeze until
+        // the authority acknowledges it and lets an already-thawing copy end.
+        using TimedEffectSyncAction = MphRead::Mods::Network::TimedEffectSyncAction;
+        Expect(ReconcileTimedEffect(140, 0, false).Action == TimedEffectSyncAction::Start
+            && ReconcileTimedEffect(30, 150, true).Action == TimedEffectSyncAction::Update,
+            "an authoritative timed effect starts or corrects its remaining frames");
+        Expect(ReconcileTimedEffect(0, 120, false).Action == TimedEffectSyncAction::End,
+            "the authority ended the effect: this copy begins its end transition");
+        Expect(ReconcileTimedEffect(0, 120, true).Action == TimedEffectSyncAction::Keep,
+            "a locally predicted effect is kept until its report arrives");
+        Expect(ReconcileTimedEffect(0, 1, false).Action == TimedEffectSyncAction::Keep
+            && ReconcileTimedEffect(0, 0, false).Action == TimedEffectSyncAction::Keep,
+            "an effect already ending or ended is left alone");
+
+        // A contact is looked for a round trip after it, not anywhere in history.
+        const FrameWindow window = ContactArrivalWindow(1000, 150, 2000);
+        Expect(window.From == 1000 && window.To == 1000 + 9 + ArrivalSlack, "150 ms is nine frames, and the slack");
+        Expect(ContactArrivalWindow(1000, 150, 1012).To == 1012, "never past now");
+
+        // Damage: what the shot could have done, not what the claim says.
+        const ChargeAmounts beam{ 6, 10, 36 };
+        Expect(ChargePercent(true, true, 6, 24, 0) == 0.0F && ChargePercent(true, true, 6, 24, 48) == 1.0F,
+            "a partial charge runs from its least to its full");
+        Expect(ChargePercent(true, true, 6, 24, 30) == 0.5F, "and halfway is half");
+        Expect(ChargePercent(true, false, 6, 24, 47) == 0.0F && ChargePercent(true, false, 6, 24, 48) == 1.0F,
+            "an all-or-nothing charge is one or the other");
+        Expect(ChargePercent(false, false, 6, 24, 99) == 0.0F, "a weapon that cannot charge is never charged");
+        Expect(AmountAt(beam, 0.0F) == 6.0F && AmountAt(beam, 0.5F) == 23.0F && AmountAt(beam, 1.0F) == 36.0F,
+            "the amount at a charge is the projectile's");
+        Expect(Largest(beam) == 36, "the most at any charge");
+        Expect(ScaleBound(6.0F, DamageScale{}) == 7, "an uncharged shot: its own damage and a point");
+        Expect(ScaleBound(6.0F, DamageScale{ 1.0F, 1.0F, true, false }) == 13, "doubled when double damage was granted");
+        Expect(ScaleBound(6.0F, DamageScale{ 1.0F, 1.0F, false, true }) == 10, "a Prime Hunter's half again");
+        Expect(ScaleBound(6.0F, DamageScale{ 1.0F, 1.0F, true, true }) == 13, "never both");
+        Expect(ScaleBound(36.0F, DamageScale{ 0.5F, 1.0F, false, false }) == 19, "a resistant victim takes half");
+
+        // Reach: generous, but not across the room.
+        using OpenTK::Mathematics::Vector3;
+        Expect(WithinPickupReach(Vector3(0.0F, 0.0F, 0.0F), Vector3(0.9F, 0.65F, 0.0F)), "standing on it");
+        Expect(!WithinPickupReach(Vector3(0.0F, 0.0F, 0.0F), Vector3(4.0F, 0.65F, 0.0F)), "four units away");
+        Expect(!WithinPickupReach(Vector3(0.0F, 0.0F, 0.0F), Vector3(0.0F, 5.0F, 0.0F)), "a floor above");
+
+        // The claim, on the wire.
+        PickupClaimPacket claim{};
+        claim.MatchId = 7;
+        claim.AuthorityEpoch = 0x1122334455667788ULL;
+        claim.ClaimId = 9;
+        claim.SpawnId = -3;
+        claim.SpawnCount = 41;
+        claim.ContactFrame = 123456;
+        claim.Position = Vector3(1.5F, -2.0F, 3.25F);
+        std::vector<std::uint8_t> bytes(PickupClaimPacket::Size);
+        claim.Write(bytes);
+        const PickupClaimPacket read = PickupClaimPacket::Read(bytes);
+        Expect(read.MatchId == 7 && read.AuthorityEpoch == claim.AuthorityEpoch && read.ClaimId == 9
+            && read.SpawnId == -3 && read.SpawnCount == 41 && read.ContactFrame == 123456
+            && read.Position.Z == 3.25F, "a pickup claim reads back as written");
     }
 
     void PacketFaults()
@@ -679,6 +1131,11 @@ int main()
         BombState();
         OwnerAuthorityParity();
         PacketFaults();
+        PredictionMatching();
+        InboxShedding();
+        ConnectionIdentity();
+        PowerUpAuthority();
+        PredictionOrders();
     }
     catch (const std::exception& e)
     {

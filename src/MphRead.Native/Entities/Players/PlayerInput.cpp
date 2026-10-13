@@ -28,18 +28,18 @@
 #include "../../Mods/Input/AimInputSourceTracker.hpp"
 #include "../../NativeRuntime/System/Runtime.hpp"
 #include "../../Mods/Input/WeaponWheel.hpp"
-#include "../../Mods/Network/ContinuousWeaponPhase.hpp"
-#include "../../Mods/Network/NetBombs.hpp"
-#include "../../Mods/Network/NetSession.hpp"
-#include "../../Mods/Network/HitRig.hpp"
-#include "../../Mods/Network/NetShotDiagnostics.hpp"
+#include "Mods/Network/Gameplay/Weapons/ContinuousWeaponPhase.hpp"
+#include "Mods/Network/Gameplay/Bombs/NetBombs.hpp"
+#include "Mods/Network/Session/NetSession.hpp"
+#include "Mods/Network/Testing/Combat/HitRig.hpp"
+#include "Mods/Network/Diagnostics/NetShotDiagnostics.hpp"
 #include "../../NativeRuntime/System/Number.hpp"
 #include "../../Mods/Input/StylusZone.hpp"
-#include "../../Mods/Network/NetDamage.hpp"
-#include "../../Mods/Network/NetHooks.hpp"
-#include "../../Mods/Network/NetPlayerBridge.hpp"
-#include "../../Mods/Network/NetShotEvents.hpp"
-#include "../../Mods/Network/NetUnlagged.hpp"
+#include "Mods/Network/Gameplay/Combat/NetDamage.hpp"
+#include "Mods/Network/Integration/Hooks/NetHooks.hpp"
+#include "Mods/Network/Gameplay/Player/NetPlayerBridge.hpp"
+#include "Mods/Network/Gameplay/Weapons/NetShotEvents.hpp"
+#include "Mods/Network/Gameplay/Combat/NetUnlagged.hpp"
 #include "../../Mods/SpectatorMode.hpp"
 #include "../../Utility/Rng.hpp"
 #include "../../NativeRuntime/System/HashCode.hpp"
@@ -425,12 +425,12 @@ namespace MphRead::Entities
             const bool local = _slotIndex == Mods::Network::NetSession::LocalSlot()
                 && Mods::Network::NetSession::LocalSlot() >= 0;
             const bool fresh = local || (_slotIndex >= 0
-                && _slotIndex < static_cast<std::int32_t>(Mods::Network::NetSession::RemoteIntentValid.size())
-                && Mods::Network::NetSession::RemoteIntentValid[static_cast<std::size_t>(_slotIndex)]
-                && Mods::Network::NetSession::RemoteIntents[static_cast<std::size_t>(_slotIndex)].Frame != 0
+                && _slotIndex < static_cast<std::int32_t>(Mods::Network::NetSession::RemotePlayerSlots)
+                && Mods::Network::NetSession::HasRemoteIntent(_slotIndex)
+                && Mods::Network::NetSession::RemoteIntent(static_cast<std::size_t>(_slotIndex)).Frame != 0
                 && Mods::Network::NetSession::RemoteIntentAge(_slotIndex)
                     <= Mods::Network::ContinuousWeaponPhase::MaxIntentAge);
-            Mods::Network::NetSession::ContinuousPhase.Observe(_slotIndex, RequireReference(_scene).FrameCount(),
+            Mods::Network::SharedContinuousWeaponPhase().Observe(_slotIndex, RequireReference(_scene).FrameCount(),
                 TestFlag(EquipWeapon().Flags, WeaponFlags::Continuous) && _controls.Shoot().IsDown(),
                 fresh);
         }
@@ -1831,7 +1831,7 @@ namespace MphRead::Entities
 
     void PlayerEntity::SpawnBomb()
     {
-        ::MphRead::NativeRuntime::IncrementInPlace(Mods::Network::NetDamage::BombSpawnCalls);
+        Mods::Network::NetDamageMetrics::RecordBombSpawnCall();
         Matrix4 transform = IdentityMatrix();
         if (_hunter == Hunter::Kanden)
         {
@@ -1854,10 +1854,10 @@ namespace MphRead::Entities
                 }
                 if (detonated)
                 {
-                    ::MphRead::NativeRuntime::IncrementInPlace(Mods::Network::NetDamage::BombSpawnDetonated);
+                    Mods::Network::NetDamageMetrics::RecordBombSpawnDetonated();
                     return;
                 }
-                ::MphRead::NativeRuntime::IncrementInPlace(Mods::Network::NetDamage::BombSpawnStaleCount);
+                Mods::Network::NetDamageMetrics::RecordBombSpawnStale();
                 _syluxBombCount = 0;
             }
             transform = GetTransformMatrix(Vector3(0.0F, 0.0F, 1.0F),
@@ -1880,11 +1880,11 @@ namespace MphRead::Entities
         const auto bomb = BombEntity::Spawn(this, transform, _scene);
         if (bomb == nullptr)
         {
-            ::MphRead::NativeRuntime::IncrementInPlace(Mods::Network::NetDamage::BombSpawnPoolEmpty);
+            Mods::Network::NetDamageMetrics::RecordBombSpawnPoolEmpty();
         }
         if (bomb != nullptr)
         {
-            ::MphRead::NativeRuntime::IncrementInPlace(Mods::Network::NetDamage::BombSpawnMade);
+            Mods::Network::NetDamageMetrics::RecordBombSpawnMade();
             if (_hunter == Hunter::Sylux)
             {
                 _syluxBombs.at(_syluxBombCount) = bomb;
@@ -1916,6 +1916,7 @@ namespace MphRead::Entities
                 bomb->SetDamage(damage);
                 bomb->SetEnemyDamage(damage);
             }
+            bomb->ModDoubleDamage = _doubleDmgTimer > 0;
             if (_doubleDmgTimer > 0)
             {
                 bomb->SetDamage(static_cast<std::uint16_t>(bomb->Damage() * 2));

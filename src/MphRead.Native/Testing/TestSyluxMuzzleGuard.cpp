@@ -1,5 +1,5 @@
 #include "../Mods/Combat/SyluxMuzzleGuard.hpp"
-#include "../Mods/Network/MuzzleObstructionHistory.hpp"
+#include "Mods/Network/Gameplay/Weapons/MuzzleObstructionHistory.hpp"
 #include "../Metadata/Player.hpp"
 #include "../Entities/Players/PlayerEntity.hpp"
 

@@ -6,6 +6,7 @@
 #include "../Features.hpp"
 #include "../Formats/Sound.hpp"
 #include "../Mods/Headless.hpp"
+#include "../Mods/AudioMute.hpp"
 #include "../Mods/ThumbnailMode.hpp"
 #include "../Mods/Diagnostics/PlatformDiagnostics.hpp"
 #include "Music.hpp"
@@ -677,7 +678,8 @@ namespace MphRead::Sound
 
     void Sfx::Load(MphRead::Scene& scene)
     {
-        if (MphRead::Mods::ThumbnailMode::Active() || MphRead::Mods::Headless::Active())
+        if (MphRead::Mods::ThumbnailMode::Active() || MphRead::Mods::Headless::Active()
+            || MphRead::Mods::AudioMute::Active())
         {
             _instance = std::make_shared<SfxInstanceBase>();
             SfxMute = false;

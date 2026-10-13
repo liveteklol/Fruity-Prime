@@ -2,8 +2,8 @@
 
 #include "ChatBox.hpp"
 
-#include "../Network/NetProtocol.hpp"
-#include "../Network/NetSession.hpp"
+#include "Mods/Network/Protocol/NetProtocol.hpp"
+#include "Mods/Network/Session/NetSession.hpp"
 #include "../../NativeRuntime/System/Globalization.hpp"
 #include "../../NativeRuntime/System/Managed.hpp"
 

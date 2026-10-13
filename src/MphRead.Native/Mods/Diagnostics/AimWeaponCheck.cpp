@@ -1,5 +1,7 @@
 #include "AimCheck.hpp"
-#include "../Network/ServerSim.hpp"
+#include "Mods/Network/Server/Match/ServerSim.hpp"
+#include "Mods/Network/Testing/ServerSimFixture.hpp"
+#include "Mods/Network/Session/NetSession.hpp"
 #include "../../Entities/Players/PlayerEntity.hpp"
 #include "../../Entities/BeamProjectileEntity.hpp"
 #include "../../Entities/BeamEffectEntity.hpp"
@@ -58,7 +60,7 @@ namespace MphRead::Mods::Diagnostics
                 const float spreadDegrees = static_cast<float>(charged ? player.EquipWeapon().ChargedSpread
                     : player.EquipWeapon().UnchargedSpread) / 4096.0F;
                 const float spreadCos = std::cos(spreadDegrees * 3.14159265358979323846F / 180.0F);
-                auto beams = sim._scene->GetBeamProjectileEntities().GetEnumerator();
+                auto beams = Network::ServerSimFixture::RequireScene(sim).GetBeamProjectileEntities().GetEnumerator();
                 while (beams.MoveNext())
                 {
                     const auto& beam = beams.Current();
@@ -82,7 +84,8 @@ namespace MphRead::Mods::Diagnostics
         const auto gun = player._gunVec1;
         for (int type : {0, 1, 3})
         {
-            const auto effect = Entities::BeamEffectEntity::Create({type, false, OpenTK::Mathematics::IdentityMatrix()}, sim._scene.get());
+            const auto effect = Entities::BeamEffectEntity::Create({type, false, OpenTK::Mathematics::IdentityMatrix()},
+                &Network::ServerSimFixture::RequireScene(sim));
             check(type >= 3 ? effect == nullptr : effect && effect->Type == EntityType::BeamEffect,
                 "type21 model effect and particle effect paths are distinct");
             check(OpenTK::Mathematics::Equal(gun, player._gunVec1), "effect registration does not rotate committed gun state");
@@ -100,7 +103,7 @@ namespace MphRead::Mods::Diagnostics
         player.UpdateAimVecs(); player._timeSinceShot = 10000;
         player._gunAnimation = Entities::GunAnimation::Idle;
         check(player.TryFireWeapon(), "collision fixture actually launches");
-        auto beams = sim._scene->GetBeamProjectileEntities().GetEnumerator();
+        auto beams = Network::ServerSimFixture::RequireScene(sim).GetBeamProjectileEntities().GetEnumerator();
         while (beams.MoveNext())
         {
             const auto& beam = beams.Current();
@@ -127,7 +130,8 @@ namespace MphRead::Mods::Diagnostics
                 (*roster.Hunters)[slot] = hunter; (*roster.Names)[slot] = "AIM WEAPON";
             }
             Network::ServerSim sim;
-            if (!sim.Start(room, GameMode::Battle, 2, [](auto) {}, [] {}, roster))
+            if (!sim.Start(room, GameMode::Battle, 2, [](auto) {}, [] {},
+                    Network::MakeNetSessionServerSimulationPort(), roster))
                 throw std::runtime_error("hunter weapon scene could not start");
             try
             {

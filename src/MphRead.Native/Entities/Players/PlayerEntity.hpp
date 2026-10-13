@@ -34,8 +34,9 @@ private: \
 #include "../../Mods/Chat/PlayerEntityChatHud.hpp"
 #include "../../Mods/Input/AimAssist/AimAssistWorld.hpp"
 #include "../../Mods/Input/PlayerEntityHaptics.hpp"
-#include "../../Mods/Network/PlayerEntityNetAim.hpp"
-#include "../../Mods/Network/PlayerEntityNetHud.hpp"
+#include "Mods/Network/Gameplay/Player/PlayerEntityNetAim.hpp"
+#include "Mods/Network/Gameplay/Player/PlayerEntityNetCulling.hpp"
+#include "Mods/Network/Gameplay/Player/PlayerEntityNetHud.hpp"
 #include "../../Mods/Render/PlayerEntityAmmoClear.hpp"
 #include "../../Mods/Render/GoldenCapture.hpp"
 #include "../../Mods/Render/PlayerEntityEndScreen.hpp"
@@ -804,6 +805,7 @@ namespace MphRead::Entities
         MPHREAD_PLAYER_SOUND_MEMBERS
         MPHREAD_PLAYER_ENTITY_CHAT_HUD_MEMBERS
         MPHREAD_PLAYER_ENTITY_NET_AIM_MEMBERS
+        MPHREAD_PLAYER_ENTITY_NET_CULLING_MEMBERS
         MPHREAD_PLAYER_ENTITY_NET_HUD_MEMBERS
         MPHREAD_PLAYER_ENTITY_AMMO_CLEAR_MEMBERS
         MPHREAD_PLAYER_ENTITY_END_SCREEN_MEMBERS

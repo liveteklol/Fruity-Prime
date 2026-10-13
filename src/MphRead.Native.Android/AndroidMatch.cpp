@@ -19,9 +19,9 @@
 #include "../MphRead.Native/Mods/Launcher/Portable/GameFiles.hpp"
 #include "../MphRead.Native/Mods/Launcher/Portable/LaunchPlan.hpp"
 #include "../MphRead.Native/Mods/Launcher/Portable/MatchStart.hpp"
-#include "../MphRead.Native/Mods/Network/DemoPlayback.hpp"
-#include "../MphRead.Native/Mods/Network/NetLaunch.hpp"
-#include "../MphRead.Native/Mods/Network/NetSession.hpp"
+#include "Mods/Network/Replay/DemoPlayback.hpp"
+#include "Mods/Network/Integration/Launch/NetLaunch.hpp"
+#include "Mods/Network/Session/NetSession.hpp"
 
 #include <algorithm>
 #include <cstddef>

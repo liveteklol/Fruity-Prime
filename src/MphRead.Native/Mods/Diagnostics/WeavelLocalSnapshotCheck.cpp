@@ -1,11 +1,12 @@
 #include "WeavelAltFormCheck.hpp"
 
-#include "../Network/NetHooks.hpp"
-#include "../Network/NetPlayerBridge.hpp"
-#include "../Network/NetPlayerLifecycle.hpp"
-#include "../Network/NetHitPrediction.hpp"
-#include "../Network/NetRoomChange.hpp"
-#include "../Network/NetSession.hpp"
+#include "Mods/Network/Integration/Hooks/NetHooks.hpp"
+#include "Mods/Network/Gameplay/Player/NetPlayerBridge.hpp"
+#include "Mods/Network/Gameplay/Player/NetPlayerLifecycle.hpp"
+#include "Mods/Network/Gameplay/Combat/NetHitPrediction.hpp"
+#include "Mods/Network/Session/NetRoomChange.hpp"
+#include "Mods/Network/Session/NetSession.hpp"
+#include "Mods/Network/Testing/NetSessionFixture.hpp"
 #include "../../Entities/Players/HalfturretEntity.hpp"
 #include "../../GameState.hpp"
 #include "../../Scene.hpp"
@@ -30,28 +31,37 @@ namespace MphRead::Mods::Diagnostics
             ++checks;
             NativeRuntime::ConsoleWriteLine("WEAVEL LOCAL SNAPSHOT PASS " + name);
         };
-        const auto savedRole = NetSession::_role;
-        const auto savedAuthority = NetSession::_isAuthority;
-        const auto savedLocal = NetSession::_localSlot;
-        const auto savedFrame = NetSession::_netFrame;
-        const auto savedValid = NetSession::RemoteStateValid;
-        const auto savedStates = NetSession::RemoteStates;
+        const auto savedSession = NetSessionFixture::Capture();
+        std::array<bool, RemotePlayerChannel::SlotCapacity> savedValid{};
+        std::array<PlayerState, RemotePlayerChannel::SlotCapacity> savedStates{};
+        RemotePlayerChannel& remotePlayers = RemotePlayers();
+        for (std::size_t slot = 0; slot < RemotePlayerChannel::SlotCapacity; slot++)
+        {
+            savedValid[slot] = remotePlayers.HasState(static_cast<std::int32_t>(slot));
+            if (savedValid[slot])
+            {
+                savedStates[slot] = remotePlayers.StateAt(slot);
+            }
+        }
         const auto restore = [&]
         {
-            NetSession::_role = savedRole;
-            NetSession::_isAuthority = savedAuthority;
-            NetSession::_localSlot = savedLocal;
-            NetSession::_netFrame = savedFrame;
-            NetSession::RemoteStateValid = savedValid;
-            NetSession::RemoteStates = savedStates;
+            NetSessionFixture::Restore(savedSession);
+            remotePlayers.InvalidateStates();
+            for (std::size_t slot = 0; slot < savedValid.size(); slot++)
+            {
+                if (savedValid[slot])
+                {
+                    remotePlayers.StoreState(savedStates[slot]);
+                }
+            }
         };
         try
         {
-            NetSession::_role = NetRole::Client;
-            NetSession::_isAuthority = false;
-            NetSession::_localSlot = owner.SlotIndex();
-            NetSession::_netFrame = 1001;
-            NetSession::RemoteStateValid.fill(false);
+            NetSessionFixture::SetRole(NetRole::Client);
+            NetSessionFixture::RevokeAuthority();
+            NetSessionFixture::SetLocalSlot(owner.SlotIndex());
+            NetSessionFixture::SetFrame(1001);
+            remotePlayers.InvalidateStates();
             check(NetSession::IsClient() && !NetSession::IsAuthority()
                 && NetSession::LocalSlot() == owner.SlotIndex() && NetRoomChange::GameplayReady(),
                 "fixture is a non-authority client with the local Weavel slot");
@@ -72,12 +82,11 @@ namespace MphRead::Mods::Diagnostics
             const std::array<std::string, 3> paths{"ApplyState local", "AfterInput", "AfterSimulation"};
             for (std::size_t path = 0; path < paths.size(); ++path)
             {
-                NetSession::_localSlot = owner.SlotIndex();
+                NetSessionFixture::SetLocalSlot(owner.SlotIndex());
                 const auto apply = [&](PlayerState snapshot, bool local)
                 {
                     NetHitPrediction::Reset(); // no unrelated predicted healing/debit in this fixture
-                    NetSession::RemoteStates[state.SlotIndex] = snapshot;
-                    NetSession::RemoteStateValid[state.SlotIndex] = true;
+                    remotePlayers.StoreState(snapshot);
                     const auto applied = NetSession::StatesApplied();
                     if (path == 0) NetPlayerBridge::ApplyState(owner, snapshot, local);
                     else if (path == 1) NetHooks::AfterInput(scene);
@@ -142,7 +151,7 @@ namespace MphRead::Mods::Diagnostics
 
                 // The same hook identifies slot0 as remote when another slot is
                 // local. Explicit active/dead/biped reconciliation still applies.
-                NetSession::_localSlot = 1;
+                NetSessionFixture::SetLocalSlot(1);
                 biped();
                 state.Flags |= PlayerState::FlagAltForm;
                 state.WeavelFlags = PlayerState::WeavelFlagTurretActive | PlayerState::WeavelFlagTurretGrounded;

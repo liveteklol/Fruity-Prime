@@ -33,12 +33,19 @@ namespace MphRead
     }
 }
 
+namespace MphRead::Mods::Network
+{
+    class ReplicaRoomPlacement;
+}
+
 namespace MphRead::Entities
 {
     class DoorEntity;
 
     class RoomEntity : public EntityBase
     {
+        friend class Mods::Network::ReplicaRoomPlacement;
+
     public:
         explicit RoomEntity(Scene* scene);
 

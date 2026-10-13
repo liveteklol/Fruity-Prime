@@ -97,6 +97,8 @@ namespace MphRead::Entities
 
         [[nodiscard]] std::uint16_t EnemyDamage() const noexcept;
         void SetEnemyDamage(std::uint16_t value) noexcept;
+        // Laid with its owner's double damage (BeamProjectileEntity's twin).
+        bool ModDoubleDamage = false;
 
         [[nodiscard]] std::shared_ptr<Effects::EffectEntry> Effect() const noexcept;
 
@@ -105,14 +107,16 @@ namespace MphRead::Entities
         [[nodiscard]] bool Process() override;
         void GetDrawInfo() override;
         void Destroy() override;
+        [[nodiscard]] OpenTK::Mathematics::Matrix4 GetModelTransform(
+            ModelInstance& inst, std::int32_t index) override;
 
         void PlaySpawnSfx();
 
         // Mods.Network.NetBombs: the bomb's sequence on its owner's machine;
         // 0 for one nobody numbered, and again once destroyed (pooled).
         std::uint32_t ModSequence = 0;
-        // Mods.Network.NetBombs: a copy's bomb moved toward where its owner
-        // has it, turned the way it moves as one homing in does.
+        // Mods.Network.NetBombs: applies the owner's reported simulation
+        // position and updates the replica's travel-facing orientation.
         void ModMoveTo(OpenTK::Mathematics::Vector3 position);
 
         [[nodiscard]] static std::shared_ptr<BombEntity> Spawn(
@@ -121,6 +125,7 @@ namespace MphRead::Entities
             Scene* scene);
 
     private:
+        [[nodiscard]] OpenTK::Mathematics::Vector3 ModVisualPosition() const noexcept;
         void LockjawCheckTargeting(PlayerEntity& player, EntityBase*& hitEntity);
         [[nodiscard]] bool LockjawCheckSnare(OpenTK::Mathematics::Vector3 position);
         void SetTarget(EntityBase* target);

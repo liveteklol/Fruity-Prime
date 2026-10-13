@@ -61,6 +61,19 @@ try {
                 throw "$observer bomb lifetime disagrees with $owner : owner=$ownFrames remote=$seenFrames"
             }
             Write-Output "BOMB NETWORK PASS observer=$observer owner=$owner ownerFrames=$ownFrames seenFrames=$seenFrames"
+
+            # Keep the measured world-position error alongside lifetime
+            # parity. Do not assign a pass threshold until a runtime baseline
+            # establishes what the movement and network cadence produce.
+            $position = @(Get-Content -LiteralPath (Join-Path $taskOut ($observer + '.log')) | Select-String "^  netcheck-bomb-position $observer $owner samples=(\d+) mean=([0-9.]+) max=([0-9.]+)$")
+            if ($position.Count -ne 1) { throw "$observer has no unique bomb XYZ measurement for $owner" }
+            $samples = [int]$position[0].Matches[0].Groups[1].Value
+            $meanError = [double]::Parse($position[0].Matches[0].Groups[2].Value, [Globalization.CultureInfo]::InvariantCulture)
+            $maxError = [double]::Parse($position[0].Matches[0].Groups[3].Value, [Globalization.CultureInfo]::InvariantCulture)
+            if ($samples -le 0 -or [double]::IsNaN($meanError) -or [double]::IsInfinity($meanError) -or [double]::IsNaN($maxError) -or [double]::IsInfinity($maxError)) {
+                throw "$observer has invalid bomb XYZ measurements for $owner"
+            }
+            Write-Output "BOMB NETWORK POSITION observer=$observer owner=$owner samples=$samples meanError=$meanError maxError=$maxError"
         }
     }
 } finally {

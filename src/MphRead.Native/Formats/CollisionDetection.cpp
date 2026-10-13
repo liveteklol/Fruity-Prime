@@ -5,7 +5,7 @@
 
 #include "../Entities/EntityBase.hpp"
 #include "../Renderer.hpp"
-#include "../Mods/Network/NetLog.hpp"
+#include "Mods/Network/Diagnostics/NetLog.hpp"
 #include "Types.hpp"
 #include "../NativeRuntime/System/Managed.hpp"
 #include "../NativeRuntime/OpenTK/Mathematics.hpp"

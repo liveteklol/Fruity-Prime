@@ -7,7 +7,7 @@
 #include "../../Scene.hpp"
 #include "../HunterSuits.hpp"
 #include "../Launcher/Portable/LaunchPlan.hpp"
-#include "../Network/PlayerColors.hpp"
+#include "Mods/Network/Gameplay/Player/PlayerColors.hpp"
 #include "../../NativeRuntime/System/Managed.hpp"
 #include "NativeRuntime/System/Globalization.hpp"
 

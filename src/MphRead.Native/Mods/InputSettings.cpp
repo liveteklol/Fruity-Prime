@@ -9,7 +9,7 @@
 #include "Input/PointerInput.hpp"
 #include "Input/StylusZone.hpp"
 #include "Input/TouchSettings.hpp"
-#include "Network/DemoClip.hpp"
+#include "Mods/Network/Replay/DemoClip.hpp"
 #include "Branding.hpp"
 #include "../Entities/Players/PlayerEntity.hpp"
 #include "Launcher/Portable/LauncherPrefs.hpp"

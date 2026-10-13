@@ -15,8 +15,9 @@
 #include "../Renderer.hpp"
 #include "../Scene.hpp"
 #include "../Utility/Rng.hpp"
-#include "../Mods/Network/NetBombs.hpp"
-#include "../Mods/Network/NetDamage.hpp"
+#include "Mods/Network/Gameplay/Bombs/NetBombs.hpp"
+#include "Mods/Network/Gameplay/Combat/NetDamage.hpp"
+#include "Mods/Network/Gameplay/Replication/NetSmoothing.hpp"
 #include "DoorEntity.hpp"
 #include "Enemies/02_Temroid.hpp"
 #include "EnemyInstanceEntity.hpp"
@@ -323,6 +324,20 @@ namespace MphRead::Entities
         }
     }
 
+    Vector3 BombEntity::ModVisualPosition() const noexcept
+    {
+        const Vector3 current = static_cast<Vector3>(Position);
+        if (ModSequence == 0 || !Mods::Network::NetBombs::IsRemoteReplica(*this)
+            || _owner == nullptr)
+        {
+            return current;
+        }
+        Vector3 sampled{};
+        bool present = false;
+        return Mods::Network::NetSmoothing::SampleTrackedPosition(
+            _owner->SlotIndex(), ModSequence, sampled, present) ? sampled : current;
+    }
+
     void BombEntity::Reposition(Vector3 offset)
     {
         Position = static_cast<Vector3>(Position) + offset;
@@ -331,6 +346,7 @@ namespace MphRead::Entities
 
     bool BombEntity::Process()
     {
+        const bool remoteReplica = Mods::Network::NetBombs::IsRemoteReplica(*this);
         if (_bombType == MphRead::BombType::Lockjaw)
         {
             ++_lockjawVisualTick;
@@ -338,7 +354,7 @@ namespace MphRead::Entities
         EntityBase* hitEntity = nullptr;
         _soundSource.Update(static_cast<Vector3>(Position), 5);
         UpdateNodeRefVolume();
-        if (_countdown > 0)
+        if (_countdown > 0 && !remoteReplica)
         {
             --_countdown;
         }
@@ -346,7 +362,7 @@ namespace MphRead::Entities
         {
             _flags |= BombFlags::Exploding;
         }
-        if (!TestFlag(_flags, BombFlags::Exploded))
+        if (!remoteReplica && !TestFlag(_flags, BombFlags::Exploded))
         {
             // A copy's bomb goes off when its owner's does (NetBombs), not by
             // touching somebody here.
@@ -361,25 +377,18 @@ namespace MphRead::Entities
                 {
                     if (&player != _owner && player.Health() > 0)
                     {
-                        ::MphRead::NativeRuntime::IncrementInPlace(Mods::Network::NetDamage::BombTeamSkips);
+                        Mods::Network::NetDamageMetrics::RecordBombTeamSkip();
                     }
                     continue;
                 }
-                ::MphRead::NativeRuntime::IncrementInPlace(Mods::Network::NetDamage::BombPlayerChecks);
+                Mods::Network::NetDamageMetrics::RecordBombPlayerCheck();
                 const Vector3 gapVector = player.Volume().SpherePosition
                     - static_cast<Vector3>(Position);
                 const float gap = Length(gapVector);
-                if (gap < Mods::Network::NetDamage::BombNearest)
-                {
-                    Mods::Network::NetDamage::BombNearest = gap;
-                }
-                if (_radius > Mods::Network::NetDamage::BombRadiusSeen)
-                {
-                    Mods::Network::NetDamage::BombRadiusSeen = _radius;
-                }
+                Mods::Network::NetDamageMetrics::RecordBombCandidate(gap, _radius);
                 if (player.CheckHitByBomb(this, false))
                 {
-                    ::MphRead::NativeRuntime::IncrementInPlace(Mods::Network::NetDamage::BombHits);
+                    Mods::Network::NetDamageMetrics::RecordBombHit();
                     hitEntity = &player;
                     _flags |= BombFlags::Exploding;
                 }
@@ -524,7 +533,7 @@ namespace MphRead::Entities
                 }
             }
         }
-        if (_target != nullptr)
+        if (!remoteReplica && _target != nullptr)
         {
             if (_target->GetTargetable())
             {
@@ -535,7 +544,7 @@ namespace MphRead::Entities
                 SetTarget(nullptr);
             }
         }
-        if (_bombType == MphRead::BombType::Lockjaw)
+        if (!remoteReplica && _bombType == MphRead::BombType::Lockjaw)
         {
             PlayerEntity& owner = RequireReference(_owner);
             if (owner.Health() == 0)
@@ -573,17 +582,22 @@ namespace MphRead::Entities
                 RequireReference(_scene).UnlinkEffectEntry(_effect);
                 _effect.reset();
             }
+            const Vector3 visualPosition = ModVisualPosition();
+            Matrix4 visualTransform = static_cast<Matrix4>(Transform);
+            visualTransform.M41 = visualPosition.X;
+            visualTransform.M42 = visualPosition.Y;
+            visualTransform.M43 = visualPosition.Z;
             if (_bombType == MphRead::BombType::Stinglarva)
             {
-                RequireReference(_scene).SpawnEffect(128, static_cast<Matrix4>(Transform));
+                RequireReference(_scene).SpawnEffect(128, visualTransform);
             }
             else if (_bombType == MphRead::BombType::Lockjaw)
             {
-                RequireReference(_scene).SpawnEffect(146, static_cast<Matrix4>(Transform));
+                RequireReference(_scene).SpawnEffect(146, visualTransform);
             }
             else if (_bombType == MphRead::BombType::MorphBall)
             {
-                RequireReference(_scene).SpawnEffect(145, static_cast<Matrix4>(Transform));
+                RequireReference(_scene).SpawnEffect(145, visualTransform);
             }
             _countdown = 0;
             _soundSource.StopSfx(SfxId::KANDEN_ALT_ATTACK);
@@ -597,8 +611,12 @@ namespace MphRead::Entities
         }
         if (_effect)
         {
-            _effect->Transform(
-                static_cast<Vector3>(Position), static_cast<Matrix4>(Transform));
+            const Vector3 visualPosition = ModVisualPosition();
+            Matrix4 visualTransform = static_cast<Matrix4>(Transform);
+            visualTransform.M41 = visualPosition.X;
+            visualTransform.M42 = visualPosition.Y;
+            visualTransform.M43 = visualPosition.Z;
+            _effect->Transform(visualPosition, visualTransform);
         }
         return EntityBase::Process();
     }
@@ -939,8 +957,8 @@ namespace MphRead::Entities
                 PlayerEntity& owner = RequireReference(_owner);
                 BombEntity& bombZero = RequireReference(BombAt(owner, 0));
                 DrawLockjawTrail(
-                    static_cast<Vector3>(Position),
-                    static_cast<Vector3>(bombZero.Position),
+                    ModVisualPosition(),
+                    bombZero.ModVisualPosition(),
                     Fixed::ToFloat(614),
                     10,
                     0);
@@ -950,15 +968,15 @@ namespace MphRead::Entities
                 PlayerEntity& owner = RequireReference(_owner);
                 BombEntity& bombOne = RequireReference(BombAt(owner, 1));
                 DrawLockjawTrail(
-                    static_cast<Vector3>(Position),
-                    static_cast<Vector3>(bombOne.Position),
+                    ModVisualPosition(),
+                    bombOne.ModVisualPosition(),
                     Fixed::ToFloat(614),
                     10,
                     1);
                 BombEntity& bombZero = RequireReference(BombAt(owner, 0));
                 DrawLockjawTrail(
-                    static_cast<Vector3>(Position),
-                    static_cast<Vector3>(bombZero.Position),
+                    ModVisualPosition(),
+                    bombZero.ModVisualPosition(),
                     Fixed::ToFloat(614),
                     10,
                     0);
@@ -970,6 +988,16 @@ namespace MphRead::Entities
         {
             ::MphRead::NativeRuntime::IncrementInPlace(ModLockjawDrawRngChanges);
         }
+    }
+
+    Matrix4 BombEntity::GetModelTransform(ModelInstance& inst, std::int32_t index)
+    {
+        Matrix4 transform = EntityBase::GetModelTransform(inst, index);
+        const Vector3 visualPosition = ModVisualPosition();
+        transform.M41 = visualPosition.X;
+        transform.M42 = visualPosition.Y;
+        transform.M43 = visualPosition.Z;
+        return transform;
     }
 
     void BombEntity::DrawLockjawTrail(

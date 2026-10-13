@@ -25,8 +25,8 @@
 #include "../../MphRead.Native/Mods/Launcher/Portable/GameFiles.hpp"
 #include "../../MphRead.Native/Mods/Launcher/Portable/LauncherPrefs.hpp"
 #include "../../MphRead.Native/Mods/LogShare.hpp"
-#include "../../MphRead.Native/Mods/Network/DemoClip.hpp"
-#include "../../MphRead.Native/Mods/Network/PlayerColors.hpp"
+#include "Mods/Network/Replay/DemoClip.hpp"
+#include "Mods/Network/Gameplay/Player/PlayerColors.hpp"
 #include "../../MphRead.Native/Mods/PauseMenu.hpp"
 #include "../../MphRead.Native/Mods/Render/Crosshair.hpp"
 #include "../../MphRead.Native/Mods/Render/FrameTiming.hpp"
@@ -661,9 +661,10 @@ namespace MphRead::Qt
 
         QStringList lengths;
         int selected = 0;
-        for (std::size_t i = 0; i < std::size(Mods::Network::DemoClip::Lengths); ++i)
+        const auto clipLengths = Mods::Network::DemoClip::Lengths();
+        for (std::size_t i = 0; i < clipLengths.size(); ++i)
         {
-            const std::int32_t seconds = Mods::Network::DemoClip::Lengths[i];
+            const std::int32_t seconds = clipLengths[i];
             lengths.push_back(QString::number(seconds) + QStringLiteral(" seconds"));
             if (seconds == Mods::Network::DemoClip::Seconds())
             {
@@ -2149,9 +2150,10 @@ namespace MphRead::Qt
             }
         }
         {
+            const auto clipLengths = Mods::Network::DemoClip::Lengths();
             const int clip = std::clamp(index(_keyboard, "clipSeconds"), 0,
-                static_cast<int>(std::size(Mods::Network::DemoClip::Lengths)) - 1);
-            Mods::Network::DemoClip::Seconds(Mods::Network::DemoClip::Lengths[clip]);
+                static_cast<int>(clipLengths.size()) - 1);
+            Mods::Network::DemoClip::Seconds(clipLengths[static_cast<std::size_t>(clip)]);
         }
 
         settings.ResolutionScale = Runtime::ToStringInvariant(std::max(Mods::RenderOptions::MinScale, value(_display, "scale")));

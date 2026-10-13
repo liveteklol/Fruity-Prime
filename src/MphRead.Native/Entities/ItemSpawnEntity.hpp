@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../Mods/Network/NetHealthSync.hpp"
+#include "Mods/Network/Gameplay/Pickups/NetItemState.hpp"
 
 #include "../Formats/Entity.hpp"
 #include "EntityBase.hpp"
@@ -44,7 +44,11 @@ namespace MphRead::Entities
 
         void Initialize() override;
         [[nodiscard]] bool Process() override;
-        [[nodiscard]] Mods::Network::HealthSpawnState ModHealthState() const;
+        [[nodiscard]] Mods::Network::ItemSpawnState ModItemState() const;
+        // How many items this spawner has put out: which spawn an item is.
+        [[nodiscard]] std::uint16_t SpawnCount() const noexcept { return _spawnCount; }
+        // Who took the last item an authority-owned spawner put out; -1: nobody.
+        [[nodiscard]] std::int8_t LastPickerSlot() const noexcept { return _lastPickerSlot; }
         void OnItemPickedUp(PlayerEntity* picker = nullptr);
         void HandleMessage(MessageInfo info) override;
         void GetDrawInfo() override;

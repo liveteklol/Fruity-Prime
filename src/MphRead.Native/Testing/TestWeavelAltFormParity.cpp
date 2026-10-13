@@ -5,10 +5,10 @@
 #include "../Entities/Players/WeavelLungeInput.hpp"
 #include "../Entities/Players/WeavelOwnedTurret.hpp"
 #include "../Entities/Players/WeavelReplicaTransition.hpp"
-#include "../Mods/Network/NetProtocol.hpp"
-#include "../Mods/Network/NetHealthSync.hpp"
-#include "../Mods/Network/NetMatchTimeSync.hpp"
-#include "../Mods/Network/NetHealthSyncTest.hpp"
+#include "Mods/Network/Protocol/NetProtocol.hpp"
+#include "Mods/Network/Gameplay/Pickups/NetItemState.hpp"
+#include "Mods/Network/Session/NetMatchTimeSync.hpp"
+#include "Mods/Network/Testing/Pickups/NetItemStateTest.hpp"
 
 #include <array>
 #include <cstdio>
@@ -103,11 +103,29 @@ namespace
         // Protocol 17 added the 14 Weavel bytes; 19 adds 3 for the newest
         // damage event's confirmed impact: 54 + 4 x 15 + 14 + 3. 20 changes
         // only the intent (shot events); 21 the shot events and the claims;
-        // 22 the meaning of two spare Weavel flag bits; 23 only the claim;
+        // 22 the meaning of two spare transition bits (and, for non-Weavel,
+        // the unused upper nibble's animation phase); 23 only the claim;
         // 24 only the intent (bombs); 25 only what a claim may name (a
-        // player's hits on itself); 26 a claim's cause (a Death Alt).
-        Expect(NetConfig::ProtocolVersion == 26 && PlayerState::Size == 131
-            && PlayerState::Size - PlayerState::LegacySize == 17, "Weavel and the impact add 17 bytes per player");
+        // player's hits on itself); 26 a claim's cause (a Death Alt); 27 an
+        // intent's variable-length sections; 28 only the hello (a connection
+        // secret); 29 the power-ups the authority grants (6 bytes a player),
+        // the pickup claim and a doubled hit's flag; 30 the freeze timer; 31
+        // burn (9 bits) and disrupt (7 bits) timers after the freeze byte.
+        Expect(NetConfig::ProtocolVersion == 31 && PlayerState::Size == 140
+            && PlayerState::PowerUpOffset - PlayerState::LegacySize == 17,
+            "timed status effects add two bytes while keeping freeze at its original offset");
+        {
+            TimedEffectTimers timers{};
+            timers.BurningFrames = 300;
+            timers.DisruptedFrames = 120;
+            timers.FrozenFrames = 150;
+            TimedEffectTimers decoded{};
+            decoded.FrozenFrames = timers.FrozenFrames;
+            decoded.UnpackBurnAndDisrupt(timers.PackBurnAndDisrupt());
+            Expect(decoded.BurningFrames == 300 && decoded.DisruptedFrames == 120
+                && decoded.FrozenFrames == 150,
+                "wire packing preserves the complete current burn, disrupt, and freeze durations");
+        }
         {
             // A transition under way on the authority is the form being
             // entered, so a watcher's copy starts its animation with it.
@@ -123,6 +141,19 @@ namespace
             heading.Write(bytes);
             Expect(PlayerState::Read(bytes).WeavelFlags == PlayerState::WeavelFlagUnmorphing,
                 "the transition flags round trip");
+        }
+        const std::array<std::uint8_t, 3> progressValues{0, 7, 15};
+        for (std::uint8_t progress : progressValues)
+        {
+            PlayerState state;
+            state.WeavelFlags = PlayerState::WeavelFlagMorphing;
+            state.SetFormTransitionProgress(progress);
+            std::vector<std::uint8_t> bytes(PlayerState::Size, 0);
+            state.Write(bytes);
+            const PlayerState replica = PlayerState::Read(bytes);
+            Expect(replica.FormTransitionProgress() == progress
+                && (replica.WeavelFlags & PlayerState::WeavelFlagMorphing) != 0,
+                "non-Weavel transition progress round trips in the existing form byte");
         }
         for (int mode = 0; mode < 3; ++mode)
         {
@@ -152,8 +183,11 @@ namespace
         catch (const std::out_of_range&) { rejected = true; }
         Expect(rejected, "legacy protocol 16 player layout is rejected");
         constexpr auto end = SnapshotHeader::Size + 8 * PlayerState::Size + NetMatchTimeSync::Size;
-        static_assert(end + NetHealthSync::HeaderSize + 1 < NetConfig::MaxPacketSize);
-        std::vector<std::uint8_t> bytes(end + NetHealthSync::HeaderSize, 0);
+        static_assert(end == 1207);
+        static_assert(NetConfig::MaxPacketSize - 1 - end == 24,
+            "the full eight-player snapshot keeps room for pickup state");
+        static_assert(end + NetItemState::HeaderSize + 1 < NetConfig::MaxPacketSize);
+        std::vector<std::uint8_t> bytes(end + NetItemState::HeaderSize, 0);
         SnapshotHeader header; header.Frame = 456; header.PlayerCount = 8; header.Write(bytes);
         for (std::uint8_t i = 0; i < 8; ++i)
         {
@@ -168,11 +202,10 @@ namespace
                 && state.HalfturretPosition.X == i, "all eight players have independent wire boundaries");
         }
         Expect(SnapshotHeader::Read(bytes).Frame == 456 && bytes[end] == 0, "snapshot header and health tail remain aligned");
-        // 16 before protocol 19; the 3 bytes of confirmed impact per player
-        // (24 at eight) leave 13 -- a pickup cycle of 56 spawns takes five
-        // snapshots instead of four.
-        Expect(NetHealthSync::PacketEntries(NetConfig::MaxPacketSize - 1 - end) == 13,
-            "eight-player packet reserves bounded health capacity without omitting players");
+        // Protocol 31 adds sixteen timer bytes at eight players. The remaining
+        // 24 payload bytes fit the item-state header and three 7-byte entries.
+        Expect(NetItemState::PacketEntries(NetConfig::MaxPacketSize - 1 - end) == 3,
+            "eight-player packet reserves three bounded item entries without omitting players");
     }
 }
 
@@ -258,7 +291,7 @@ int main()
     {
         FireRateAndClock();
         InputAndProtocol();
-        MphRead::Mods::Network::NetHealthSyncTest::Run();
+        MphRead::Mods::Network::NetItemStateTest::Run();
         MphRead::Entities::WeavelAltFormParityTest::Run();
         std::printf("WeavelAltFormParity PASS %d checks (fire rate, cadence, reused turret reset)\n", checks);
         return 0;

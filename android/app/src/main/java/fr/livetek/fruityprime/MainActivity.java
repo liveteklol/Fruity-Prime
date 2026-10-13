@@ -43,6 +43,8 @@ public final class MainActivity extends Activity
     private boolean destroyed;
     private boolean resumed;
     private boolean startupFailed;
+    private boolean qmlReadyHandled;
+    private static final long QML_STATUS_POLL_MS = 250L;
     private final Handler startupHandler = new Handler(Looper.getMainLooper());
 
     // Startup is a sequence of observable states, never a black window:
@@ -124,22 +126,45 @@ public final class MainActivity extends Activity
                 new FrameLayout.LayoutParams(
                         FrameLayout.LayoutParams.MATCH_PARENT,
                         FrameLayout.LayoutParams.MATCH_PARENT));
-        launcher.setStatusChangeListener(new org.qtproject.qt.android.QtQmlStatusChangeListener() {
-            @Override public void onStatusChanged(org.qtproject.qt.android.QtQmlStatus status) {
-                if (status == org.qtproject.qt.android.QtQmlStatus.LOADING) {
-                    startupPhase("qml_status_loading");
-                } else if (status == org.qtproject.qt.android.QtQmlStatus.READY) {
-                    startupPhase("qml_status_ready");
-                    runOnUiThread(() -> createNative(savedInstanceState));
-                } else if (status == org.qtproject.qt.android.QtQmlStatus.ERROR) {
-                    startupPhase("qml_status_error native_handle=" + nativeHandle);
-                    runOnUiThread(() -> failStartup(
-                            "The menus could not be loaded (QML error). See logcat tags FruityQt and FruityStartup."));
-                }
-            }
-        });
+        launcher.setStatusChangeListener(status -> onQmlStatusChanged(status, savedInstanceState));
         setContentView(root);
+        // QtQuickView starts loading inside its constructor. It can become
+        // READY before the listener is installed, so observe current status
+        // independently rather than relying on an edge-triggered callback.
+        startupHandler.post(() -> pollQmlStatus(savedInstanceState));
         startupHandler.postDelayed(this::checkStartup, STARTUP_TIMEOUT_MS);
+    }
+
+    private void onQmlStatusChanged(org.qtproject.qt.android.QtQmlStatus status,
+            Bundle savedInstanceState) {
+        if (destroyed || startupFailed) {
+            return;
+        }
+        if (status == org.qtproject.qt.android.QtQmlStatus.LOADING) {
+            startupPhase("qml_status_loading");
+        } else if (status == org.qtproject.qt.android.QtQmlStatus.READY && !qmlReadyHandled) {
+            qmlReadyHandled = true;
+            startupPhase("qml_status_ready");
+            runOnUiThread(() -> createNative(savedInstanceState));
+        } else if (status == org.qtproject.qt.android.QtQmlStatus.ERROR) {
+            startupPhase("qml_status_error native_handle=" + nativeHandle);
+            runOnUiThread(() -> failStartup(
+                    "The menus could not be loaded (QML error). See logcat tags FruityQt and FruityStartup."));
+        }
+    }
+
+    private void pollQmlStatus(Bundle savedInstanceState) {
+        if (destroyed || startupFailed || qmlReadyHandled || launcher == null) {
+            return;
+        }
+        final org.qtproject.qt.android.QtQmlStatus status = launcher.getStatus();
+        if (status == org.qtproject.qt.android.QtQmlStatus.READY
+                || status == org.qtproject.qt.android.QtQmlStatus.ERROR) {
+            startupPhase("qml_status_poll_recovered status=" + status);
+            onQmlStatusChanged(status, savedInstanceState);
+        } else {
+            startupHandler.postDelayed(() -> pollQmlStatus(savedInstanceState), QML_STATUS_POLL_MS);
+        }
     }
 
     private void createNative(Bundle savedInstanceState) {
@@ -193,6 +218,9 @@ public final class MainActivity extends Activity
         if (done) {
             startupPhase("startup_complete");
             return;
+        }
+        if (nativeHandle == 0 && launcher != null) {
+            startupPhase("qml_status_at_timeout status=" + launcher.getStatus());
         }
         String missing = (flags & STARTUP_FAILED) != 0 ? nativeError
                 : nativeHandle == 0 ? "the menus never became ready"

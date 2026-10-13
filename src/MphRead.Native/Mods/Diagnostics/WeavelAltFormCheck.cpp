@@ -1,13 +1,16 @@
 #include "WeavelAltFormCheck.hpp"
-#include "../Network/ServerSim.hpp"
-#include "../Network/NetPlayerBridge.hpp"
-#include "../Network/NetPlayerLifecycle.hpp"
-#include "../Network/NetHealthSync.hpp"
-#include "../Network/NetMatchTimeSync.hpp"
-#include "../Network/NetDamage.hpp"
-#include "../Network/DedicatedServer.hpp"
-#include "../Network/NetTransport.hpp"
-#include "../Network/MapRotation.hpp"
+#include "Mods/Network/Server/Match/ServerSim.hpp"
+#include "Mods/Network/Testing/ServerSimFixture.hpp"
+#include "Mods/Network/Session/NetSession.hpp"
+#include "Mods/Network/Gameplay/Player/NetPlayerBridge.hpp"
+#include "Mods/Network/Gameplay/Player/NetPlayerLifecycle.hpp"
+#include "Mods/Network/Gameplay/Pickups/NetItemState.hpp"
+#include "Mods/Network/Session/NetMatchTimeSync.hpp"
+#include "Mods/Network/Gameplay/Combat/NetDamage.hpp"
+#include "Mods/Network/Server/Core/DedicatedServer.hpp"
+#include "Mods/Network/Transport/NetTransport.hpp"
+#include "Mods/Network/Server/Match/MapRotation.hpp"
+#include "Mods/Network/Testing/NetSessionFixture.hpp"
 #include "../../Entities/Players/HalfturretEntity.hpp"
 #include "../../Entities/ItemSpawnEntity.hpp"
 #include "../../GameState.hpp"
@@ -83,7 +86,8 @@ namespace MphRead::Mods::Diagnostics
         ServerSim sim;
         std::vector<std::uint8_t> snapshot;
         if (!sim.Start(room, GameMode::Battle, 8, [&snapshot](std::span<const std::uint8_t> bytes)
-            { snapshot.assign(bytes.begin(), bytes.end()); }, [] {})) return 1;
+            { snapshot.assign(bytes.begin(), bytes.end()); }, [] {},
+                Network::MakeNetSessionServerSimulationPort())) return 1;
         const auto originalSave = GameState::StorySave;
         int checks = 0, result = 1;
         const auto check = [&checks](bool ok, const std::string& name)
@@ -111,7 +115,7 @@ namespace MphRead::Mods::Diagnostics
             for (int i = 0; i < 120; ++i) sim.Step();
             auto& owner = *PlayerEntity::Players()[0];
             auto& victim = *PlayerEntity::Players()[1];
-            auto& scene = *sim._scene;
+            auto& scene = Network::ServerSimFixture::RequireScene(sim);
             auto turret = owner.Halfturret();
             check(owner.Hunter() == Hunter::Weavel && owner.ModIsInPlay() && sim.StepFailures() == 0,
                 "asset-backed authority spawns Weavel");
@@ -326,7 +330,7 @@ namespace MphRead::Mods::Diagnostics
             fresh(101); turret->ApplyNetworkState(50, Vector3(2, 20, 3), true); NetDamage::Reset();
             const auto publish = [&](std::uint32_t frame)
             {
-                NetSession::_netFrame = frame; NetSession::BroadcastSnapshot();
+                NetSessionFixture::SetFrame(frame); NetSession::BroadcastSnapshot();
                 check(!snapshot.empty() && snapshot.size() + 1 <= NetConfig::MaxPacketSize, "production snapshot fits bounded datagram");
                 return snapshot;
             };
@@ -375,24 +379,27 @@ namespace MphRead::Mods::Diagnostics
                 auto wire = std::make_shared<std::vector<std::uint8_t>>(bytes.size() + 1);
                 (*wire)[0] = static_cast<std::uint8_t>(PacketType::Snapshot);
                 std::copy(bytes.begin(), bytes.end(), wire->begin() + 1);
-                NetSession::HandleSnapshot(ReceivedPacket({}, wire, static_cast<std::int32_t>(wire->size())));
+                NetSessionFixture::ReceiveSnapshot(
+                    ReceivedPacket({}, wire, static_cast<std::int32_t>(wire->size())));
             };
             receive(activeBytes); receive(deadBytes); receive(activeBytes); receive(deadBytes);
-            check(NetSession::RemoteStateValid[0] && NetSession::RemoteStates[0].WeavelFlags == 0
+            check(NetSession::HasRemoteState(owner.SlotIndex())
+                && NetSession::RemoteState(static_cast<std::size_t>(owner.SlotIndex())).WeavelFlags == 0
                 && NetSession::LastSnapshotFrame() == 501, "receiver rejects duplicated and reordered snapshots");
-            NetPlayerBridge::ApplyState(owner, NetSession::RemoteStates[0], false);
+            NetPlayerBridge::ApplyState(owner,
+                NetSession::RemoteState(static_cast<std::size_t>(owner.SlotIndex())), false);
             check((owner.IsAltForm() || owner.IsMorphing()) && turret->Health() == 0, "reordered old active packet cannot revive dead replica");
 
             // Eight active players plus the maximum 56 health spawners must all fit.
             roster.Count = 8; roster.Revision = 2; NetSession::ApplyRoster(roster);
             for (int i = 0; i < 120; ++i) sim.Step();
-            auto spawns = NetHealthSync::RegisteredSpawns();
+            auto spawns = NetItemState::RegisteredSpawns();
             check(!spawns.empty(), "room supplies health data for maximum packet fixture");
-            NetHealthSync::BeginRoom();
-            for (int i = 0; i < NetHealthSync::MaxSpawns; ++i)
+            NetItemState::BeginRoom();
+            for (int i = 0; i < NetItemState::MaxSpawns; ++i)
             {
                 auto spawn = std::make_shared<ItemSpawnEntity>(spawns[0]->Data(), "", &scene);
-                spawn->Id = i; spawn->Active = true; NetHealthSync::Register(*spawn);
+                spawn->Id = i; spawn->Active = true; NetItemState::Register(*spawn);
             }
             // The health subset takes whatever room eight players leave in a
             // snapshot, so how many snapshots a full rotation takes follows
@@ -400,30 +407,30 @@ namespace MphRead::Mods::Diagnostics
             std::set<int> reported;
             std::size_t perSnapshot = 0;
             int snapshots = 0;
-            for (; snapshots < NetHealthSync::MaxSpawns
-                && reported.size() < static_cast<std::size_t>(NetHealthSync::MaxSpawns); ++snapshots)
+            for (; snapshots < NetItemState::MaxSpawns
+                && reported.size() < static_cast<std::size_t>(NetItemState::MaxSpawns); ++snapshots)
             {
                 const auto bytes = publish(800 + static_cast<std::uint32_t>(snapshots));
                 check(SnapshotHeader::Read(bytes).PlayerCount == 8, "maximum snapshot retains every player");
                 check(bytes.size() + 1 <= static_cast<std::size_t>(NetConfig::MaxPacketSize),
                     "maximum snapshot fits MaxPacketSize");
                 const auto tail = std::span(bytes).subspan(SnapshotHeader::Size + 8 * PlayerState::Size + NetMatchTimeSync::Size);
-                check(NetHealthSync::Validate(tail), "bounded health subset validates");
-                NetHealthSync::Receive(tail);
-                perSnapshot = (tail.size() - NetHealthSync::HeaderSize) / NetHealthSync::EntrySize;
-                for (std::size_t off = NetHealthSync::HeaderSize; off < tail.size(); off += NetHealthSync::EntrySize)
+                check(NetItemState::Validate(tail), "bounded health subset validates");
+                NetItemState::Receive(tail);
+                perSnapshot = (tail.size() - NetItemState::HeaderSize) / NetItemState::EntrySize;
+                for (std::size_t off = NetItemState::HeaderSize; off < tail.size(); off += NetItemState::EntrySize)
                     reported.insert(Runtime::ReadInt16LittleEndian(tail.subspan(off)));
             }
             const std::size_t expected = perSnapshot == 0 ? 0
-                : (static_cast<std::size_t>(NetHealthSync::MaxSpawns) + perSnapshot - 1) / perSnapshot;
-            check(reported.size() == static_cast<std::size_t>(NetHealthSync::MaxSpawns)
+                : (static_cast<std::size_t>(NetItemState::MaxSpawns) + perSnapshot - 1) / perSnapshot;
+            check(reported.size() == static_cast<std::size_t>(NetItemState::MaxSpawns)
                 && static_cast<std::size_t>(snapshots) == expected,
                 "rotating health reports cover all 56 in " + std::to_string(expected) + " snapshots of "
                     + std::to_string(perSnapshot));
-            for (int i = 0; i < NetHealthSync::MaxSpawns; ++i)
+            for (int i = 0; i < NetItemState::MaxSpawns; ++i)
             {
-                HealthSpawnState state;
-                check(NetHealthSync::TryGet(static_cast<std::int16_t>(i), state) && state.Active,
+                ItemSpawnState state;
+                check(NetItemState::TryGet(static_cast<std::int16_t>(i), state) && state.Active,
                     "partial receiver preserves previously reported health spawners");
             }
             check(sim.StepFailures() == 0, "asset-backed scene retains zero simulation failures");

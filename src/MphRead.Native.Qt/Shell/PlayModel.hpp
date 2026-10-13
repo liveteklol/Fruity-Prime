@@ -45,7 +45,7 @@ namespace MphRead::Qt
         Q_PROPERTY(int lastBots READ LastBots CONSTANT)
         Q_PROPERTY(int lastSkill READ LastSkill CONSTANT)
         Q_PROPERTY(QString playerName READ PlayerName CONSTANT)
-        Q_PROPERTY(QString serverEndpoint READ ServerEndpoint CONSTANT)
+        Q_PROPERTY(QString serverEndpoint READ ServerEndpoint NOTIFY serverEndpointChanged)
         Q_PROPERTY(QString chosenRoom READ ChosenRoom CONSTANT)
         Q_PROPERTY(QString votingRoom READ VotingRoom CONSTANT)
 
@@ -99,11 +99,13 @@ namespace MphRead::Qt
         void busyChanged();
         void slotsChanged();
         void clipsChanged();
+        void serverEndpointChanged();
 
     private:
         void Rebuild();
         void StartPolling();
         void Answered();
+        void OfferLive(const QString& endpoint);
         void AddServer(const ::MphRead::Mods::Network::MasterListing& listing);
         void SetStatus(int row, const ::MphRead::Mods::Network::ServerStatus& status);
         void SetNote(QString text, QColor colour);
@@ -124,6 +126,12 @@ namespace MphRead::Qt
         int _asked = 0;
         int _replied = 0;
         int _live = 0;
+        // Bumped whenever the list is rebuilt, so late replies are dropped.
+        int _generation = 0;
+        // The first listed server that answered, and whether the remembered
+        // address did not.
+        QString _firstLive;
+        bool _savedDead = false;
         // Replies from threads check this before touching the model.
         std::shared_ptr<int> _lifetime = std::make_shared<int>(0);
         std::shared_ptr<std::stop_source> _statusCancel;

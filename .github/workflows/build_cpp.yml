@@ -366,7 +366,9 @@ jobs:
             ${{ runner.temp }}/native-deps-install.log
             ${{ steps.vcpkg.outputs.root }}/installed/x64-linux/share/*/vcpkg_abi_info.txt
 
-      # Refresh immutable snapshots weekly; avoid a full duplicate on every push.
+      # Rotate the primary cache namespace weekly, but fall back to older
+      # weeks so the first build after rollover can reuse compiled objects.
+      # Timestamped saves are required: GitHub cache entries are immutable.
       - name: Select compiler cache generation
         shell: bash
         run: echo "COMPILER_CACHE_WEEK=$(date -u +%G-%V)" >> "$GITHUB_ENV"
@@ -375,8 +377,10 @@ jobs:
         uses: hendrikmuhs/ccache-action@v1.2
         with:
           key: native-ccache-${{ runner.os }}-${{ runner.arch }}-gcc-game-${{ env.COMPILER_CACHE_WEEK }}
-          max-size: 500M
-          append-timestamp: false
+          restore-keys: |
+            native-ccache-${{ runner.os }}-${{ runner.arch }}-gcc-game
+          max-size: 2G
+          append-timestamp: true
 
       - name: Install Qt Quick
         shell: bash

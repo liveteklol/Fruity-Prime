@@ -3,8 +3,9 @@
 
 Every -netcheck client prints what its own player did over the whole run
 ("netcheck A mine A feature value"), what it did while each other player was
-in the match ("netcheck A mine-with B feature value"), what it saw of every
-other player ("netcheck B saw A feature value"), and what became of every
+in the match ("netcheck A mine-with B feature value"), what it saw of each
+player over the whole run ("netcheck B saw A feature value") and while both
+were present ("netcheck B saw-with A feature value"), and what became of every
 shot event it received from each of them ("netcheck-shots B from A ...").
 The thresholds are the client's, printed with the report: how much of a
 feature counts as having happened ("netcheck-needed"), how closely an
@@ -46,12 +47,12 @@ import re
 import sys
 from collections import defaultdict
 
-LINE = re.compile(r"^\s*netcheck (\S+) (mine|mine-with|saw) (\S+) (\S+) (-?[0-9.]+)\s*$")
+LINE = re.compile(r"^\s*netcheck (\S+) (mine|mine-with|saw|saw-with) (.+?) (\S+) (-?[0-9.]+)\s*$")
 NEEDED = re.compile(r"^\s*netcheck-needed (\S+) ([0-9.]+) (single|pairwise)\s*$")
 PARITY = re.compile(r"^\s*netcheck-parity (\S+) ([0-9.]+) ([0-9.]+)\s*$")
 NOT_APPLICABLE = re.compile(r"^\s*netcheck-na (\S+) (\S+)\s*$")
 HUNTER = re.compile(r"^\s*netcheck-hunter (\S+) (\S+)\s*$")
-SHOTS = re.compile(r"^\s*netcheck-shots (\S+) from (\S+) (.*)$")
+SHOTS = re.compile(r"^\s*netcheck-shots (\S+) from (.+?) (received .*)$")
 
 
 class Reports:
@@ -59,6 +60,7 @@ class Reports:
         self.own = defaultdict(dict)                        # player -> feature -> value
         self.own_with = defaultdict(lambda: defaultdict(dict))  # player -> observer -> feature -> value
         self.seen = defaultdict(lambda: defaultdict(dict))  # observer -> player -> feature -> value
+        self.seen_with = defaultdict(lambda: defaultdict(dict))  # observer -> player -> feature -> value
         self.needed = {}                                    # feature -> (value, pairwise)
         self.parity = {}                                    # feature -> (fraction, absolute)
         self.not_applicable = defaultdict(set)              # player -> features
@@ -95,6 +97,8 @@ class Reports:
                         self.own_with[reporter][subject][feature] = float(value)
                     elif kind == "saw":
                         self.seen[reporter][subject][feature] = float(value)
+                    elif kind == "saw-with":
+                        self.seen_with[reporter][subject][feature] = float(value)
 
 
 class Tally:
@@ -109,7 +113,8 @@ def judge_feature(reports, tally, player, observer, feature):
     threshold, pairwise = reports.needed[feature]
     window = reports.own_with[player].get(observer)
     did = (window if window is not None else reports.own[player]).get(feature, 0.0)
-    saw = reports.seen[observer][player].get(feature, 0.0)
+    paired_seen = reports.seen_with[observer].get(player)
+    saw = (paired_seen if paired_seen is not None else reports.seen[observer][player]).get(feature, 0.0)
     parity = reports.parity.get(feature)
     allowed = None
     if feature in reports.not_applicable[player]:
@@ -192,8 +197,10 @@ def main(paths):
                 print(f"  FAIL: {observer} never saw {player} at all")
                 tally.failures += 1
                 continue
-            window = "while both were in the match" if observer in reports.own_with[player] \
-                else "whole run: no window reported"
+            paired_window = observer in reports.own_with[player] \
+                and player in reports.seen_with[observer]
+            window = "within pair-scoped windows" if paired_window \
+                else "whole-run observer window: no paired window reported"
             print(f"--- {player} ({reports.hunters.get(player, '?')}) as {observer} saw them, {window} ---")
             for feature in reports.needed:
                 judge_feature(reports, tally, player, observer, feature)

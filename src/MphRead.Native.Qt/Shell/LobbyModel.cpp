@@ -10,11 +10,11 @@
 #include "../../MphRead.Native/Mods/Launcher/Portable/LauncherPrefs.hpp"
 #include "../../MphRead.Native/Mods/Launcher/Portable/LaunchPlan.hpp"
 #include "../../MphRead.Native/Mods/Multiplayer/TeamLayout.hpp"
-#include "../../MphRead.Native/Mods/Network/LobbyRules.hpp"
-#include "../../MphRead.Native/Mods/Network/NetHostSession.hpp"
-#include "../../MphRead.Native/Mods/Network/NetProtocol.hpp"
-#include "../../MphRead.Native/Mods/Network/NetSession.hpp"
-#include "../../MphRead.Native/Mods/Network/SessionProtocol.hpp"
+#include "Mods/Network/Server/Lobby/LobbyRules.hpp"
+#include "Mods/Network/Integration/Launch/NetHostSession.hpp"
+#include "Mods/Network/Protocol/NetProtocol.hpp"
+#include "Mods/Network/Session/NetSession.hpp"
+#include "Mods/Network/Protocol/SessionProtocol.hpp"
 #include "../../MphRead.Native/Mods/ThumbnailGenerator.hpp"
 #include "../../MphRead.Native/NativeRuntime/System/Globalization.hpp"
 #include "../../MphRead.Native/NativeRuntime/System/IO.hpp"
@@ -437,12 +437,12 @@ namespace MphRead::Qt
         const std::int32_t localSlot = Session::LocalSlot();
         if (localSlot >= 0)
         {
-            _team = Session::SlotTeamIndex[static_cast<std::size_t>(localSlot)] + 1;
+            _team = Network::SessionSlots().TeamAt(localSlot) + 1;
         }
         _playerEnabled = Session::IsInLobby() && !Session::LobbyCommandPending();
         _owner = Session::LocalIsLobbyOwner();
         _teamEnabled = _chooseTeams && _playerEnabled && (!session.LockTeams() || _owner);
-        _readyLabel = localSlot >= 0 && Session::SlotLobbyReady[static_cast<std::size_t>(localSlot)]
+        _readyLabel = localSlot >= 0 && Network::SessionSlots().LobbyReady(localSlot)
             ? QStringLiteral("Unready") : QStringLiteral("Ready");
         std::string reason;
         const Network::LobbyResultCode valid
@@ -747,7 +747,7 @@ namespace MphRead::Qt
         if (slot >= 0)
         {
             Session::SendLobbyCommand(Network::LobbyCommandType::SetReady, 255, -1,
-                !Session::SlotLobbyReady[static_cast<std::size_t>(slot)]);
+                !Network::SessionSlots().LobbyReady(slot));
         }
     }
 

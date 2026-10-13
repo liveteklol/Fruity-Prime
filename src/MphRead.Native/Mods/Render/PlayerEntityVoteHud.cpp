@@ -8,7 +8,7 @@
 #include "../../HUD/HudInfo.hpp"
 #include "../../Renderer.hpp"
 #include "../../Scene.hpp"
-#include "../Network/MapVote.hpp"
+#include "Mods/Network/UI/Voting/MapVote.hpp"
 #include "../../NativeRuntime/System/Managed.hpp"
 
 #include <cmath>

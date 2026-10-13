@@ -7,6 +7,7 @@
 #include "../GameState.hpp"
 #include "../Formats/Formats.hpp"
 #include "../Mods/Diagnostics/PlatformDiagnostics.hpp"
+#include "../Mods/AudioMute.hpp"
 #include "../Mods/ThumbnailMode.hpp"
 #include "../NativeRuntime/System/Encoding.hpp"
 #include "../NativeRuntime/System/Managed.hpp"
@@ -393,7 +394,7 @@ namespace MphRead
 
     float Music::MusicVolume() noexcept { return g_musicVolume; }
     void Music::MusicVolume(float value) noexcept { g_musicVolume = value; }
-    float Music::Volume() noexcept { return g_userVolume * g_musicVolume; }
+    float Music::Volume() noexcept { return Mods::AudioMute::Active() ? 0.0F : g_userVolume * g_musicVolume; }
     bool Music::IsPaused() noexcept { return g_paused; }
     std::int32_t Music::MusicEncounterSuspension() noexcept { return g_musicEncounterSuspension; }
     MusicId Music::MusicToResume() noexcept { return g_musicToResume; }
