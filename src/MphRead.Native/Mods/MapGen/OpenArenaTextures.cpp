@@ -1,4 +1,5 @@
 #include "OpenArenaTextures.hpp"
+#include "CurlTrust.hpp"
 #include "../../Formats/Formats.hpp"
 #include "../../NativeRuntime/System/Console.hpp"
 #include "../../NativeRuntime/System/IO.hpp"
@@ -114,11 +115,7 @@ namespace MphRead::Mods::MapGen
             curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, &Write);
             curl_easy_setopt(curl, CURLOPT_WRITEDATA, &body);
             curl_easy_setopt(curl, CURLOPT_USERAGENT, "FruityPrime");
-#if defined(__ANDROID__)
-            // Android keeps its certificate authorities here, one file each
-            // under its subject hash, which is what OpenSSL's CAPATH reads.
-            curl_easy_setopt(curl, CURLOPT_CAPATH, "/system/etc/security/cacerts");
-#endif
+            CurlTrust::Apply(curl);
             if (range.has_value())
             {
                 bytes = std::to_string(range->first) + "-" + std::to_string(range->second);
@@ -127,6 +124,10 @@ namespace MphRead::Mods::MapGen
             const CURLcode result = curl_easy_perform(curl);
             long status = 0;
             curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
+            if (result != CURLE_OK)
+            {
+                CurlTrust::Report("GET", url, result, curl);
+            }
             curl_easy_cleanup(curl);
             if (result != CURLE_OK)
             {

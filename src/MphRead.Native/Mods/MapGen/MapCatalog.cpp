@@ -1,5 +1,6 @@
 #include "MapCatalog.hpp"
 
+#include "CurlTrust.hpp"
 #include "CustomRooms.hpp"
 #include "../../NativeRuntime/System/Console.hpp"
 #include "../../NativeRuntime/System/Cryptography.hpp"
@@ -73,9 +74,7 @@ namespace MphRead::Mods::MapGen
             curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeoutSeconds);
             curl_easy_setopt(curl, CURLOPT_USERAGENT, "FruityPrime");
             curl_easy_setopt(curl, CURLOPT_FAILONERROR, 1L);
-#if defined(__ANDROID__)
-            curl_easy_setopt(curl, CURLOPT_CAPATH, "/system/etc/security/cacerts");
-#endif
+            CurlTrust::Apply(curl);
             if (file != nullptr)
             {
                 curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, &ToFile);
@@ -87,6 +86,10 @@ namespace MphRead::Mods::MapGen
                 curl_easy_setopt(curl, CURLOPT_WRITEDATA, text);
             }
             const CURLcode result = curl_easy_perform(curl);
+            if (result != CURLE_OK)
+            {
+                CurlTrust::Report("GET", url, result, curl);
+            }
             curl_easy_cleanup(curl);
             return result == CURLE_OK;
         }
