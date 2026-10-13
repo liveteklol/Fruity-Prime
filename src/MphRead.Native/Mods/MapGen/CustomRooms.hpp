@@ -42,6 +42,11 @@ namespace MphRead::Mods::MapGen
         [[nodiscard]] static std::vector<std::shared_ptr<MphRead::RoomMetadata>> AppendRooms(
             std::vector<std::shared_ptr<MphRead::RoomMetadata>>&& rooms);
 
+        // The map folder's rooms the two lists above did not have when they were
+        // made: appended, each with the next id, ids and rooms together.
+        static void AppendMissingRooms(
+            std::vector<std::string>& ids,
+            std::vector<std::shared_ptr<MphRead::RoomMetadata>>& rooms);
         [[nodiscard]] static std::string ArchiveDirectory(MapDefinition* def);
         [[nodiscard]] static std::string EntityDirectory();
         [[nodiscard]] static std::string NodeDirectory();

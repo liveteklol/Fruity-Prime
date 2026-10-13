@@ -10,6 +10,7 @@
 #include "../../../Menu.hpp"
 #include "../../../Renderer.hpp"
 #include "../../MapGen/CustomRooms.hpp"
+#include "../../MapGen/MapCatalog.hpp"
 #include "Mods/Network/Replay/DemoPlayback.hpp"
 #include "Mods/Network/Integration/Launch/NetLaunch.hpp"
 #include "Mods/Network/Session/NetSession.hpp"
@@ -101,6 +102,17 @@ namespace MphRead::Mods::Launcher
 
         if (roomKey.empty() || roomKey == "none")
         {
+            return false;
+        }
+
+        // A server plays a map this device does not have: fetched now, from
+        // FruityPrime's map server.
+        if (MphRead::Mods::Network::NetSession::Active()
+            && !MphRead::Mods::MapGen::MapCatalog::EnsureRoom(roomKey))
+        {
+            std::cout << "[launcher] the server plays " << roomKey
+                      << ", which this device does not have and the map server could not give"
+                      << std::endl;
             return false;
         }
 

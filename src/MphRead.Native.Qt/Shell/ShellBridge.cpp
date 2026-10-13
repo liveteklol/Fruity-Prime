@@ -66,8 +66,8 @@ namespace MphRead::Qt
         const auto progress = ::MphRead::Mods::MapGen::CustomRooms::Progress();
         const bool building = progress.Running && progress.Total > 0;
         const bool previews = ::MphRead::Mods::ThumbnailGenerator::RefreshingPreviews();
-        // Asking the server for new maps, then fetching and preparing them,
-        // then their previews: one line at the top of the launcher. A share
+        // Fetching maps the player asked for, preparing them, then their
+        // previews: one line at the top of the launcher. A share
         // below zero is a step whose length is not known.
         const bool busy = progress.Running || previews;
         double fraction = -1.0;
@@ -82,7 +82,7 @@ namespace MphRead::Qt
         }
         else if (progress.Running)
         {
-            stage = QString::fromUtf8("Checking for new maps…");
+            stage = QString::fromUtf8("Preparing maps…");
         }
         else if (previews)
         {

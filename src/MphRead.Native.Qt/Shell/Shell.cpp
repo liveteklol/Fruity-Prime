@@ -173,6 +173,10 @@ namespace MphRead::Mods::Launcher::Gui
                 if (MphRead::Mods::MapGen::CustomRooms::TakeDownloaded() > 0)
                 {
                     MphRead::Mods::MapGen::CustomRooms::Rescan();
+                    // The game's lists were made when it started: the new
+                    // rooms are added to them here, or they would wait for
+                    // the next start.
+                    (void)MphRead::Metadata::AppendLateRooms();
                     MphRead::Mods::MapGen::CustomRooms::StartGenerating();
                 }
                 g_rooms = MphRead::Mods::ThumbnailGenerator::MultiplayerRooms();

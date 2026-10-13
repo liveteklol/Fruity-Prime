@@ -2,6 +2,7 @@
 
 #include "Mods/Network/Protocol/NetProtocol.hpp"
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -49,6 +50,10 @@ namespace MphRead::Mods::Network
 
         static std::string _requested;
         static std::uint32_t _requestedFrame;
+        // The map pack being fetched for a room this device lacks: which, and
+        // 0 while it comes, 1 once on disk, 2 if it could not be had.
+        static std::string _fetchWanted;
+        static std::shared_ptr<std::atomic<int>> _fetchState;
         static bool _loadPending;
         static std::uint16_t _requestedMatch;
         static std::uint16_t _loadedMatch;

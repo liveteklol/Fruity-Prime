@@ -2,8 +2,10 @@
 
 #include "CurlTrust.hpp"
 #include "CustomRooms.hpp"
+#include "../../Metadata/Metadata.hpp"
 #include "../../NativeRuntime/System/Console.hpp"
 #include "../../NativeRuntime/System/Cryptography.hpp"
+#include "../../NativeRuntime/System/Globalization.hpp"
 #include "../../NativeRuntime/System/IO.hpp"
 #include "../../NativeRuntime/System/Json.hpp"
 
@@ -218,6 +220,71 @@ namespace MphRead::Mods::MapGen
             ::MphRead::NativeRuntime::ConsoleWriteLine("[maps] downloaded " + entry.File);
             return true;
         }
+    }
+
+    bool MapCatalog::FetchForRoom(const std::string& roomKey)
+    {
+        using ::MphRead::NativeRuntime::ConsoleWriteLine;
+        using ::MphRead::NativeRuntime::StringCompareOrdinalIgnoreCase;
+        const std::string directory = CustomRooms::MapDirectory();
+        if (roomKey.empty() || directory.empty())
+        {
+            return false;
+        }
+        const std::optional<std::vector<Entry>> catalogue = Catalogue();
+        if (!catalogue)
+        {
+            ConsoleWriteLine("[maps] " + roomKey + " is not here and the map server could not be reached");
+            return false;
+        }
+        for (const Entry& entry : *catalogue)
+        {
+            for (const std::string& level : entry.Levels)
+            {
+                if (StringCompareOrdinalIgnoreCase(level, roomKey) != 0)
+                {
+                    continue;
+                }
+                const std::filesystem::path root = PathFromUtf8(directory);
+                return Present(root, entry) || Fetch(root / "downloaded", entry);
+            }
+        }
+        ConsoleWriteLine("[maps] no pack on the map server holds " + roomKey);
+        return false;
+    }
+
+    bool MapCatalog::EnsureRoom(const std::string& roomKey)
+    {
+        if (roomKey.empty() || roomKey == "none")
+        {
+            return true;
+        }
+        const auto known = [&]()
+        {
+            return ::MphRead::Metadata::GetRoomByName(roomKey).first != nullptr;
+        };
+        const auto list = [&]()
+        {
+            CustomRooms::Rescan();
+            (void)::MphRead::Metadata::AppendLateRooms();
+        };
+        if (known())
+        {
+            return true;
+        }
+        // On disk already but not in the game's lists yet (a pack the Download
+        // maps page fetched, or one dropped in the folder since the start).
+        list();
+        if (known())
+        {
+            return true;
+        }
+        if (!FetchForRoom(roomKey))
+        {
+            return false;
+        }
+        list();
+        return known();
     }
 
     std::optional<std::vector<MapCatalog::Pack>> MapCatalog::List()

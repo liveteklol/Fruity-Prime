@@ -945,6 +945,23 @@ namespace MphRead::Mods::MapGen
         return std::move(rooms);
     }
 
+    void CustomRooms::AppendMissingRooms(
+        std::vector<std::string>& ids,
+        std::vector<std::shared_ptr<MphRead::RoomMetadata>>& rooms)
+    {
+        for (const std::shared_ptr<MapDefinition>& definition : Definitions())
+        {
+            const std::string name = definition->Name();
+            if (std::find(ids.begin(), ids.end(), name) != ids.end())
+            {
+                continue;
+            }
+            const std::int32_t id = static_cast<std::int32_t>(ids.size());
+            rooms.push_back(MakeMetadata(definition.get(), id));
+            ids.push_back(name);
+        }
+    }
+
     std::shared_ptr<MphRead::RoomMetadata> CustomRooms::MakeMetadata(
         MapDefinition* def, std::int32_t id)
     {
@@ -1132,37 +1149,9 @@ namespace MphRead::Mods::MapGen
         }
         std::thread([]()
         {
-            // The server's maps the folder lacks, before anything is built:
-            // they are listed and built once this job is done (TakeDownloaded).
-            try
-            {
-                const std::int32_t arrived = MapCatalog::Sync(
-                    [](const std::string& pack, std::int32_t done, std::int32_t total)
-                    {
-                        GenerationState& state = Generation();
-                        const std::lock_guard<std::mutex> guard(state.Lock);
-                        state.Progress.Downloading = true;
-                        state.Progress.Total = total;
-                        state.Progress.Done = done;
-                        state.Progress.Current = pack;
-                    });
-                if (arrived > 0)
-                {
-                    // Listed at once, so the new maps are built and offered
-                    // without the game being started again (ListVersion).
-                    Rescan();
-                }
-                GenerationState& state = Generation();
-                const std::lock_guard<std::mutex> guard(state.Lock);
-                state.Progress = GenerationProgress{0, 0, {}, true, false};
-                if (arrived > 0)
-                {
-                    ++state.ListVersion;
-                }
-            }
-            catch (...)
-            {
-            }
+            // Nothing is fetched here: the server's maps come when the player
+            // asks (the Download maps page) or when a server plays one this
+            // device lacks (MapCatalog::EnsureRoom).
             for (;;)
             {
                 try

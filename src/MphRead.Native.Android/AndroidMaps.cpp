@@ -702,11 +702,11 @@ namespace MphRead::Droid
                 return;
             }
             Mods::Launcher::GameFiles::ApplyPaths();
-            // The job the desktop runs (download what the folder lacks, list
-            // it, build it), not a copy of it: the launcher reads its
-            // progress and its list version, so a map that arrives or is
-            // built shows up in the lists with no restart. Waited for, since
-            // callers load a match or render previews from what it builds.
+            // The job the desktop runs (list what the folder holds, build it),
+            // not a copy of it: the launcher reads its progress, so maps being
+            // built show as such and the lists refresh when they are done.
+            // Nothing is downloaded here. Waited for, since callers load a
+            // match or render previews from what it builds.
             Mods::MapGen::CustomRooms::StartGenerating();
             while (Mods::MapGen::CustomRooms::Progress().Running)
             {

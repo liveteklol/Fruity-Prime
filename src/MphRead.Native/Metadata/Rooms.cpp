@@ -1891,13 +1891,24 @@ namespace MphRead
 
     namespace Metadata
     {
-        const std::vector<std::string> _roomIds = Mods::MapGen::CustomRooms::AppendIds(CreateBaseRoomIds());
+        std::vector<std::string> _roomIds = Mods::MapGen::CustomRooms::AppendIds(CreateBaseRoomIds());
 
-        const std::vector<std::shared_ptr<MphRead::RoomMetadata>> RoomList
+        std::vector<std::shared_ptr<MphRead::RoomMetadata>> RoomList
             = Mods::MapGen::CustomRooms::AppendRooms(CreateBaseRooms());
 
-        const std::unordered_map<std::string, std::shared_ptr<MphRead::RoomMetadata>> RoomMetadata
+        std::unordered_map<std::string, std::shared_ptr<MphRead::RoomMetadata>> RoomMetadata
             = CreateRoomMetadataMap(RoomList);
+
+        std::int32_t AppendLateRooms()
+        {
+            const std::size_t before = RoomList.size();
+            Mods::MapGen::CustomRooms::AppendMissingRooms(_roomIds, RoomList);
+            for (std::size_t i = before; i < RoomList.size(); ++i)
+            {
+                RoomMetadata.emplace(RoomList[i]->Name, RoomList[i]);
+            }
+            return static_cast<std::int32_t>(RoomList.size() - before);
+        }
 
         const std::unordered_map<std::int32_t, std::string> EncounterNodeDataOverrides = {
             {28, R"(levels\nodeData\unit1_C0_Boss_Node.bin)"},

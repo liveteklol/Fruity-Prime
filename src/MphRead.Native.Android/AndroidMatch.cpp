@@ -19,6 +19,7 @@
 #include "../MphRead.Native/Mods/Launcher/Portable/GameFiles.hpp"
 #include "../MphRead.Native/Mods/Launcher/Portable/LaunchPlan.hpp"
 #include "../MphRead.Native/Mods/Launcher/Portable/MatchStart.hpp"
+#include "../MphRead.Native/Mods/MapGen/MapCatalog.hpp"
 #include "Mods/Network/Replay/DemoPlayback.hpp"
 #include "Mods/Network/Integration/Launch/NetLaunch.hpp"
 #include "Mods/Network/Session/NetSession.hpp"
@@ -226,6 +227,14 @@ namespace MphRead::Droid
         {
             throw MphRead::ProgramException(
                 "The server did not say which map it is running.");
+        }
+
+        // The server plays a map this device does not have: fetched now.
+        if (!MphRead::Mods::MapGen::MapCatalog::EnsureRoom(roomKey.value()))
+        {
+            throw MphRead::ProgramException(
+                "The server plays " + roomKey.value()
+                + ", which this device does not have and the map server could not give.");
         }
 
         NetLaunch::BuildPlayers(

@@ -100,9 +100,16 @@ namespace MphRead
 
     namespace Metadata
     {
-        extern const std::vector<std::string> _roomIds;
-        extern const std::vector<std::shared_ptr<RoomMetadata>> RoomList;
-        extern const std::unordered_map<std::string, std::shared_ptr<RoomMetadata>> RoomMetadata;
+        // The cartridge's rooms, then the map folder's. Appended to while the
+        // game runs (AppendLateRooms) and nowhere else.
+        extern std::vector<std::string> _roomIds;
+        extern std::vector<std::shared_ptr<RoomMetadata>> RoomList;
+        extern std::unordered_map<std::string, std::shared_ptr<RoomMetadata>> RoomMetadata;
+        // Rooms the map folder holds now that these lists lacked when the game
+        // started (a pack downloaded since): added with the next ids, the
+        // ones already given never move. How many were added. On the thread
+        // that loads rooms; nothing reads the lists meanwhile.
+        std::int32_t AppendLateRooms();
         extern const std::unordered_map<std::int32_t, std::string> EncounterNodeDataOverrides;
         extern const std::unordered_map<std::int32_t, std::string> CtfNodeDataOverrides;
     }
