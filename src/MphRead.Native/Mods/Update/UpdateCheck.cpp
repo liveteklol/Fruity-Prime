@@ -3,6 +3,7 @@
 #include "NativeRuntime/System/AtomicSharedPtr.hpp"
 
 #include "../Branding.hpp"
+#include "../MapGen/CurlTrust.hpp"
 #include "../../NativeRuntime/System/Encoding.hpp"
 #include "NativeRuntime/System/Globalization.hpp"
 
@@ -720,6 +721,9 @@ namespace MphRead::Mods::Update
             {
                 throw NamedException("HttpRequestException", "curl_easy_init failed");
             }
+            // Android's libcurl knows no certificate authorities: without the
+            // phone's own, every request failed TLS and no update was offered.
+            MapGen::CurlTrust::Apply(easy.get());
 
             struct SlistDeleter
             {
@@ -1027,7 +1031,7 @@ namespace MphRead::Mods::Update
         }
         catch (const std::exception& ex)
         {
-            SetLastReason("could not reach GitHub (" + ExceptionTypeName(ex) + ")");
+            SetLastReason("could not reach GitHub (" + ExceptionTypeName(ex) + ": " + ex.what() + ")");
             return std::nullopt;
         }
         catch (...)

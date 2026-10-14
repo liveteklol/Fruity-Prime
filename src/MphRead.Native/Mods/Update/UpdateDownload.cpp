@@ -3,6 +3,7 @@
 #include "NativeRuntime/System/AtomicSharedPtr.hpp"
 
 #include "../Branding.hpp"
+#include "../MapGen/CurlTrust.hpp"
 #include "BuildVersion.hpp"
 #include "../../NativeRuntime/System/Globalization.hpp"
 #include "../../NativeRuntime/System/IO.hpp"
@@ -206,6 +207,8 @@ namespace MphRead::Mods::Update
                 {
                     throw std::runtime_error("curl_easy_init failed");
                 }
+                // The phone's certificate authorities, as for the check.
+                MapGen::CurlTrust::Apply(_easy);
                 _multi = curl_multi_init();
                 if (_multi == nullptr)
                 {
