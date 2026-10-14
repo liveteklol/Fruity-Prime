@@ -203,6 +203,16 @@ jobs:
           # one new entry per push would fill the repository's 10 GB.
           save: ${{ github.ref_name == github.event.repository.default_branch }}
 
+      # Qt's archives, kept between runs. install-qt.py checks each one against
+      # Qt's own SHA-1 before using it, so a restored archive is never trusted
+      # blindly; only master saves, once per kit and version.
+      - name: Restore Qt archives
+        id: qt-archives
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ runner.temp }}/qt-archives
+          key: qt-archives-v1-${{ runner.os }}-${{ runner.arch }}-android-${{ matrix.abi }}-6.11.2-${{ hashFiles('tools/qt/install-qt.py') }}
+
       - name: Install Qt Quick host and Android kit
         shell: bash
         run: |
@@ -211,11 +221,18 @@ jobs:
           sudo apt-get install -y p7zip-full libxcb-cursor0 libxkbcommon-x11-0
           kit="android_${{ matrix.abi }}"
           kit="${kit/arm64-v8a/arm64_v8a}"
-          python3 tools/qt/install-qt.py --kit gcc_64 --root "$RUNNER_TEMP/qt"
-          python3 tools/qt/install-qt.py --kit "$kit" --root "$RUNNER_TEMP/qt"
+          python3 tools/qt/install-qt.py --kit gcc_64 --root "$RUNNER_TEMP/qt" --cache "$RUNNER_TEMP/qt-archives"
+          python3 tools/qt/install-qt.py --kit "$kit" --root "$RUNNER_TEMP/qt" --cache "$RUNNER_TEMP/qt-archives"
           echo "QT_HOST_PATH=$RUNNER_TEMP/qt/6.11.2/gcc_64" >> "$GITHUB_ENV"
           echo "LD_LIBRARY_PATH=$RUNNER_TEMP/qt/6.11.2/gcc_64/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
           echo "QT_ROOT=$RUNNER_TEMP/qt/6.11.2/$kit" >> "$GITHUB_ENV"
+
+      - name: Save Qt archives
+        if: steps.qt-archives.outputs.cache-hit != 'true' && github.ref_name == github.event.repository.default_branch
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ runner.temp }}/qt-archives
+          key: qt-archives-v1-${{ runner.os }}-${{ runner.arch }}-android-${{ matrix.abi }}-6.11.2-${{ hashFiles('tools/qt/install-qt.py') }}
 
       - name: Configure and build shared library
         shell: bash

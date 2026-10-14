@@ -2,8 +2,11 @@
 name: build_cpp
 
 on:
+  # master's pushes, and every pull request. A branch push with a PR open
+  # was built twice (push and pull_request), which doubled the runners and
+  # the cache written; the pull_request run is the one a PR shows.
   push:
-    branches: ["**"]
+    branches: [master]
     tags-ignore: ["**"]
   pull_request:
   workflow_dispatch:
@@ -109,7 +112,13 @@ jobs:
     name: Windows / MSVC
     runs-on: windows-2025
     env:
-      SCCACHE_GHA_ENABLED: "true"
+      # A local directory saved as one archive, not sccache's GitHub-cache
+      # backend: that stored every object as an entry of its own, and the
+      # other jobs' archives pushed them out of the repository's 10 GB, so
+      # most runs compiled all ~800 files from scratch (25 min, against 4 with
+      # the cache there).
+      SCCACHE_DIR: ${{ github.workspace }}/.cache/sccache
+      SCCACHE_CACHE_SIZE: 3G
 
     steps:
       - name: Checkout C++ source
@@ -216,17 +225,49 @@ jobs:
             ${{ runner.temp }}/vcpkg-install.log
             ${{ runner.temp }}/fruity-vcpkg/installed/x64-windows/share/*/vcpkg_abi_info.txt
 
+      # Weekly generations, newest first; the run id makes each save a new
+      # entry, since GitHub cache entries are immutable.
+      - name: Select compiler cache generation
+        shell: bash
+        run: echo "COMPILER_CACHE_WEEK=$(date -u +%G-%V)" >> "$GITHUB_ENV"
+
+      - name: Restore compiler cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ env.SCCACHE_DIR }}
+          key: native-sccache-${{ runner.os }}-${{ runner.arch }}-msvc-game-${{ env.COMPILER_CACHE_WEEK }}-${{ github.run_id }}
+          restore-keys: |
+            native-sccache-${{ runner.os }}-${{ runner.arch }}-msvc-game-${{ env.COMPILER_CACHE_WEEK }}-
+            native-sccache-${{ runner.os }}-${{ runner.arch }}-msvc-game-
+
       - name: Set up compiler cache
         uses: mozilla-actions/sccache-action@v0.0.11
         with:
           version: "v0.16.0"
 
+      # Qt's archives, kept between runs. install-qt.py checks each one against
+      # Qt's own SHA-1 before using it, so a restored archive is never trusted
+      # blindly; only master saves, once per kit and version.
+      - name: Restore Qt archives
+        id: qt-archives
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ runner.temp }}/qt-archives
+          key: qt-archives-v1-${{ runner.os }}-${{ runner.arch }}-msvc2022_64-6.11.2-${{ hashFiles('tools/qt/install-qt.py') }}
+
       - name: Install Qt Quick for MSVC
         shell: pwsh
         run: |
-          python tools/qt/install-qt.py --kit msvc2022_64 --root "$env:RUNNER_TEMP/qt"
+          python tools/qt/install-qt.py --kit msvc2022_64 --root "$env:RUNNER_TEMP/qt" --cache "$env:RUNNER_TEMP/qt-archives"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           "QT_ROOT=$env:RUNNER_TEMP/qt/6.11.2/msvc2022_64" >> $env:GITHUB_ENV
+
+      - name: Save Qt archives
+        if: steps.qt-archives.outputs.cache-hit != 'true' && github.ref_name == github.event.repository.default_branch
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ runner.temp }}/qt-archives
+          key: qt-archives-v1-${{ runner.os }}-${{ runner.arch }}-msvc2022_64-6.11.2-${{ hashFiles('tools/qt/install-qt.py') }}
 
       - name: Configure
         shell: pwsh
@@ -278,6 +319,20 @@ jobs:
         if: always()
         shell: pwsh
         run: sccache --show-stats
+
+      # Branches and pull requests restore master's cache and add nothing:
+      # one new entry per push would fill the repository's 10 GB.
+      - name: Stop the compiler cache server
+        if: ${{ !cancelled() && github.ref_name == github.event.repository.default_branch }}
+        shell: pwsh
+        run: sccache --stop-server
+
+      - name: Save compiler cache
+        if: ${{ !cancelled() && github.ref_name == github.event.repository.default_branch }}
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ env.SCCACHE_DIR }}
+          key: native-sccache-${{ runner.os }}-${{ runner.arch }}-msvc-game-${{ env.COMPILER_CACHE_WEEK }}-${{ github.run_id }}
 
       - name: Upload Windows build
         uses: actions/upload-artifact@v7
@@ -410,19 +465,38 @@ jobs:
             native-ccache-${{ runner.os }}-${{ runner.arch }}-gcc-game
           max-size: 2G
           append-timestamp: true
+          # Branches and pull requests restore master's cache and add nothing:
+          # one new entry per push would fill the repository's 10 GB.
+          save: ${{ github.ref_name == github.event.repository.default_branch }}
+
+      # Qt's archives, kept between runs. install-qt.py checks each one against
+      # Qt's own SHA-1 before using it, so a restored archive is never trusted
+      # blindly; only master saves, once per kit and version.
+      - name: Restore Qt archives
+        id: qt-archives
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ runner.temp }}/qt-archives
+          key: qt-archives-v1-${{ runner.os }}-${{ runner.arch }}-gcc_64-6.11.2-${{ hashFiles('tools/qt/install-qt.py') }}
 
       - name: Install Qt Quick
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get install -y p7zip-full libxcb-cursor0 libxkbcommon-x11-0 libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 libxcb-xinerama0
-          python3 tools/qt/install-qt.py --kit gcc_64 --root "$RUNNER_TEMP/qt"
+          python3 tools/qt/install-qt.py --kit gcc_64 --root "$RUNNER_TEMP/qt" --cache "$RUNNER_TEMP/qt-archives"
           echo "QT_ROOT=$RUNNER_TEMP/qt/6.11.2/gcc_64" >> "$GITHUB_ENV"
           echo "LD_LIBRARY_PATH=$RUNNER_TEMP/qt/6.11.2/gcc_64/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
           export LD_LIBRARY_PATH="$RUNNER_TEMP/qt/6.11.2/gcc_64/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
           ldd "$RUNNER_TEMP/qt/6.11.2/gcc_64/plugins/platforms/libqxcb.so" | tee "$RUNNER_TEMP/qt-xcb-dependencies.txt"
           ! grep -q 'not found' "$RUNNER_TEMP/qt-xcb-dependencies.txt"
 
+      - name: Save Qt archives
+        if: steps.qt-archives.outputs.cache-hit != 'true' && github.ref_name == github.event.repository.default_branch
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ runner.temp }}/qt-archives
+          key: qt-archives-v1-${{ runner.os }}-${{ runner.arch }}-gcc_64-6.11.2-${{ hashFiles('tools/qt/install-qt.py') }}
       - name: Configure
         shell: bash
         run: |
@@ -607,17 +681,34 @@ jobs:
             libopenal-dev \
             libicu-dev
 
+      # Qt's archives, kept between runs. install-qt.py checks each one against
+      # Qt's own SHA-1 before using it, so a restored archive is never trusted
+      # blindly; only master saves, once per kit and version.
+      - name: Restore Qt archives
+        id: qt-archives
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ runner.temp }}/qt-archives
+          key: qt-archives-v1-${{ runner.os }}-${{ runner.arch }}-gcc_arm64-6.11.2-${{ hashFiles('tools/qt/install-qt.py') }}
+
       - name: Install Qt Quick
         shell: bash
         run: |
           set -euo pipefail
-          python3 tools/qt/install-qt.py --kit gcc_arm64 --root "$RUNNER_TEMP/qt"
+          python3 tools/qt/install-qt.py --kit gcc_arm64 --root "$RUNNER_TEMP/qt" --cache "$RUNNER_TEMP/qt-archives"
           # This kit's ICU archive brings the unversioned libicu*.so link
           # names too, so FindICU would pair the system's ICU 74 headers with
           # Qt's older ICU libraries and the link fails. Qt itself loads its
           # copy by soname; the game links the system's, as on x64.
           rm -f "$RUNNER_TEMP"/qt/6.11.2/gcc_arm64/lib/libicu*.so
           echo "QT_ROOT=$RUNNER_TEMP/qt/6.11.2/gcc_arm64" >> "$GITHUB_ENV"
+
+      - name: Save Qt archives
+        if: steps.qt-archives.outputs.cache-hit != 'true' && github.ref_name == github.event.repository.default_branch
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ runner.temp }}/qt-archives
+          key: qt-archives-v1-${{ runner.os }}-${{ runner.arch }}-gcc_arm64-6.11.2-${{ hashFiles('tools/qt/install-qt.py') }}
 
       - name: Configure
         shell: bash
@@ -743,13 +834,30 @@ jobs:
           # one new entry per push would fill the repository's 10 GB.
           save: ${{ github.ref_name == github.event.repository.default_branch }}
 
+      # Qt's archives, kept between runs. install-qt.py checks each one against
+      # Qt's own SHA-1 before using it, so a restored archive is never trusted
+      # blindly; only master saves, once per kit and version.
+      - name: Restore Qt archives
+        id: qt-archives
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ runner.temp }}/qt-archives
+          key: qt-archives-v1-${{ runner.os }}-${{ runner.arch }}-clang_64-6.11.2-${{ hashFiles('tools/qt/install-qt.py') }}
+
       - name: Install Qt Quick
         shell: bash
         run: |
           set -euo pipefail
           brew install sevenzip
-          python3 tools/qt/install-qt.py --kit clang_64 --root "$RUNNER_TEMP/qt"
+          python3 tools/qt/install-qt.py --kit clang_64 --root "$RUNNER_TEMP/qt" --cache "$RUNNER_TEMP/qt-archives"
           echo "QT_ROOT=$RUNNER_TEMP/qt/6.11.2/clang_64" >> "$GITHUB_ENV"
+
+      - name: Save Qt archives
+        if: steps.qt-archives.outputs.cache-hit != 'true' && github.ref_name == github.event.repository.default_branch
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ runner.temp }}/qt-archives
+          key: qt-archives-v1-${{ runner.os }}-${{ runner.arch }}-clang_64-6.11.2-${{ hashFiles('tools/qt/install-qt.py') }}
 
       - name: Configure
         shell: bash
