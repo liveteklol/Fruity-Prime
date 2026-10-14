@@ -2650,7 +2650,8 @@ namespace MphRead::Entities
             if (!GameState::SinglePlayer() || colRes.Terrain() <= Terrain::Lava)
             {
                 const std::shared_ptr<BeamEffectEntity> ent = BeamEffectEntity::Create(
-                    BeamEffectEntityData(_collisionEffect, noSplat, transform, colRes.EntityCollision), _scene);
+                    BeamEffectEntityData(_collisionEffect, noSplat, transform, colRes.EntityCollision), _scene,
+                    InstagibTint());
                 if (ent)
                 {
                     if (_splashDamage > 0.0F)
@@ -2699,8 +2700,27 @@ namespace MphRead::Entities
         }
         if (effectId > 0)
         {
-            RequireReference(_scene).SpawnEffect(effectId, transform);
+            if (const std::optional<Vector3> tint = InstagibTint(); tint.has_value())
+            {
+                RequireReference(_scene).SpawnTintedEffect(effectId, transform, *tint);
+            }
+            else
+            {
+                RequireReference(_scene).SpawnEffect(effectId, transform);
+            }
         }
+    }
+
+    std::optional<Vector3> BeamProjectileEntity::InstagibTint() const
+    {
+        // Instagib: where an Imperialist shot lands is drawn in the shooter's
+        // rail colour, like the rail and the flash at the gun.
+        if (!GameState::Instagib() || !GameState::Multiplayer() || _beam != BeamType::Imperialist
+            || _owner == nullptr || _owner->Type != EntityType::Player)
+        {
+            return std::nullopt;
+        }
+        return Mods::Render::InstagibRails::ColorForSlot(static_cast<const PlayerEntity*>(_owner.get())->SlotIndex());
     }
 
     void BeamProjectileEntity::SpawnSniperBeam()

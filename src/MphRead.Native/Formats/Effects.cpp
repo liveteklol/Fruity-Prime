@@ -1218,11 +1218,17 @@ namespace MphRead::Effects
 
     Vector3 EffectParticle::TintedColor(Vector3 color) const noexcept
     {
-        if (!Owner || !Owner->EffectEntry || !Owner->EffectEntry->Tint.has_value())
+        if (!Owner)
         {
             return color;
         }
-        const Vector3 tint = *Owner->EffectEntry->Tint;
+        const std::optional<Vector3>& own = Owner->Tint;
+        const std::optional<Vector3>& entry = Owner->EffectEntry ? Owner->EffectEntry->Tint : own;
+        if (!own.has_value() && !entry.has_value())
+        {
+            return color;
+        }
+        const Vector3 tint = own.has_value() ? *own : *entry;
         const float brightness = std::max(color.X, std::max(color.Y, color.Z));
         return Vector3(tint.X * brightness, tint.Y * brightness, tint.Z * brightness);
     }

@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 
 namespace MphRead::Formats::Collision
 {
@@ -45,8 +46,11 @@ namespace MphRead::Entities
         [[nodiscard]] bool Process() override;
         void Destroy() override;
 
+        // `tint`: an effect (type 3 and up) drawn in one colour, as Instagib's
+        // hits are in the shooter's rail colour. The models (types 0-2) ignore it.
         [[nodiscard]] static std::shared_ptr<BeamEffectEntity> Create(
-            BeamEffectEntityData data, Scene* scene);
+            BeamEffectEntityData data, Scene* scene,
+            std::optional<::OpenTK::Mathematics::Vector3> tint = std::nullopt);
 
     private:
         std::int32_t _lifespan = 0;

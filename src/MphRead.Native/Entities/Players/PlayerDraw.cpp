@@ -5,6 +5,7 @@
 #include "../../Features.hpp"
 #include "../../Formats/CollisionDetection.hpp"
 #include "../../GameState.hpp"
+#include "../../Mods/Render/InstagibRails.hpp"
 #include "Mods/SpectatorMode.hpp"
 #include "../../Metadata/Metadata.hpp"
 #include "../../Renderer.hpp"
@@ -380,6 +381,31 @@ namespace MphRead::Entities
                 ModelInstance& gun = RequireReference(_gunModel.get());
                 UpdateTransforms(gun, transform, Recolor());
                 Model& gunModel = RequireReference(gun.Model());
+                // Instagib: the parts of the gun its weapon animation colours
+                // (the materials that animation names) take the rail's colour,
+                // at their own brightness. The colours are read as the draw
+                // items are made, right after, and animated afresh every frame.
+                if (GameState::Instagib() && GameState::Multiplayer()
+                    && CurrentWeapon() == MphRead::BeamType::Imperialist && gun.AnimInfo
+                    && gun.AnimInfo->Material && gun.AnimInfo->Material->Group)
+                {
+                    const Vector3 tint = Mods::Render::InstagibRails::ColorForSlot(SlotIndex());
+                    const auto& animated = RequireReference(gun.AnimInfo->Material->Group->Animations);
+                    const auto recolor = [&tint](Vector3 color)
+                    {
+                        const float brightness = std::max(color.X, std::max(color.Y, color.Z));
+                        return Vector3(tint.X * brightness, tint.Y * brightness, tint.Z * brightness);
+                    };
+                    for (const std::shared_ptr<Material>& materialValue : RequireReference(gunModel.Materials))
+                    {
+                        Material& material = RequireReference(materialValue);
+                        if (animated.find(material.Name) != animated.end())
+                        {
+                            material.CurrentDiffuse = recolor(material.CurrentDiffuse);
+                            material.CurrentAmbient = recolor(material.CurrentAmbient);
+                        }
+                    }
+                }
                 GetDrawItems(gun, RequireReference(ManagedAt(gunModel.Nodes, 0)), _curAlpha);
                 if (TestFlag(Flags1(), PlayerFlags1::DrawGunSmoke))
                 {

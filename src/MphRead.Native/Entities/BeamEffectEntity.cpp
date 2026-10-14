@@ -137,7 +137,7 @@ namespace MphRead::Entities
     }
 
     std::shared_ptr<BeamEffectEntity> BeamEffectEntity::Create(
-        BeamEffectEntityData data, Scene* scene)
+        BeamEffectEntityData data, Scene* scene, std::optional<Vector3> tint)
     {
         if (data.Type >= 3)
         {
@@ -153,8 +153,16 @@ namespace MphRead::Entities
                     effectId = 98;
                 }
             }
-            RequireReference(scene).SpawnEffect(
-                effectId, data.Transform, false, data.EntityCollision);
+            if (tint.has_value())
+            {
+                RequireReference(scene).SpawnTintedEffect(
+                    effectId, data.Transform, *tint, data.EntityCollision);
+            }
+            else
+            {
+                RequireReference(scene).SpawnEffect(
+                    effectId, data.Transform, false, data.EntityCollision);
+            }
             return nullptr;
         }
         return RequireReference(scene).InitBeamEffect(data);

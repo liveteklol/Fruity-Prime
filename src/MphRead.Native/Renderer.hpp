@@ -909,6 +909,9 @@ public: \
         std::shared_ptr<MphRead::Formats::Collision::EntityCollision> entCol = nullptr); \
     void SpawnEffect(std::int32_t effectId, OpenTK::Mathematics::Matrix4 transform, bool child = false, \
         std::shared_ptr<MphRead::Formats::Collision::EntityCollision> entCol = nullptr); \
+    /* Every particle of this effect, and of the effects it spawns, drawn in one colour at its own brightness (Instagib). */ \
+    void SpawnTintedEffect(std::int32_t effectId, OpenTK::Mathematics::Matrix4 transform, \
+        OpenTK::Mathematics::Vector3 tint, std::shared_ptr<MphRead::Formats::Collision::EntityCollision> entCol = nullptr); \
     [[nodiscard]] std::int32_t CountElements(std::int32_t effectId); \
     void ClearEffects(); \
     void BreakEffectCycles(); \
@@ -1103,7 +1106,8 @@ private: \
     std::shared_ptr<MphRead::Effects::EffectParticle> InitEffectParticle(); \
     void UnlinkEffectParticle(const std::shared_ptr<MphRead::Effects::EffectParticle>& particle); \
     void SpawnEffect(std::int32_t effectId, OpenTK::Mathematics::Matrix4 transform, bool child, \
-        const std::shared_ptr<MphRead::Effects::EffectEntry>& entry, std::shared_ptr<MphRead::Formats::Collision::EntityCollision> entCol); \
+        const std::shared_ptr<MphRead::Effects::EffectEntry>& entry, std::shared_ptr<MphRead::Formats::Collision::EntityCollision> entCol, \
+        std::optional<OpenTK::Mathematics::Vector3> tint = std::nullopt); \
     void ProcessEffects(std::uint64_t effectFrame); \
     std::shared_ptr<MphRead::RenderItem> GetRenderItem(); \
     void AddRenderItem(const std::shared_ptr<MphRead::RenderItem>& item); \

@@ -385,6 +385,9 @@ namespace MphRead::Effects
         float ParticleAmount = 0.0F;
         bool Expired = false;
         std::int32_t ChildEffectId = 0;
+        // Overrides the colour of every particle, at its own brightness: set
+        // by Scene::SpawnTintedEffect, or by the owning EffectEntry's Tint.
+        std::optional<OpenTK::Mathematics::Vector3> Tint{};
         float RoField1 = 0.0F;
         float RoField2 = 0.0F;
         float RoField3 = 0.0F;

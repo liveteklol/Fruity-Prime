@@ -2958,6 +2958,7 @@ namespace MphRead
                 + "\", now effect " + std::to_string(effect->Id) + " \"" + effect->Name + "/" + element->Name + "\"");
         }
         entry->EffectId = effect->Id;
+        entry->Tint.reset();
         entry->EffectName = effect->Name;
         entry->ElementName = element->Name;
         entry->BufferTime = element->BufferTime;
@@ -3097,8 +3098,15 @@ namespace MphRead
         SpawnEffect(effectId, transform, child, nullptr, std::move(entCol));
     }
 
+    void Scene::SpawnTintedEffect(std::int32_t effectId, Matrix4 transform, Vector3 tint,
+        std::shared_ptr<Formats::Collision::EntityCollision> entCol)
+    {
+        SpawnEffect(effectId, transform, false, nullptr, std::move(entCol), tint);
+    }
+
     void Scene::SpawnEffect(std::int32_t effectId, Matrix4 transform, bool child,
-        const std::shared_ptr<EffectEntry>& entry, std::shared_ptr<Formats::Collision::EntityCollision> entCol)
+        const std::shared_ptr<EffectEntry>& entry, std::shared_ptr<Formats::Collision::EntityCollision> entCol,
+        std::optional<Vector3> tint)
     {
         const auto effect = Read::GetEffect(effectId);
         if (!effect)
@@ -3113,6 +3121,7 @@ namespace MphRead
             {
                 return;
             }
+            element->Tint = tint;
             if (entry)
             {
                 element->EffectEntry = entry;
@@ -3487,8 +3496,10 @@ namespace MphRead
                             ? Vector3(1.0F, 0.0F, 0.0F)
                             : Vector3(0.0F, 0.0F, 1.0F);
                         vec2 = Vector3::Cross(vec1, vec2).Normalized();
-                        SpawnEffect(element->ChildEffectId,
-                            Matrix::GetTransform4(vec2, vec1, particle->Position));
+                        // A tinted effect's sparks and debris keep its tint.
+                        SpawnEffect(static_cast<std::int32_t>(element->ChildEffectId),
+                            Matrix::GetTransform4(vec2, vec1, particle->Position), false, nullptr, nullptr,
+                            element->Tint);
                     }
                     element->Particles->erase(element->Particles->begin() + j);
                     UnlinkEffectParticle(particle);
