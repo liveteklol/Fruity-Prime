@@ -105,7 +105,7 @@ namespace MphRead::Mods::Network
             return false;
         }
         const auto flags = static_cast<SessionRules>(Runtime::ReadUInt16LittleEndian(Runtime::SpanSlice(src, 14)));
-        if ((static_cast<std::uint16_t>(flags) & ~127) != 0)
+        if ((static_cast<std::uint16_t>(flags) & ~255) != 0)
         {
             return false;
         }
@@ -131,6 +131,7 @@ namespace MphRead::Mods::Network
         read.Match.AffinityWeapons = HasRule(flags, SessionRules::AffinityWeapons);
         read.Match.ShadowFreeze = HasRule(flags, SessionRules::ShadowFreeze);
         read.Match.HideOpponentHealth = HasRule(flags, SessionRules::HideOpponentHealth);
+        read.Match.Instagib = HasRule(flags, SessionRules::Instagib);
         state = read;
         std::string reason;
         return MatchDefinitionRules::Validate(state.Match, reason)

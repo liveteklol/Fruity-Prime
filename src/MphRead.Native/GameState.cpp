@@ -249,6 +249,7 @@ namespace MphRead
     bool GameState::_radarPlayers = false;
     bool GameState::_affinityWeapons = false;
     bool GameState::_shadowFreeze = true;
+    bool GameState::_instagib = false;
     float GameState::_matchTime = -1.0F;
     bool GameState::_forceEndGame = false;
 
@@ -373,6 +374,8 @@ namespace MphRead
     void GameState::AffinityWeapons(bool value) noexcept { _affinityWeapons = value; }
     bool GameState::ShadowFreeze() noexcept { return _shadowFreeze; }
     void GameState::ShadowFreeze(bool value) noexcept { _shadowFreeze = value; }
+    bool GameState::Instagib() noexcept { return _instagib; }
+    void GameState::Instagib(bool value) noexcept { _instagib = value; }
     float GameState::MatchTime() noexcept { return _matchTime; }
     void GameState::MatchTime(float value) noexcept { _matchTime = value; }
     bool GameState::ForceEndGame() noexcept { return _forceEndGame; }

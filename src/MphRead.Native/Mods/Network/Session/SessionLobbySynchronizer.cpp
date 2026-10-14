@@ -33,6 +33,7 @@ namespace MphRead::Mods::Network
             match.Flags = static_cast<std::uint8_t>(MatchStatePacket::FlagInProgress
                 | (state.Match.FriendlyFire ? MatchStatePacket::FlagFriendlyFire : 0)
                 | (state.Match.ShadowFreeze ? 0 : MatchStatePacket::FlagNoShadowFreeze)
+                | (state.Match.Instagib ? MatchStatePacket::FlagInstagib : 0)
                 | MatchStatePacket::RuleFlags(1, state.Match.AffinityWeapons));
             transition.MatchState = std::move(match);
         }

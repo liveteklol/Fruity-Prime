@@ -75,6 +75,7 @@ namespace MphRead::Mods::Network
         return (FriendlyFire ? SessionRules::FriendlyFire : SessionRules::None)
             | (AffinityWeapons ? SessionRules::AffinityWeapons : SessionRules::None)
             | (ShadowFreeze ? SessionRules::ShadowFreeze : SessionRules::None)
-            | (HideOpponentHealth ? SessionRules::HideOpponentHealth : SessionRules::None);
+            | (HideOpponentHealth ? SessionRules::HideOpponentHealth : SessionRules::None)
+            | (Instagib ? SessionRules::Instagib : SessionRules::None);
     }
 }

@@ -13,6 +13,7 @@
 #include "Mods/Network/Gameplay/Pickups/PickupReach.hpp"
 #include "Mods/Network/Domain/PowerUps.hpp"
 #include "Entities/ItemInstanceEntity.hpp"
+#include "GameState.hpp"
 #include "Entities/ItemSpawnEntity.hpp"
 #include "NativeRuntime/System/BinaryPrimitives.hpp"
 
@@ -183,6 +184,10 @@ namespace MphRead::Mods::Network
         if (!Reachable(slot, claim, *player, static_cast<OpenTK::Mathematics::Vector3>(item->Position)))
         {
             return Verdict(claim.ClaimId, PickupVerdictPacket::ResultOutOfReach);
+        }
+        if (GameState::Instagib())
+        {
+            return Verdict(claim.ClaimId, PickupVerdictPacket::ResultGone);
         }
         item->OnPickedUp(player);
         const PowerUpLedger::Grant grant = NetPowerUps::Grant(*player, *kind, claim.ContactFrame);

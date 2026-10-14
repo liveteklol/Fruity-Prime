@@ -69,6 +69,7 @@ namespace MphRead::Mods::Network
 
         GameState::FriendlyFire(state.FriendlyFire());
         GameState::ShadowFreeze(state.ShadowFreeze());
+        GameState::Instagib(state.Instagib());
         // And whether weapon pickups are the picking hunter's affinity
         // variant, which is a different row of the damage table. Silence is
         // not a no: a server built before this says nothing, and nothing

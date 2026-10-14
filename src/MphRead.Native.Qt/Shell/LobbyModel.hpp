@@ -168,7 +168,7 @@ namespace MphRead::Qt
         QString _goal = QStringLiteral("7");
         // Friendly fire, affinity weapons, shadow freeze, opponent health,
         // require ready, join in progress, lock teams.
-        std::array<bool, 7> _toggles{false, false, false, true, false, false, false};
+        std::array<bool, 8> _toggles{false, false, false, true, false, false, false, false};
         std::array<std::uint8_t, 5> _custom{2, 2, 2, 0, 0};
         QString _summary;
         std::unique_ptr<::MphRead::Mods::Network::MatchDefinition> _shownMatch;

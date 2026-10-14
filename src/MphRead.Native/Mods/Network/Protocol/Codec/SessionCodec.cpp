@@ -17,6 +17,7 @@ namespace MphRead::Mods::Network
     }
     bool MatchStatePacket::StatesRules() const noexcept { return (Flags & FlagDamageMask) != 0; }
     bool MatchStatePacket::AffinityWeapons() const noexcept { return (Flags & FlagAffinityWeapons) != 0; }
+    bool MatchStatePacket::Instagib() const noexcept { return (Flags & FlagInstagib) != 0; }
     std::uint8_t MatchStatePacket::RuleFlags(std::int32_t damageLevel, bool affinityWeapons) noexcept
     {
         if (damageLevel < 0 || damageLevel > 2)

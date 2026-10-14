@@ -698,6 +698,7 @@ namespace MphRead::Mods::Network
         state.Match.AffinityWeapons = true;
         state.Match.ShadowFreeze = true;
         state.Match.HideOpponentHealth = true;
+        state.Match.Instagib = true;
         std::vector<std::uint8_t> data(SessionStatePacket::Size);
         state.Write(data);
         SessionStatePacket read{};

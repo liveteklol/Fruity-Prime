@@ -1626,7 +1626,9 @@ namespace MphRead::Entities
     void PlayerEntity::PickUpItems()
     {
         const auto scene = [&]() -> Scene& { return RequireReference(_scene); };
-        if (_health == 0 || (_isBot && GameState::SinglePlayer()) || _ignoreItemPickups)
+        // Instagib: nothing on the map is for the taking.
+        if (_health == 0 || (_isBot && GameState::SinglePlayer()) || _ignoreItemPickups
+            || (GameState::Instagib() && GameState::Multiplayer()))
         {
             return;
         }

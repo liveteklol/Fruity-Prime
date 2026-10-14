@@ -248,6 +248,7 @@ namespace MphRead::Mods::Network
         next.FriendlyFire = frozen.FriendlyFire;
         next.AffinityWeapons = frozen.AffinityWeapons;
         next.ShadowFreeze = frozen.ShadowFreeze;
+        next.Instagib = frozen.Instagib;
         std::string ignored;
         if (LobbyRules::ValidateDefinition(next, ignored) != LobbyResultCode::Ok)
         {

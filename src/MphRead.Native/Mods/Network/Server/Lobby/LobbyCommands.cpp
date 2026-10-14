@@ -30,6 +30,7 @@ namespace MphRead::Mods::Network
         definition.FriendlyFire = _friendlyFire;
         definition.AffinityWeapons = _affinityWeapons;
         definition.ShadowFreeze = _shadowFreeze;
+        definition.Instagib = _instagib;
         return definition;
     }
 }

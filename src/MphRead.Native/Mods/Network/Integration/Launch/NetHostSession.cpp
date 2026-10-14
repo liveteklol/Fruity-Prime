@@ -60,6 +60,7 @@ namespace MphRead::Mods::Network
         auto server = std::make_shared<DedicatedServer>(port, maxPlayers, rotation);
         server->FriendlyFire(GameState::FriendlyFire());
         server->ShadowFreeze(GameState::ShadowFreeze());
+        server->Instagib(GameState::Instagib());
         // The host's own affinity-weapons rule: a different row of the
         // damage table, so it is broadcast rather than left to each guest.
         server->AffinityWeapons(GameState::AffinityWeapons());

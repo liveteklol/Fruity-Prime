@@ -38,7 +38,7 @@ namespace MphRead::Mods::Network
     {
         None = 0, FriendlyFire = 1, AffinityWeapons = 2, ShadowFreeze = 4,
         RequireReady = 8, AllowJoinInProgress = 16, LockTeams = 32,
-        HideOpponentHealth = 64
+        HideOpponentHealth = 64, Instagib = 128
     };
 
     [[nodiscard]] constexpr SessionRules operator|(SessionRules left, SessionRules right) noexcept
@@ -80,6 +80,7 @@ namespace MphRead::Mods::Network
         bool AffinityWeapons = false;
         bool ShadowFreeze = false;
         bool HideOpponentHealth = false;
+        bool Instagib = false;
 
         [[nodiscard]] SessionRules Rules() const noexcept;
 

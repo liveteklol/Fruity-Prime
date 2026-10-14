@@ -847,6 +847,8 @@ namespace MphRead::Entities
         void ResetMorphBallTrail();
         void UpdateMorphBallTrail();
         void InitializeWeapon();
+        // Instagib: the Imperialist and nothing else, with infinite ammo.
+        void ModApplyInstagibLoadout();
         // caller: only the -debuglog [weapon] line reads it.
         [[nodiscard]] bool TryEquipWeapon(MphRead::BeamType beam, bool silent = false, bool debug = false,
             std::source_location caller = std::source_location::current());

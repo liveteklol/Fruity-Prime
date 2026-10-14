@@ -87,6 +87,8 @@ namespace MphRead::Mods::Network
         void Bots(std::int32_t count, std::int32_t level);
         [[nodiscard]] bool ShadowFreeze() const noexcept { return _shadowFreeze; }
         void ShadowFreeze(bool value) noexcept { _shadowFreeze = value; }
+        [[nodiscard]] bool Instagib() const noexcept { return _instagib; }
+        void Instagib(bool value) noexcept { _instagib = value; }
         [[nodiscard]] bool AutoUpdate() const noexcept { return _autoUpdate; }
         void AutoUpdate(bool value) noexcept { _autoUpdate = value; }
         [[nodiscard]] bool RunsTheMatch() const noexcept { return _runsTheMatch; }
@@ -141,6 +143,7 @@ namespace MphRead::Mods::Network
         bool _friendlyFire = false;
         bool _affinityWeapons = false;
         bool _shadowFreeze = true;
+        bool _instagib = false;
         bool _autoUpdate = false;
         bool _runsTheMatch = true;
         HostPool _hosts{};

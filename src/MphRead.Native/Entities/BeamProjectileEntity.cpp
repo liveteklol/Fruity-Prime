@@ -17,6 +17,7 @@
 #include "Mods/Network/Gameplay/Combat/HitLocation.hpp"
 #include "Mods/Network/Gameplay/Player/NetPlayerBridge.hpp"
 #include "../Mods/Headless.hpp"
+#include "../Mods/Render/InstagibRails.hpp"
 #include "Mods/Network/Gameplay/Combat/NetHitPrediction.hpp"
 #include "Mods/Network/Diagnostics/NetLog.hpp"
 #include "Mods/Network/Gameplay/Weapons/ContinuousWeaponPhase.hpp"
@@ -2058,6 +2059,16 @@ namespace MphRead::Entities
             splashDmg *= 4;
         }
 
+        // Instagib: one hit kills, from any range and anywhere on the body,
+        // scoped or not. Large enough that no distance falloff or damage
+        // scale leaves anything standing, small enough for the wire.
+        if (GameState::Instagib() && GameState::Multiplayer() && weapon.Beam == BeamType::Imperialist)
+        {
+            damage = 9999;
+            hsDamage = 9999;
+            splashDmg = 0;
+        }
+
         const std::uint16_t damageInterpolation = ManagedAt(RequireReference(weapon.DamageInterpolations), charged ? 1U : 0U);
         const float maxDist = getAmount(
             weapon.UnchargedDistance, weapon.MinChargeDistance, weapon.ChargedDistance) / 4096.0F;
@@ -2694,6 +2705,16 @@ namespace MphRead::Entities
 
     void BeamProjectileEntity::SpawnSniperBeam()
     {
+        // Instagib draws its own rail, in the shooter's colour, from the
+        // muzzle to where the shot ended (Mods/Render/InstagibRails).
+        if (GameState::Instagib() && GameState::Multiplayer() && _owner != nullptr
+            && _owner->Type == EntityType::Player)
+        {
+            const PlayerEntity* shooter = static_cast<PlayerEntity*>(_owner.get());
+            Mods::Render::InstagibRails::Add(RequireReference(_scene), _spawnPosition,
+                static_cast<Vector3>(Position), shooter->SlotIndex());
+            return;
+        }
         const Vector3 spawnPos = _pastPositions[8];
         Vector3 up = static_cast<Vector3>(Position) - spawnPos;
         const float magnitude = Length(up);

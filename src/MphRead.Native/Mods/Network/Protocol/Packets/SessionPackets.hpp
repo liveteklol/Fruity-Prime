@@ -38,6 +38,9 @@ namespace MphRead::Mods::Network
         static constexpr std::uint8_t FlagDamageMask = 0b11U << FlagDamageShift;
         // Bit 6: weapon pickups are the picking hunter's affinity variant.
         static constexpr std::uint8_t FlagAffinityWeapons = 1U << 6;
+        // Bit 7: Instagib (see GameState::Instagib). Zero from a server that does
+        // not know the rule, which plays without it.
+        static constexpr std::uint8_t FlagInstagib = 1U << 7;
 
         [[nodiscard]] bool Ending() const noexcept;
         [[nodiscard]] bool FriendlyFire() const noexcept;
@@ -47,6 +50,7 @@ namespace MphRead::Mods::Network
         // Whether this server states its damage rules at all.
         [[nodiscard]] bool StatesRules() const noexcept;
         [[nodiscard]] bool AffinityWeapons() const noexcept;
+        [[nodiscard]] bool Instagib() const noexcept;
         // Pack the two rules into the spare bits of the flags byte. A level
         // outside 0-2 is "do not say", which is what an older server sends.
         [[nodiscard]] static std::uint8_t RuleFlags(

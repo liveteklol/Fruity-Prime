@@ -439,7 +439,8 @@ namespace MphRead::Entities
 
     void ItemInstanceEntity::GetDrawInfo()
     {
-        if (IsVisible(NodeRef))
+        // Instagib: the map has nothing to pick up, so it shows nothing.
+        if (IsVisible(NodeRef) && !(GameState::Instagib() && GameState::Multiplayer()))
         {
             SpinningEntityBase::GetDrawInfo();
         }

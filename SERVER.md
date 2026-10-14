@@ -53,6 +53,7 @@ existing systemd unit or launch script keeps working unchanged.
 | `-servername "NAME"` | the name shown in the browser |
 | `-rotation FILE` | default `maprotation.txt`, written beside the binary on first run |
 | `-friendlyfire` | team damage on |
+| `-instagib` | Instagib rule: everybody has the Imperialist with infinite ammo, one hit kills, nothing on the map can be picked up, and each shot leaves a Quake-style rail in the shooter's colour. Works with any game type; a server broadcasts it, so clients need nothing |
 | `-nomaster` | stay off every server list |
 | `-master HOST` `-masterport N` | use a server list other than `net.livetek.fr:27889` |
 

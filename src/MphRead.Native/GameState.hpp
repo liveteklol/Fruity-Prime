@@ -219,6 +219,11 @@ namespace MphRead
         static void AffinityWeapons(bool value) noexcept;
         [[nodiscard]] static bool ShadowFreeze() noexcept;
         static void ShadowFreeze(bool value) noexcept;
+        // Instagib: everybody has the Imperialist, infinite ammo, one hit kills,
+        // and nothing on the map can be picked up. A match rule: broadcast by the
+        // server, so every machine plays the same one.
+        [[nodiscard]] static bool Instagib() noexcept;
+        static void Instagib(bool value) noexcept;
         [[nodiscard]] static float MatchTime() noexcept;
         static void MatchTime(float value) noexcept;
         [[nodiscard]] static bool ForceEndGame() noexcept;
@@ -366,6 +371,7 @@ namespace MphRead
         static bool _radarPlayers;
         static bool _affinityWeapons;
         static bool _shadowFreeze;
+        static bool _instagib;
         static float _matchTime;
         static bool _forceEndGame;
 

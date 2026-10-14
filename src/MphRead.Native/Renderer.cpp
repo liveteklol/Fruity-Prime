@@ -40,6 +40,7 @@
 #include "Formats/Movie.hpp"
 #include "HUD/HudInfo.hpp"
 #include "Mods/Branding.hpp"
+#include "Mods/Render/InstagibRails.hpp"
 #include "Mods/EndScreen.hpp"
 #include "Mods/GameSettings.hpp"
 #include "Mods/Headless.hpp"
@@ -3790,6 +3791,8 @@ namespace MphRead
                 entity->GetDisplayVolumes();
             }
         }
+        // Instagib rails are not entities: they outlive the shot that made them.
+        Mods::Render::InstagibRails::AddRenderItems(*this);
         if (ProcessFrame() && GameState::MatchState() == MatchState::InProgress && !GameState::DialogPause())
         {
             for (std::int32_t i = 0; i < _pendingEffectSteps; ++i)

@@ -21,6 +21,7 @@ namespace MphRead::Mods::Network
         state.Flags = static_cast<std::uint8_t>((ending ? MatchStatePacket::FlagEnding : MatchStatePacket::FlagInProgress)
             | (definition.FriendlyFire ? MatchStatePacket::FlagFriendlyFire : 0)
             | (definition.ShadowFreeze ? 0 : MatchStatePacket::FlagNoShadowFreeze)
+            | (definition.Instagib ? MatchStatePacket::FlagInstagib : 0)
             | MatchStatePacket::RuleFlags(damageLevel, definition.AffinityWeapons));
         state.PointGoal = definition.PointGoal;
         state.MatchId = matchId;

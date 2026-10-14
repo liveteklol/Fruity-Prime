@@ -78,8 +78,8 @@ namespace MphRead::Qt
             {"Custom", Network::MatchFormat::Custom},
         }};
 
-        const std::array<const char*, 7> ToggleLabels{{"Friendly fire", "Affinity weapons", "Shadow freeze",
-            "Opponent health", "Require ready", "Join in progress", "Lock teams"}};
+        const std::array<const char*, 8> ToggleLabels{{"Friendly fire", "Affinity weapons", "Shadow freeze",
+            "Opponent health", "Require ready", "Join in progress", "Lock teams", "Instagib"}};
 
         [[nodiscard]] std::string RoomName(const std::string& room)
         {
@@ -419,7 +419,7 @@ namespace MphRead::Qt
             _goal = Q(GoalDisplay(session.Match.Mode, session.Match.PointGoal));
             _toggles = {session.Match.FriendlyFire, session.Match.AffinityWeapons, session.Match.ShadowFreeze,
                 !session.Match.HideOpponentHealth, session.RequireReady(), session.AllowJoinInProgress(),
-                PlayerChoosesTeam(session.Match) && session.LockTeams()};
+                PlayerChoosesTeam(session.Match) && session.LockTeams(), session.Match.Instagib};
             const TeamLayout layout = Network::LobbyRules::ResolveTeamLayout(session.Match);
             const TeamLayout custom = session.Match.CustomTeams.IsValid() ? session.Match.CustomTeams
                 : layout.IsValid() ? layout : TeamLayout(2, 2, 2);
@@ -697,6 +697,7 @@ namespace MphRead::Qt
         match.AffinityWeapons = _toggles[1];
         match.ShadowFreeze = _toggles[2];
         match.HideOpponentHealth = !_toggles[3];
+        match.Instagib = _toggles[7];
         return true;
     }
 

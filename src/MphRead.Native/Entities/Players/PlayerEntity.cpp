@@ -595,6 +595,7 @@ namespace MphRead::Entities
         InitializeWeapon();
         _availableWeapons[MphRead::BeamType::PowerBeam] = true;
         TryEquipWeapon(MphRead::BeamType::PowerBeam, true);
+        ModApplyInstagibLoadout();
         _facingVector = Negate(Vector3(0.0F, 0.0F, 1.0F));
         _upVector = Vector3(0.0F, 1.0F, 0.0F);
         SetTransform(_facingVector, _upVector, Vector3::Zero);
@@ -807,6 +808,7 @@ namespace MphRead::Entities
         _deathaltTimer = 0;
         _previousWeapon = MphRead::BeamType::PowerBeam;
         TryEquipWeapon(MphRead::BeamType::PowerBeam, true);
+        ModApplyInstagibLoadout();
         Metadata::LoadEffectiveness(0x2AAAA, BeamEffectiveness);
         _frozenTimer = 0;
         _timeSinceFrozen = 255;
@@ -1384,6 +1386,31 @@ namespace MphRead::Entities
         {
             // The source intentionally has no executable HUD work here.
         }
+    }
+
+    void PlayerEntity::ModApplyInstagibLoadout()
+    {
+        // Instagib is a multiplayer match rule; a story hunter or a bot of
+        // the adventure keeps whatever the game gave it.
+        if (!GameState::Instagib() || !GameState::Multiplayer())
+        {
+            return;
+        }
+        constexpr MphRead::BeamType beam = MphRead::BeamType::Imperialist;
+        MphRead::WeaponInfo& info = CurrentWeaponAt(static_cast<std::int32_t>(beam));
+        _availableWeapons.ClearAll();
+        _availableCharges.ClearAll();
+        _availableWeapons[beam] = true;
+        _availableCharges[beam] = true;
+        _weaponSlots[0] = MphRead::BeamType::None;
+        _weaponSlots[1] = MphRead::BeamType::None;
+        _weaponSlots[2] = beam;
+        _ammo[UA] = _ammo[Missiles] = 0;
+        ManagedAt(_ammo, static_cast<std::int32_t>(info.AmmoType))
+            = ManagedAt(_ammoMax, static_cast<std::int32_t>(info.AmmoType));
+        RequireReference(_equipInfo).InfiniteAmmo = true;
+        _previousWeapon = beam;
+        static_cast<void>(TryEquipWeapon(beam, true));
     }
 
     bool PlayerEntity::TryEquipWeapon(MphRead::BeamType beam, bool silent, bool debug, std::source_location caller)
