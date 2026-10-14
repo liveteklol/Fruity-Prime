@@ -480,6 +480,10 @@ if(BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)
     add_executable(fruity_map_vote_rules_tests "${FRUITY_MPHREAD_ROOT}/Testing/TestMapVoteRules.cpp")
     target_compile_features(fruity_map_vote_rules_tests PRIVATE cxx_std_20)
     add_test(NAME FruityPrime.MapVoteRules COMMAND fruity_map_vote_rules_tests)
+    add_executable(fruity_collision_weld_tests "${FRUITY_MPHREAD_ROOT}/Testing/TestCollisionWeld.cpp")
+    target_link_libraries(fruity_collision_weld_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_collision_weld_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.CollisionWeld COMMAND fruity_collision_weld_tests)
     # The map upload is built from its own sources rather than the engine
     # library: the test replaces the engine's map folder and room list (it needs
     # no game files) and linking the library would pull the real ones in.

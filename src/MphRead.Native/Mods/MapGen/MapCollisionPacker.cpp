@@ -7,6 +7,7 @@
 #include "../../NativeRuntime/System/Managed.hpp"
 #include "../../Formats/Types.hpp"
 #include "NativeRuntime/System/Globalization.hpp"
+#include "NativeRuntime/System/Console.hpp"
 
 #include <algorithm>
 #include <map>
@@ -22,6 +23,7 @@
 #include <string>
 #include <tuple>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -170,6 +172,162 @@ namespace
         }
         return editor;
     }
+    using FaceList = std::vector<std::shared_ptr<CollisionDataEditor>>;
+
+    struct CellKey final
+    {
+        std::int64_t X = 0;
+        std::int64_t Y = 0;
+        std::int64_t Z = 0;
+
+        [[nodiscard]] bool operator==(const CellKey& other) const noexcept
+        {
+            return X == other.X && Y == other.Y && Z == other.Z;
+        }
+    };
+
+    struct CellKeyHash final
+    {
+        [[nodiscard]] std::size_t operator()(const CellKey& key) const noexcept
+        {
+            std::size_t hash = std::hash<std::int64_t>{}(key.X);
+            hash = CombineHash(hash, std::hash<std::int64_t>{}(key.Y));
+            return CombineHash(hash, std::hash<std::int64_t>{}(key.Z));
+        }
+    };
+
+    [[nodiscard]] std::size_t CountDistinctPoints(const FaceList& faces)
+    {
+        std::unordered_set<Vector3, Vector3Hash, Vector3Equal> seen;
+        for (const std::shared_ptr<CollisionDataEditor>& face : faces)
+        {
+            for (const Vector3 point : *RequireEditor(face)->Points)
+            {
+                seen.insert(point);
+            }
+        }
+        return seen.size();
+    }
+
+    // The faces with every point moved onto the first point seen within the
+    // same cell of a grid `cell` units wide, a face left with fewer than three
+    // different corners dropped. A level that has more corners than the format
+    // can index is brought down to a number it can, by the amount that costs
+    // least: two corners a fraction of a unit apart are one corner as far as
+    // anybody can walk into or shoot at the difference.
+    [[nodiscard]] std::shared_ptr<FaceList> Weld(const FaceList& faces, float cell, std::size_t& dropped)
+    {
+        auto result = std::make_shared<FaceList>();
+        result->reserve(faces.size());
+        // Corners already chosen, by the grid cell they are in. A corner is the
+        // nearest chosen one within `cell` of it, looked for in the 27 cells
+        // around, so two copies of a point that fall either side of a cell
+        // edge are still found to be one point.
+        std::unordered_map<CellKey, std::vector<Vector3>, CellKeyHash> representatives;
+        const auto cellOf = [&](float value) { return static_cast<std::int64_t>(std::floor(value / cell)); };
+        dropped = 0;
+        for (const std::shared_ptr<CollisionDataEditor>& face : faces)
+        {
+            const std::shared_ptr<CollisionDataEditor> source = RequireEditor(face);
+            std::vector<Vector3> moved;
+            moved.reserve(source->Points->size());
+            for (const Vector3 point : *source->Points)
+            {
+                const std::int64_t cx = cellOf(point.X);
+                const std::int64_t cy = cellOf(point.Y);
+                const std::int64_t cz = cellOf(point.Z);
+                bool found = false;
+                Vector3 corner = point;
+                float nearest = cell * cell;
+                for (std::int64_t dx = -1; dx <= 1; ++dx)
+                {
+                    for (std::int64_t dy = -1; dy <= 1; ++dy)
+                    {
+                        for (std::int64_t dz = -1; dz <= 1; ++dz)
+                        {
+                            const auto at = representatives.find(CellKey{cx + dx, cy + dy, cz + dz});
+                            if (at == representatives.end())
+                            {
+                                continue;
+                            }
+                            for (const Vector3 candidate : at->second)
+                            {
+                                const float ex = candidate.X - point.X;
+                                const float ey = candidate.Y - point.Y;
+                                const float ez = candidate.Z - point.Z;
+                                const float distance = ex * ex + ey * ey + ez * ez;
+                                if (distance <= nearest)
+                                {
+                                    nearest = distance;
+                                    corner = candidate;
+                                    found = true;
+                                }
+                            }
+                        }
+                    }
+                }
+                if (!found)
+                {
+                    representatives[CellKey{cx, cy, cz}].push_back(point);
+                }
+                if (moved.empty() || !Vector3Equal{}(moved.back(), corner))
+                {
+                    moved.push_back(corner);
+                }
+            }
+            while (moved.size() > 1 && Vector3Equal{}(moved.front(), moved.back()))
+            {
+                moved.pop_back();
+            }
+            if (moved.size() < 3)
+            {
+                ++dropped;
+                continue;
+            }
+            auto welded = std::make_shared<CollisionDataEditor>();
+            *welded->Points = std::move(moved);
+            welded->Plane = source->Plane;
+            welded->LayerMask = source->LayerMask;
+            welded->Flags = source->Flags;
+            result->push_back(std::move(welded));
+        }
+        return result;
+    }
+
+    // The faces as they are if their corners fit the format's 16-bit index,
+    // else welded at the smallest cell that makes them fit, or nothing if no
+    // cell small enough to be harmless does.
+    [[nodiscard]] std::shared_ptr<FaceList> FitCorners(const FaceList& faces)
+    {
+        constexpr std::size_t Limit = 65535;
+        constexpr float Smallest = 0.005F;
+        constexpr float Largest = 0.4F;
+        const std::size_t before = CountDistinctPoints(faces);
+        if (before <= Limit)
+        {
+            return nullptr;
+        }
+        for (float cell = Smallest; cell <= Largest; cell *= 1.5F)
+        {
+            std::size_t dropped = 0;
+            std::shared_ptr<FaceList> welded = Weld(faces, cell, dropped);
+            if (welded->empty())
+            {
+                break;
+            }
+            const std::size_t after = CountDistinctPoints(*welded);
+            if (after <= Limit)
+            {
+                ::MphRead::NativeRuntime::ConsoleWriteLine("[mapgen] the collision has " + std::to_string(before)
+                    + " distinct corners and the format indexes " + std::to_string(Limit) + ": welded corners closer than "
+                    + std::to_string(cell) + " units, " + std::to_string(after) + " left, "
+                    + std::to_string(dropped) + " of " + std::to_string(faces.size()) + " faces collapsed");
+                return welded;
+            }
+        }
+        return nullptr;
+    }
+
 
 }
 
@@ -177,19 +335,24 @@ namespace MphRead::Mods::MapGen
 {
     std::vector<std::uint8_t> MapCollisionPacker::Pack(
         const std::shared_ptr<const std::vector<
-            std::shared_ptr<MphRead::Utility::CollisionDataEditor>>>& input)
+            std::shared_ptr<MphRead::Utility::CollisionDataEditor>>>& requested)
     {
         using MphRead::Formats::Collision::CollisionHeader;
         using MphRead::Utility::BinaryWriter;
 
-        if (!input)
+        if (!requested)
         {
             throw System::NullReferenceException();
         }
-        if (input->empty())
+        if (requested->empty())
         {
             throw MphRead::ProgramException("A map needs at least one solid face.");
         }
+
+        // A level with more corners than the format can index is welded down to
+        // what it can, rather than refused outright (see FitCorners).
+        const std::shared_ptr<FaceList> fitted = FitCorners(*requested);
+        const std::shared_ptr<const FaceList> input = fitted ? fitted : requested;
 
         // The faces in the order of the grid's cells they start in, so the
         // cells along a row list runs of the same faces in the same order,

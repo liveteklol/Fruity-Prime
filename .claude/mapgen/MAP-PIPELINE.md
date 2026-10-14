@@ -292,6 +292,22 @@ while dropping an exposed one leaves a hole in the floor.
 `-mapgen` reports the number the grid needs when it does not fit, so the
 scale can be chosen by arithmetic instead of by bisection.
 
+**A level with more corners than the format can index is welded, not refused.**
+The collision file addresses its points with 16 bits, and a level written down
+corner by corner can hold the same corner many times a hair apart: `pom_bots`
+came to 87,943 distinct corners against 65,535 and was refused, which left a
+listed map with no collision file and a crash on launch. `MapCollisionPacker`
+now tries welding corners within a growing tolerance (0.005 units, times 1.5 up
+to 0.4) and uses the smallest that fits. Each corner is the nearest one already
+chosen within the tolerance, looked for in the 27 cells around it so two copies
+either side of a cell edge are still one point, and a face left with fewer than
+three different corners is dropped. `pom_bots` fits at 0.005 (1,608 of 32,773
+faces collapse, all slivers); `simpsons_q3`, with 493,000 collision faces, at
+0.13 (417,000 collapse), so its collision is a much coarser version of the
+level than the drawn one. A level that does not fit at 0.4 is still refused
+with the same message. The tolerance and the counts are printed (`[mapgen] the
+collision has N distinct corners ...`). Test: `fruity_collision_weld_tests`.
+
 `keepSpawns` (default true) says whether to take the level's own player
 starts. True is right for a deathmatch level, authored with eight of them in
 the places its author wanted people to appear. It is wrong for anything else:
