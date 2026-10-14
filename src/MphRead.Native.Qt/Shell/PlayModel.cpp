@@ -320,6 +320,11 @@ namespace MphRead::Qt
         return Launcher::LauncherPrefs::BotLevel();
     }
 
+    bool PlayModel::LastInstagib() const
+    {
+        return Launcher::LauncherPrefs::Instagib();
+    }
+
     QString PlayModel::PlayerName() const
     {
         const std::string name = Runtime::StringTrim(Launcher::LauncherPrefs::PlayerName());
@@ -686,7 +691,8 @@ namespace MphRead::Qt
 
     // ----------------------------------------------------------- Offline
 
-    void PlayModel::start(const QString& room, int modeIndex, int hunterIndex, int suit, int bots, int skill)
+    void PlayModel::start(
+        const QString& room, int modeIndex, int hunterIndex, int suit, int bots, int skill, bool instagib)
     {
         if (room.isEmpty())
         {
@@ -704,6 +710,7 @@ namespace MphRead::Qt
         Launcher::LauncherPrefs::LastColor(suit);
         Launcher::LauncherPrefs::Bots(bots);
         Launcher::LauncherPrefs::BotLevel(skill);
+        Launcher::LauncherPrefs::Instagib(instagib);
         Launcher::LauncherPrefs::LastKind(static_cast<std::int32_t>(Launcher::LaunchKind::Offline));
         Launcher::LauncherPrefs::Save();
 
@@ -715,6 +722,7 @@ namespace MphRead::Qt
         init.Mode = mode;
         init.Bots = bots;
         init.BotLevel = skill;
+        init.Instagib = instagib;
         _finished = true;
         stopPolling();
         if (bridge != nullptr)

@@ -59,6 +59,9 @@ namespace MphRead::Mods::Launcher
         [[nodiscard]] static std::int32_t BotLevel() noexcept;
         static void BotLevel(std::int32_t value) noexcept;
 
+        [[nodiscard]] static bool Instagib() noexcept;
+        static void Instagib(bool value) noexcept;
+
         [[nodiscard]] static std::int32_t HostPort() noexcept;
         static void HostPort(std::int32_t value) noexcept;
 
@@ -155,6 +158,7 @@ namespace MphRead::Mods::Launcher
         static MphRead::Hunter _lastHunter;
         static std::int32_t _lastColor;
         static std::int32_t _bots;
+        static bool _instagib;
         static std::int32_t _botLevel;
         static std::int32_t _hostPort;
         static bool _listHostedGame;

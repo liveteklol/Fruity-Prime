@@ -80,6 +80,9 @@ namespace MphRead::Mods::Launcher
             MphRead::GameMode Mode = static_cast<MphRead::GameMode>(0);
             std::int32_t Bots = 0;
             std::int32_t BotLevel = 0;
+            // The Instagib rule, for an offline match. A networked match takes
+            // the server's instead.
+            bool Instagib = false;
             std::int32_t Port = 0;
             std::optional<std::string> PlayerName{};
             std::uint8_t SaveSlot = 0;
@@ -102,6 +105,7 @@ namespace MphRead::Mods::Launcher
         [[nodiscard]] MphRead::GameMode Mode() const noexcept;
         [[nodiscard]] std::int32_t Bots() const noexcept;
         [[nodiscard]] std::int32_t BotLevel() const noexcept;
+        [[nodiscard]] bool Instagib() const noexcept;
         [[nodiscard]] std::int32_t Port() const noexcept;
         [[nodiscard]] const std::optional<std::string>& PlayerName() const noexcept;
         [[nodiscard]] std::uint8_t SaveSlot() const noexcept;
@@ -116,6 +120,7 @@ namespace MphRead::Mods::Launcher
         MphRead::GameMode _mode = static_cast<MphRead::GameMode>(0);
         std::int32_t _bots = 0;
         std::int32_t _botLevel = 0;
+        bool _instagib = false;
         std::int32_t _port = 0;
         std::optional<std::string> _playerName{};
         std::uint8_t _saveSlot = 0;

@@ -44,6 +44,7 @@ namespace MphRead::Qt
         Q_PROPERTY(int lastColour READ LastColour CONSTANT)
         Q_PROPERTY(int lastBots READ LastBots CONSTANT)
         Q_PROPERTY(int lastSkill READ LastSkill CONSTANT)
+        Q_PROPERTY(bool lastInstagib READ LastInstagib CONSTANT)
         Q_PROPERTY(QString playerName READ PlayerName CONSTANT)
         Q_PROPERTY(QString serverEndpoint READ ServerEndpoint NOTIFY serverEndpointChanged)
         Q_PROPERTY(QString chosenRoom READ ChosenRoom CONSTANT)
@@ -72,6 +73,7 @@ namespace MphRead::Qt
         [[nodiscard]] int LastColour() const;
         [[nodiscard]] int LastBots() const;
         [[nodiscard]] int LastSkill() const;
+        [[nodiscard]] bool LastInstagib() const;
         [[nodiscard]] QString PlayerName() const;
         [[nodiscard]] QString ServerEndpoint() const;
         [[nodiscard]] QString ChosenRoom() const;
@@ -83,7 +85,8 @@ namespace MphRead::Qt
         Q_INVOKABLE void queryStatus(const QString& endpoint);
         Q_INVOKABLE void stopPolling();
         Q_INVOKABLE void join(const QString& name, const QString& endpoint, int hunter, int suit);
-        Q_INVOKABLE void start(const QString& room, int mode, int hunter, int suit, int bots, int skill);
+        Q_INVOKABLE void start(const QString& room, int mode, int hunter, int suit, int bots, int skill,
+            bool instagib);
         Q_INVOKABLE bool slotUsed(int slot) const;
         Q_INVOKABLE void startAdventure(int slot, int hunter, bool newGame);
         Q_INVOKABLE void watch(const QString& path);

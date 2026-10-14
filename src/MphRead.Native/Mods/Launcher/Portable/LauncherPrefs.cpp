@@ -134,6 +134,7 @@ namespace MphRead::Mods::Launcher
     std::int32_t LauncherPrefs::_lastColor = 0;
     std::int32_t LauncherPrefs::_bots = 3;
     std::int32_t LauncherPrefs::_botLevel = 1;
+    bool LauncherPrefs::_instagib = false;
     std::int32_t LauncherPrefs::_hostPort = Network::NetConfig::DefaultPort;
     bool LauncherPrefs::_listHostedGame = true;
     bool LauncherPrefs::_hostOnMaster = true;
@@ -262,6 +263,16 @@ namespace MphRead::Mods::Launcher
     void LauncherPrefs::BotLevel(std::int32_t value) noexcept
     {
         _botLevel = value;
+    }
+
+    bool LauncherPrefs::Instagib() noexcept
+    {
+        return _instagib;
+    }
+
+    void LauncherPrefs::Instagib(bool value) noexcept
+    {
+        _instagib = value;
     }
 
     std::int32_t LauncherPrefs::HostPort() noexcept
@@ -571,6 +582,14 @@ namespace MphRead::Mods::Launcher
                         _hostOnMaster = hostOnMaster;
                     }
                 }
+                else if (key == "instagib")
+                {
+                    bool instagib = false;
+                    if (BooleanTryParse(value, instagib))
+                    {
+                        _instagib = instagib;
+                    }
+                }
                 else if (key == "list_hosted")
                 {
                     bool listHosted = false;
@@ -701,6 +720,7 @@ namespace MphRead::Mods::Launcher
             lines.emplace_back("color=" + ::MphRead::NativeRuntime::ToStringInvariant(_lastColor));
             lines.emplace_back("bots=" + ::MphRead::NativeRuntime::ToStringInvariant(_bots));
             lines.emplace_back("bot_level=" + ::MphRead::NativeRuntime::ToStringInvariant(_botLevel));
+            lines.emplace_back(std::string("instagib=") + (_instagib ? "true" : "false"));
             lines.emplace_back("host_port=" + ::MphRead::NativeRuntime::ToStringInvariant(_hostPort));
             lines.emplace_back(
                 std::string("list_hosted=")

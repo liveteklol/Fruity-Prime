@@ -60,6 +60,7 @@ namespace MphRead::Mods::Launcher
           _mode(init.Mode),
           _bots(init.Bots),
           _botLevel(init.BotLevel),
+          _instagib(init.Instagib),
           _port(init.Port),
           _playerName(init.PlayerName),
           _saveSlot(init.SaveSlot),
@@ -111,6 +112,11 @@ namespace MphRead::Mods::Launcher
     std::int32_t LaunchPlan::BotLevel() const noexcept
     {
         return _botLevel;
+    }
+
+    bool LaunchPlan::Instagib() const noexcept
+    {
+        return _instagib;
     }
 
     std::int32_t LaunchPlan::Port() const noexcept

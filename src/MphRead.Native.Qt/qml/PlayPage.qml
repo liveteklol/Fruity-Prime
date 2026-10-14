@@ -298,6 +298,13 @@ Page {
                             options: ["Easy", "Normal", "Hard", "Insane"]
                             index: playModel.lastSkill
                         }
+                        ToggleRow {
+                            id: sideInstagib
+                            visible: !play.sideOnline
+                            width: parent.width
+                            label: "Instagib"
+                            on: playModel.lastInstagib
+                        }
                     }
                 }
             }
@@ -416,7 +423,8 @@ Page {
                 nav.openCreateServer()
             break
         case 1:
-            playModel.start(picked, sideMode.index, sideHunter.index, sideSuit.index, sideBots.index, sideSkill.index)
+            playModel.start(picked, sideMode.index, sideHunter.index, sideSuit.index, sideBots.index, sideSkill.index,
+                             sideInstagib.on)
             break
         case 2:
             playModel.startAdventure(list.selectedIndex >= 0 ? playModel.saveSlots[list.selectedIndex].slot : 1,
