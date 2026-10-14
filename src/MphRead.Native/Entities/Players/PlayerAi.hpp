@@ -806,6 +806,7 @@ namespace MphRead::Entities
         }
 
         void ExecuteFuncs1(const std::vector<std::int32_t>& funcsIds);
+        void ApplyInstagibWeapons();
         void ExecuteFuncs2(AiContext& context);
         [[nodiscard]] std::int32_t ExecuteFuncs3(AiContext& context, std::int32_t funcId,
             const Formats::AiPersonalityData5& param);

@@ -102,6 +102,7 @@ namespace MphRead::Entities
         InitializeMain();
         ClearInput();
         UpdateExecutionPath(Personality, 0);
+        ApplyInstagibWeapons();
     }
 
     void PlayerEntity::PlayerAiData::InitializeGlobals()
@@ -606,6 +607,26 @@ namespace MphRead::Entities
             default: throw std::runtime_error("Invalid AI func 1.");
             }
         }
+        ApplyInstagibWeapons();
+    }
+
+    void PlayerEntity::PlayerAiData::ApplyInstagibWeapons()
+    {
+        // Instagib: the Imperialist is the only weapon a hunter holds, and the
+        // personality scripts still pick from the whole arsenal -- the Power
+        // Beam by default, and Missile or Power Beam when one weapon is left
+        // (Func1_2149D3C). Func2143A40 never fires a pick the hunter does not
+        // have, so a bot held the gun and never shot. Every pick is the
+        // Imperialist instead, uncharged, and there is no weapon to go and
+        // find, since nothing on the map can be picked up.
+        if (!GameState::Instagib() || !GameState::Multiplayer())
+        {
+            return;
+        }
+        _weapon1 = 4;
+        _weapon2 = 4;
+        _findWeaponIndex = 4;
+        Flags4 &= ~AiFlags4::Bit1;
     }
 
     void PlayerEntity::PlayerAiData::ExecuteFuncs2(AiContext& context)
