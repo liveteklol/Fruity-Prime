@@ -99,6 +99,7 @@ namespace MphRead::Mods::Launcher::Gui
             init.Mode = source.Mode();
             init.Bots = source.Bots();
             init.BotLevel = source.BotLevel();
+            init.Instagib = source.Instagib();
             init.Port = source.Port();
             init.PlayerName = source.PlayerName();
             init.SaveSlot = source.SaveSlot();

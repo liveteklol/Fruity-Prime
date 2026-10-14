@@ -25,6 +25,9 @@ namespace MphRead::Mods::Launcher
             std::shared_ptr<MphRead::MenuSettings> settings,
             LaunchPlan plan);
         static void AfterMatch();
+        // The match rules a local match takes from its plan rather than from
+        // a server: Instagib. Called by every head that starts one.
+        static void ApplyLocalRules(const LaunchPlan& plan);
         static void CommitAdventureSave();
 
     private:

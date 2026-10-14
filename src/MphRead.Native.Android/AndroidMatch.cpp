@@ -75,6 +75,7 @@ namespace MphRead::Droid
         }
         else
         {
+            MphRead::Mods::Launcher::MatchStart::ApplyLocalRules(plan);
             AddLocalPlayers(
                 *scene,
                 plan,
