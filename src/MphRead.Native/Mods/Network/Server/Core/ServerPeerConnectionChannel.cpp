@@ -160,21 +160,12 @@ namespace MphRead::Mods::Network
                 return;
             }
             _ports.EverOccupied->store(true);
-            if (!*_ports.RunsTheMatch && _ports.Authority->TryClaim(peer))
+            Log(packet.Sender->ToString() + " joined as slot " + std::to_string(slot));
+            if (*_ports.RunsTheMatch && _ports.Simulation->HasSimulation()
+                && _ports.Snapshots->HasLatest()
+                && _ports.Transport != nullptr && *_ports.Transport != nullptr)
             {
-                _ports.Snapshots->ResetIncomingSequence();
-                Log(packet.Sender->ToString() + " joined as slot " + std::to_string(slot) + " (authority)");
-                _ports.State->NotifyAuthority(peer);
-            }
-            else
-            {
-                Log(packet.Sender->ToString() + " joined as slot " + std::to_string(slot));
-                if (*_ports.RunsTheMatch && _ports.Simulation->HasSimulation()
-                    && _ports.Snapshots->HasLatest()
-                    && _ports.Transport != nullptr && *_ports.Transport != nullptr)
-                {
-                    _ports.SnapshotChannel->SendLatest(peer, _ports.Transport->get());
-                }
+                _ports.SnapshotChannel->SendLatest(peer, _ports.Transport->get());
             }
         }
         peer->ClientId = clientId;
@@ -297,23 +288,6 @@ namespace MphRead::Mods::Network
         if (!removed->Profile.Name().empty())
         {
             Announce(removed->Profile.Name() + " " + reason);
-        }
-        if (*_ports.RunsTheMatch || !_ports.Authority->IsAuthority(removed))
-        {
-            return;
-        }
-        const PeerHandle successor = !_ports.Peers->All().empty()
-            ? _ports.Peers->All()[0] : nullptr;
-        _ports.Authority->TransferTo(successor);
-        _ports.Snapshots->ResetIncomingSequence();
-        _ports.State->BroadcastMatchState(*_ports.Now);
-        _ports.State->BroadcastRoster();
-        Log(_ports.Authority->HasAuthority()
-            ? "authority moved to slot " + std::to_string(_ports.Authority->Current()->SlotIndex)
-            : std::string("no peers left; waiting for a new authority"));
-        if (_ports.Authority->HasAuthority())
-        {
-            _ports.State->NotifyAuthority(_ports.Authority->Current());
         }
     }
 }

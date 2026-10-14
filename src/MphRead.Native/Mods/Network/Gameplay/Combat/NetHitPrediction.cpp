@@ -10,6 +10,7 @@
 #include "Mods/Network/Gameplay/StatusEffects/FreezeStatusEffectPolicy.hpp"
 #include "Mods/Network/Gameplay/Claims/Hit/NetHitClaims.hpp"
 #include "Mods/Network/Integration/Hooks/NetHooks.hpp"
+#include "Mods/Network/Diagnostics/HomingShotTrace.hpp"
 #include "Mods/Network/Diagnostics/NetLog.hpp"
 #include "Mods/Network/Gameplay/Player/NetPlayerLifecycle.hpp"
 #include "Mods/Network/Session/NetSession.hpp"
@@ -45,7 +46,7 @@ namespace MphRead::Mods::Network
 
     bool NetHitPrediction::Predicting() noexcept
     {
-        return NetSession::Active() && !NetSession::IsHost() && !NetSession::IsAuthority() && !NetDamage::Replaying();
+        return NetSession::Active() && !NetSession::IsAuthority() && !NetDamage::Replaying();
     }
 
     std::int32_t NetHitPrediction::HoldFrames()
@@ -579,6 +580,8 @@ namespace MphRead::Mods::Network
         _healCount++;
         _drainPredicted += amount;
         NetShotDiagnostics::RecordDrainCredit(static_cast<std::int64_t>(amount));
+        HomingShotTrace::Drained({HomingShotRole::Owner, healer.SlotIndex(), -1, 0, amount,
+            HomingShotTrace::WeaponRow(NativeRuntime::RequireReference(healer.EquipInfo()).Weapon.get())});
     }
 
     std::int32_t NetHitPrediction::Debit(std::int32_t slot)

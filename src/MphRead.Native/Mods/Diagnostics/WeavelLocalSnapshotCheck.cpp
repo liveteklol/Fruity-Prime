@@ -90,7 +90,7 @@ namespace MphRead::Mods::Diagnostics
                     const auto applied = NetSession::StatesApplied();
                     if (path == 0) NetPlayerBridge::ApplyState(owner, snapshot, local);
                     else if (path == 1) NetHooks::AfterInput(scene);
-                    else NetHooks::AfterSimulation();
+                    else NetHooks::AfterSimulation(scene);
                     if (path != 0)
                         check(NetSession::StatesApplied() == applied + 1,
                             paths[path] + " reaches ApplyRemoteStates");

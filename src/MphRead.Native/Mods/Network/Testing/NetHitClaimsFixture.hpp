@@ -27,9 +27,28 @@ namespace MphRead::Mods::Network
             NetHitClaims::NoteLedger(attacker, victim, ack, launch, damage, used, beam, launchKey);
         }
 
-        [[nodiscard]] static std::int32_t MaxDamageFor(std::int32_t shooterSlot, std::uint8_t beam)
+        [[nodiscard]] static std::int32_t MaxDamageFor(std::int32_t shooterSlot, std::uint8_t beam,
+            std::uint32_t launchFrame, std::uint32_t shotSequence)
         {
-            return NetHitClaims::MaxDamageFor(shooterSlot, beam);
+            return NetHitClaims::MaxDamageFor(shooterSlot, beam, launchFrame, shotSequence);
+        }
+
+        [[nodiscard]] static const ::MphRead::WeaponInfo* FiredWeapon(std::int32_t shooterSlot,
+            std::uint8_t beam, std::uint32_t launchFrame, std::uint32_t shotSequence)
+        {
+            return NetHitClaims::FiredWeapon(shooterSlot, beam, launchFrame, shotSequence);
+        }
+
+        [[nodiscard]] static bool Drains(std::int32_t shooterSlot, std::uint8_t beam,
+            std::uint32_t launchFrame, std::uint32_t shotSequence)
+        {
+            return NetHitClaims::Drains(shooterSlot, beam, launchFrame, shotSequence);
+        }
+
+        [[nodiscard]] static bool StraightWeapon(std::int32_t shooterSlot, std::uint8_t beam,
+            std::uint32_t launchFrame, std::uint32_t shotSequence)
+        {
+            return NetHitClaims::StraightWeapon(shooterSlot, beam, launchFrame, shotSequence);
         }
     };
 }

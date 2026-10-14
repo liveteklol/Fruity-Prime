@@ -51,8 +51,7 @@ namespace MphRead::Mods::Network
 
         if (runtime.LocalSlot() >= 0)
         {
-            DemoRecorder::RecordOwnIntent(runtime.LocalSlot(),
-                First(connection.Buffer(), IntentPacket::FullSize));
+            DemoRecorder::RecordOwnIntent(runtime.LocalSlot(), intent);
         }
         SessionClaimChannel::SendClientClaims(connection);
     }

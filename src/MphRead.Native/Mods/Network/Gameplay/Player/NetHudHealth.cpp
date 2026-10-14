@@ -30,7 +30,7 @@ namespace MphRead::Mods::Network
     HudHealthSample NetHudHealth::Sample(const ::MphRead::Entities::PlayerEntity& player)
     {
         const std::int32_t slot = player.SlotIndex();
-        if (NetSession::Active() && !NetSession::IsAuthority() && !NetSession::IsHost()
+        if (NetSession::Active() && !NetSession::IsAuthority()
             && slot >= 0 && slot < static_cast<std::int32_t>(NetSession::RemotePlayerSlots)
             && NetSession::HasRemoteState(slot))
         {
@@ -41,7 +41,7 @@ namespace MphRead::Mods::Network
                 return HudHealthSample{state.Health, NetSession::LastSnapshotFrame(), state.LifeId, true};
             }
         }
-        const bool authoritative = !NetSession::Active() || NetSession::IsAuthority() || NetSession::IsHost();
+        const bool authoritative = !NetSession::Active() || NetSession::IsAuthority();
         return HudHealthSample{player.Health(), authoritative ? NetSession::NetFrame() : 0U,
             NetPlayerLifecycle::Get(slot), authoritative};
     }

@@ -38,11 +38,11 @@ int main()
     passed &= Check(!authority.StandDown() && authority.StandDowns() == 1,
         "stand-down without a lease has no effect");
 
-    passed &= Check(authority.BecomeClientAuthority() && authority.IsAuthority(), "client accepts a new lease");
-    passed &= Check(authority.ConsumeStateSync() && !authority.ConsumeStateSync(),
-        "client lease requests one state synchronization");
+    passed &= Check(!authority.BecomeClientAuthority() && !authority.IsAuthority(),
+        "a client cannot acquire simulation authority");
+    passed &= Check(!authority.ConsumeStateSync(), "a rejected client grant does not request state synchronization");
     authority.RecordAuthorityFrame();
-    passed &= Check(authority.Frames() == 3, "client authority records an authoritative frame");
+    passed &= Check(authority.Frames() == 2, "a client cannot record an authoritative frame");
 
     authority.Revoke();
     passed &= Check(!authority.IsAuthority() && authority.StandDowns() == 1,

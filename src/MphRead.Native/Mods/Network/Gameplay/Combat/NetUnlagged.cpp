@@ -4,11 +4,14 @@
 #include "Mods/Network/Gameplay/Player/NetPlayerBridge.hpp"
 #include "Mods/Network/Gameplay/Claims/Hit/NetHitClaims.hpp"
 #include "Mods/Network/Gameplay/Weapons/NetShotEvents.hpp"
+#include "Mods/Network/Gameplay/Weapons/HomingTargetHistory.hpp"
+#include "Mods/Network/Gameplay/Weapons/FiringVariant.hpp"
 #include "Mods/Network/Gameplay/Player/NetPlayerLifecycle.hpp"
 #include "Mods/Network/Session/NetSession.hpp"
 #include "Mods/Network/Diagnostics/NetShotDiagnostics.hpp"
 #include "Mods/Network/Gameplay/Replication/NetSmoothing.hpp"
 #include "Entities/BeamProjectileEntity.hpp"
+#include "GameState.hpp"
 #include "Metadata/Weapons.hpp"
 #include "NativeRuntime/System/Managed.hpp"
 #include "NativeRuntime/System/Number.hpp"
@@ -88,7 +91,11 @@ namespace MphRead::Mods::Network
 
     void NetUnlagged::Reset()
     {
+        HomingTargetHistory::Reset();
+        FiringVariant::ResetRole();
         _stamp.fill(0);
+        _primeHunterStamp.fill(0);
+        _primeHunter.fill(-1);
         _moved.fill(false);
         _newest = 0;
         _reconciled = false;
@@ -118,13 +125,15 @@ namespace MphRead::Mods::Network
 
     void NetUnlagged::Record(std::uint32_t frame)
     {
+        const std::size_t index = At(frame);
+        _primeHunterStamp[index] = frame;
+        _primeHunter[index] = GameState::PrimeHunter();
         if (!Enabled())
         {
             return;
         }
         Restore();
         _inProgress = false;
-        const std::size_t index = At(frame);
         _stamp[index] = frame;
         _newest = frame;
         for (std::int32_t i = 0; i < Slots; ++i)
@@ -146,6 +155,20 @@ namespace MphRead::Mods::Network
                 _altForm[s][index] = player.IsAltForm();
             }
         }
+    }
+
+    std::optional<std::int32_t> NetUnlagged::PrimeHunterAt(std::uint32_t frame) noexcept
+    {
+        if (frame == 0)
+        {
+            return std::nullopt;
+        }
+        const std::size_t index = At(frame);
+        if (_primeHunterStamp[index] != frame)
+        {
+            return std::nullopt;
+        }
+        return _primeHunter[index];
     }
 
     bool NetUnlagged::PositionAt(std::int32_t slot, std::uint32_t frame, std::uint16_t expectedGeneration,
@@ -248,7 +271,7 @@ namespace MphRead::Mods::Network
 
     bool NetUnlagged::Simulating()
     {
-        return NetSession::Active() && (NetSession::Role() == NetRole::Host || NetSession::IsAuthority());
+        return NetSession::Active() && (NetSession::IsAuthority());
     }
 
     void NetUnlagged::BeginShot(Entities::PlayerEntity& shooter)

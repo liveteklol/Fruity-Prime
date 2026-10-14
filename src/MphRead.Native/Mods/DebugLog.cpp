@@ -1699,8 +1699,9 @@ namespace MphRead::Mods
 
         try
         {
-            const std::string directory = PathCombine(
-                Launcher::LauncherPrefs::Directory(), "logs");
+            const auto requestedDirectory = EnvironmentGetVariable("FRUITY_DEBUG_LOG_DIRECTORY");
+            const std::string directory = requestedDirectory.has_value() && !requestedDirectory->empty()
+                ? *requestedDirectory : PathCombine(Launcher::LauncherPrefs::Directory(), "logs");
             std::filesystem::create_directories(PathFromManagedString(directory));
             Prune(directory);
             // The process id is not decoration: a thumbnail batch starts

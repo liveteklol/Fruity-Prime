@@ -10,6 +10,11 @@
 #include <cstdint>
 #include <span>
 
+namespace MphRead
+{
+    class Scene;
+}
+
 namespace MphRead::Mods::Network
 {
     // Captures authoritative game state, writes the snapshot datagram, and
@@ -22,6 +27,6 @@ namespace MphRead::Mods::Network
         static void Publish(SessionConnection& connection, const SessionRuntimeState& runtime,
             const SessionAuthorityState& authority, const SessionMatchIdentity& matchIdentity,
             const SessionSimulationCallbacks& simulationCallbacks,
-            SessionTrafficMetrics& traffic);
+            SessionTrafficMetrics& traffic, MphRead::Scene& scene);
     };
 }

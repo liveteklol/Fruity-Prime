@@ -311,7 +311,7 @@ namespace MphRead::Mods::Network
         // Every intent, with or without a touch block: one without (a demo
         // recorded before) is no contact, never the last contact repeated.
         player.ModSetReportedTouch(intent.TouchReport(), intent.SlotGeneration, intent.LifeId);
-        if (intent.HasState && (NetSession::IsAuthority() || NetSession::IsHost()))
+        if (intent.HasState && (NetSession::IsAuthority()))
         {
             player.ModSetShotState(intent.ChargeLevel, intent.BoostDamage);
         }
@@ -713,7 +713,7 @@ namespace MphRead::Mods::Network
     {
         using OpenTK::Mathematics::Vector3;
         const std::int32_t local = NetHooks::LocalSlot();
-        if (!_retargetEnabled || !NetSession::Active() || NetSession::IsHost() || NetSession::IsAuthority() || ackFrame == 0
+        if (!_retargetEnabled || !NetSession::Active() || NetSession::IsAuthority() || ackFrame == 0
             || local < 0 || local >= static_cast<std::int32_t>(Entities::PlayerEntity::Players().size())
             || shooter.SlotIndex() == local)
         {

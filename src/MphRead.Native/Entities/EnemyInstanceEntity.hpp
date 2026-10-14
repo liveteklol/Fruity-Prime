@@ -95,14 +95,17 @@ namespace MphRead::Entities
     {
         const MphRead::EnemyType Type;
         EntityBase* const Spawner;
+        // The same enemy's name on every machine, for a homing shot's target.
+        const std::uint64_t ModStableTargetId;
 
         EnemyInstanceEntityData() noexcept
-            : Type{}, Spawner(nullptr)
+            : Type{}, Spawner(nullptr), ModStableTargetId(0)
         {
         }
 
-        EnemyInstanceEntityData(MphRead::EnemyType type, EntityBase* spawner) noexcept
-            : Type(type), Spawner(spawner)
+        EnemyInstanceEntityData(MphRead::EnemyType type, EntityBase* spawner,
+            std::uint64_t modStableTargetId = 0) noexcept
+            : Type(type), Spawner(spawner), ModStableTargetId(modStableTargetId)
         {
         }
     };
@@ -176,6 +179,7 @@ namespace MphRead::Entities
         [[nodiscard]] CollisionVolume HurtVolume() const noexcept;
         [[nodiscard]] MphRead::EnemyType EnemyType() const noexcept;
         [[nodiscard]] EntityBase* Owner() const noexcept;
+        [[nodiscard]] std::uint64_t ModStableTargetId() const noexcept { return _data.ModStableTargetId; }
         [[nodiscard]] std::int32_t HealthbarMessageId() const noexcept;
 
         std::array<bool, 8> HitPlayers{};

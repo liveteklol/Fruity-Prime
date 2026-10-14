@@ -156,6 +156,9 @@ namespace MphRead::Entities::Enemies
         [[nodiscard]] EnemySpawnEntity *Spawner() const noexcept;
         [[nodiscard]] const std::vector<ColorRgb> *Colors() const noexcept;
         [[nodiscard]] std::int32_t WeaponIndex() const noexcept;
+        // Mods: a check moves Gorea on to its next weapon the way its own
+        // phase change does (Mods::Diagnostics::HomingSpawnCheck).
+        void ModChangeWeapon() { ChangeWeapon(); }
 
         void Activate();
 

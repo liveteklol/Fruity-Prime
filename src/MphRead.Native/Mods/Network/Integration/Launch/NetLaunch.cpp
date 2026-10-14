@@ -113,8 +113,12 @@ namespace MphRead::Mods::Network
 
             const std::int32_t localSlot = NetSession::LocalSlot();
             if (localSlot >= 0 && NetSession::ServerSession().has_value()
-                && SessionSlots().IsOccupied(localSlot))
+                && SessionSlots().IsOccupied(localSlot)
+                && SessionSlots().HunterAt(static_cast<std::size_t>(localSlot)) == NetSession::LocalHunter())
             {
+                // Hello and Identify are separate datagrams. The server must
+                // acknowledge this hunter before its first shot can be sent,
+                // or the placeholder hunter could select the wrong affinity.
                 NativeRuntime::ConsoleWriteLine("[net] connected in " + ToString(NetSession::CurrentSessionPhase())
                     + ", slot " + std::to_string(localSlot));
                 return true;

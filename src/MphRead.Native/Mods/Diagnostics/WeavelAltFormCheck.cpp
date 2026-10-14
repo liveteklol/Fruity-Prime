@@ -330,7 +330,7 @@ namespace MphRead::Mods::Diagnostics
             fresh(101); turret->ApplyNetworkState(50, Vector3(2, 20, 3), true); NetDamage::Reset();
             const auto publish = [&](std::uint32_t frame)
             {
-                NetSessionFixture::SetFrame(frame); NetSession::BroadcastSnapshot();
+                NetSessionFixture::SetFrame(frame); NetSession::BroadcastSnapshot(scene);
                 check(!snapshot.empty() && snapshot.size() + 1 <= NetConfig::MaxPacketSize, "production snapshot fits bounded datagram");
                 return snapshot;
             };

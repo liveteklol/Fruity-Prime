@@ -3,6 +3,10 @@
 #include "../NativeRuntime/System/Buffers.hpp"
 
 #include "../Mods/Combat/BeamObstacleTrace.hpp"
+#include "../Mods/Combat/ProjectileFlight.hpp"
+#include "../Mods/Combat/ProjectileHoming.hpp"
+#include "../Mods/Combat/ProjectileValueCurve.hpp"
+#include "../Mods/Combat/WeaponCharge.hpp"
 #include "../Mods/Combat/SyluxMuzzleGuard.hpp"
 #include "Mods/Network/Gameplay/Claims/Hit/NetHitClaims.hpp"
 #include "Mods/Network/Gameplay/Combat/NetUnlagged.hpp"
@@ -19,8 +23,11 @@
 #include "../Mods/Headless.hpp"
 #include "../Mods/Render/InstagibRails.hpp"
 #include "Mods/Network/Gameplay/Combat/NetHitPrediction.hpp"
+#include "Mods/Network/Diagnostics/HomingShotTrace.hpp"
 #include "Mods/Network/Diagnostics/NetLog.hpp"
+#include "Mods/Network/Gameplay/Weapons/ConfirmedShotSteering.hpp"
 #include "Mods/Network/Gameplay/Weapons/ContinuousWeaponPhase.hpp"
+#include "Mods/Network/Gameplay/Weapons/HomingTargetAcquisition.hpp"
 #include "Mods/Network/Gameplay/Player/NetPlayerLifecycle.hpp"
 #include "Mods/Network/Session/NetSession.hpp"
 #include "Mods/Network/Diagnostics/NetShotDiagnostics.hpp"
@@ -176,14 +183,6 @@ namespace MphRead::Entities
     const std::shared_ptr<EquipInfo> BeamProjectileEntity::_ricochetEquip
         = std::make_shared<EquipInfo>();
 
-    const std::array<EntityType, 5> BeamProjectileEntity::_homingTargetTypes{
-        EntityType::Player,
-        EntityType::Halfturret,
-        EntityType::EnemyInstance,
-        EntityType::Door,
-        EntityType::Platform
-    };
-
     const std::array<std::array<std::uint8_t, 12>, 11> BeamProjectileEntity::_terSplat1P{{
         {{255, 99, 121, 122, 123, 126, 125, 124, 100, 142, 141, 140}},
         {{255, 99, 121, 122, 123, 126, 125, 124, 100, 142, 141, 140}},
@@ -305,6 +304,7 @@ namespace MphRead::Entities
         {
             past = past + offset;
         }
+        ModPresentation.Reposition(offset);
     }
 
     bool BeamProjectileEntity::Process()
@@ -317,6 +317,7 @@ namespace MphRead::Entities
         _lifespan -= scene.FrameTime();
         if (TestFlag(_flags, BeamFlags::Collided))
         {
+            ModPresentation.ContinueAfterCollision(*this, scene);
             return true;
         }
         const bool firstFrame = _age == 0.0F;
@@ -354,21 +355,10 @@ namespace MphRead::Entities
         }
         else
         {
-            Position = static_cast<Vector3>(Position) + _velocity;
-            _velocity = _velocity + Divide(_acceleration, 2.0F);
             assert(_speedDecayTime >= 0.0F);
-            if (_speedDecayTime > 0.0F && _age <= _speedDecayTime)
-            {
-                const float magnitude = Length(_velocity);
-                if (magnitude > 0.0F)
-                {
-                    _speed = GetInterpolatedValue(
-                        _speedInterpolation, _initialSpeed, _finalSpeed, _age / _speedDecayTime);
-                    _velocity = ::Scale(_velocity, _speed / magnitude);
-                }
-            }
+            Mods::Combat::ProjectileFlight::MoveFlight(*this);
         }
-        _soundSource.Update(Position, _beam == BeamType::Missile ? 3 : 2);
+        _soundSource.Update(ModPresentation.DrawnPosition(Position), _beam == BeamType::Missile ? 3 : 2);
         UpdateNodeRefVolume();
         if (_target)
         {
@@ -389,28 +379,8 @@ namespace MphRead::Entities
         {
             CheckCollision();
         }
-        if (TestFlag(_flags, BeamFlags::Homing) && !TestFlag(_flags, BeamFlags::Continuous) && _target)
-        {
-            Vector3 targetPos{};
-            _target->GetPosition(targetPos);
-            Vector3 acceleration = targetPos - static_cast<Vector3>(Position);
-            acceleration = !IsZero(acceleration) ? Normalize(acceleration) : Vector3(1, 0, 0);
-            acceleration = ::Scale(acceleration, _speed);
-            if (Vector3::Dot(acceleration, _velocity) >= 0.0F)
-            {
-                acceleration = acceleration - _velocity;
-                const float accelMag = Length(acceleration);
-                if (accelMag > _homing)
-                {
-                    acceleration = ::Scale(acceleration, _homing / accelMag);
-                }
-                _velocity = _velocity + acceleration;
-            }
-            else
-            {
-                _target.reset();
-            }
-        }
+        Mods::Combat::ProjectileHoming::SteerFlight(*this);
+        ModPresentation.Step(*this, scene);
         if (TestFlag(_flags, BeamFlags::Charged)
             && (_beam != BeamType::Missile || TestFlag(_flags, BeamFlags::Homing)))
         {
@@ -426,7 +396,7 @@ namespace MphRead::Entities
         {
             UpdateAnimFrames(_models[0]);
         }
-        else if (_effect)
+        else if (_effect && !ModPresentation.TransformEffect(*this))
         {
             _effect->Transform(Position, ClearScale(static_cast<Matrix4>(Transform)));
         }
@@ -511,62 +481,6 @@ namespace MphRead::Entities
         }
     }
 
-    void BeamProjectileEntity::ModHomeConfirmed()
-    {
-        const auto& players = PlayerEntity::Players();
-        const bool targetKnown = ModTargetSlot >= 0 && ModTargetSlot < static_cast<std::int32_t>(players.size());
-        if (ModHeldUntil != 0)
-        {
-            if (ModConfirmedTarget)
-            {
-                ModHeldUntil = 0;
-            }
-            else if (static_cast<std::int32_t>(Mods::Network::NetSession::NetFrame() - ModHeldUntil) >= 0)
-            {
-                // No word: it did not hit. On it goes, through them.
-                ModHeldUntil = 0;
-                ModPassedTarget = true;
-                Mods::Network::NetPlayerBridge::NotePassedLocal(*this);
-                if (Mods::Network::HitLocation::Enabled() && targetKnown)
-                {
-                    Mods::Network::HitLocation::Passed(*this, *players[static_cast<std::size_t>(ModTargetSlot)], ModHeldPoint);
-                }
-            }
-            else
-            {
-                // Still waiting: it stays where it met the body.
-                Position = ModHeldPoint;
-                _backPosition = ModHeldPoint;
-                return;
-            }
-        }
-        if (!ModConfirmedTarget || ModTouchedTarget || !targetKnown)
-        {
-            return;
-        }
-        const PlayerEntity& victim = *players[static_cast<std::size_t>(ModTargetSlot)];
-        if (victim.Health() <= 0)
-        {
-            // Died before it arrived (this hit, or another): a body takes no
-            // collision, so the hit is drawn on it here and the shot is spent.
-            ModTouchedTarget = true;
-            PlayerEntity* owner = Mods::Network::NetHitPrediction::OwnerOf(this);
-            Mods::Network::NetPlayerBridge::SynthesizeImpact(owner != nullptr ? owner->SlotIndex() : -1, ModTargetSlot,
-                static_cast<std::uint8_t>(_beam), static_cast<std::uint8_t>(ModShooterAck & 0xFFU), ModConfirmedOffset);
-            return;
-        }
-        const Vector3 toTarget = static_cast<Vector3>(victim.Position) + ModConfirmedOffset - static_cast<Vector3>(Position);
-        const float distance = Length(toTarget);
-        const float speed = Length(_velocity);
-        if (!(distance > 0.0001F) || !(speed > 0.0001F))
-        {
-            return;
-        }
-        // Straight at the spot, at the speed it was already flying: the shot
-        // the shooter saw land, arriving where it landed.
-        _velocity = ::Scale(toTarget, speed / distance);
-    }
-
     void BeamProjectileEntity::ModSpawnImpact(Scene* scene, BeamType beam, Vector3 point, Vector3 up)
     {
         if (scene == nullptr || Mods::Headless::Active())
@@ -597,7 +511,10 @@ namespace MphRead::Entities
     void BeamProjectileEntity::CheckCollision()
     {
         Scene& scene = RequireReference(_scene);
-        ModHomeConfirmed();
+        if (!ModPresentation.Active())
+        {
+            Mods::Network::ConfirmedShotSteering::Apply(*this);
+        }
         if (Mods::Network::HitLocation::Enabled())
         {
             ModTrackNearLocal();
@@ -954,6 +871,7 @@ namespace MphRead::Entities
                     if (player->SlotIndex() == ModTargetSlot)
                     {
                         ModTouchedTarget = true;
+                        ModPresentation.Place(anyRes.Position);
                     }
                     if (Mods::Network::HitLocation::Enabled())
                     {
@@ -1451,30 +1369,12 @@ namespace MphRead::Entities
     float BeamProjectileEntity::GetInterpolatedValue(
         std::int32_t type, float value1, float value2, float ratio) const
     {
-        if (type == 3)
-        {
-            return ratio > 1.0F ? value2 : value1;
-        }
-        ratio = std::clamp(ratio, 0.0F, 1.0F);
-        if (type == 0)
-        {
-            return value1 + (value2 - value1) * ratio;
-        }
-        if (type == 1)
-        {
-            return value1 + (value2 - value1)
-                * ((std::sin(DegreesToRadians(270.0F - 180.0F * ratio)) + 1.0F) / 2.0F);
-        }
-        if (type == 2)
-        {
-            return value1 + (value2 - value1)
-                * (std::sin(DegreesToRadians(270.0F - 90.0F * ratio)) + 1.0F);
-        }
-        return 0.0F;
+        return Mods::Combat::InterpolateProjectileValue(type, value1, value2, ratio);
     }
 
     void BeamProjectileEntity::GetDrawInfo()
     {
+        const Mods::Network::ShotPresentation::DrawScope presentation(*this);
         if (_drawFuncId == 0) Draw00();
         else if (_drawFuncId == 1) Draw01();
         else if (_drawFuncId == 2) Draw02();
@@ -1758,6 +1658,7 @@ namespace MphRead::Entities
         ModHeldUntil = 0;
         ModTargetSlot = -1;
         ModTouchedTarget = false;
+        ModPresentation.Reset();
         _soundSource.StopAllSfx();
         _lifespan = 0.0F;
         if (_effect)
@@ -1832,7 +1733,8 @@ namespace MphRead::Entities
         Formats::Culling::NodeRef nodeRef,
         Scene* scene,
         BeamProjectileEntity* parent,
-        std::optional<Vector3> syluxGuardStart)
+        std::optional<Vector3> syluxGuardStart,
+        std::optional<Vector3> modPresentationDirection)
     {
         if (Mods::Network::NetSession::Active() && parent != nullptr
             && !Mods::Network::NetPlayerLifecycle::CurrentProjectile(*parent))
@@ -1844,33 +1746,16 @@ namespace MphRead::Entities
         const std::shared_ptr<WeaponInfo> weaponPtr = equipRef.Weapon;
         WeaponInfo& weapon = RequireReference(weaponPtr);
 
-        bool charged = false;
-        float chargePct = 0.0F;
-        if (TestFlag(weapon.Flags, WeaponFlags::CanCharge))
-        {
-            if (TestFlag(weapon.Flags, WeaponFlags::PartialCharge))
-            {
-                if (equipRef.ChargeLevel >= weapon.MinCharge * 2)
-                {
-                    charged = true;
-                    chargePct = (equipRef.ChargeLevel - weapon.MinCharge * 2)
-                        / static_cast<float>(weapon.FullCharge * 2 - weapon.MinCharge * 2);
-                }
-            }
-            else if (equipRef.ChargeLevel >= weapon.FullCharge * 2)
-            {
-                charged = true;
-                chargePct = 1.0F;
-            }
-        }
+        const Mods::Combat::WeaponChargeState chargeState = Mods::Combat::ResolveWeaponCharge(
+            weapon.Flags, weapon.MinCharge, weapon.FullCharge, equipRef.ChargeLevel);
+        const bool charged = chargeState.Charged;
+        const float chargePct = chargeState.Percent;
 
-        const auto getAmount = [chargePct](std::int32_t unchargedAmt,
+        const auto getAmount = [chargeState](std::int32_t unchargedAmt,
             std::int32_t minChargeAmt, std::int32_t fullChargeAmt) -> float
         {
-            return chargePct <= 0.0F
-                ? static_cast<float>(unchargedAmt)
-                : static_cast<float>(minChargeAmt)
-                    + static_cast<float>(UncheckedSubtract(fullChargeAmt, minChargeAmt)) * chargePct;
+            return Mods::Combat::InterpolateWeaponChargeAmount(
+                unchargedAmt, minChargeAmt, fullChargeAmt, chargeState);
         };
 
         std::int32_t cost = static_cast<std::int32_t>(
@@ -2167,6 +2052,8 @@ namespace MphRead::Entities
             beamRef._speedDecayTime = speedDecayTime;
             beamRef._speedInterpolation = speedInterpolation;
             beamRef._homing = homing;
+            beamRef.ModHomingPhase = 0;
+            beamRef.ModFlightPhase = 0;
             beamRef._drawFuncId = drawFuncId;
             beamRef._color = color;
             beamRef._collisionEffect = colEffect;
@@ -2240,6 +2127,7 @@ namespace MphRead::Entities
             }
             beamRef._velocity = velocity;
             beamRef._acceleration = acceleration;
+            beamRef.ModPresentation.Begin(beamRef, position, modPresentationDirection);
             // A beam comes off a free list and keeps whatever transform the
             // last one left on it until the draw pass computes a new one.
             // Only draw functions 3 and 17 set one here, so every other
@@ -2324,6 +2212,7 @@ namespace MphRead::Entities
                 }
             }
 
+            Mods::Network::HomingShotTrace::Spawned(beamRef, equipRef, i, preHit.has_value());
             if (beamRef._beam == BeamType::ShockCoil && RequireReference(owner).Type == EntityType::Player)
             {
                 Mods::Network::NetDamageMetrics::RecordShockCoil(beamRef._target != nullptr);
@@ -2357,144 +2246,8 @@ namespace MphRead::Entities
         const std::shared_ptr<EquipInfo>& equip,
         Scene* scene)
     {
-        bool result = false;
-        EquipInfo& equipRef = RequireReference(equip);
-        const std::shared_ptr<WeaponInfo> weapon = equipRef.Weapon;
-        BeamProjectileEntity& beamRef = RequireReference(beam);
-        assert(beamRef._owner != nullptr);
-        const float tolerance = Fixed::ToFloat(equipRef.HomingTolerance());
-        float curDiv = tolerance;
-
-        for (std::size_t i = 0; i < _homingTargetTypes.size(); ++i)
-        {
-            const EntityType type = _homingTargetTypes[i];
-            if (type == EntityType::EnemyInstance
-                && (RequireReference(beamRef._owner).Type == EntityType::EnemyInstance
-                    || RequireReference(beamRef._owner).Type == EntityType::Platform))
-            {
-                continue;
-            }
-
-            auto enumerator = RequireReference(scene).Entities().GetEnumerator();
-            while (enumerator.MoveNext())
-            {
-                const std::shared_ptr<EntityBase> entityPtr = enumerator.Current();
-                EntityBase& entity = RequireReference(entityPtr);
-                if (entity.Type != type || entityPtr == beamRef._owner || !entity.GetTargetable())
-                {
-                    continue;
-                }
-
-                bool tryTarget = false;
-                if (type == EntityType::Player)
-                {
-                    PlayerEntity& player = static_cast<PlayerEntity&>(entity);
-                    if (RequireReference(beamRef._owner).Type != EntityType::Player)
-                    {
-                        tryTarget = true;
-                    }
-                    else
-                    {
-                        PlayerEntity& ownerPlayer
-                            = static_cast<PlayerEntity&>(RequireReference(beamRef._owner));
-                        tryTarget = !Mods::Multiplayer::TeamRules::AreAllies(player.TeamIndex(), ownerPlayer.TeamIndex());
-                    }
-                }
-                else if (type == EntityType::Halfturret)
-                {
-                    HalfturretEntity& halfturret = static_cast<HalfturretEntity&>(entity);
-                    if (RequireReference(beamRef._owner).Type != EntityType::Player)
-                    {
-                        tryTarget = true;
-                    }
-                    else
-                    {
-                        PlayerEntity& ownerPlayer
-                            = static_cast<PlayerEntity&>(RequireReference(beamRef._owner));
-                        tryTarget = halfturret.Owner().get() != &ownerPlayer
-                            && !Mods::Multiplayer::TeamRules::AreAllies(RequireReference(halfturret.Owner()).TeamIndex(), ownerPlayer.TeamIndex());
-                    }
-                }
-                else if (type == EntityType::EnemyInstance)
-                {
-                    EnemyInstanceEntity& enemy = static_cast<EnemyInstanceEntity&>(entity);
-                    const EnemyFlags enemyFlags = enemy.Flags();
-                    if (TestFlag(enemyFlags, EnemyFlags::CollideBeam)
-                        && (!TestFlag(enemyFlags, EnemyFlags::NoHomingNc)
-                            || TestFlag(beamRef._flags, BeamFlags::Continuous))
-                        && (!TestFlag(enemyFlags, EnemyFlags::NoHomingCo)
-                            || !TestFlag(beamRef._flags, BeamFlags::Continuous)))
-                    {
-                        tryTarget = true;
-                    }
-                }
-                else if (type == EntityType::Platform)
-                {
-                    PlatformEntity& platform = static_cast<PlatformEntity&>(entity);
-                    tryTarget = TestFlag(platform.Flags(), PlatformFlags::BeamTarget);
-                }
-                else
-                {
-                    tryTarget = true;
-                }
-
-                if (tryTarget)
-                {
-                    Vector3 targetPosition{};
-                    entity.GetPosition(targetPosition);
-                    const Vector3 between = targetPosition - static_cast<Vector3>(beamRef.Position);
-                    const float distSqr = Vector3::Dot(between, between);
-                    WeaponInfo& weaponRef = RequireReference(weapon);
-                    const float range = Fixed::ToFloat(weaponRef.HomingRange);
-                    if ((TestFlag(weaponRef.Flags, WeaponFlags::Continuous)
-                            && beamRef._beamKind != BeamType::Platform
-                        || distSqr <= range * range)
-                        && distSqr > 0.0F)
-                    {
-                        const float dist = std::sqrt(distSqr);
-                        assert(!IsZero(beamRef._velocity));
-                        const float dot = Vector3::Dot(between, Normalize(beamRef._velocity));
-                        const float div1 = dot / dist;
-                        if (div1 >= curDiv)
-                        {
-                            if (TestFlag(weaponRef.Flags, WeaponFlags::Continuous))
-                            {
-                                bool canTarget = false;
-                                if (type == EntityType::Player)
-                                {
-                                    PlayerEntity& player = static_cast<PlayerEntity&>(entity);
-                                    if ((!player.IsAltForm() && !player.IsMorphing())
-                                        || div1 >= Fixed::ToFloat(4006))
-                                    {
-                                        canTarget = true;
-                                    }
-                                }
-                                else
-                                {
-                                    canTarget = true;
-                                }
-                                if (canTarget)
-                                {
-                                    const float div2 = ::MphRead::NativeRuntime::MathMin(dist / range, 1.0F);
-                                    if (div1 >= tolerance + div2 * (Fixed::ToFloat(4094) - tolerance))
-                                    {
-                                        curDiv = div1;
-                                        beamRef._target = entityPtr;
-                                        result = true;
-                                    }
-                                }
-                            }
-                            else
-                            {
-                                curDiv = div1;
-                                beamRef._target = entityPtr;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        return result;
+        return Mods::Network::HomingTargetAcquisition::Acquire(
+            RequireReference(beam), RequireReference(equip), RequireReference(scene));
     }
 
     void BeamProjectileEntity::SpawnIceWave(

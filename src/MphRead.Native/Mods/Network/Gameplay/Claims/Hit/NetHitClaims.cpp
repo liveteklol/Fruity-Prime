@@ -31,6 +31,10 @@
 #include "Metadata/Enemies.hpp"
 #include "Metadata/Metadata.hpp"
 #include "Metadata/Weapons.hpp"
+#include "Mods/Combat/WeaponCharge.hpp"
+#include "Mods/Network/Diagnostics/HomingShotTrace.hpp"
+#include "Mods/Combat/WeaponVariant.hpp"
+#include "GameState.hpp"
 #include "NativeRuntime/System/BinaryPrimitives.hpp"
 #include "NativeRuntime/System/Globalization.hpp"
 #include "NativeRuntime/System/Managed.hpp"
@@ -75,6 +79,85 @@ namespace MphRead::Mods::Network
         [[nodiscard]] PlayerEntity& PlayerAt(std::int32_t slot)
         {
             return Runtime::RequireReference(Runtime::ManagedAt(PlayerEntity::Players(), slot));
+        }
+
+        [[nodiscard]] std::optional<Mods::Combat::WeaponVariantSelection> AuthorityVariantForShot(
+            std::int32_t shooterSlot, std::uint8_t beam, std::uint32_t launchFrame,
+            std::uint32_t shotSequence)
+        {
+            if (shooterSlot < 0 || shooterSlot >= static_cast<std::int32_t>(PlayerEntity::Players().size())
+                || beam >= 9 || Weapons::Current == nullptr)
+            {
+                return std::nullopt;
+            }
+            const std::optional<IntentPacket::ShotEvent> event = shotSequence == 0
+                ? std::nullopt : NetShotEvents::Find(shooterSlot, shotSequence);
+            if (event.has_value() && event->WeaponId != beam)
+            {
+                return std::nullopt;
+            }
+            const std::uint32_t roleFrame = event.has_value()
+                ? (event->RoleFrame != 0 ? event->RoleFrame : event->AckFrame) : launchFrame;
+            const std::optional<std::int32_t> primeHunter = NetUnlagged::PrimeHunterAt(roleFrame);
+            if (!primeHunter.has_value())
+            {
+                return std::nullopt;
+            }
+            const PlayerEntity& shooter = PlayerAt(shooterSlot);
+            const bool primeAtFire = *primeHunter == shooterSlot;
+            const Mods::Combat::WeaponVariantSelection resolved = Mods::Combat::ResolveWeaponVariantAtFire(
+                static_cast<BeamType>(beam), shooter.Hunter(), Weapons::GetAffinityBeam(shooter.Hunter()),
+                GameState::SinglePlayer(), primeAtFire);
+            if (resolved.Index == IntentPacket::NoVariant
+                || (event.has_value() && (event->WeaponVariantIndex != resolved.Index
+                    || event->PrimeHunterAtFire() != primeAtFire)))
+            {
+                return std::nullopt;
+            }
+            return resolved;
+        }
+
+        [[nodiscard]] std::optional<Mods::Combat::WeaponChargeState> ChargeForShot(
+            std::uint32_t shotSequence, std::int32_t shooterSlot, std::uint8_t beam,
+            const WeaponInfo& weapon)
+        {
+            if (shotSequence == 0)
+            {
+                return std::nullopt;
+            }
+            const std::optional<IntentPacket::ShotEvent> event = NetShotEvents::Find(shooterSlot, shotSequence);
+            if (!event.has_value() || event->WeaponId != beam || event->Charge == 0xFF)
+            {
+                return std::nullopt;
+            }
+            return Mods::Combat::ResolveWeaponCharge(weapon.Flags, weapon.MinCharge, weapon.FullCharge, event->Charge);
+        }
+
+        [[nodiscard]] bool HomingDecisionRequired(const WeaponInfo& weapon,
+            const std::optional<Mods::Combat::WeaponChargeState>& charge) noexcept
+        {
+            if (charge.has_value())
+            {
+                return Mods::Combat::InterpolateWeaponChargeAmount(weapon.UnchargedHoming,
+                    weapon.MinChargeHoming, weapon.ChargedHoming, *charge) > 0.0F;
+            }
+            return weapon.UnchargedHoming != 0 || weapon.MinChargeHoming != 0
+                || weapon.ChargedHoming != 0;
+        }
+
+        [[nodiscard]] bool PrimeAtShot(std::int32_t shooterSlot, std::uint32_t launchFrame,
+            std::uint32_t shotSequence)
+        {
+            const std::optional<IntentPacket::ShotEvent> event = shotSequence == 0
+                ? std::nullopt : NetShotEvents::Find(shooterSlot, shotSequence);
+            if (event.has_value())
+            {
+                const auto variant = AuthorityVariantForShot(
+                    shooterSlot, event->WeaponId, launchFrame, shotSequence);
+                return variant.has_value() && variant->PrimeHunter;
+            }
+            const auto primeHunter = NetUnlagged::PrimeHunterAt(launchFrame);
+            return primeHunter.has_value() && *primeHunter == shooterSlot;
         }
 
         void LogSpectatorClaimRefusal(const PlayerEntity& victim, const char* phase,
@@ -133,7 +216,7 @@ namespace MphRead::Mods::Network
     bool NetHitClaims::Claiming()
     {
         return _enabled && CanSubmitClientClaim(NetSession::Active(),
-            NetSession::IsAuthority(), NetSession::IsHost(), NetSession::LocalSlot());
+            NetSession::IsAuthority(), false, NetSession::LocalSlot());
     }
 
     std::uint16_t NetHitClaims::Declare(PlayerEntity& victim, PlayerEntity& attacker, ::MphRead::BeamType beam,
@@ -371,7 +454,7 @@ namespace MphRead::Mods::Network
     bool NetHitClaims::Arbitrating()
     {
         return _enabled && NetSession::Active()
-            && (NetSession::Role() == NetRole::Host || NetSession::IsAuthority());
+            && (NetSession::IsAuthority());
     }
 
     void NetHitClaims::NoteAuthorityHit(std::int32_t attackerSlot, std::int32_t victimSlot,
@@ -494,6 +577,14 @@ namespace MphRead::Mods::Network
             _replayLedger.Begin(shooterSlot, claim.ClaimId, ResultPending,
                 static_cast<::MphRead::BeamType>(claim.Beam), ShotKey::For(shooterSlot, claim.LaunchFrame));
             NetShotDiagnostics::RecordClaim(static_cast<::MphRead::BeamType>(claim.Beam));
+            if (HomingShotTrace::Enabled())
+            {
+                const std::uint32_t shotFrame = claim.LaunchFrame != 0 ? claim.LaunchFrame : claim.AckFrame;
+                HomingShotTrace::Claimed({shooterSlot, claim.ClaimId, claim.ShotSequence, claim.Beam,
+                    claim.VictimSlot, HomingShotTrace::WeaponRow(
+                        FiredWeapon(shooterSlot, claim.Beam, shotFrame, claim.ShotSequence)),
+                    StraightWeapon(shooterSlot, claim.Beam, shotFrame, claim.ShotSequence)});
+            }
             const std::uint8_t immediate = Judge(shooterSlot, claim);
             if (HitLocation::Enabled() && claim.VictimSlot < PlayerEntity::Players().size())
             {
@@ -561,12 +652,14 @@ namespace MphRead::Mods::Network
             _metrics.Increment(HitClaimMetrics::Counter::RefusedHere);
             return HitVerdictPacket::ResultInvalidLaunch;
         }
-        if (claim.Damage + claim.TurretDamage > MaxDamageFor(shooterSlot, claim.Beam))
+        const std::uint32_t shotFrame = claim.LaunchFrame != 0 ? claim.LaunchFrame : claim.AckFrame;
+        if (claim.Damage + claim.TurretDamage > MaxDamageFor(
+                shooterSlot, claim.Beam, shotFrame, claim.ShotSequence))
         {
             _metrics.Increment(HitClaimMetrics::Counter::RefusedHere);
             NetLog::Event("slot " + std::to_string(shooterSlot) + " claimed " + std::to_string(claim.Damage + claim.TurretDamage)
                 + " damage with beam " + std::to_string(claim.Beam) + ", which cannot deal more than "
-                + std::to_string(MaxDamageFor(shooterSlot, claim.Beam)));
+                + std::to_string(MaxDamageFor(shooterSlot, claim.Beam, shotFrame, claim.ShotSequence)));
             return HitVerdictPacket::ResultDamageLimit;
         }
         // A hit on another player is checked against where the shooter saw
@@ -595,7 +688,7 @@ namespace MphRead::Mods::Network
                 + std::to_string(claim.AckFrame) + " put them");
             return HitVerdictPacket::ResultGeometry;
         }
-        if (!RatePlausible(shooterSlot, claim.Beam, claim.LaunchFrame != 0 ? claim.LaunchFrame : claim.AckFrame))
+        if (!RatePlausible(shooterSlot, claim.Beam, shotFrame, claim.ShotSequence))
         {
             _metrics.Increment(HitClaimMetrics::Counter::RefusedHere);
             NetLog::Event("slot " + std::to_string(shooterSlot) + " claimed a shot of beam " + std::to_string(claim.Beam)
@@ -703,6 +796,9 @@ namespace MphRead::Mods::Network
         entry->Flags = claim.Flags;
         entry->AckFrame = claim.AckFrame;
         entry->LaunchFrame = claim.LaunchFrame;
+        entry->RoleFrame = _intentHistory.RoleForFrame(shooterSlot, claim.Frame).value_or(
+            claim.LaunchFrame != 0 ? claim.LaunchFrame : claim.AckFrame);
+        entry->IntentFrame = claim.Frame;
         entry->ShotSequence = claim.ShotSequence;
         entry->HitPoint = claim.HitPoint;
         entry->Impulse = claim.Impulse;
@@ -721,38 +817,43 @@ namespace MphRead::Mods::Network
         return true;
     }
 
-    const ::MphRead::WeaponInfo* NetHitClaims::FiredWeapon(std::int32_t shooterSlot, std::uint8_t beam)
+    const ::MphRead::WeaponInfo* NetHitClaims::FiredWeapon(std::int32_t shooterSlot,
+        std::uint8_t beam, std::uint32_t launchFrame, std::uint32_t shotSequence)
     {
         const auto& current = ::MphRead::Weapons::Current;
         if (beam == HitClaimPacket::NoBeam || current == nullptr || beam >= 9 || beam >= current->size())
         {
             return nullptr;
         }
-        std::size_t index = beam;
-        // As PlayerEntity::TryEquipWeapon picks it in a match.
-        if (shooterSlot >= 0 && static_cast<std::size_t>(shooterSlot) < PlayerEntity::Players().size()
-            && static_cast<std::uint8_t>(::MphRead::Weapons::GetAffinityBeam(PlayerAt(shooterSlot).Hunter())) == beam
-            && beam + 9U < current->size())
+        const auto variant = AuthorityVariantForShot(shooterSlot, beam, launchFrame, shotSequence);
+        if (!variant.has_value() || variant->Index >= current->size())
         {
-            index = beam + 9U;
+            return nullptr;
         }
-        return &Runtime::RequireReference((*current)[index]);
+        return &Runtime::RequireReference((*current)[variant->Index]);
     }
 
-    bool NetHitClaims::Drains(std::int32_t shooterSlot, std::uint8_t beam)
+    bool NetHitClaims::Drains(std::int32_t shooterSlot, std::uint8_t beam,
+        std::uint32_t launchFrame, std::uint32_t shotSequence)
     {
-        // Continuous fire is never charged, and the Shock Coil is the one
-        // weapon that drains; its claim carries no charge, so either flag.
-        const ::MphRead::WeaponInfo* fired = FiredWeapon(shooterSlot, beam);
-        return fired != nullptr
-            && (::MphRead::TestFlag(fired->Flags, ::MphRead::WeaponFlags::LifeDrainUncharged)
+        const ::MphRead::WeaponInfo* fired = FiredWeapon(shooterSlot, beam, launchFrame, shotSequence);
+        if (fired == nullptr)
+        {
+            return false;
+        }
+        const std::optional<Mods::Combat::WeaponChargeState> charge = ChargeForShot(shotSequence, shooterSlot, beam, *fired);
+        return charge.has_value()
+            ? ::MphRead::TestFlag(fired->Flags, charge->Charged
+                ? ::MphRead::WeaponFlags::LifeDrainCharged : ::MphRead::WeaponFlags::LifeDrainUncharged)
+            : (::MphRead::TestFlag(fired->Flags, ::MphRead::WeaponFlags::LifeDrainUncharged)
                 || ::MphRead::TestFlag(fired->Flags, ::MphRead::WeaponFlags::LifeDrainCharged));
     }
 
-    std::int32_t NetHitClaims::MaxDamageFor(std::int32_t shooterSlot, std::uint8_t beam)
+    std::int32_t NetHitClaims::MaxDamageFor(std::int32_t shooterSlot, std::uint8_t beam,
+        std::uint32_t launchFrame, std::uint32_t shotSequence)
     {
         std::int32_t raw = 200;
-        if (const ::MphRead::WeaponInfo* fired = FiredWeapon(shooterSlot, beam); fired != nullptr)
+        if (const ::MphRead::WeaponInfo* fired = FiredWeapon(shooterSlot, beam, launchFrame, shotSequence); fired != nullptr)
         {
             const ::MphRead::WeaponInfo& info = *fired;
             raw = std::max<std::int32_t>(info.ChargedHeadshotDamage,
@@ -918,9 +1019,10 @@ namespace MphRead::Mods::Network
     // than its cooldown allows (in 30 Hz frames, so twice that here); half of
     // that is the floor, for acks that jump with jitter. Several hits of one
     // shot -- splash, ricochets, several victims -- share a launch frame.
-    bool NetHitClaims::RatePlausible(std::int32_t shooterSlot, std::uint8_t beam, std::uint32_t launch)
+    bool NetHitClaims::RatePlausible(std::int32_t shooterSlot, std::uint8_t beam,
+        std::uint32_t launch, std::uint32_t shotSequence)
     {
-        const ::MphRead::WeaponInfo* fired = FiredWeapon(shooterSlot, beam);
+        const ::MphRead::WeaponInfo* fired = FiredWeapon(shooterSlot, beam, launch, shotSequence);
         if (shooterSlot < 0 || shooterSlot >= static_cast<std::int32_t>(HitClaimRateLimiter::SlotCapacity) || beam >= 9
             || launch == 0 || fired == nullptr)
         {
@@ -940,24 +1042,36 @@ namespace MphRead::Mods::Network
         return true;
     }
 
-    bool NetHitClaims::StraightWeapon(std::int32_t shooterSlot, std::uint8_t beam)
+    bool NetHitClaims::StraightWeapon(std::int32_t shooterSlot, std::uint8_t beam,
+        std::uint32_t launchFrame, std::uint32_t shotSequence)
     {
         // The shooter's own variant: Samus's charged missile and Kanden's
         // charged Volt Driver home, where everybody else's fly straight.
         // Straight means no gravity, no homing and no bounce of any kind.
-        const ::MphRead::WeaponInfo* fired = FiredWeapon(shooterSlot, beam);
+        const ::MphRead::WeaponInfo* fired = FiredWeapon(shooterSlot, beam, launchFrame, shotSequence);
         if (fired == nullptr)
         {
             return false;
         }
         const ::MphRead::WeaponInfo& w = *fired;
-        return w.UnchargedGravity == 0 && w.MinChargeGravity == 0 && w.ChargedGravity == 0
-            && w.UnchargedHoming == 0 && w.MinChargeHoming == 0 && w.ChargedHoming == 0
-            && !::MphRead::TestFlag(w.Flags, ::MphRead::WeaponFlags::RicochetUncharged)
-            && !::MphRead::TestFlag(w.Flags, ::MphRead::WeaponFlags::RicochetCharged)
-            // The Judicator carries neither flag, but a shot of it that meets
-            // a wall spawns a ricochet weapon's round off it, in a new direction.
-            && w.UnchargedRicochetWeapon() == nullptr && w.ChargedRicochetWeapon() == nullptr;
+        const std::optional<Mods::Combat::WeaponChargeState> charge = ChargeForShot(shotSequence, shooterSlot, beam, w);
+        if (!charge.has_value())
+        {
+            return w.UnchargedGravity == 0 && w.MinChargeGravity == 0 && w.ChargedGravity == 0
+                && w.UnchargedHoming == 0 && w.MinChargeHoming == 0 && w.ChargedHoming == 0
+                && !::MphRead::TestFlag(w.Flags, ::MphRead::WeaponFlags::RicochetUncharged)
+                && !::MphRead::TestFlag(w.Flags, ::MphRead::WeaponFlags::RicochetCharged)
+                && w.UnchargedRicochetWeapon() == nullptr && w.ChargedRicochetWeapon() == nullptr;
+        }
+        const bool ricochets = ::MphRead::TestFlag(w.Flags, charge->Charged
+                ? ::MphRead::WeaponFlags::RicochetCharged : ::MphRead::WeaponFlags::RicochetUncharged)
+            || (charge->Charged ? w.ChargedRicochetWeapon() != nullptr
+                : w.UnchargedRicochetWeapon() != nullptr);
+        return Mods::Combat::InterpolateWeaponChargeAmount(
+                w.UnchargedGravity, w.MinChargeGravity, w.ChargedGravity, *charge) == 0.0F
+            && Mods::Combat::InterpolateWeaponChargeAmount(
+                w.UnchargedHoming, w.MinChargeHoming, w.ChargedHoming, *charge) == 0.0F
+            && !ricochets;
     }
 
     // The claim is the hit, so it has to be one the shooter's own shots can
@@ -1007,7 +1121,7 @@ namespace MphRead::Mods::Network
         const std::optional<OpenTK::Mathematics::Vector3> turret = claim.TurretDamage > 0
             ? LiveTurretPosition(PlayerAt(claim.VictimSlot)) : std::nullopt;
         if ((!claim.Impact.Known() && !turret.has_value()) || (claim.Flags & HitClaimPacket::FlagSplash) != 0
-            || !StraightWeapon(shooterSlot, claim.Beam))
+            || !StraightWeapon(shooterSlot, claim.Beam, launch, claim.ShotSequence))
         {
             return true;
         }
@@ -1075,10 +1189,24 @@ namespace MphRead::Mods::Network
         }
         _metrics.Increment(HitClaimMetrics::Counter::EventNamed);
         const std::uint32_t gap = named->AckFrame > launch ? named->AckFrame - launch : launch - named->AckFrame;
-        if (named->WeaponId != claim.Beam || (named->AckFrame != 0 && gap > NamedShotAckSlack))
+        const auto variant = AuthorityVariantForShot(shooterSlot, claim.Beam, launch, claim.ShotSequence);
+        if (named->WeaponId != claim.Beam || !variant.has_value()
+            || (named->AckFrame != 0 && gap > NamedShotAckSlack))
         {
             _metrics.Increment(HitClaimMetrics::Counter::EventRefused);
             return false;
+        }
+        if (Weapons::Current != nullptr && variant->Index < Weapons::Current->size())
+        {
+            const WeaponInfo& weapon = Runtime::RequireReference(
+                Runtime::ManagedAt(Weapons::Current, static_cast<std::int32_t>(variant->Index)));
+            if (HomingDecisionRequired(weapon, ChargeForShot(
+                    claim.ShotSequence, shooterSlot, claim.Beam, weapon))
+                && !named->HasHomingDecision())
+            {
+                _metrics.Increment(HitClaimMetrics::Counter::EventRefused);
+                return false;
+            }
         }
         return true;
     }
@@ -1163,6 +1291,18 @@ namespace MphRead::Mods::Network
         return entry.LaunchFrame != 0 ? entry.LaunchFrame : entry.AckFrame;
     }
 
+    std::uint32_t NetHitClaims::RoleFrameOf(const Pending& entry) noexcept
+    {
+        if (entry.ShotSequence != 0)
+        {
+            return FiredFrame(entry);
+        }
+        // The intent may follow its claim on a reordered line. Resolve it
+        // again at settlement, while retaining evidence already received.
+        return _intentHistory.RoleForFrame(entry.ShooterSlot, entry.IntentFrame).value_or(
+            entry.RoleFrame != 0 ? entry.RoleFrame : FiredFrame(entry));
+    }
+
     bool NetHitClaims::DoublingSettled(const Pending& entry)
     {
         return (entry.Flags & HitClaimPacket::FlagDoubled) == 0
@@ -1180,8 +1320,11 @@ namespace MphRead::Mods::Network
     {
         ClaimDamageProfile profile{};
         profile.Level = Metadata::DamageLevels.at(static_cast<std::size_t>(GameState::DamageLevel()));
-        profile.PrimeHunter = GameState::Mode() == GameMode::PrimeHunter;
-        const ::MphRead::WeaponInfo* weapon = FiredWeapon(entry.ShooterSlot, entry.Beam);
+        const std::uint32_t launchFrame = entry.LaunchFrame != 0 ? entry.LaunchFrame : entry.AckFrame;
+        const std::uint32_t roleFrame = RoleFrameOf(entry);
+        profile.PrimeHunter = PrimeAtShot(entry.ShooterSlot, roleFrame, entry.ShotSequence);
+        const ::MphRead::WeaponInfo* weapon = FiredWeapon(
+            entry.ShooterSlot, entry.Beam, roleFrame, entry.ShotSequence);
         if (weapon == nullptr)
         {
             return profile;
@@ -1395,10 +1538,16 @@ namespace MphRead::Mods::Network
                 // A Shock Coil's drain comes with its hit, by the same rules as
                 // the projectile's: the shooter's machine credited it as the
                 // hit landed, and only this makes it last.
-                if (Drains(shooterSlot, entry.Beam) && &shooter != &victim && !shooter.IsPrimeHunter()
+                const std::uint32_t roleFrame = RoleFrameOf(entry);
+                if (Drains(shooterSlot, entry.Beam, roleFrame, entry.ShotSequence)
+                    && &shooter != &victim && !PrimeAtShot(shooterSlot, roleFrame, entry.ShotSequence)
                     && !Mods::Multiplayer::TeamRules::AreAllies(shooter.TeamIndex(), victim.TeamIndex()))
                 {
+                    const std::int32_t before = shooter.Health();
                     shooter.GainDrainedHealth(applied);
+                    HomingShotTrace::Drained({HomingShotRole::Authority, shooterSlot, entry.VictimSlot, entry.Id,
+                        shooter.Health() - before, HomingShotTrace::WeaponRow(
+                            FiredWeapon(shooterSlot, entry.Beam, FiredFrame(entry), entry.ShotSequence))});
                 }
             }
         }
@@ -1420,7 +1569,8 @@ namespace MphRead::Mods::Network
         // the damage kept: freezing with a Power Beam is not a hit to refuse
         // but a flag nobody honest sends. Frozen also rides on a victim that
         // was already frozen on the shooter's screen.
-        if (const ::MphRead::WeaponInfo* fired = FiredWeapon(shooterSlot, entry.Beam); fired != nullptr)
+        if (const ::MphRead::WeaponInfo* fired = FiredWeapon(
+                shooterSlot, entry.Beam, FiredFrame(entry), entry.ShotSequence); fired != nullptr)
         {
             const ::MphRead::WeaponInfo& weapon = *fired;
             const auto& table = Runtime::RequireReference(weapon.Afflictions);
@@ -1522,6 +1672,7 @@ namespace MphRead::Mods::Network
                 NetShotDiagnostics::Trace("authority-verdict", key, beam,
                     "claim=" + std::to_string(id) + " result=" + HitVerdictPacket::Describe(result));
             }
+            HomingShotTrace::Answered({slot, id, result});
         }
         if (remember)
         {

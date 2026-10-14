@@ -53,6 +53,9 @@ namespace MphRead::Mods::Network
         [[nodiscard]] static const std::shared_ptr<NativeRuntime::Process>& Running() noexcept { return _running; }
 
         [[nodiscard]] static std::optional<ServerBinary> Available();
+        [[nodiscard]] static std::optional<ServerBinary> HostingBinary();
+        [[nodiscard]] static bool CanBind(std::int32_t port);
+        static void PreparePaths(const std::string& directory);
         [[nodiscard]] static bool Ready();
         [[nodiscard]] static bool CanInstall();
         static bool Install(const std::function<void(float)>& progress = {},
@@ -69,7 +72,6 @@ namespace MphRead::Mods::Network
         static void MakeExecutable(const std::string& path);
         static void CopyPaths(const std::string& directory);
         [[nodiscard]] static std::int32_t FreePort();
-        [[nodiscard]] static bool CanBind(std::int32_t port);
 
         inline static std::optional<std::string> _lastError{};
         inline static NativeRuntime::Guid _ownerToken{};

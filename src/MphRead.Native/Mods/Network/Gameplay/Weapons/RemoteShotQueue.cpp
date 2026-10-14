@@ -49,14 +49,17 @@ namespace MphRead::Mods::Network
         for (std::size_t i = 0; i < length; ++i)
         {
             const IntentPacket::ShotEvent& event = intent.ShotHistory[i];
-            if (event.Sequence == 0
-                || event.WeaponId > static_cast<std::uint8_t>(::MphRead::BeamType::OmegaCannon))
+            if (!event.IsValid())
             {
                 continue;
             }
             // Both frames use this packet's sender clock. An event cannot
             // have occurred after the intent carrying it was captured.
             if (!IsValidShotEventFrame(event.Frame, intent.Frame))
+            {
+                continue;
+            }
+            if (MergeQueued(event))
             {
                 continue;
             }
@@ -182,6 +185,25 @@ namespace MphRead::Mods::Network
         }
         _queue[at] = event;
         ++_count;
+    }
+
+    bool RemoteShotQueue::MergeQueued(const IntentPacket::ShotEvent& event) noexcept
+    {
+        for (std::size_t i = 0; i < _count; ++i)
+        {
+            IntentPacket::ShotEvent& queued = _queue[i];
+            if (queued.Sequence != event.Sequence)
+            {
+                continue;
+            }
+            IntentPacket::ShotEvent merged{};
+            if (queued.TryMergeHomingDecision(event, merged))
+            {
+                queued = merged;
+            }
+            return true;
+        }
+        return false;
     }
 
     void RemoteShotQueue::PopFront() noexcept

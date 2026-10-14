@@ -309,10 +309,12 @@ namespace MphRead::Mods::Network
         std::vector<std::unique_ptr<Client>> Clients{};
         std::int32_t _expectedBotCount = 0;
 
-        explicit Rig(ServerSessionPolicy policy = ServerSessionPolicy::Lobby, Runtime::Guid token = {})
+        explicit Rig(ServerSessionPolicy policy = ServerSessionPolicy::Lobby, Runtime::Guid token = {},
+            float timeLimit = 0)
         {
             Server = std::make_shared<DedicatedServer>(0, 8,
-                MapRotation::SingleMatch(Rooms()[0], GameMode::Battle, 0, 0));
+                MapRotation::SingleMatch(Rooms()[0], GameMode::Battle,
+                    policy == ServerSessionPolicy::Continuous ? 1 : timeLimit, 0));
             Server->SessionPolicy(policy);
             Server->OwnerToken(token);
             Server->RunsTheMatch(false);
@@ -1020,7 +1022,7 @@ namespace MphRead::Mods::Network
         rig.ReadyAll();
         SessionStatePacket config = a.State.value();
         config.Match.RoomKey = Rooms()[1];
-        config.Match.TimeLimitSeconds = 600;
+        config.Match.TimeLimitSeconds = 2;
         config.Match.HideOpponentHealth = true;
         static_cast<void>(rig.Expect(a, a.Command(LobbyCommandType::UpdateMatch, false, config), LobbyResultCode::Ok));
         Check(NoneReady(a.Roster), "configuration clears ready");
@@ -1032,7 +1034,7 @@ namespace MphRead::Mods::Network
         static_cast<void>(rig.Expect(b, b.Command(LobbyCommandType::UpdateMatch, false, forbidden), LobbyResultCode::NotOwner));
         Check(a.State->Match.HideOpponentHealth, "non-owner cannot expose hidden health");
         const ServerStatus lobbyStatus = NetStatus::Query("127.0.0.1", rig.Server->BoundPort(), false);
-        Check(lobbyStatus.Online && lobbyStatus.Phase == SessionPhase::Lobby && lobbyStatus.TimeRemaining == 600,
+        Check(lobbyStatus.Online && lobbyStatus.Phase == SessionPhase::Lobby && lobbyStatus.TimeRemaining == 2,
             "browser status clock stays at the full time limit in the lobby");
         rig.ReadyAll();
         const LobbyCommandPacket start = a.Command(LobbyCommandType::StartMatch);
@@ -1043,13 +1045,15 @@ namespace MphRead::Mods::Network
         rig.Wait([&a]() { return a.State->LoadedParticipants == (1 << a.Slot); }, "one participant loaded");
         Check(a.State->Phase == SessionPhase::Starting, "one loaded cannot release barrier");
         const ServerStatus loadingStatus = NetStatus::Query("127.0.0.1", rig.Server->BoundPort(), false);
-        Check(loadingStatus.Phase == SessionPhase::Starting && loadingStatus.TimeRemaining == 600,
+        Check(loadingStatus.Phase == SessionPhase::Starting && loadingStatus.TimeRemaining == 2,
             "browser status clock stays frozen through the load barrier");
         Client& late = rig.Add(3);
         Check((late.State.value().ExpectedParticipants & (1 << late.Slot)) == 0, "late join excluded from barrier");
         b.Loaded();
         rig.Wait([&a]() { return a.State->Phase == SessionPhase::InMatch; }, "barrier released");
         b.EndMatch();
+        rig.Stable();
+        Check(!a.Authority && !b.Authority, "lobby owner and guests never receive client authority");
         rig.Wait([&a]() { return a.State->Phase == SessionPhase::PostMatch; }, "results entered");
         for (const std::unique_ptr<Client>& client : rig.Clients)
         {
@@ -1255,6 +1259,7 @@ namespace MphRead::Mods::Network
         Check(client.State.value().Phase == SessionPhase::InMatch, "continuous starts in match");
         const std::uint16_t match = client.State->MatchId;
         client.EndMatch();
+        Check(!client.Authority, "continuous creator stays a client");
         rig.Wait([&client]() { return client.State->Phase == SessionPhase::PostMatch; }, "continuous results");
         client.ReadyResults();
         rig.Wait([&]() { return client.State->Phase == SessionPhase::InMatch && client.State->MatchId != match; },
@@ -1280,7 +1285,7 @@ namespace MphRead::Mods::Network
     void NetLobbyTest::ClientSessionScenario()
     {
         static_cast<void>(NetLag::Configure("80:20"));
-        Rig rig{};
+        Rig rig(ServerSessionPolicy::Lobby, {}, 2);
         Check(NetLaunch::Connect("127.0.0.1", rig.Server->BoundPort(), "RealClient", Hunter::Samus),
             "NetSession connects to an idle lobby");
         const std::int32_t port = NetSession::ConnectionPort();

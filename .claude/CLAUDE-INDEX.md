@@ -20,12 +20,13 @@ loading everything.
 - multiplayer/NETWORK-DEMOS.md — recording and replaying a match: format, clocking, the gaps
 - multiplayer/NETWORK-MATCHEND.md — match end, rotation, the double-counted-kill bug
 - multiplayer/NETWORK-DIAGNOSTICS.md — the full damage-bug postmortem, traps, diagnostics
-- multiplayer/NETWORK-SERVERAUTH.md — the server as the simulation authority: the headless engine, what moved, what did not, and what a room costs a server
+- multiplayer/NETWORK-SERVERAUTH.md — Native server-only authority, one process per hosted room, shooter-priority claims, the headless engine and historical room-cost measurements
 - multiplayer/NETWORK-UNLAGGED.md — lag compensation: the rewind, the projectile catch-up, what was not ported from Q-Zandronum, how it is measured
 - multiplayer/NETWORK-PREDICTION.md — instant hit registration: a client resolving its own shots the frame it fires them, the three rules that keep a prediction from becoming a lie, and how it is measured
 - multiplayer/NETWORK-HITCLAIMS.md — a client declaring which of its own shots landed and the authority arbitrating them: the five checks, the grace window, and the rule that decides who dies when two people kill each other
 - multiplayer/NETWORK-SMOOTHING.md — remote players read off a playout clock instead of snapped to whichever snapshot arrived last, and the sub-frame ack that keeps hit registration exact through it
 - multiplayer/NETWORK-SHOOTER-AUTHORITY.md — native protocol 18: the shooter's machine decides hits and the authority validates them, predicted kills, the fired ray in the intent, and confirmed impacts -- the victim seeing the shot that hit them land where the shooter saw it
+- multiplayer/NETWORK-HOMING.md — homing shots: the weapon row and Prime role at fire, the target chosen once and carried on the wire, the 60 Hz flight that lands on the 30 Hz one, the drawn flight kept apart, and the checks that prove each
 - render/CEL-SHADING.md — flat colours in place of textures, and the depth-kink ink pass
 - render/FRAME-PACING.md — 60 Hz of simulation under a picture drawn at the display's rate: the split, why interpolation was taken back out, and how both halves are tested without a 144 Hz monitor
 - mapgen/MAP-PIPELINE.md — custom maps: the generator, the Quake 3 importer, the format traps

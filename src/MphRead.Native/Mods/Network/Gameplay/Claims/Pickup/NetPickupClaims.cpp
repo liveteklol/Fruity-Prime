@@ -48,7 +48,7 @@ namespace MphRead::Mods::Network
     bool NetPickupClaims::Claiming()
     {
         return CanSubmitClientClaim(NetSession::Active(),
-            NetSession::IsAuthority(), NetSession::IsHost(), NetSession::LocalSlot());
+            NetSession::IsAuthority(), false, NetSession::LocalSlot());
     }
 
     std::uint16_t NetPickupClaims::Declare(Entities::PlayerEntity& player, const Entities::ItemSpawnEntity& spawner)

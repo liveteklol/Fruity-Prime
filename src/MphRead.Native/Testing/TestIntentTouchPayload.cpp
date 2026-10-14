@@ -1,6 +1,8 @@
 // The Morph Ball touch block of IntentPacket: what an owner reports so the
 // authority can run the same touch roll and touch/shoulder boost branches.
 #include "Mods/Network/Protocol/NetProtocol.hpp"
+#include "Mods/Combat/WeaponVariant.hpp"
+#include "Formats/Enums.hpp"
 #include "Mods/Network/Gameplay/Weapons/LocalShotLog.hpp"
 #include "Mods/Network/Gameplay/Claims/Common/ClaimResend.hpp"
 #include "Mods/Network/Protocol/ConnectionSecret.hpp"
@@ -48,6 +50,8 @@ namespace
 
     using ShotEvent = IntentPacket::ShotEvent;
     using MphRead::BeamType;
+    using MphRead::Mods::Combat::BaseWeaponVariantCount;
+    using MphRead::EntityType;
     using MphRead::Mods::Network::LocalShotLog;
     using MphRead::Mods::Network::RemoteShotQueue;
     using MphRead::Mods::Network::ShotEventLedger;
@@ -59,12 +63,31 @@ namespace
         packet.Frame = frame;
         for (const ShotEvent& event : events)
         {
-            packet.ShotHistory[packet.ShotHistoryLength++] = event;
+            ShotEvent validEvent = event;
+            if (validEvent.WeaponVariantIndex == IntentPacket::NoVariant
+                && validEvent.WeaponId < BaseWeaponVariantCount)
+            {
+                validEvent.WeaponVariantIndex = validEvent.WeaponId;
+            }
+            packet.ShotHistory[packet.ShotHistoryLength++] = validEvent;
         }
         return packet;
     }
 
     std::uint8_t Id(BeamType beam) { return static_cast<std::uint8_t>(beam); }
+
+    ShotEvent MakeShotEvent(std::uint32_t sequence, std::uint32_t frame, BeamType weapon,
+        std::uint8_t charge = 0, std::uint32_t ackFrame = 0)
+    {
+        ShotEvent event{};
+        event.Sequence = sequence;
+        event.Frame = frame;
+        event.WeaponId = Id(weapon);
+        event.WeaponVariantIndex = event.WeaponId;
+        event.Charge = charge;
+        event.AckFrame = ackFrame;
+        return event;
+    }
 
     std::uint8_t NextWeapon(RemoteShotQueue& shots)
     {
@@ -72,13 +95,22 @@ namespace
         return event.has_value() ? event->WeaponId : IntentPacket::NoWeapon;
     }
 
-    // Protocol 20 on the wire: the ray, this frame's shot, and the history.
+    // The shot block carries this frame's shot and the retained history.
     void ShotEventWire()
     {
         IntentPacket shot{};
         shot.ShotHistory[0] = {41, 100, Id(BeamType::Missile)};
+        shot.ShotHistory[0].WeaponVariantIndex = Id(BeamType::Missile);
         shot.ShotHistory[1] = {42, 104, Id(BeamType::OmegaCannon), 37, 99,
             OpenTK::Mathematics::Vector3(4, 5, 6), OpenTK::Mathematics::Vector3(0, 1, 0)};
+        shot.ShotHistory[1].WeaponVariantIndex = 17;
+        shot.ShotHistory[1].ShotFlags = IntentPacket::ShotFlagPrimeHunter | IntentPacket::ShotFlagTargetResolved;
+        shot.ShotHistory[1].Target = { IntentPacket::ShotTargetKind::Player, 0xFF, 3, 7, 9, -1, 0 };
+        shot.HasContinuousTarget = true;
+        shot.ContinuousRoleFrame = 123;
+        shot.ShotHistory[1].RoleFrame = 101;
+        shot.ContinuousTarget = { IntentPacket::ShotTargetKind::SceneEntity,
+            static_cast<std::uint8_t>(EntityType::Door), 0xFF, 0, 0, 24, 0 };
         shot.ShotHistoryLength = 2;
         std::vector<std::uint8_t> bytes(IntentPacket::MaxWireSize);
         shot.Write(bytes);
@@ -91,6 +123,14 @@ namespace
         Expect(noRay.ShotHistory[1].AckFrame == 99 && Near(noRay.ShotHistory[1].Origin.Z, 6.0F)
             && Near(noRay.ShotHistory[1].Direction.Y, 1.0F) && noRay.ShotHistory[1].HasRay(),
             "each event carries the world it was aimed in and its own ray");
+        Expect(noRay.ShotHistory[1].WeaponVariantIndex == 17
+            && noRay.ShotHistory[1].PrimeHunterAtFire() && noRay.ShotHistory[1].HasHomingDecision()
+            && noRay.ShotHistory[1].Target.Slot == 3,
+            "the shot keeps its fire-time variant, role, and selected target");
+        Expect(noRay.HasContinuousTarget && noRay.ContinuousTarget.EntityId == 24,
+            "continuous lock state has its own stable target reference");
+        Expect(noRay.ShotHistory[1].RoleFrame == 101 && noRay.ContinuousRoleFrame == 123,
+            "role snapshots survive the wire independently of the interpolated world");
         Expect(!noRay.ShotHistory[0].HasRay(), "an event recorded without a ray says so");
 
         HitClaimPacket claim{};
@@ -141,15 +181,19 @@ namespace
         Expect(idle.WireSize() == static_cast<std::size_t>(IntentPacket::FullSize) + 3,
             "a report of no bombs is two bytes");
         Expect(shot.WireSize() == static_cast<std::size_t>(IntentPacket::FullSize) + 1 + IntentPacket::ShotSize
-            + 1 + 2 * IntentPacket::ShotEventSize, "a ray and two shots, and nothing else");
-        Expect(static_cast<std::size_t>(IntentPacket::MaxWireSize) < 388, "never larger than the fixed layout was");
+            + 1 + 2 * IntentPacket::ShotEventSize + IntentPacket::TargetReferenceSize + 4,
+            "a ray, two shots, and a continuous target use their exact sections");
+        Expect(static_cast<std::size_t>(IntentPacket::MaxWireSize) < 512,
+            "the extended payload stays within one datagram");
 
         // A section cut short is absent, never half read; a corrupt count
         // is clamped, and then only read if every entry it names is there.
         shot.Write(bytes);
         const std::size_t whole = shot.WireSize();
-        Expect(IntentPacket::Read(std::span(bytes).first(whole - 1)).ShotHistoryLength == 0,
-            "a history missing its last byte is not read");
+        const IntentPacket missingContinuousTarget
+            = IntentPacket::Read(std::span(bytes).first(whole - 1));
+        Expect(missingContinuousTarget.ShotHistoryLength == 2 && !missingContinuousTarget.HasContinuousTarget,
+            "an incomplete continuous target is not read with the complete shot history");
         Expect(IntentPacket::Read(std::span(bytes).first(static_cast<std::size_t>(IntentPacket::FullSize))).ShotHistoryLength == 0,
             "an intent without the sections has no history");
         bytes[static_cast<std::size_t>(IntentPacket::FullSize + 1 + IntentPacket::ShotSize)] = 0xFF;
@@ -163,6 +207,17 @@ namespace
         RemoteShotQueue shots;
         Expect(!shots.Next().has_value() && !shots.Active(), "nothing pending, and no events driving, on a new life");
         shots.BeginLife();
+
+        RemoteShotQueue targetUpdate;
+        ShotEvent unresolved = MakeShotEvent(1, 200, BeamType::Missile);
+        ShotEvent resolved = unresolved;
+        resolved.ShotFlags |= IntentPacket::ShotFlagTargetResolved;
+        resolved.Target = { IntentPacket::ShotTargetKind::Player, 0xFF, 1, 2, 3, -1, 0 };
+        targetUpdate.Receive(WithShots(205, { unresolved }));
+        targetUpdate.Receive(WithShots(206, { resolved }));
+        const auto updated = targetUpdate.Next();
+        Expect(updated.has_value() && updated->HasHomingDecision() && updated->Target == resolved.Target,
+            "a reordered repeat updates the queued shot with its resolved target");
 
         // The Omega shot, then the switch to the Power Beam arriving first:
         // the switch is WeaponSelect's business, the shot keeps its weapon.
@@ -244,6 +299,7 @@ namespace
             IntentPacket::ShotEvent shot{};
             shot.Frame = 100 + i;
             shot.WeaponId = Id(i % 2 == 0 ? BeamType::Missile : BeamType::OmegaCannon);
+            shot.WeaponVariantIndex = shot.WeaponId;
             shot.Charge = static_cast<std::uint8_t>(i);
             shot.AckFrame = 90 + i;
             const std::uint32_t sequence = log.Record(shot);
@@ -260,6 +316,7 @@ namespace
         IntentPacket::ShotEvent after{};
         after.Frame = 200;
         after.WeaponId = Id(BeamType::PowerBeam);
+        after.WeaponVariantIndex = after.WeaponId;
         static_cast<void>(log.Record(after));
         IntentPacket respawned{};
         log.Fill(respawned, 200);
@@ -288,29 +345,42 @@ namespace
     {
         ShotEventLedger ledger;
         Expect(!ledger.Find(0).has_value() && !ledger.Find(7).has_value(), "nothing named before it is reported");
-        ledger.Note({7, 300, Id(BeamType::Missile), 0, 280});
+        const ShotEvent shot = MakeShotEvent(7, 300, BeamType::Missile, 0, 280);
+        ledger.Note(shot);
         Expect(ledger.Find(7).has_value() && ledger.Find(7)->AckFrame == 280, "a reported shot is found by its sequence");
-        ledger.Note({7, 300, Id(BeamType::Missile), 0, 280});
+        ShotEvent resolved = shot;
+        resolved.ShotFlags |= IntentPacket::ShotFlagTargetResolved;
+        resolved.Target = { IntentPacket::ShotTargetKind::Player, 0xFF, 1, 2, 3, -1, 0 };
+        ledger.Note(resolved);
+        ledger.Note(shot);
+        Expect(ledger.Find(7)->HasHomingDecision() && ledger.Find(7)->Target == resolved.Target,
+            "a repeated shot can attach its target without losing the resolution");
+        ShotEvent conflictingTarget = resolved;
+        conflictingTarget.Target.Slot = 2;
+        ledger.Note(conflictingTarget);
+        Expect(ledger.Find(7)->Target == resolved.Target && ledger.Conflicts() == 1,
+            "a repeated shot cannot replace its already resolved target");
+        ledger.Note(resolved);
         Expect(ledger.Find(7).has_value(), "and stays, however many claims name it");
-        ledger.Note({7 + ShotEventLedger::Capacity, 900, Id(BeamType::PowerBeam)});
+        ledger.Note(MakeShotEvent(7 + ShotEventLedger::Capacity, 900, BeamType::PowerBeam));
         Expect(!ledger.Find(7).has_value(), "a shot pushed out by newer ones is no longer named");
         ledger.Reset();
         Expect(!ledger.Find(7 + ShotEventLedger::Capacity).has_value(), "a new life names nothing");
 
         // A late intent's event a whole ledger older shares the newer shot's
         // entry: it must not take its place.
-        ledger.Note({100, 500, Id(BeamType::Missile), 0, 480});
-        ledger.Note({100 - ShotEventLedger::Capacity, 100, Id(BeamType::PowerBeam), 0, 80});
+        ledger.Note(MakeShotEvent(100, 500, BeamType::Missile, 0, 480));
+        ledger.Note(MakeShotEvent(100 - ShotEventLedger::Capacity, 100, BeamType::PowerBeam, 0, 80));
         Expect(ledger.Find(100).has_value() && ledger.StaleRefused() == 1, "an older shot cannot overwrite a newer one");
         // The same sequence saying something else is noted, never kept.
-        ledger.Note({100, 500, Id(BeamType::Judicator), 0, 480});
-        Expect(ledger.Find(100)->WeaponId == Id(BeamType::Missile) && ledger.Conflicts() == 1,
+        ledger.Note(MakeShotEvent(100, 500, BeamType::Judicator, 0, 480));
+        Expect(ledger.Find(100)->WeaponId == Id(BeamType::Missile) && ledger.Conflicts() == 2,
             "a contradicting repeat is counted and ignored");
         // Wrapping sequences still order: the shot after 0xFFFFFFFF is newer.
         ShotEventLedger wrap;
-        wrap.Note({0xFFFFFFFFU, 1, Id(BeamType::Missile)});
+        wrap.Note(MakeShotEvent(0xFFFFFFFFU, 1, BeamType::Missile));
         constexpr auto wrapped = static_cast<std::uint32_t>(0xFFFFFFFFULL + ShotEventLedger::Capacity);
-        wrap.Note({wrapped, 2, Id(BeamType::PowerBeam)});
+        wrap.Note(MakeShotEvent(wrapped, 2, BeamType::PowerBeam));
         Expect(wrap.Find(wrapped).has_value(), "a wrapped sequence is newer");
     }
 

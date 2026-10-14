@@ -17,6 +17,21 @@ namespace MphRead::Mods::Network
         return _sequence;
     }
 
+    void LocalShotLog::SetHomingTarget(std::uint32_t sequence,
+        const IntentPacket::ShotTargetReference& target) noexcept
+    {
+        for (std::size_t i = 0; i < _length; ++i)
+        {
+            IntentPacket::ShotEvent& event = _history[i];
+            if (event.Sequence == sequence)
+            {
+                event.Target = target;
+                event.ShotFlags |= IntentPacket::ShotFlagTargetResolved;
+                return;
+            }
+        }
+    }
+
     void LocalShotLog::Fill(IntentPacket& intent, std::uint32_t now) const noexcept
     {
         intent.ShotHistory = {};

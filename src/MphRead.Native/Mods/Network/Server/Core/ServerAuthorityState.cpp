@@ -29,18 +29,11 @@ namespace MphRead::Mods::Network
 
     bool ServerAuthorityState::TryClaim(const PeerHandle& peer) noexcept
     {
-        if (_current != nullptr || peer == nullptr)
-        {
-            return false;
-        }
-        _current = peer;
-        ++_epoch;
-        return true;
+        return false;
     }
 
     void ServerAuthorityState::TransferTo(const PeerHandle& peer) noexcept
     {
-        _current = peer;
-        ++_epoch;
+        // Legacy migration cannot assign world-state ownership to a peer.
     }
 }

@@ -95,8 +95,8 @@ int main()
         "disabling interpolation restores the immediate remote form-input path");
     NetSmoothing::Enabled(true);
     NetSessionFixture::SetRole(NetRole::Host);
-    passed &= Check(!NetSmoothing::PresentationOwnsRemoteReplicas(),
-        "the authoritative host retains remote form-input simulation");
+    passed &= Check(NetSmoothing::PresentationOwnsRemoteReplicas() && !NetSession::IsAuthority(),
+        "lobby ownership cannot bypass remote presentation or grant authority");
     NetSessionFixture::SetRole(NetRole::Client);
 
     for (std::uint32_t frame = 1; frame <= 30; ++frame)

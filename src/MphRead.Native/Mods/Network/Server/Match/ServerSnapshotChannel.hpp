@@ -28,7 +28,7 @@ namespace MphRead::Mods::Network
         void Receive(const ReceivedPacket& packet, double now, NetTransport* transport);
         void Publish(std::span<const std::uint8_t> payload, NetTransport* transport);
         void SendLatest(const ServerPeerRegistry::PeerHandle& peer, NetTransport* transport) const;
-        void SendAuthoritySeed(const ServerPeerRegistry::PeerHandle& peer, NetTransport* transport) const;
+
 
     private:
         ServerPeerRegistry& _peers;

@@ -18,6 +18,11 @@ namespace MphRead::Entities
     class EnemySpawnEntity;
 }
 
+namespace MphRead::Mods::Diagnostics
+{
+    class HomingSpawnFixture;
+}
+
 namespace MphRead::Entities::Enemies
 {
     struct Enemy23Values
@@ -47,6 +52,7 @@ namespace MphRead::Entities::Enemies
 
     class Enemy23Entity : public EnemyInstanceEntity
     {
+        friend class ::MphRead::Mods::Diagnostics::HomingSpawnFixture;
     public:
         Enemy23Entity(EnemyInstanceEntityData data,
             Formats::Culling::NodeRef nodeRef, Scene* scene);

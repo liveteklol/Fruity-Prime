@@ -212,11 +212,13 @@ namespace MphRead::Mods::Network
             std::int32_t claimed, std::int32_t resolved);
         // False when every pending entry is taken: the claim has not been parked.
         [[nodiscard]] static bool Park(std::int32_t shooterSlot, const HitClaimPacket& claim);
-        [[nodiscard]] static std::int32_t MaxDamageFor(std::int32_t shooterSlot, std::uint8_t beam);
+        [[nodiscard]] static std::int32_t MaxDamageFor(std::int32_t shooterSlot, std::uint8_t beam,
+            std::uint32_t launchFrame, std::uint32_t shotSequence);
         // The weapon the shooter actually fires for this beam: a hunter's
         // affinity weapon is its own row of the table (index + 9), with its
         // own homing, cooldown, damage and afflictions. Null for no beam.
-        [[nodiscard]] static const ::MphRead::WeaponInfo* FiredWeapon(std::int32_t shooterSlot, std::uint8_t beam);
+        [[nodiscard]] static const ::MphRead::WeaponInfo* FiredWeapon(std::int32_t shooterSlot,
+            std::uint8_t beam, std::uint32_t launchFrame, std::uint32_t shotSequence);
         static void TrackDeaths();
         static void NoteRescued(std::int32_t attacker, std::int32_t victim, std::uint32_t launch);
         static void ApplyOne(Pending& entry);
@@ -246,14 +248,16 @@ namespace MphRead::Mods::Network
             std::uint32_t launch, std::optional<IntentPacket::ShotEvent>& named);
         // The distinct launch frames recently claimed, per shooter and weapon.
         static HitClaimRateLimiter _rateLimiter;
-        [[nodiscard]] static bool RatePlausible(std::int32_t shooterSlot, std::uint8_t beam, std::uint32_t launch);
+        [[nodiscard]] static bool RatePlausible(std::int32_t shooterSlot, std::uint8_t beam,
+            std::uint32_t launch, std::uint32_t shotSequence);
         // Measured for every claim (ShotPlausible), for -hitlog.
         inline static std::int32_t _lastAckGap = 0;
         inline static float _lastRayDistance = -1.0F;
         inline static bool _lastBlocked = false;
         [[nodiscard]] static bool ShotPlausible(std::int32_t shooterSlot, const HitClaimPacket& claim,
             OpenTK::Mathematics::Vector3 was);
-        [[nodiscard]] static bool StraightWeapon(std::int32_t shooterSlot, std::uint8_t beam);
+        [[nodiscard]] static bool StraightWeapon(std::int32_t shooterSlot, std::uint8_t beam,
+            std::uint32_t launchFrame, std::uint32_t shotSequence);
         [[nodiscard]] static bool ImpactPlausible(const HitClaimPacket& claim, std::int32_t victimSlot);
         // The damage flags a claim's hit carries when applied here: its
         // headshot, and its cause when the authority can vouch for it.
@@ -261,6 +265,7 @@ namespace MphRead::Mods::Network
         [[nodiscard]] static bool CauseVouched(const Pending& entry);
         // The frame the claimed shot was fired in (the world it was aimed in).
         [[nodiscard]] static std::uint32_t FiredFrame(const Pending& entry) noexcept;
+        [[nodiscard]] static std::uint32_t RoleFrameOf(const Pending& entry) noexcept;
         // A doubled claim waits for the double damage it was fired under:
         // the pickup claim behind it may still be on its way.
         [[nodiscard]] static bool DoublingSettled(const Pending& entry);
@@ -271,7 +276,8 @@ namespace MphRead::Mods::Network
         [[nodiscard]] static ClaimDamageProfile DamageProfile(const Pending& entry);
         [[nodiscard]] static std::uint8_t CauseOf(::MphRead::Entities::DamageFlags flags) noexcept;
         // Whether the weapon a claim names heals its shooter by the hit.
-        [[nodiscard]] static bool Drains(std::int32_t shooterSlot, std::uint8_t beam);
+        [[nodiscard]] static bool Drains(std::int32_t shooterSlot, std::uint8_t beam,
+            std::uint32_t launchFrame, std::uint32_t shotSequence);
         inline static bool _shooterHits = true;
         static HitClaimIntentHistory _intentHistory;
 

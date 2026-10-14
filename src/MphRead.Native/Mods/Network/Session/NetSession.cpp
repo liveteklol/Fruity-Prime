@@ -405,9 +405,9 @@ namespace MphRead::Mods::Network
         SessionMatchEndChannel::Send(_context._connection, _context._runtime, _context._matchIdentity, _context._simulationCallbacks);
     }
 
-    void NetSession::BroadcastSnapshot()
+    void NetSession::BroadcastSnapshot(MphRead::Scene& scene)
     {
         SessionSnapshotPublisher::Publish(_context._connection, _context._runtime, _context._authorityState, _context._matchIdentity,
-            _context._simulationCallbacks, _context._traffic);
+            _context._simulationCallbacks, _context._traffic, scene);
     }
 }

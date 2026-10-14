@@ -234,17 +234,7 @@ namespace MphRead::Mods::Network
             return;
         }
         peer->Liveness.MarkSeen(now);
-        if (Simulating() || !_ports.Authority->IsAuthority(peer))
-        {
-            return;
-        }
-        const std::span<const std::uint8_t> payload = packet.Payload();
-        if (payload.size() != 10
-            || Runtime::ReadUInt16LittleEndian(payload) != *_ports.MatchId
-            || Runtime::ReadUInt64LittleEndian(payload.subspan(2)) != _ports.Authority->Epoch())
-        {
-            return;
-        }
-        EndMatch(now, "a player reached the goal");
+        // Match completion is decided by the server simulation. A client
+        // hit claim may change its score, but a client cannot end the world.
     }
 }

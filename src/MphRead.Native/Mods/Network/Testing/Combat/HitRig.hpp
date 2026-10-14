@@ -49,7 +49,11 @@ namespace MphRead::Mods::Network
             // strafing side to side non-stop, nothing holding them in place:
             // the knockback is real. What the rewind log (-hitlog) is
             // measured with.
-            Strafe
+            Strafe,
+            // Even slots fire HomingRigSchedule at an odd-slot runner: every
+            // charge-dependent homing weapon at the levels around each
+            // boundary, and the Shock Coil held. What -homingtrace is read with.
+            Homing
         };
 
         [[nodiscard]] static ::MphRead::BeamType VolleyWeapon() noexcept { return _volleyWeapon; }
@@ -61,6 +65,9 @@ namespace MphRead::Mods::Network
         [[nodiscard]] static bool ConfigureSpeed(const std::optional<std::string>& value);
         // -rigstrafe N: frames each way before the strafe turns round (8 to 240).
         [[nodiscard]] static bool ConfigureStrafePeriod(const std::optional<std::string>& value);
+        // -rigmorph: a runner rolls into its alt form and out again, so a
+        // continuous lock is tried against a morphing target as well.
+        static void ConfigureMorph(bool value) noexcept { _morph = value; }
         // -rigrange N: the two players of a strafe pair stand N units apart (8 to 40).
         [[nodiscard]] static bool ConfigureRange(const std::optional<std::string>& value);
         [[nodiscard]] static float MoveScale() noexcept { return _moveScale; }
@@ -114,6 +121,7 @@ namespace MphRead::Mods::Network
         [[nodiscard]] static Entities::PlayerEntity* CellOpponent(Entities::PlayerEntity& self);
         [[nodiscard]] static ::MphRead::BeamType CycleWeapon() noexcept;
         static void DriveSniper(Entities::PlayerEntity& player, Entities::PlayerControls& c, Entities::PlayerEntity* other);
+        static void DriveHoming(Entities::PlayerEntity& player, Entities::PlayerControls& c, Entities::PlayerEntity* other);
         static void HoldRange(Entities::PlayerEntity& player, Entities::PlayerControls& c, float range, float want);
         [[nodiscard]] static bool AimAt(Entities::PlayerEntity& player, Entities::PlayerEntity* target, float headHeight);
         [[nodiscard]] static Entities::PlayerEntity* Opponent(Entities::PlayerEntity& self);
@@ -160,6 +168,7 @@ namespace MphRead::Mods::Network
         inline static bool _affinity = false;
         inline static float _highest = 0;
         inline static bool _wasAirborne = false;
+        inline static bool _morph = false;
         inline static Scene* _scene = nullptr;
     };
 

@@ -43,6 +43,9 @@ namespace MphRead::Mods::Network
         // finished at the damage the authority allows, not the number claimed.
         static void DuplicateKillIsHeldToAllowedDamage();
         static void ContinuousPhaseAgreesAcrossPeers();
+        static void HomingAuthorityVariantMatches(Entities::PlayerEntity& shooter);
+        static void ContinuousLockIsReplicated(Entities::PlayerEntity& owner,
+            Entities::PlayerEntity& target);
         // Verified when the guard landed; not run by Run (see there).
         static void SyluxMuzzleGuardCases(Scene& scene);
 

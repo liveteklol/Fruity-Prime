@@ -159,7 +159,17 @@ namespace
         check("main", "mtx_stack", SceneShaderAbi::ValueType::Mat4, MatrixStackCapacity);
         check("shift", "shift_table", SceneShaderAbi::ValueType::Float, ShiftTableLength);
         check("shift", "white_table", SceneShaderAbi::ValueType::Float, WhiteoutTableLength);
-        Expect(SceneShaderAbi::Constants.size() == 55 && SceneShaderAbi::Textures.size() == 8,
+        check("main", "fog_boxes", SceneShaderAbi::ValueType::Int, 0);
+        check("main", "fog_eye", SceneShaderAbi::ValueType::Vec3, 0);
+        for (std::size_t i = 0; i < SceneFogBoxes::Capacity; ++i)
+        {
+            const std::string prefix = "fog_box" + std::to_string(i);
+            for (const auto suffix : {"_min", "_max", "_color"})
+            {
+                check("main", prefix + suffix, SceneShaderAbi::ValueType::Vec4, 0);
+            }
+        }
+        Expect(SceneShaderAbi::Constants.size() == 69 && SceneShaderAbi::Textures.size() == 8,
             "production program interface coverage changed");
         Expect(SceneShaderAbi::TextureUnit("backdrop", "noise_tex") == 1,
             "backdrop noise must use the auxiliary texture unit");

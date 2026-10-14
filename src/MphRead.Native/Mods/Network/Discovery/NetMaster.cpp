@@ -118,18 +118,6 @@ namespace MphRead::Mods::Network
         double LastSeen = 0.0;
     };
 
-    class MasterServer::Hosted final
-    {
-    public:
-        std::shared_ptr<DedicatedServer> Server{};
-        std::shared_ptr<std::stop_source> Cancel{};
-        std::int32_t Port = 0;
-        std::string Name{};
-        std::array<std::uint8_t, 4> Asker{};
-        double StartedAt = 0.0;
-        double LastOccupied = 0.0;
-    };
-
     MasterReporter::MasterReporter(std::string host, std::int32_t port)
         : _host(std::move(host)), _port(port)
     {
@@ -242,12 +230,16 @@ namespace MphRead::Mods::Network
     MasterServer::MasterServer(std::int32_t port)
         : _port(port)
     {
+        _hosts.Log = [](const std::string& message) { Log(message); };
+        _hosts.ReporterFactory = [this]() { return std::make_shared<MasterReporter>("127.0.0.1", _port); };
+        _hosts.OnStopped = [this](std::int32_t port) { Unlist(port); };
     }
 
     void MasterServer::SetHostPorts(std::int32_t first, std::int32_t last) noexcept
     {
         _hostPortFirst = first;
         _hostPortLast = last;
+        _hosts.SetPorts(first, last);
     }
 
     bool MasterServer::CanHost() const noexcept
@@ -333,7 +325,7 @@ namespace MphRead::Mods::Network
             Expire(now);
             ReapHosted(now);
             if (Update::ServerUpdate::ShouldRestart(
-                static_cast<std::int32_t>(_hosted.size())))
+                _hosts.Count()))
             {
                 Log("shutting down to come back on the new build");
                 _running.store(false);
@@ -343,20 +335,16 @@ namespace MphRead::Mods::Network
             {
                 lastReport = now;
                 std::string message = ::MphRead::NativeRuntime::ToString((static_cast<std::int32_t>(_entries.size()))) + " server(s) listed";
-                if (!_hosted.empty())
+                if (_hosts.Count() > 0)
                 {
-                    message += ", " + ::MphRead::NativeRuntime::ToString((static_cast<std::int32_t>(_hosted.size()))) + " started here";
+                    message += ", " + ::MphRead::NativeRuntime::ToString((_hosts.Count())) + " started here";
                 }
                 Log(message);
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
         }
         Log("shutting down");
-        for (std::int32_t i = static_cast<std::int32_t>(_hosted.size()) - 1; i >= 0; --i)
-        {
-            StopHosted(_hosted[static_cast<std::size_t>(i)],
-                "the directory is shutting down");
-        }
+        _hosts.StopAll("the directory is shutting down");
         _transport->Dispose();
         _transport.reset();
     }
@@ -449,172 +437,12 @@ namespace MphRead::Mods::Network
     HostReplyPacket MasterServer::StartHosted(const HostRequestPacket& request,
         const std::shared_ptr<System::Net::IPEndPoint>& asker, double now)
     {
-        const std::array<std::uint8_t, 4> askerAddress = asker->AddressBytes();
-        for (std::int32_t i = static_cast<std::int32_t>(_hosted.size()) - 1; i >= 0; --i)
-        {
-            const std::shared_ptr<Hosted> previous = _hosted[static_cast<std::size_t>(i)];
-            if (previous->Asker == askerAddress && previous->Server->PeerCount() == 0)
-            {
-                StopHosted(previous, "the same player asked for another game");
-            }
-        }
-        const std::int32_t port = FreeHostPort(now);
-        if (port < 0)
-        {
-            HostReplyPacket result{};
-            result.Reason = "all " + ::MphRead::NativeRuntime::ToString((UncheckedSlotCount(_hostPortFirst, _hostPortLast))) + " game slots are busy";
-            return result;
-        }
-        const GameMode mode = ::MphRead::IsDefinedGameMode(request.Mode)
-            ? static_cast<GameMode>(request.Mode)
-            : GameMode::Battle;
-        const std::string& requestedName = request.ServerName.value();
-        const std::string name = !requestedName.empty() ? requestedName : "Hosted game";
-        const std::string& roomKey = request.RoomKey.value();
-        const std::shared_ptr<MapRotation> rotation = request.Rotation.has_value() && !request.Rotation->empty()
-            ? MapRotation::FromList(*request.Rotation, static_cast<float>(request.TimeLimit), request.PointGoal)
-            : MapRotation::SingleMatch(roomKey, mode, static_cast<float>(request.TimeLimit), request.PointGoal);
-        NativeRuntime::Guid ownerToken{};
-        if (request.Policy == ServerSessionPolicy::Lobby)
-        {
-            std::array<std::uint8_t, 16> bytes{};
-            NativeRuntime::RandomNumberGeneratorFill(bytes.data(), bytes.size());
-            ownerToken = NativeRuntime::Guid(bytes);
-        }
-        const auto server = std::make_shared<DedicatedServer>(port,
-            std::clamp(static_cast<std::int32_t>(request.MaxPlayers), 2,
-                Entities::PlayerEntity::SlotCapacity), rotation);
-        server->ServerName(name);
-        server->SessionPolicy(request.Policy);
-        server->Format(request.Format);
-        server->OwnerToken(ownerToken);
-        server->Reporter(std::make_shared<MasterReporter>("127.0.0.1", _port));
-        server->RunsTheMatch(false);
-        server->SetSessionOptions(request.RequireReady, request.AllowJoinInProgress);
-
-        const auto cancel = std::make_shared<std::stop_source>();
-        const auto entry = std::make_shared<Hosted>();
-        entry->Server = server;
-        entry->Cancel = cancel;
-        entry->Port = port;
-        entry->Name = name;
-        entry->Asker = askerAddress;
-        entry->StartedAt = now;
-        entry->LastOccupied = now;
-
-        std::thread thread([server, cancel, port]()
-        {
-            NativeRuntime::SetCurrentThreadName("MphRead hosted "
-                + ::MphRead::NativeRuntime::ToString(port));
-            try
-            {
-                server->Run(cancel->get_token());
-            }
-            catch (const std::exception& ex)
-            {
-                MasterServer::Log("game on "
-                    + ::MphRead::NativeRuntime::ToString(port)
-                    + " stopped: " + ex.what());
-            }
-        });
-        thread.detach();
-
-        for (std::int32_t i = 0; i < 50 && !server->Listening(); ++i)
-        {
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        }
-        if (!server->Listening())
-        {
-            cancel->request_stop();
-            server->Stop();
-            HostReplyPacket result{};
-            result.Reason = "could not listen on port "
-                + ::MphRead::NativeRuntime::ToString(port);
-            return result;
-        }
-        _hosted.push_back(entry);
-        Log("started \"" + name + "\" on port "
-            + ::MphRead::NativeRuntime::ToString(port) + " for "
-            + IPv4ToString(askerAddress) + " (" + roomKey + ", "
-            + ::MphRead::ToString(mode) + ", " + std::to_string(rotation->Entries().size()) + " map(s))");
-        HostReplyPacket result{};
-        result.Started = true;
-        result.Port = static_cast<std::uint16_t>(port);
-        result.Reason = "";
-        result.OwnerToken = ownerToken;
-        return result;
-    }
-
-    std::int32_t MasterServer::FreeHostPort(double now)
-    {
-        std::int32_t port = _hostPortFirst;
-        while (port <= _hostPortLast)
-        {
-            bool taken = false;
-            for (const std::shared_ptr<Hosted>& entry : _hosted)
-            {
-                if (entry->Port == port)
-                {
-                    taken = true;
-                    break;
-                }
-            }
-            if (!taken)
-            {
-                const auto cooling = _cooling.find(port);
-                if (cooling != _cooling.end())
-                {
-                    if (now - cooling->second < PortCooldownSeconds)
-                    {
-                        port = UncheckedIncrement(port);
-                        continue;
-                    }
-                    _cooling.erase(cooling);
-                }
-                return port;
-            }
-            port = UncheckedIncrement(port);
-        }
-        return -1;
+        return _hosts.Start(request, asker, now);
     }
 
     void MasterServer::ReapHosted(double now)
     {
-        for (std::int32_t i = static_cast<std::int32_t>(_hosted.size()) - 1; i >= 0; --i)
-        {
-            const std::shared_ptr<Hosted> entry = _hosted[static_cast<std::size_t>(i)];
-            if (entry->Server->PeerCount() > 0)
-            {
-                entry->LastOccupied = now;
-                continue;
-            }
-            const bool played = entry->Server->EverOccupied();
-            const double grace = played ? HostedEmptySeconds : HostedStartupSeconds;
-            if (now - entry->LastOccupied > grace)
-            {
-                StopHosted(entry, played ? "everyone left" : "nobody joined");
-            }
-        }
-    }
-
-    void MasterServer::StopHosted(const std::shared_ptr<Hosted>& entry,
-        const std::string& why)
-    {
-        Log("stopping \"" + entry->Name + "\" on port "
-            + ::MphRead::NativeRuntime::ToString(entry->Port) + ": " + why);
-        entry->Cancel->request_stop();
-        entry->Server->Stop();
-        for (std::int32_t i = 0; i < 100 && entry->Server->Listening(); ++i)
-        {
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        }
-        const auto found = std::find(_hosted.begin(), _hosted.end(), entry);
-        if (found != _hosted.end())
-        {
-            _hosted.erase(found);
-        }
-        _cooling[entry->Port] = ClockElapsedSeconds();
-        Unlist(entry->Port);
+        _hosts.Reap(now);
     }
 
     void MasterServer::Unlist(std::int32_t port)

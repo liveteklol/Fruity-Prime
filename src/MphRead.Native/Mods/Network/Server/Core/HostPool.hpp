@@ -18,14 +18,15 @@ namespace System::Net
 
 namespace MphRead::Mods::Network
 {
-    class DedicatedServer;
+    class DedicatedServerProcess;
     class MasterReporter;
 
     // The games a server starts for players who cannot open a port of their
-    // own: each one a DedicatedServer on a thread, on a port from a range.
+    // own: each room runs in an isolated dedicated-server process.
     class HostPool final
     {
     public:
+        ~HostPool();
         std::function<void(const std::string&)> Log = [](const std::string&) {};
         std::function<std::shared_ptr<MasterReporter>()> ReporterFactory{};
         std::function<void(std::int32_t)> OnStopped{};
@@ -43,13 +44,13 @@ namespace MphRead::Mods::Network
     private:
         struct Hosted final
         {
-            std::shared_ptr<DedicatedServer> Server{};
-            std::shared_ptr<std::stop_source> Cancel{};
+            std::shared_ptr<DedicatedServerProcess> Server{};
             std::int32_t Port = 0;
             std::string Name{};
             std::array<std::uint8_t, 4> Asker{255, 255, 255, 255};
             double StartedAt = 0;
             double LastOccupied = 0;
+            double LastProbe = -1;
         };
 
         static constexpr double PortCooldownSeconds = 5;

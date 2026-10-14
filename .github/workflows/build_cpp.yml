@@ -256,9 +256,9 @@ jobs:
       - name: Reflex lifecycle, input and Dialanche regression
         shell: pwsh
         run: |
-          cmake --build build/native --config RelWithDebInfo --target fruity_vulkan_reflex_tests fruity_raw_mouse_motion_tests fruity_native_touch_state_tests fruity_native_aim_rules_tests fruity_dialanche_native_collision_tests fruity_weavel_alt_form_parity_tests fruity_intent_touch_payload_tests fruity_windows_raw_mouse_tests
+          cmake --build build/native --config RelWithDebInfo --target fruity_vulkan_reflex_tests fruity_raw_mouse_motion_tests fruity_native_touch_state_tests fruity_native_aim_rules_tests fruity_dialanche_native_collision_tests fruity_weavel_alt_form_parity_tests fruity_intent_touch_payload_tests fruity_demo_own_intent_tests fruity_windows_raw_mouse_tests
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          ctest --test-dir build/native -C RelWithDebInfo -R '^FruityPrime\.(VulkanNvidiaReflex|RawMouseMotion|NativeTouchState|NativeAimRules|DialancheNativeCollision|WeavelAltFormParity|IntentTouchPayload|WindowsRawMouseInput)$' --output-on-failure --no-tests=error
+          ctest --test-dir build/native -C RelWithDebInfo -R '^FruityPrime\.(VulkanNvidiaReflex|RawMouseMotion|NativeTouchState|NativeAimRules|DialancheNativeCollision|WeavelAltFormParity|IntentTouchPayload|DemoOwnIntent|WindowsRawMouseInput)$' --output-on-failure --no-tests=error
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Backend contract (OpenGL, Vulkan, Qt Quick)
@@ -441,8 +441,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cmake --build build/native --config RelWithDebInfo --target fruity_vulkan_reflex_tests fruity_raw_mouse_motion_tests fruity_native_touch_state_tests fruity_native_aim_rules_tests fruity_dialanche_native_collision_tests fruity_weavel_alt_form_parity_tests fruity_intent_touch_payload_tests
-          ctest --test-dir build/native -C RelWithDebInfo -R '^FruityPrime\.(VulkanNvidiaReflex|RawMouseMotion|NativeTouchState|NativeAimRules|DialancheNativeCollision|WeavelAltFormParity|IntentTouchPayload)$' --output-on-failure --no-tests=error
+          cmake --build build/native --config RelWithDebInfo --target fruity_vulkan_reflex_tests fruity_raw_mouse_motion_tests fruity_native_touch_state_tests fruity_native_aim_rules_tests fruity_dialanche_native_collision_tests fruity_weavel_alt_form_parity_tests fruity_intent_touch_payload_tests fruity_demo_own_intent_tests
+          ctest --test-dir build/native -C RelWithDebInfo -R '^FruityPrime\.(VulkanNvidiaReflex|RawMouseMotion|NativeTouchState|NativeAimRules|DialancheNativeCollision|WeavelAltFormParity|IntentTouchPayload|DemoOwnIntent)$' --output-on-failure --no-tests=error
 
       - name: Backend contract (OpenGL, Vulkan, Qt Quick)
         shell: bash
@@ -769,8 +769,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cmake --build build/native --config RelWithDebInfo --target fruity_vulkan_reflex_tests fruity_raw_mouse_motion_tests fruity_native_touch_state_tests fruity_native_aim_rules_tests fruity_dialanche_native_collision_tests fruity_weavel_alt_form_parity_tests fruity_intent_touch_payload_tests
-          ctest --test-dir build/native -C RelWithDebInfo -R '^FruityPrime\.(VulkanNvidiaReflex|RawMouseMotion|NativeTouchState|NativeAimRules|DialancheNativeCollision|WeavelAltFormParity|IntentTouchPayload)$' --output-on-failure --no-tests=error
+          cmake --build build/native --config RelWithDebInfo --target fruity_vulkan_reflex_tests fruity_raw_mouse_motion_tests fruity_native_touch_state_tests fruity_native_aim_rules_tests fruity_dialanche_native_collision_tests fruity_weavel_alt_form_parity_tests fruity_intent_touch_payload_tests fruity_demo_own_intent_tests
+          ctest --test-dir build/native -C RelWithDebInfo -R '^FruityPrime\.(VulkanNvidiaReflex|RawMouseMotion|NativeTouchState|NativeAimRules|DialancheNativeCollision|WeavelAltFormParity|IntentTouchPayload|DemoOwnIntent)$' --output-on-failure --no-tests=error
 
       - name: Archive installed Qt application
         shell: bash

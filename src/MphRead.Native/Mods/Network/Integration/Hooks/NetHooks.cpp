@@ -73,7 +73,7 @@ namespace MphRead::Mods::Network
 
     bool NetHooks::SnapshotPositions()
     {
-        return _snapshotOwnsPuppets && !NetSession::IsAuthority() && !NetSession::IsHost()
+        return _snapshotOwnsPuppets && !NetSession::IsAuthority()
             && NetSession::SnapshotAge() <= SnapshotStaleFrames;
     }
 
@@ -111,7 +111,7 @@ namespace MphRead::Mods::Network
         {
             return;
         }
-        if (!NetSession::IsHost() && !NetSession::IsAuthority())
+        if (!NetSession::IsAuthority())
         {
             NetTimingDiagnostics::Position(slot, false);
         }
@@ -154,7 +154,7 @@ namespace MphRead::Mods::Network
     OpenTK::Mathematics::Vector3 NetHooks::DrawnRemoteShot(
         Entities::PlayerEntity& player, OpenTK::Mathematics::Vector3 origin, OpenTK::Mathematics::Vector3 current)
     {
-        if (!NetSession::Active() || NetSession::IsAuthority() || NetSession::IsHost()
+        if (!NetSession::Active() || NetSession::IsAuthority()
             || player.SlotIndex() == NetSession::LocalSlot() || player.IsBot())
         {
             return current;
@@ -262,7 +262,7 @@ namespace MphRead::Mods::Network
         {
             return false;
         }
-        if (!NetSession::IsHost() && !NetSession::IsAuthority())
+        if (!NetSession::IsAuthority())
         {
             return false;
         }
@@ -380,7 +380,7 @@ namespace MphRead::Mods::Network
         }
     }
 
-    void NetHooks::AfterSimulation()
+    void NetHooks::AfterSimulation(Scene& scene)
     {
         if (!NetSession::Active() || !NetRoomChange::GameplayReady())
         {
@@ -390,11 +390,11 @@ namespace MphRead::Mods::Network
         {
             _intentPending = false;
             NetPlayerBridge::AttachLocalShot(_pendingIntent);
-            NetShotEvents::Attach(_pendingIntent);
+            NetShotEvents::Attach(_pendingIntent, NetSession::LocalSlot());
             NetBombs::AttachFor(NetSession::LocalSlot(), _pendingIntent, _pendingIntent.Frame);
             NetSession::SendIntent(_pendingIntent);
         }
-        if (!NetSession::IsAuthority() && !NetSession::IsHost())
+        if (!NetSession::IsAuthority())
         {
             NetPlayerBridge::TickConfirms();
         }
@@ -413,9 +413,9 @@ namespace MphRead::Mods::Network
             }
         }
 
-        if (NetSession::IsHost() || NetSession::IsAuthority())
+        if (NetSession::IsAuthority())
         {
-            NetSession::BroadcastSnapshot();
+            NetSession::BroadcastSnapshot(scene);
         }
         else if (NetSession::IsClient())
         {

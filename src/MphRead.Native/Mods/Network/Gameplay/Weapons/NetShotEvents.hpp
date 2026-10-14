@@ -52,10 +52,19 @@ namespace MphRead::Mods::Network
             bool Continuous = false;
             OpenTK::Mathematics::Vector3 Origin{};
             OpenTK::Mathematics::Vector3 Direction{};
+            std::uint8_t WeaponVariantIndex = IntentPacket::NoVariant;
+            bool PrimeHunter = false;
         };
 
         // After a shot leaves PlayerEntity::TryFireWeapon.
         static void Fired(Entities::PlayerEntity& shooter, const FiredShot& shot);
+        static void FinishShot(const Entities::PlayerEntity& shooter) noexcept;
+        [[nodiscard]] static std::optional<IntentPacket::ShotEvent> CurrentShotEvent(
+            const Entities::PlayerEntity& shooter) noexcept;
+        static void RecordHomingTarget(const Entities::PlayerEntity& shooter,
+            const IntentPacket::ShotTargetReference& target) noexcept;
+        static void RecordContinuousTarget(std::int32_t slot,
+            const IntentPacket::ShotTargetReference& target) noexcept;
         // The sequence of the shot this machine's own player fired this frame
         // (Fired runs before its projectiles spawn), for them to carry; 0 for
         // a shot that made no event.
@@ -75,7 +84,7 @@ namespace MphRead::Mods::Network
         // Fires every event waiting for this copy, alive or just killed.
         // Returns how many left.
         static std::int32_t FireReady(Entities::PlayerEntity& shooter);
-        static void Attach(IntentPacket& intent) noexcept;
+        static void Attach(IntentPacket& intent, std::int32_t slot) noexcept;
         // Before the frame-order check that refuses an older intent: its
         // movement is stale, its shots are not.
         static void Receive(std::int32_t slot, const IntentPacket& intent) noexcept;
@@ -111,6 +120,8 @@ namespace MphRead::Mods::Network
     private:
         [[nodiscard]] static bool Drives(const Entities::PlayerEntity& shooter) noexcept;
         [[nodiscard]] static bool Records(const Entities::PlayerEntity& shooter) noexcept;
+        static void AttachContinuousTarget(const Entities::PlayerEntity& player,
+            IntentPacket& intent) noexcept;
         // The log a shooter's shots go in on this machine: its own player's,
         // or a bot this server plays; none for anybody else.
         [[nodiscard]] static LocalShotLog* LogFor(const Entities::PlayerEntity& shooter) noexcept;
@@ -120,6 +131,16 @@ namespace MphRead::Mods::Network
         inline static std::array<RemoteShotQueue, Slots> _remote{};
         inline static std::array<ShotEventEligibilityTimeline, Slots> _eligibility{};
         inline static std::array<ShotEventLedger, Slots> _ledger{};
+        inline static std::array<std::optional<IntentPacket::ShotEvent>, Slots> _activeShots{};
+        inline static std::array<IntentPacket::ShotTargetReference, Slots> _continuousTargets{};
+        struct ContinuousFire final
+        {
+            bool Fired = false;
+            bool PrimeHunter = false;
+            std::uint32_t RoleFrame = 0;
+        };
+        // Consumed by the intent that carries it, one frame at a time.
+        inline static std::array<ContinuousFire, Slots> _continuousFire{};
         // Occupants gone: still part of what this machine received.
         inline static ShotQueueStats _departed{};
         inline static std::array<ShotQueueStats, Slots> _lastDeparted{};

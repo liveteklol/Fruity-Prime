@@ -1,4 +1,5 @@
 #include "Mods/Network/Testing/Combat/HitRig.hpp"
+#include "Mods/Network/Testing/Combat/HomingRigSchedule.hpp"
 
 #include "Mods/Network/Gameplay/Combat/HitLocation.hpp"
 #include "Mods/Network/Session/NetSession.hpp"
@@ -36,6 +37,7 @@ namespace MphRead::Mods::Network
         case HitRig::RigMode::Lanes: return "Lanes";
         case HitRig::RigMode::Observe: return "Observe";
         case HitRig::RigMode::Strafe: return "Strafe";
+        case HitRig::RigMode::Homing: return "Homing";
         }
         return std::to_string(static_cast<std::int32_t>(value));
     }
@@ -109,6 +111,7 @@ namespace MphRead::Mods::Network
         if (key == "lanes") { _mode = RigMode::Lanes; return true; }
         if (key == "observe" || key == "observer") { _mode = RigMode::Observe; return true; }
         if (key == "strafe" || key == "rewind") { _mode = RigMode::Strafe; return true; }
+        if (key == "homing") { _mode = RigMode::Homing; return true; }
         return false;
     }
 
@@ -243,7 +246,11 @@ namespace MphRead::Mods::Network
                 Runtime::IncrementInPlace(_placements);
             }
         }
-        else if (IsSniper())
+        else if (_mode == RigMode::Homing && IsSniper())
+        {
+            DriveHoming(player, c, other);
+        }
+        else if (_mode != RigMode::Homing && IsSniper())
         {
             DriveSniper(player, c, other);
         }
@@ -307,6 +314,32 @@ namespace MphRead::Mods::Network
         }
         c.Jump().SetIsDown(_mode == RigMode::Jump ? _frame % 24 < 3 : _frame % 90 < 3);
         Square(c, _mode == RigMode::Jump ? 50 : 80);
+        if (_morph && !player.IsMorphing() && !player.IsUnmorphing())
+        {
+            c.Morph().SetIsDown(_frame % 150 < 2);
+        }
+    }
+
+    void HitRig::DriveHoming(PlayerEntity& player, PlayerControls& c, PlayerEntity* other)
+    {
+        const HomingRigSchedule::Command command = HomingRigSchedule::At(_frame, NetSession::LocalSlot());
+        if (player.CurrentWeapon() != command.Weapon)
+        {
+            player.ModArmWeapon(command.Weapon);
+        }
+        player.ModSetAmmo(std::numeric_limits<std::int32_t>::max(), std::numeric_limits<std::int32_t>::max());
+        const bool onTarget = AimAt(player, other, ChestAimHeight);
+        if (onTarget)
+        {
+            Runtime::IncrementInPlace(_framesOnTarget);
+        }
+        if (other != nullptr)
+        {
+            const float range = OpenTK::Mathematics::Length(static_cast<OpenTK::Mathematics::Vector3>(other->Position)
+                - static_cast<OpenTK::Mathematics::Vector3>(player.Position));
+            HoldRange(player, c, range, command.Weapon == ::MphRead::BeamType::ShockCoil ? CloseRange : VolleyRange);
+        }
+        c.Shoot().SetIsDown(command.Trigger);
     }
 
     void HitRig::DriveWells(PlayerEntity& player, PlayerControls& c, PlayerEntity* other)

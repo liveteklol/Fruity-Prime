@@ -101,10 +101,6 @@ namespace MphRead::Mods::Network
                 {
                     ports.mapVoting.BroadcastMapChoices();
                 }
-                if (ports.authority.HasAuthority() && !ports.runsTheMatch)
-                {
-                    ports.stateBroadcast.NotifyAuthority(ports.authority.Current());
-                }
                 if (ports.reporter != nullptr)
                 {
                     const MatchDefinition definition = ports.currentDefinition(ports.context);
@@ -128,9 +124,7 @@ namespace MphRead::Mods::Network
                 lastReport = now;
                 std::string line = std::to_string(ports.peers.All().size()) + " peer(s) connected"
                     + (ports.matchLifecycle.Simulating() ? std::string(", authority = this server")
-                        : ports.authority.HasAuthority() ? ", authority = slot "
-                            + std::to_string(ports.authority.Current()->SlotIndex)
-                        : std::string(", no authority"))
+                        : std::string(", simulation inactive"))
                     + ", map " + ports.currentDefinition(ports.context).RoomKey.value_or("");
                 const float timeLimit = ports.currentDefinition(ports.context).TimeLimitSeconds;
                 if (timeLimit > 0)

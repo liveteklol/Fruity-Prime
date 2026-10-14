@@ -15,10 +15,11 @@
 namespace MphRead
 {
     enum class GameMode : std::uint8_t;
+    namespace Mods::Diagnostics { class HostedAuthorityCheck; }
 
     namespace Mods::Network
     {
-        class DedicatedServer;
+        class DedicatedServerProcess;
 
         class NetHostSession final
         {
@@ -39,9 +40,8 @@ namespace MphRead
             static void Stop();
 
         private:
-            static std::shared_ptr<DedicatedServer> _server;
-            static std::shared_ptr<std::stop_source> _cancel;
-            static std::shared_ptr<std::thread> _thread;
+            friend class Mods::Diagnostics::HostedAuthorityCheck;
+            static std::shared_ptr<DedicatedServerProcess> _server;
             static std::optional<std::string> _lastError;
             static std::mutex _lastErrorMutex;
 

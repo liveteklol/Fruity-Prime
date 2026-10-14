@@ -7,10 +7,13 @@
 #include "Mods/Network/Gameplay/Player/NetPlayerLifecycle.hpp"
 #include "Mods/Network/Gameplay/Replication/PlayerStateSnapshotCapture.hpp"
 #include "Mods/Network/Gameplay/Weapons/NetShotEvents.hpp"
+#include "Mods/Network/Gameplay/Weapons/HomingTargetReference.hpp"
+#include "Mods/Network/Bots/ServerBots.hpp"
 #include "Mods/Network/Session/NetSession.hpp"
 #include "Mods/Network/Testing/NetSessionFixture.hpp"
 #include "Mods/Network/Diagnostics/NetShotDiagnostics.hpp"
 #include "Mods/Network/Gameplay/Combat/NetUnlagged.hpp"
+#include "Mods/Network/Testing/NetUnlaggedFixture.hpp"
 #include "Mods/Network/Server/Match/ServerSim.hpp"
 #include "Mods/Network/Testing/ServerSimFixture.hpp"
 #include "Mods/Network/Testing/NetHitClaimsFixture.hpp"
@@ -20,6 +23,7 @@
 #include "Formats/Enums.hpp"
 #include "GameState.hpp"
 #include "Metadata/Metadata.hpp"
+#include "Metadata/Weapons.hpp"
 #include "NativeRuntime/System/Console.hpp"
 #include "NativeRuntime/System/ExceptionText.hpp"
 #include "NativeRuntime/System/Exceptions.hpp"
@@ -139,6 +143,161 @@ namespace MphRead::Mods::Network
         Runtime::ConsoleWriteLine("COMBAT PASS " + name);
     }
 
+    void NetCombatCheck::HomingAuthorityVariantMatches(PlayerEntity& shooter)
+    {
+        const Hunter previousHunter = shooter._hunter;
+        const std::int32_t previousPrimeHunter = GameState::PrimeHunter();
+        const auto previousWeapons = Weapons::Current;
+        const std::uint32_t frame = std::max<std::uint32_t>(NetSession::NetFrame(), 1U);
+        const auto previousFrameRole = NetUnlaggedFixture::CapturePrimeHistory(frame);
+        const auto previousNextFrameRole = NetUnlaggedFixture::CapturePrimeHistory(frame + 1U);
+        const std::array<std::uint32_t, 8> chargeFrames{
+            frame + 2U, frame + 3U, frame + 4U, frame + 5U,
+            frame + 6U, frame + 7U, frame + 8U, frame + 9U
+        };
+        std::array<NetUnlaggedFixture::PrimeHistoryEntry, chargeFrames.size()> previousChargeRoles{};
+        for (std::size_t i = 0; i < chargeFrames.size(); ++i)
+        {
+            previousChargeRoles[i] = NetUnlaggedFixture::CapturePrimeHistory(chargeFrames[i]);
+        }
+        Weapons::Current = Weapons::WeaponsMP;
+        shooter._hunter = Hunter::Samus;
+        GameState::PrimeHunter(1);
+        NetUnlaggedFixture::SetPrimeHistory(frame, 0);
+        const auto* primePowerBeam = NetHitClaimsFixture::FiredWeapon(
+            0, static_cast<std::uint8_t>(BeamType::PowerBeam), frame, 0);
+        const bool primeShockCoilDrains = NetHitClaimsFixture::Drains(
+            0, static_cast<std::uint8_t>(BeamType::ShockCoil), frame, 0);
+
+        NetUnlaggedFixture::SetPrimeHistory(frame + 1U, 1);
+        const auto* handedOffPowerBeam = NetHitClaimsFixture::FiredWeapon(
+            0, static_cast<std::uint8_t>(BeamType::PowerBeam), frame, 0);
+        const auto* nonPrimePowerBeam = NetHitClaimsFixture::FiredWeapon(
+            0, static_cast<std::uint8_t>(BeamType::PowerBeam), frame + 1U, 0);
+        const bool nonPrimeShockCoilDrains = NetHitClaimsFixture::Drains(
+            0, static_cast<std::uint8_t>(BeamType::ShockCoil), frame + 1U, 0);
+
+        Check(primePowerBeam == Weapons::WeaponsMP->at(9).get()
+            && handedOffPowerBeam == primePowerBeam
+            && nonPrimePowerBeam == Weapons::WeaponsMP->at(0).get(),
+            "AuthorityHomingVariantUsesPrimeRoleAtFireFrame");
+        Check(primeShockCoilDrains && !nonPrimeShockCoilDrains,
+            "AuthorityShockCoilLifeDrainUsesResolvedVariant");
+
+        NetShotEvents::Forget(shooter.SlotIndex());
+        const auto straightForCharge = [&](BeamType beam, Hunter hunter, bool primeHolder,
+            std::uint8_t charge, std::uint32_t shotFrame, std::uint32_t sequence)
+        {
+            shooter._hunter = hunter;
+            const std::int32_t primeSlot = primeHolder ? shooter.SlotIndex() : 1;
+            GameState::PrimeHunter(primeSlot);
+            NetUnlaggedFixture::SetPrimeHistory(shotFrame, primeSlot);
+            const Mods::Combat::WeaponVariantSelection variant = Mods::Combat::ResolveWeaponVariantAtFire(beam, hunter,
+                Weapons::GetAffinityBeam(hunter), false, primeHolder);
+
+            IntentPacket intent{};
+            intent.Frame = shotFrame;
+            intent.ShotHistoryLength = 1;
+            IntentPacket::ShotEvent& event = intent.ShotHistory[0];
+            event.Sequence = sequence;
+            event.Frame = shotFrame;
+            event.WeaponId = static_cast<std::uint8_t>(beam);
+            event.Charge = charge;
+            event.AckFrame = shotFrame;
+            event.WeaponVariantIndex = variant.Index;
+            if (primeHolder)
+            {
+                event.ShotFlags |= IntentPacket::ShotFlagPrimeHunter;
+            }
+            NetShotEvents::Receive(shooter.SlotIndex(), intent);
+            return NetHitClaimsFixture::StraightWeapon(shooter.SlotIndex(), event.WeaponId,
+                shotFrame, sequence);
+        };
+        const std::uint32_t firstChargeFrame = chargeFrames[0];
+        const bool missileUnchargedStraight = straightForCharge(
+            BeamType::Missile, Hunter::Samus, false, 0, firstChargeFrame, 1001);
+        const bool missileBelowThresholdStraight = straightForCharge(
+            BeamType::Missile, Hunter::Samus, false, 89, chargeFrames[1], 1002);
+        const bool missileChargedStraight = straightForCharge(
+            BeamType::Missile, Hunter::Samus, false, 90, chargeFrames[2], 1003);
+        const bool otherMissileChargedStraight = straightForCharge(
+            BeamType::Missile, Hunter::Kanden, false, 90, chargeFrames[3], 1004);
+        const bool primeMissileChargedStraight = straightForCharge(
+            BeamType::Missile, Hunter::Kanden, true, 90, chargeFrames[4], 1005);
+        const bool voltUnchargedStraight = straightForCharge(
+            BeamType::VoltDriver, Hunter::Kanden, false, 0, chargeFrames[5], 1006);
+        const bool voltBelowThresholdStraight = straightForCharge(
+            BeamType::VoltDriver, Hunter::Kanden, false, 119, chargeFrames[6], 1007);
+        const bool voltChargedStraight = straightForCharge(
+            BeamType::VoltDriver, Hunter::Kanden, false, 120, chargeFrames[7], 1008);
+        Check(missileUnchargedStraight && missileBelowThresholdStraight && !missileChargedStraight
+            && otherMissileChargedStraight && !primeMissileChargedStraight
+            && voltUnchargedStraight && voltBelowThresholdStraight && !voltChargedStraight,
+            "StraightWeaponUsesVariantAndChargeRecordedAtFire");
+        shooter._hunter = Hunter::Samus;
+        IntentPacket roleIntent{};
+        roleIntent.Frame = frame + 1U;
+        roleIntent.ShotHistoryLength = 1;
+        auto& roleShot = roleIntent.ShotHistory[0];
+        roleShot.Sequence = 2001;
+        roleShot.Frame = frame + 1U;
+        roleShot.AckFrame = frame + 1U;
+        roleShot.RoleFrame = frame;
+        roleShot.WeaponId = static_cast<std::uint8_t>(BeamType::PowerBeam);
+        roleShot.WeaponVariantIndex = 9;
+        roleShot.ShotFlags = IntentPacket::ShotFlagPrimeHunter;
+        NetShotEvents::Receive(shooter.SlotIndex(), roleIntent);
+        Check(NetHitClaimsFixture::FiredWeapon(shooter.SlotIndex(), roleShot.WeaponId,
+                roleShot.AckFrame, roleShot.Sequence) == Weapons::WeaponsMP->at(9).get(),
+            "AuthorityUsesRoleSnapshotInsteadOfInterpolatedAckAtHandoff");
+        roleShot.Sequence = 2002;
+        roleShot.RoleFrame = frame + 1U;
+        NetShotEvents::Receive(shooter.SlotIndex(), roleIntent);
+        Check(NetHitClaimsFixture::FiredWeapon(shooter.SlotIndex(), roleShot.WeaponId,
+                roleShot.AckFrame, roleShot.Sequence) == nullptr,
+            "AuthorityRejectsPrimeRoleAbsentFromNamedSnapshot");
+        NetShotEvents::Forget(shooter.SlotIndex());
+
+        shooter._hunter = previousHunter;
+        GameState::PrimeHunter(previousPrimeHunter);
+        Weapons::Current = previousWeapons;
+        NetUnlaggedFixture::RestorePrimeHistory(frame, previousFrameRole);
+        NetUnlaggedFixture::RestorePrimeHistory(frame + 1U, previousNextFrameRole);
+        for (std::size_t i = 0; i < chargeFrames.size(); ++i)
+        {
+            NetUnlaggedFixture::RestorePrimeHistory(chargeFrames[i], previousChargeRoles[i]);
+        }
+    }
+
+    void NetCombatCheck::ContinuousLockIsReplicated(PlayerEntity& owner, PlayerEntity& target)
+    {
+        const BeamType previousWeapon = owner.CurrentWeapon();
+        const bool previousBot = owner.IsBot();
+        const auto previousBotCount = ServerBots::Count();
+        const auto previousBotLevel = ServerBots::Level();
+        ServerBots::Configure(1, previousBotLevel, PlayerEntity::MaxPlayers());
+        owner.SetIsBot(true);
+        owner.ModArmWeapon(BeamType::ShockCoil);
+        const auto selected = HomingTargetReference::Encode(&target);
+        NetShotEvents::Fired(owner, {BeamType::ShockCoil, true, static_cast<Vector3>(owner.Position),
+            Vector3(1.0F, 0.0F, 0.0F), 7, false});
+        NetShotEvents::RecordContinuousTarget(owner.SlotIndex(), selected);
+
+        IntentPacket intent{};
+        NetShotEvents::AttachFor(owner.SlotIndex(), intent);
+        Check(selected.IsValid() && intent.HasContinuousTarget && intent.ContinuousTarget == selected,
+            "ContinuousLockIsReplicatedFromSelectedTarget");
+        IntentPacket idle{};
+        NetShotEvents::AttachFor(owner.SlotIndex(), idle);
+        Check(!idle.HasContinuousFire && !idle.HasContinuousTarget,
+            "ContinuousLockIsNotRepeatedOnAnIdleFrame");
+
+        owner.ModArmWeapon(previousWeapon);
+        NetShotEvents::RecordContinuousTarget(owner.SlotIndex(), {});
+        owner.SetIsBot(previousBot);
+        ServerBots::Configure(previousBotCount, previousBotLevel, PlayerEntity::MaxPlayers());
+    }
+
     std::int32_t NetCombatCheck::Run(const std::string& room)
     {
         std::string reason;
@@ -183,6 +342,8 @@ namespace MphRead::Mods::Network
             PlayerEntity& victim = *PlayerAt(1);
             Check(shooter.ModIsInPlay() && victim.ModIsInPlay() && sim.StepFailures() == 0, "spawn both players");
             Scene* scene = &ServerSimFixture::RequireScene(sim);
+            HomingAuthorityVariantMatches(shooter);
+            ContinuousLockIsReplicated(*PlayerAt(3), victim);
             InvalidHitClaimIsRefused();
             SpectatorInputAndDamageAreRefused();
             InvulnerableClaimIsRefused();
@@ -540,6 +701,7 @@ namespace MphRead::Mods::Network
         oldOccupantShot.Sequence = 1;
         oldOccupantShot.Frame = oldShotFrame;
         oldOccupantShot.WeaponId = static_cast<std::uint8_t>(BeamType::PowerBeam);
+        oldOccupantShot.WeaponVariantIndex = static_cast<std::uint8_t>(BeamType::PowerBeam);
         oldOccupantIntent.ShotHistory[0] = oldOccupantShot;
         oldOccupantIntent.ShotHistoryLength = 1;
         NetShotEvents::Receive(slot, oldOccupantIntent);
@@ -601,6 +763,7 @@ namespace MphRead::Mods::Network
             event.Frame = frame;
             event.AckFrame = frame;
             event.WeaponId = static_cast<std::uint8_t>(BeamType::PowerBeam);
+            event.WeaponVariantIndex = static_cast<std::uint8_t>(BeamType::PowerBeam);
             event.Origin = shooter.Position;
             event.Direction = UnitZ;
             intent.ShotHistory[0] = event;
@@ -898,7 +1061,8 @@ namespace MphRead::Mods::Network
         claim.Flags = static_cast<std::uint8_t>(claim.Flags | HitClaimPacket::FlagLethal);
         // Inflated, but under the coarse ceiling every claim is checked against
         // on arrival: only the settled damage can stop it.
-        claim.Damage = static_cast<std::uint16_t>(NetHitClaimsFixture::MaxDamageFor(0, claim.Beam) - 1);
+        claim.Damage = static_cast<std::uint16_t>(NetHitClaimsFixture::MaxDamageFor(
+            0, claim.Beam, claim.LaunchFrame, claim.ShotSequence) - 1);
         Check(claim.Damage >= victim.Health(), "DuplicateKill precondition: the claimed damage would kill");
         const std::int64_t duplicates = NetHitClaims::DuplicateHere();
         const std::int64_t capped = NetHitClaims::CappedHere();

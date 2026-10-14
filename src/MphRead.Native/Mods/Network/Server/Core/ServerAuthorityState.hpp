@@ -7,7 +7,7 @@
 
 namespace MphRead::Mods::Network
 {
-    // Owns the selected client authority and the epoch that fences its packets.
+    // Fences server packets; no peer may acquire simulation authority.
     class ServerAuthorityState final
     {
     public:
@@ -20,10 +20,10 @@ namespace MphRead::Mods::Network
         [[nodiscard]] const PeerHandle& Current() const noexcept;
         [[nodiscard]] std::uint64_t Epoch() const noexcept;
 
-        // The first client authority advances the epoch exactly once.
+        // Legacy grants are rejected without changing the server epoch.
         [[nodiscard]] bool TryClaim(const PeerHandle& peer) noexcept;
 
-        // Authority removal advances the epoch even when there is no successor.
+        // Legacy migration is ignored.
         void TransferTo(const PeerHandle& peer) noexcept;
 
     private:

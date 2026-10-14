@@ -111,27 +111,4 @@ namespace MphRead::Mods::Network
         }
     }
 
-    void ServerStateBroadcastChannel::NotifyAuthority(const ServerPeerRegistry::PeerHandle& peer)
-    {
-        MatchStatePacket match = BuildMatchState(*_ports.Now);
-        match.Write(*_ports.Scratch);
-        if (_ports.Transport == nullptr || *_ports.Transport == nullptr)
-        {
-            return;
-        }
-        (*_ports.Transport)->Send(peer->EndPoint, PacketType::MatchState,
-            std::span<const std::uint8_t>(*_ports.Scratch).first(MatchStatePacket::Size));
-        RosterPacket roster = BuildRoster();
-        roster.Write(*_ports.Scratch);
-        (*_ports.Transport)->Send(peer->EndPoint, PacketType::Roster,
-            std::span<const std::uint8_t>(*_ports.Scratch).first(RosterPacket::Size));
-        _ports.Snapshots->SendAuthoritySeed(peer, _ports.Transport->get());
-        (*_ports.Scratch)[0] = static_cast<std::uint8_t>(peer->SlotIndex);
-        Runtime::WriteUInt16LittleEndian(std::span(*_ports.Scratch).subspan(1), *_ports.MatchId);
-        Runtime::WriteUInt64LittleEndian(std::span(*_ports.Scratch).subspan(3), _ports.Authority->Epoch());
-        Runtime::WriteUInt16LittleEndian(std::span(*_ports.Scratch).subspan(11),
-            _ports.Slots->Generation(static_cast<std::size_t>(peer->SlotIndex)));
-        (*_ports.Transport)->Send(peer->EndPoint, PacketType::Authority,
-            std::span<const std::uint8_t>(*_ports.Scratch).first(13));
-    }
 }

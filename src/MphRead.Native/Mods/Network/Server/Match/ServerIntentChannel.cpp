@@ -37,7 +37,7 @@ namespace MphRead::Mods::Network
         }
 
         const ServerPeerRegistry::PeerHandle peer = _peers.Find(packet.Sender);
-        if (peer == nullptr || (!_authority.HasAuthority() && !_simulation.Running()))
+        if (peer == nullptr)
         {
             return;
         }

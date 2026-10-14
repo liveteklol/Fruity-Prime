@@ -32,6 +32,8 @@ namespace MphRead::Mods::Network
         [[nodiscard]] std::uint32_t LatestAck(std::int32_t slot) const noexcept;
         [[nodiscard]] std::optional<std::uint32_t> AckForFrame(
             std::int32_t slot, std::uint32_t frame) const noexcept;
+        [[nodiscard]] std::optional<std::uint32_t> RoleForFrame(
+            std::int32_t slot, std::uint32_t frame) const noexcept;
         [[nodiscard]] const ClaimShotRay* NearestRay(
             std::int32_t slot, std::uint32_t launch, std::uint32_t maxGapExclusive) const noexcept;
 
@@ -42,6 +44,7 @@ namespace MphRead::Mods::Network
         {
             std::uint32_t IntentFrame = 0;
             std::uint32_t AckFrame = 0;
+            std::uint32_t RoleFrame = 0;
         };
 
         std::array<std::array<ClaimShotRay, ShotRayCapacity>, SlotCapacity> _shotRays{};

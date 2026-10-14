@@ -107,6 +107,7 @@ namespace MphRead::Mods::Network
 
     private:
         void Enqueue(const IntentPacket::ShotEvent& event) noexcept;
+        [[nodiscard]] bool MergeQueued(const IntentPacket::ShotEvent& event) noexcept;
         void PopFront() noexcept;
         void AwaitSkipped(std::uint32_t from, std::uint32_t to) noexcept;
         void Await(std::uint32_t sequence) noexcept;

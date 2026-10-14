@@ -219,9 +219,15 @@ namespace
         intent.ShotDirection = { 0.0F, 0.0F, 1.0F };
         intent.ShotHistoryLength = 1;
         intent.ShotHistory[0] = { 12, 599, 4, 3, 590, { 4.0F, 5.0F, 6.0F }, { 0.0F, 0.0F, 1.0F } };
+        intent.ShotHistory[0].WeaponVariantIndex = 13;
+        intent.ShotHistory[0].ShotFlags = IntentPacket::ShotFlagPrimeHunter | IntentPacket::ShotFlagTargetResolved;
+        intent.ShotHistory[0].Target = { IntentPacket::ShotTargetKind::Player, 0xFF, 3, 7, 9, -1, 0 };
         intent.HasBombs = true;
         intent.BombsLength = 1;
         intent.Bombs[0] = { 2, { 7.0F, 8.0F, 9.0F }, false };
+        intent.HasContinuousTarget = true;
+        intent.ContinuousTarget = { IntentPacket::ShotTargetKind::SceneEntity,
+            static_cast<std::uint8_t>(::MphRead::EntityType::Door), 0xFF, 0, 0, 24, 0 };
         add("Intent", Encode<IntentPacket::MaxWireSize>([&intent](auto bytes) { intent.Write(bytes); }));
 
         DamageEvent damage;
@@ -268,6 +274,7 @@ namespace
         snapshot.Rng1 = 0x10203040U;
         snapshot.Rng2 = 0xA0B0C0D0U;
         snapshot.PlayerCount = 3;
+        snapshot.PrimeHunterSlot = 2;
         snapshot.MatchId = match.MatchId;
         snapshot.AuthorityEpoch = match.AuthorityEpoch;
         add("SnapshotHeader", Encode<SnapshotHeader::Size>([&snapshot](auto bytes) { snapshot.Write(bytes); }));
@@ -425,13 +432,13 @@ namespace
             {
                 if (!RoundTrips<T>(packet.Bytes))
                 {
-                    std::cerr << "Protocol 31 decode/encode mismatch: " << label << '\n';
+                    std::cerr << "Protocol 33 decode/encode mismatch: " << label << '\n';
                     return false;
                 }
                 return true;
             }
         }
-        std::cerr << "Missing Protocol 31 round-trip fixture: " << label << '\n';
+        std::cerr << "Missing Protocol 33 round-trip fixture: " << label << '\n';
         return false;
     }
 
@@ -446,20 +453,20 @@ namespace
                 T decoded{};
                 if (!tryRead(std::span<const std::uint8_t>(packet.Bytes), decoded))
                 {
-                    std::cerr << "Protocol 31 rejected valid round-trip fixture: " << label << '\n';
+                    std::cerr << "Protocol 33 rejected valid round-trip fixture: " << label << '\n';
                     return false;
                 }
                 std::vector<std::uint8_t> encoded(packet.Bytes.size());
                 decoded.Write(std::span<std::uint8_t>(encoded));
                 if (encoded != packet.Bytes)
                 {
-                    std::cerr << "Protocol 31 decode/encode mismatch: " << label << '\n';
+                    std::cerr << "Protocol 33 decode/encode mismatch: " << label << '\n';
                     return false;
                 }
                 return true;
             }
         }
-        std::cerr << "Missing Protocol 31 round-trip fixture: " << label << '\n';
+        std::cerr << "Missing Protocol 33 round-trip fixture: " << label << '\n';
         return false;
     }
 }
@@ -467,7 +474,7 @@ namespace
 int main(int argc, char** argv)
 {
     using namespace MphRead::Mods::Network;
-    static_assert(NetConfig::ProtocolVersion == 31);
+    static_assert(NetConfig::ProtocolVersion == 33);
     static_assert(HelloPacket::Size == 38);
     static_assert(static_cast<std::uint8_t>(PacketType::Hello) == 1);
     static_assert(static_cast<std::uint8_t>(PacketType::HitClaim) == 30);
@@ -527,7 +534,7 @@ int main(int argc, char** argv)
     std::ifstream input(argv[1]);
     if (!input)
     {
-        std::cerr << "Could not open Protocol 31 golden file: " << argv[1] << '\n';
+        std::cerr << "Could not open Protocol 33 golden file: " << argv[1] << '\n';
         return 2;
     }
     std::map<std::string, std::string> expected;
@@ -542,7 +549,7 @@ int main(int argc, char** argv)
         if (separator == std::string::npos || separator == 0
             || !expected.emplace(line.substr(0, separator), line.substr(separator + 1)).second)
         {
-            std::cerr << "Malformed or duplicate Protocol 31 golden entry.\n";
+            std::cerr << "Malformed or duplicate Protocol 33 golden entry.\n";
             return 2;
         }
     }
@@ -553,7 +560,7 @@ int main(int argc, char** argv)
         const auto found = expected.find(packet.Name);
         if (found == expected.end() || found->second != Hex(packet.Bytes))
         {
-            std::cerr << "Protocol 31 raw-wire mismatch: " << packet.Name << '\n';
+            std::cerr << "Protocol 33 raw-wire mismatch: " << packet.Name << '\n';
             passed = false;
         }
     }
@@ -562,6 +569,6 @@ int main(int argc, char** argv)
         std::cerr << "Expected " << expected.size() << " golden packets; captured " << packets.size() << ".\n";
         return 1;
     }
-    std::cout << "Protocol 31 raw-wire goldens passed: " << packets.size() << " packet layouts.\n";
+    std::cout << "Protocol 33 raw-wire goldens passed: " << packets.size() << " packet layouts.\n";
     return 0;
 }

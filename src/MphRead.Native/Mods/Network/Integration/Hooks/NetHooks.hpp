@@ -47,7 +47,7 @@ namespace MphRead::Mods::Network
             Entities::PlayerEntity& player, std::int32_t slot);
         [[nodiscard]] static bool ForceSpawn(Entities::PlayerEntity& player);
         static void AfterInput(MphRead::Scene& scene);
-        static void AfterSimulation();
+        static void AfterSimulation(MphRead::Scene& scene);
 
     private:
         static constexpr std::uint32_t SnapshotStaleFrames = 12U;

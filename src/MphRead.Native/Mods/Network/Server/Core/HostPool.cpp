@@ -1,6 +1,7 @@
 #include "Mods/Network/Server/Core/HostPool.hpp"
 
-#include "Mods/Network/Server/Core/DedicatedServer.hpp"
+#include "Mods/Network/Server/Core/LocalServer.hpp"
+#include "Mods/Network/Server/Core/DedicatedServerProcess.hpp"
 #include "Mods/Network/Server/Match/MapRotation.hpp"
 #include "Mods/Network/Discovery/NetMaster.hpp"
 #include "Entities/Players/PlayerEntity.hpp"
@@ -35,6 +36,11 @@ namespace MphRead::Mods::Network
         _last = last;
     }
 
+    HostPool::~HostPool()
+    {
+        StopAll("host pool closed");
+    }
+
     std::string HostPool::Describe() const
     {
         return CanHost()
@@ -50,7 +56,7 @@ namespace MphRead::Mods::Network
         for (std::int32_t i = static_cast<std::int32_t>(_hosted.size()) - 1; i >= 0; i--)
         {
             const std::shared_ptr<Hosted> previous = _hosted[static_cast<std::size_t>(i)];
-            if (previous->Asker == askerAddress && previous->Server->PeerCount() == 0)
+            if (previous->Asker == askerAddress && previous->Server->PlayerCount() == 0)
             {
                 Stop(previous, "the same player asked for another game");
             }
@@ -77,52 +83,35 @@ namespace MphRead::Mods::Network
             Runtime::RandomNumberGeneratorFill(bytes.data(), bytes.size());
             ownerToken = Runtime::Guid(bytes);
         }
-        const auto server = std::make_shared<DedicatedServer>(port,
-            std::clamp(static_cast<std::int32_t>(request.MaxPlayers), 2, Entities::PlayerEntity::SlotCapacity),
-            rotation);
-        server->ServerName(name);
-        server->SessionPolicy(request.Policy);
-        server->Format(request.Format);
-        server->OwnerToken(ownerToken);
-        server->Reporter(ReporterFactory ? ReporterFactory() : nullptr);
-        server->RunsTheMatch(false);
-        server->SetSessionOptions(request.RequireReady, request.AllowJoinInProgress);
-        const auto cancel = std::make_shared<std::stop_source>();
+        DedicatedServerProcessOptions options{};
+        options.Port = port;
+        options.MaxPlayers = std::clamp(static_cast<std::int32_t>(request.MaxPlayers), 2,
+            Entities::PlayerEntity::SlotCapacity);
+        options.Name = name;
+        for (const auto& map : rotation->Entries()) { options.Rotation.emplace_back(map->RoomKey, map->Mode); }
+        options.TimeLimit = request.TimeLimit;
+        options.PointGoal = request.PointGoal;
+        options.Policy = request.Policy;
+        options.Format = request.Format;
+        options.OwnerToken = ownerToken;
+        options.Reporter = ReporterFactory ? ReporterFactory() : nullptr;
+        options.RequireReady = request.RequireReady;
+        options.AllowJoinInProgress = request.AllowJoinInProgress;
+        std::string error;
+        const auto server = DedicatedServerProcess::Start(options, error);
+        if (server == nullptr)
+        {
+            HostReplyPacket failed{};
+            failed.Reason = error;
+            return failed;
+        }
         const auto entry = std::make_shared<Hosted>();
         entry->Server = server;
-        entry->Cancel = cancel;
         entry->Port = port;
         entry->Name = name;
         entry->Asker = askerAddress;
         entry->StartedAt = now;
         entry->LastOccupied = now;
-        const std::function<void(const std::string&)> log = Log;
-        std::thread thread([server, cancel, port, log]()
-        {
-            Runtime::SetCurrentThreadName("FruityPrime hosted " + std::to_string(port));
-            try
-            {
-                server->Run(cancel->get_token());
-            }
-            catch (...)
-            {
-                log("game on " + std::to_string(port) + " stopped: "
-                    + Runtime::ExceptionMessage(std::current_exception()));
-            }
-        });
-        thread.detach();
-        for (std::int32_t i = 0; i < 50 && !server->Listening(); i++)
-        {
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        }
-        if (!server->Listening())
-        {
-            cancel->request_stop();
-            server->Stop();
-            HostReplyPacket failed{};
-            failed.Reason = "could not listen on port " + std::to_string(port);
-            return failed;
-        }
         _hosted.push_back(entry);
         Log("started \"" + name + "\" on port " + std::to_string(port) + " for " + AddressText(askerAddress)
             + " (" + request.RoomKey.value_or("") + ", " + ::MphRead::ToString(mode) + ", "
@@ -145,6 +134,7 @@ namespace MphRead::Mods::Network
             {
                 continue;
             }
+            if (!LocalServer::CanBind(port)) { continue; }
             const auto cooling = _cooling.find(port);
             if (cooling != _cooling.end())
             {
@@ -164,7 +154,15 @@ namespace MphRead::Mods::Network
         for (std::int32_t i = static_cast<std::int32_t>(_hosted.size()) - 1; i >= 0; i--)
         {
             const std::shared_ptr<Hosted> entry = _hosted[static_cast<std::size_t>(i)];
-            if (entry->Server->PeerCount() > 0)
+            if (!entry->Server->Alive())
+            {
+                Stop(entry, "server process exited", now);
+                continue;
+            }
+            if (now - entry->LastProbe < 1.0) { continue; }
+            entry->LastProbe = now;
+            const auto count = entry->Server->PlayerCount();
+            if (!count.has_value() || *count > 0)
             {
                 entry->LastOccupied = now;
                 continue;
@@ -189,12 +187,7 @@ namespace MphRead::Mods::Network
     void HostPool::Stop(const std::shared_ptr<Hosted>& entry, const std::string& why, double now)
     {
         Log("stopping \"" + entry->Name + "\" on port " + std::to_string(entry->Port) + ": " + why);
-        entry->Cancel->request_stop();
         entry->Server->Stop();
-        for (std::int32_t i = 0; i < 100 && entry->Server->Listening(); i++)
-        {
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        }
         const auto found = std::find(_hosted.begin(), _hosted.end(), entry);
         if (found != _hosted.end())
         {

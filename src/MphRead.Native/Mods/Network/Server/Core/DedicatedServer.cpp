@@ -296,7 +296,8 @@ namespace MphRead::Mods::Network
             }
             Log(Simulating()
                 ? "this server runs the match itself"
-                : "hosted game: the first client to connect runs the match");
+                : _runsTheMatch ? "this server will run the match when the lobby starts"
+                : "simulation disabled for the protocol fixture");
             Log("rotation: " + std::to_string(_rotation->Entries().size()) + " map(s), starting on "
                 + _rotation->Current()->ToString());
             Log(_hosts.Describe());

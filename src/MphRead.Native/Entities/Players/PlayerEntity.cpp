@@ -28,6 +28,7 @@
 #include "../../Metadata/Metadata.hpp"
 #include "../../Metadata/Player.hpp"
 #include "../../Metadata/Weapons.hpp"
+#include "Mods/Combat/WeaponVariant.hpp"
 #include "Mods/Network/Gameplay/Combat/NetDamage.hpp"
 #include "Mods/Network/Gameplay/Player/PlayerCombatPolicy.hpp"
 #include "Mods/Network/Gameplay/Combat/NetHitPrediction.hpp"
@@ -1468,18 +1469,10 @@ namespace MphRead::Entities
         UpdateZoom(false);
         _previousWeapon = _currentWeapon;
         _currentWeapon = _weaponSelection = beam;
-        if (beam == Weapons::GetAffinityBeam(_hunter)
-            || (GameState::SinglePlayer()
-                && ((_hunter == MphRead::Hunter::Samus
-                        && (beam == MphRead::BeamType::PowerBeam || beam == MphRead::BeamType::OmegaCannon))
-                    || (_hunter == MphRead::Hunter::Guardian && beam == MphRead::BeamType::VoltDriver))))
-        {
-            RequireReference(_equipInfo).Weapon = CurrentWeaponPtrAt(index + 9);
-        }
-        else
-        {
-            RequireReference(_equipInfo).Weapon = CurrentWeaponPtrAt(index);
-        }
+        const Mods::Combat::WeaponVariantSelection variant = Mods::Combat::ResolveEquippedWeaponVariant(
+            beam, _hunter, Weapons::GetAffinityBeam(_hunter), GameState::SinglePlayer());
+        assert(variant.Index != 0xFF);
+        RequireReference(_equipInfo).Weapon = CurrentWeaponPtrAt(variant.Index);
         RequireReference(_equipInfo).ChargeLevel = 0;
         RequireReference(_equipInfo).SmokeLevel = 0;
         RequireReference(_equipInfo).GetAmmo = [this, ammoType]() {

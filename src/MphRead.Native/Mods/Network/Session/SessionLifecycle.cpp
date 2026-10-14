@@ -70,30 +70,8 @@ namespace MphRead::Mods::Network
     void SessionLifecycle::StartHost(Ports& ports, std::int32_t port)
     {
         Stop(ports);
-        try
-        {
-            ports.connection.Open(port);
-            ports.runtime.SetRole(NetRole::Host);
-            ports.runtime.SetLocalSlot(0);
-            SessionPeers().ResetHostGenerations();
-            SessionPeers().SetHostGeneration(0, 1);
-            NetPlayerLifecycle::SetOccupant(0, 1);
-            SessionSlots().SetOccupied(0, true);
-            MatchStatePacket match{};
-            match.MatchId = 1;
-            match.AuthorityEpoch = static_cast<std::uint64_t>(Runtime::DateTimeUtcNowTicks());
-            ports.matchIdentity.SetAuthoritative(match);
-            ports.runtime.ResetFrame();
-            ports.runtime.ClearLastError();
-            SessionClaims.Start(ports.connection, SessionPeers(), ports.matchIdentity);
-            Runtime::ConsoleWriteLine("[net] hosting on UDP " + Runtime::ToString(ports.connection.LocalPort()));
-        }
-        catch (const std::exception& ex)
-        {
-            ports.runtime.SetLastError(ex.what());
-            Runtime::ConsoleWriteLine("[net] host failed: " + std::string(ex.what()));
-            ports.runtime.SetRole(NetRole::Offline);
-        }
+        ports.runtime.SetLastError("a hosted game must start a dedicated server and join as a client");
+        throw std::logic_error("client-host simulation is no longer supported");
     }
 
     void SessionLifecycle::StartClient(Ports& ports, const std::string& address, std::int32_t port,

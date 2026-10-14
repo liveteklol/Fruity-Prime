@@ -11,13 +11,8 @@ namespace MphRead::Mods::Network
 
     bool SessionAuthorityState::BecomeClientAuthority() noexcept
     {
-        if (_isAuthority)
-        {
-            return false;
-        }
-        _isAuthority = true;
-        _needsStateSync = true;
-        return true;
+        // Legacy authority packets cannot promote a client.
+        return false;
     }
 
     bool SessionAuthorityState::StandDown() noexcept

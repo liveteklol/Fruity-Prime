@@ -1898,7 +1898,7 @@ namespace MphRead
             Mods::Network::NetPowerUps::Observe();
             Mods::Network::NetPickupClaims::Tick();
             Mods::Network::NetPowerUpPrediction::Tick();
-            Mods::Network::NetHooks::AfterSimulation();
+            Mods::Network::NetHooks::AfterSimulation(*this);
             Mods::Network::NetHitPrediction::Tick();
             if (!Mods::Headless::Active())
             {
@@ -3819,7 +3819,9 @@ namespace MphRead
                     player->AiData->Process();
                 }
             }
-            if (playerActive)
+            // The mode HUD is pictures only, and a headless process built
+            // none of them: a dedicated server in Prime Hunter crashed here.
+            if (playerActive && !Mods::Headless::Active())
             {
                 main->ProcessModeHud();
             }
@@ -4181,7 +4183,9 @@ namespace MphRead
             return;
         }
         const AfterFade afterFade = _afterFade;
-        if (afterFade == AfterFade::PlayMovie)
+        // A headless process has no screen to show a film on, and the film's
+        // decoding tasks outlive a scene that a check unloads behind them.
+        if (afterFade == AfterFade::PlayMovie && !Mods::Headless::Active())
         {
             PlayMovie(_movieSettings.MovieId);
         }

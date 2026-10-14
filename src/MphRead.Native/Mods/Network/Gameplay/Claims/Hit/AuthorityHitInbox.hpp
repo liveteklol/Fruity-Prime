@@ -34,6 +34,8 @@ namespace MphRead::Mods::Network
             std::uint8_t Flags = 0;
             std::uint32_t AckFrame = 0;
             std::uint32_t LaunchFrame = 0;
+            std::uint32_t RoleFrame = 0;
+            std::uint32_t IntentFrame = 0;
             std::uint32_t ShotSequence = 0;
             OpenTK::Mathematics::Vector3 HitPoint{};
             OpenTK::Mathematics::Vector3 Impulse{};

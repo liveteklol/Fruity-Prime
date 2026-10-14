@@ -1,4 +1,6 @@
 #include "Mods/Network/Server/Core/LocalServer.hpp"
+#include "Mods/Network/Server/Core/DedicatedServerProcess.hpp"
+#include "Mods/Network/Discovery/NetMaster.hpp"
 
 #include "Mods/Network/Server/Match/MapRotation.hpp"
 #include "Mods/Network/Protocol/NetProtocol.hpp"
@@ -72,6 +74,23 @@ namespace MphRead::Mods::Network
     bool LocalServer::Ready()
     {
         return Available().has_value();
+    }
+
+    std::optional<ServerBinary> LocalServer::HostingBinary()
+    {
+        const auto canonical = Runtime::PathCombine(Runtime::AppContextBaseDirectory(),
+            std::string(Mods::Branding::FileName) + (Runtime::IsWindows() ? ".exe" : ""));
+        if (Runtime::FileExists(canonical))
+        {
+            return ServerBinary(canonical, {}, Platform::AppPaths::UserDataDirectory(), false);
+        }
+        const auto own = OwnBinary();
+        return own.has_value() ? own : Available();
+    }
+
+    void LocalServer::PreparePaths(const std::string& directory)
+    {
+        CopyPaths(directory);
     }
 
     std::optional<ServerBinary> LocalServer::OwnBinary()
@@ -197,95 +216,32 @@ namespace MphRead::Mods::Network
             _lastError = "there is no server binary on this machine yet";
             return -1;
         }
-        const ServerBinary& binary = *found;
-        const std::optional<std::string> problem = Launcher::GameFiles::Problem();
-        if (problem.has_value())
-        {
-            _lastError = "a server runs the match itself and needs the game files: " + *problem;
-            return -1;
-        }
         const std::int32_t port = FreePort();
         if (port < 0)
         {
             _lastError = "no free UDP port could be found for a server";
             return -1;
         }
-        const std::string rotationPath = Runtime::PathCombine(binary.WorkingDirectory, "maprotation-launcher.txt");
-        try
+        DedicatedServerProcessOptions options{};
+        options.Port = port;
+        options.Name = serverName;
+        options.MaxPlayers = maxPlayers;
+        options.Rotation = rotation;
+        options.TimeLimit = timeLimit;
+        options.PointGoal = pointGoal;
+        options.Policy = lobby ? ServerSessionPolicy::Lobby : ServerSessionPolicy::Continuous;
+        options.OwnerToken = _ownerToken;
+        if (listed) { options.Reporter = std::make_shared<MasterReporter>(masterHost, masterPort); }
+        std::string error;
+        const auto room = DedicatedServerProcess::Start(options, error, &*found, cancel);
+        if (room == nullptr)
         {
-            MapRotation::WriteList(rotationPath, rotation, timeLimit, pointGoal);
-            CopyPaths(binary.WorkingDirectory);
-        }
-        catch (const std::exception& ex)
-        {
-            _lastError = std::string("the rotation could not be written: ") + ex.what();
+            _lastError = error;
             return -1;
         }
-        Runtime::ProcessStartInfo start{};
-        start.FileName = binary.Executable;
-        start.WorkingDirectory = binary.WorkingDirectory;
-        start.UseShellExecute = Runtime::IsWindows();
-        start.CreateNoWindow = false;
-        for (const std::string& argument : binary.Prefix)
-        {
-            start.ArgumentList.push_back(argument);
-        }
-        start.ArgumentList.emplace_back("-server");
-        if (lobby)
-        {
-            start.ArgumentList.emplace_back("-lobby");
-            start.ArgumentList.emplace_back("-ownertoken");
-            start.ArgumentList.push_back(_ownerToken.ToString("N"));
-        }
-        start.ArgumentList.emplace_back("-port");
-        start.ArgumentList.push_back(std::to_string(port));
-        start.ArgumentList.emplace_back("-players");
-        start.ArgumentList.push_back(std::to_string(maxPlayers));
-        start.ArgumentList.emplace_back("-servername");
-        start.ArgumentList.push_back(serverName);
-        start.ArgumentList.emplace_back("-rotation");
-        start.ArgumentList.push_back(rotationPath);
-        start.ArgumentList.emplace_back("-master");
-        start.ArgumentList.push_back(masterHost);
-        start.ArgumentList.emplace_back("-masterport");
-        start.ArgumentList.push_back(std::to_string(masterPort));
-        if (!listed)
-        {
-            start.ArgumentList.emplace_back("-nomaster");
-        }
-        start.ArgumentList.emplace_back("-noautoupdate");
-        try
-        {
-            _running = Runtime::Process::Start(start);
-            if (_running == nullptr)
-            {
-                _lastError = "the server process would not start";
-                return -1;
-            }
-        }
-        catch (const std::exception& ex)
-        {
-            _lastError = std::string("the server could not be started: ") + ex.what();
-            return -1;
-        }
-        for (std::int32_t i = 0; i < 120 && !cancel.stop_requested(); i++)
-        {
-            if (_running->HasExited() && _running->ExitCode() != 0)
-            {
-                _lastError = "the server stopped while starting up -- its window says "
-                    "why; usually the game files or a port already in use";
-                _running = nullptr;
-                return -1;
-            }
-            if (NetStatus::Query("127.0.0.1", port, false).Online)
-            {
-                return port;
-            }
-            std::this_thread::sleep_for(std::chrono::milliseconds(250));
-        }
-        _lastError = "the server did not answer in thirty seconds";
-        Stop();
-        return -1;
+        _running = room->ProcessHandle();
+        room->Detach();
+        return port;
     }
 
     void LocalServer::CopyPaths(const std::string& directory)

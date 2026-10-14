@@ -100,7 +100,7 @@ namespace MphRead::Mods::Network
     bool NetPlayerLifecycle::CanSpawn()
     {
         return !NetSession::Active() || (NetRoomChange::GameplayReady()
-            && (NetSession::IsHost() || NetSession::IsAuthority() || _applyingSpawn));
+            && (NetSession::IsAuthority() || _applyingSpawn));
     }
 
     std::uint16_t NetPlayerLifecycle::Get(std::int32_t slot) noexcept
@@ -153,7 +153,7 @@ namespace MphRead::Mods::Network
         beam.ModShotSequence = owner != nullptr && beam.Owner().get() == owner
             ? NetShotEvents::SequenceOfShotFired(*owner) : 0U;
         beam.ModShooterAck = 0;
-        if (owner != nullptr && NetSession::Active() && !NetSession::IsAuthority() && !NetSession::IsHost()
+        if (owner != nullptr && NetSession::Active() && !NetSession::IsAuthority()
             && owner->SlotIndex() != NetSession::LocalSlot() && !owner->IsBot() && owner->SlotIndex() >= 0
             && static_cast<std::size_t>(owner->SlotIndex()) < NetSession::RemotePlayerSlots
             && NetSession::HasRemoteIntent(owner->SlotIndex()))
@@ -210,7 +210,7 @@ namespace MphRead::Mods::Network
     {
         // On every machine that plays a bot: a server's own, a client's AI.
         NetBotRoles::PrepareSpawn(player);
-        if (!NetSession::Active() || _applyingSpawn || (!NetSession::IsHost() && !NetSession::IsAuthority()))
+        if (!NetSession::Active() || _applyingSpawn || (!NetSession::IsAuthority()))
         {
             return;
         }

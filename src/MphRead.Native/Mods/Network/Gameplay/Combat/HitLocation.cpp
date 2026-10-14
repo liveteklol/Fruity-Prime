@@ -104,7 +104,7 @@ namespace MphRead::Mods::Network
         line += ',' + std::to_string(WallMs());
         line += ',' + std::to_string(NetSession::NetFrame());
         line += ',' + std::to_string(NetSession::AppliedSnapshotFrame());
-        line += NetSession::IsAuthority() || NetSession::IsHost() ? ",1" : ",0";
+        line += NetSession::IsAuthority() ? ",1" : ",0";
         line += ',' + std::to_string(NetSession::LocalSlot());
         line += ',' + std::to_string(shooter);
         line += ',' + std::to_string(victim.SlotIndex());
@@ -232,7 +232,7 @@ namespace MphRead::Mods::Network
 
     void HitLocation::Watch()
     {
-        if (!NetSession::Active() || NetSession::IsAuthority() || NetSession::IsHost())
+        if (!NetSession::Active() || NetSession::IsAuthority())
         {
             return;
         }

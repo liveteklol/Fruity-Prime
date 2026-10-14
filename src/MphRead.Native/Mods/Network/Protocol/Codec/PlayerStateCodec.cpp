@@ -182,7 +182,8 @@ namespace MphRead::Mods::Network
         W32(Slice(dest, 0), Frame);
         W32(Slice(dest, 4), Rng1);
         W32(Slice(dest, 8), Rng2);
-        At(dest, 12) = PlayerCount;
+        At(dest, 12) = static_cast<std::uint8_t>((PlayerCount & 0x0F)
+            | ((PrimeHunterSlot == 0xFF ? 0 : PrimeHunterSlot + 1) << 4));
     }
     SnapshotHeader SnapshotHeader::Read(std::span<const std::uint8_t> src)
     {
@@ -192,7 +193,9 @@ namespace MphRead::Mods::Network
         packet.Frame = R32(Slice(src, 0));
         packet.Rng1 = R32(Slice(src, 4));
         packet.Rng2 = R32(Slice(src, 8));
-        packet.PlayerCount = At(src, 12);
+        packet.PlayerCount = At(src, 12) & 0x0F;
+        const std::uint8_t role = At(src, 12) >> 4;
+        packet.PrimeHunterSlot = role == 0 ? 0xFF : role - 1;
         return packet;
     }
 }

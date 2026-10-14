@@ -205,7 +205,7 @@ namespace MphRead::Mods::Network
         {
             return true;
         }
-        if (NetSession::IsHost() || NetSession::IsAuthority())
+        if (NetSession::IsAuthority())
         {
             // Shooter-authoritative hits: what a remote player's own machine
             // resolved arrives as a claim and is applied from it. The copy

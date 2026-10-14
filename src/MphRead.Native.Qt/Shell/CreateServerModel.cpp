@@ -589,7 +589,8 @@ namespace MphRead::Qt
         auto task = std::async(std::launch::async, [host, port, name, mode, maps]()
         {
             return Network::NetMasterClient::RequestGame(host, port, maps[0].first, mode, 7 * 60,
-                Network::MatchGoalRules::DefaultValue(mode), ::MphRead::Entities::PlayerEntity::SlotCapacity, name, 6000,
+                Network::MatchGoalRules::DefaultValue(mode), ::MphRead::Entities::PlayerEntity::SlotCapacity, name,
+                Network::NetMasterConfig::HostedRequestTimeoutMs,
                 std::optional<Maps>(maps), Network::ServerSessionPolicy::Lobby);
         }).share();
         Await(this, std::move(task), [this, name, player, hunter, mode, host](Network::HostedGame game)

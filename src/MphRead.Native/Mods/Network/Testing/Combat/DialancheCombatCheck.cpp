@@ -145,7 +145,7 @@ namespace MphRead::Mods::Network
             {
                 if (!wire) return;
                 NetSessionFixture::SetFrame(frame);
-                NetSession::BroadcastSnapshot(); // The production snapshot serializer and damage history.
+                NetSession::BroadcastSnapshot(scene); // The production snapshot serializer and damage history.
                 for (int repeat = 0; repeat < 4; ++repeat)
                 {
                     for (const auto port : {peerA, peerB}) wire->Send(System::Net::IPEndPoint::Loopback(port), PacketType::Snapshot, snapshot);

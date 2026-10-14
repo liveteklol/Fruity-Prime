@@ -58,7 +58,6 @@ namespace MphRead::Mods::Network
         void BroadcastMatchState(double now);
         [[nodiscard]] RosterPacket BuildRoster();
         void BroadcastRoster();
-        void NotifyAuthority(const ServerPeerRegistry::PeerHandle& peer);
 
     private:
         [[nodiscard]] MatchDefinition CurrentDefinition() const;

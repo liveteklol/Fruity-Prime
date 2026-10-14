@@ -104,6 +104,8 @@ namespace MphRead::Entities
 
     public:
         std::int32_t Id = -1;
+        // Counts what this entity has spawned, for the spawn's stable name.
+        [[nodiscard]] std::uint32_t ModNextSpawnOrdinal() noexcept { return ++_modSpawnOrdinal; }
         virtual std::int32_t Recolor() const;
         virtual void SetRecolor(std::int32_t value);
         const EntityType Type;
@@ -119,6 +121,7 @@ namespace MphRead::Entities
         Scene* _scene;
         const std::optional<std::string> _nodeName{};
         std::int32_t _scanId = 0;
+        std::uint32_t _modSpawnOrdinal = 0;
 
         float _drawScale = 1.0F;
         ::OpenTK::Mathematics::Matrix4 _transform = ::OpenTK::Mathematics::Matrix4(

@@ -3,6 +3,7 @@
 #include "Mods/Network/Session/PeerRegistry.hpp"
 #include "Mods/Network/Gameplay/Replication/PlayerStateSnapshotCapture.hpp"
 #include "Mods/Network/Gameplay/Combat/NetUnlagged.hpp"
+#include "Mods/Network/Gameplay/Weapons/HomingTargetHistory.hpp"
 #include "Mods/Network/Gameplay/Pickups/NetItemState.hpp"
 #include "Mods/Network/Replay/DemoRecorder.hpp"
 #include "Mods/Network/Session/NetMatchTimeSync.hpp"
@@ -10,6 +11,7 @@
 #include "Mods/Network/Gameplay/Player/NetPlayerLifecycle.hpp"
 #include "Mods/Network/Diagnostics/NetLog.hpp"
 #include "Entities/Players/PlayerEntity.hpp"
+#include "GameState.hpp"
 #include "NativeRuntime/System/Globalization.hpp"
 #include "NativeRuntime/System/Managed.hpp"
 #include "Utility/Rng.hpp"
@@ -47,7 +49,7 @@ namespace MphRead::Mods::Network
     void SessionSnapshotPublisher::Publish(SessionConnection& connection, const SessionRuntimeState& runtime,
         const SessionAuthorityState& authority, const SessionMatchIdentity& matchIdentity,
         const SessionSimulationCallbacks& simulationCallbacks,
-        SessionTrafficMetrics& traffic)
+        SessionTrafficMetrics& traffic, Scene& scene)
     {
         if (!NetRoomChange::GameplayReady())
         {
@@ -58,13 +60,7 @@ namespace MphRead::Mods::Network
         {
             return;
         }
-        const bool asHost = runtime.Role() == NetRole::Host && !SessionPeers().Empty();
-        const bool asAuthority = runtime.Role() == NetRole::Client && authority.IsAuthority() && connection.HasHostEndpoint();
-        if (!asHost && !asAuthority && !asServer)
-        {
-            return;
-        }
-
+        if (!asServer || !authority.IsAuthority()) { return; }
         std::int32_t count = 0;
         std::size_t offset = SnapshotHeader::Size;
         const auto& players = Entities::PlayerEntity::Players();
@@ -100,30 +96,19 @@ namespace MphRead::Mods::Network
             Scratch(connection.Buffer(), offset).first(NetConfig::MaxPacketSize - 1 - offset)));
 
         SnapshotHeader header{};
-        header.MatchId = matchIdentity.MatchId(runtime.Role() == NetRole::Host);
-        header.AuthorityEpoch = matchIdentity.AuthorityEpoch(runtime.Role() == NetRole::Host);
+        header.MatchId = matchIdentity.MatchId(false);
+        header.AuthorityEpoch = matchIdentity.AuthorityEpoch(false);
         header.Frame = runtime.Frame();
         header.Rng1 = Rng::Rng1();
         header.Rng2 = Rng::Rng2();
         header.PlayerCount = static_cast<std::uint8_t>(count);
+        header.PrimeHunterSlot = GameState::PrimeHunter() < 0 ? 0xFF
+            : static_cast<std::uint8_t>(GameState::PrimeHunter());
         header.Write(connection.Buffer());
         traffic.RecordSnapshotSent();
         NetUnlagged::Record(header.Frame);
+        HomingTargetHistory::Record(header.Frame, scene);
         DemoRecorder::RecordOwnSnapshot(First(connection.Buffer(), offset));
-        if (asServer)
-        {
-            simulationCallbacks.PublishSnapshot(First(connection.Buffer(), offset));
-            return;
-        }
-
-        if (asAuthority)
-        {
-            connection.SendToHost(PacketType::Snapshot, First(connection.Buffer(), offset));
-            return;
-        }
-        for (const std::shared_ptr<PeerRegistry::Peer>& peer : SessionPeers().Peers())
-        {
-            connection.Send(peer->Endpoint(), PacketType::Snapshot, First(connection.Buffer(), offset));
-        }
+        simulationCallbacks.PublishSnapshot(First(connection.Buffer(), offset));
     }
 }

@@ -16,7 +16,8 @@ namespace MphRead::Mods::Network
             latestAck = intent.AckFrame;
         }
 
-        _ackFrames[index][intent.Frame % AckFrameCapacity] = AckRecord{intent.Frame, intent.AckFrame};
+        _ackFrames[index][intent.Frame % AckFrameCapacity] = AckRecord{
+            intent.Frame, intent.AckFrame, intent.HasContinuousFire ? intent.ContinuousRoleFrame : 0};
         if (intent.HasShot)
         {
             _shotRays[index][_shotRayNext[index]] = ClaimShotRay{
@@ -49,6 +50,18 @@ namespace MphRead::Mods::Network
 
         const AckRecord& record = _ackFrames[static_cast<std::size_t>(slot)][frame % AckFrameCapacity];
         return record.IntentFrame == frame ? std::optional<std::uint32_t>(record.AckFrame) : std::nullopt;
+    }
+
+    std::optional<std::uint32_t> HitClaimIntentHistory::RoleForFrame(
+        std::int32_t slot, std::uint32_t frame) const noexcept
+    {
+        if (!HasSlot(slot))
+        {
+            return std::nullopt;
+        }
+        const AckRecord& record = _ackFrames[static_cast<std::size_t>(slot)][frame % AckFrameCapacity];
+        return record.IntentFrame == frame && record.RoleFrame != 0
+            ? std::optional<std::uint32_t>(record.RoleFrame) : std::nullopt;
     }
 
     const ClaimShotRay* HitClaimIntentHistory::NearestRay(

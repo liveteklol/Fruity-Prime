@@ -111,7 +111,7 @@ namespace
         // secret); 29 the power-ups the authority grants (6 bytes a player),
         // the pickup claim and a doubled hit's flag; 30 the freeze timer; 31
         // burn (9 bits) and disrupt (7 bits) timers after the freeze byte.
-        Expect(NetConfig::ProtocolVersion == 31 && PlayerState::Size == 140
+        Expect(NetConfig::ProtocolVersion == 33 && PlayerState::Size == 140
             && PlayerState::PowerUpOffset - PlayerState::LegacySize == 17,
             "timed status effects add two bytes while keeping freeze at its original offset");
         {

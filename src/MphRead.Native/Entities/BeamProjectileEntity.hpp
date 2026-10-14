@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Mods/Network/Diagnostics/NetShotDiagnostics.hpp"
+#include "Mods/Network/Gameplay/Weapons/ShotPresentation.hpp"
 
 #include "../Formats/CollisionDetection.hpp"
 #include "../Formats/Culling.hpp"
@@ -176,7 +177,16 @@ namespace MphRead::Entities
         std::uint32_t ModHeldUntil = 0;
         std::uint32_t ModHeldSince = 0;
         OpenTK::Mathematics::Vector3 ModHeldPoint{};
-        void ModHomeConfirmed();
+        // A remote shot's drawn flight, beside the physical one.
+        Mods::Network::ShotPresentation ModPresentation{};
+        // Where this shot is in the shared homing steering cadence, and in
+        // the 30 Hz tick its velocity changes on.
+        std::int32_t ModHomingPhase = 0;
+        std::int32_t ModFlightPhase = 0;
+        [[nodiscard]] static OpenTK::Mathematics::Vector3 ModCrossVector(OpenTK::Mathematics::Vector3 up)
+        {
+            return GetCrossVector(up);
+        }
         // The weapon's own impact effect at a point, as a hit there draws it.
         static void ModSpawnImpact(Scene* scene, BeamType beam, OpenTK::Mathematics::Vector3 point,
             OpenTK::Mathematics::Vector3 up);
@@ -289,7 +299,8 @@ namespace MphRead::Entities
             Formats::Culling::NodeRef nodeRef,
             Scene* scene,
             BeamProjectileEntity* parent = nullptr,
-            std::optional<::OpenTK::Mathematics::Vector3> syluxGuardStart = std::nullopt);
+            std::optional<::OpenTK::Mathematics::Vector3> syluxGuardStart = std::nullopt,
+            std::optional<::OpenTK::Mathematics::Vector3> modPresentationDirection = std::nullopt);
 
     protected:
         [[nodiscard]] ::OpenTK::Mathematics::Matrix4 GetModelTransform(
@@ -390,7 +401,6 @@ namespace MphRead::Entities
         float _cylinderRadius = 0.0F;
 
         static const std::shared_ptr<EquipInfo> _ricochetEquip;
-        static const std::array<EntityType, 5> _homingTargetTypes;
         static const std::array<std::array<std::uint8_t, 12>, 11> _terSplat1P;
 
         std::shared_ptr<ModelInstance> _trailModel{};

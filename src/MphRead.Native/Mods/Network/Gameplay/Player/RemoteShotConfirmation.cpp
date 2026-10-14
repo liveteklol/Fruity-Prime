@@ -41,7 +41,7 @@ namespace MphRead::Mods::Network
         // A remote human's projectile on a machine that only draws it.
         [[nodiscard]] PlayerEntity* RemoteShooterOf(BeamProjectileEntity& beam) noexcept
         {
-            if (!NetSession::Active() || NetSession::IsAuthority() || NetSession::IsHost())
+            if (!NetSession::Active() || NetSession::IsAuthority())
             {
                 return nullptr;
             }

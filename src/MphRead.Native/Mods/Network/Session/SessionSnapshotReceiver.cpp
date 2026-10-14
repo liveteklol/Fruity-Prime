@@ -9,6 +9,7 @@
 #include "Mods/Network/Transport/NetTransport.hpp"
 #include "Entities/Players/PlayerEntity.hpp"
 #include "Utility/Rng.hpp"
+#include "Mods/Network/Gameplay/Weapons/FiringVariant.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -36,7 +37,8 @@ namespace MphRead::Mods::Network
         const std::size_t timeOffset = SnapshotHeader::Size
             + static_cast<std::size_t>(header.PlayerCount) * PlayerState::Size;
         const std::size_t healthOffset = timeOffset + NetMatchTimeSync::Size;
-        if (header.PlayerCount > Entities::PlayerEntity::SlotCapacity || healthOffset > payload.size())
+        if (header.PlayerCount > Entities::PlayerEntity::SlotCapacity || healthOffset > payload.size()
+            || (header.PrimeHunterSlot != 0xFF && header.PrimeHunterSlot >= NetworkSlotCapacity))
         {
             return;
         }
@@ -78,6 +80,7 @@ namespace MphRead::Mods::Network
         }
 
         traffic.RecordSnapshotReceived();
+        FiringVariant::ReceiveRole(header.Frame, header.PrimeHunterSlot == 0xFF ? -1 : header.PrimeHunterSlot);
         Rng::SetRng1(header.Rng1);
         Rng::SetRng2(header.Rng2);
 

@@ -1,160 +1,135 @@
-# The server as the simulation authority
+# Server authority and hosted rooms
 
-`-simulate` on a dedicated server. Code: `Mods/Network/ServerSim.cs`,
-`Mods/Headless.cs`, `Mods/Input/SyntheticInput.cs`, and the `NetRole.Server`
-branches in `NetSession.cs` / `DedicatedServer.cs`.
+Current Native C++ implementation on `develop12_homing`, updated 2026-10-14.
+The C# sources are historical reference; the paths below are relative to
+`src/MphRead.Native/`.
 
-## What moved, and what did not
+## The role split
 
-The authority was never a property of being a player. It is the property of
-being the machine every other player's intent is pointed at, and until now
-that machine was whichever client joined first. The server can now be that
-machine.
+Only the dedicated server is the simulation authority. It runs the match,
+resolves damage and pickups, owns match progression, and publishes snapshots.
+Every human player is a normal client: input, local movement, firing, hit
+prediction and drawing run on that player's machine.
 
-**What this buys, in order of how much it matters.**
+| Launcher choice | Match simulation | Creator / first participant |
+|---|---|---|
+| Dedicated server | dedicated server process | normal client |
+| Hosted lobby, local or online | dedicated server process for that room | normal client; lobby ownership does not grant authority |
 
-- **Nobody is at zero latency any more.** The client authority resolved its
-  own shots against its own present and everybody else's against a rewind
-  (`NETWORK-UNLAGGED.md`). It was the one player in the match who could not be
-  wrong about where anyone was, and it paid nothing for the privilege. Now
-  every player, the ex-slot-0 included, is compensated by exactly their own
-  round trip and nobody is compensated by zero.
-- **The match stops depending on a player's machine.** No handover when the
-  authority leaves, no stand-down when their line blips (`AuthorityStandDowns`
-  exists because that happened against the Pi), no half second of nobody
-  simulating while the server picks a successor.
-- **A client can no longer publish a world.** `HandleSnapshot` refuses every
-  peer while simulating. Before, the authority *was* a client, so "the
-  authority's snapshot is trusted" and "one particular player's machine is
-  trusted" were the same sentence.
+Starting a server on the player's own PC does not change those roles. That
+client still exchanges UDP with the server. Its loopback latency may be very
+small, but it has no special simulation or damage privilege. The same
+rewind, prediction and claim paths apply to it as to other players.
 
-**What it does not buy, and must not be sold as.**
+`NetSession::IsAuthority()` requires `NetRole::Server` and server authority
+state. Clients ignore legacy `PacketType::Authority` grants. A client cannot
+publish a snapshot or end the match by sending `MatchEnd`. Leaving the room
+does not migrate authority to another participant.
 
-- **A player still does not see their own hit register any sooner.** Damage is
-  felt when the snapshot carrying it arrives, which is a round trip after the
-  trigger, wherever the authority sits. Moving it to the server *equalises*
-  that wait; it does not shorten it. Shortening it is client-side hit
-  prediction and is not implemented -- see "What is still owed".
-- **The server is not authoritative over movement.** `IntentPacket.Position`
-  is still where its sender says they are, exactly as it was when a client
-  held this role. Deriving position from buttons is the thing the intent
-  stream was built to stop doing (two simulations of one player drift apart on
-  the first lost packet), and undoing that needs prediction first.
+## Shooter priority is retained
 
-So: this refactor is about *fairness and resilience*, not about latency. A
-report of "my shots go through people" is answered by unlagged, which was
-already there; a report of "slot 0 always wins the trades" is answered by this.
+Server authority does not mean waiting for the server's projectile to hit.
+The owner fires and predicts hits immediately. Its hit claim tells the server
+what landed on its screen, including hits the server's own replay missed and
+shots it did not replay because the shooter died during the round trip.
+The server validates and settles that claim; its own matching hit is not a
+prerequisite. Existing identity/history, damage-limit and duplicate checks
+remain in place.
 
-## How it works
+Shots fired before the shooter was down still count when their claims arrive
+later. Arrival order does not decide a trade. `NetworkCombat` exercises both
+arrival orders and delayed claims. See [NETWORK-PREDICTION.md](NETWORK-PREDICTION.md)
+and [NETWORK-HITCLAIMS.md](NETWORK-HITCLAIMS.md).
 
-The engine's simulation turns out to need no GL context at all.
-`Scene.OnSimulationFrame` and everything under it -- input, the entity step,
-collision, beams, damage -- contains no GL call anywhere, because the frame
-split (`render/FRAME-PACING.md`) had already put every one of them in
-`Scene.OnDrawFrame`. `grep -l "GL\." src/MphRead/Entities/ src/MphRead/GameState.cs
-src/MphRead/Scene.cs src/MphRead/SceneSetup.cs src/MphRead/HUD/` finds
-**nothing**. So the server runs the real engine rather than a model of it,
-and the old objection -- "a reimplementation on the server would be a second
-answer free to disagree with the first" -- disappears: it is the same answer,
-compiled from the same file.
+Movement still uses the owner's reported position and intents. This change
+does not replace that path with a new input-only movement simulation.
 
-Spire's alt attack has one simulation-owned exception to the old draw-derived
-pose: after the alt animation frame update, `PlayerProcess` animates its rock
-nodes and stores both world-space collision positions. `PlayerDraw` animates
-the nodes again for the picture but does not write collision positions. This
-keeps the headless server's slam collision current without changing the startup
-positions set when the attack begins or the render transforms. The
-`-spireposecheck` headless probe verifies moving rock positions with no draw.
+## One room per process
 
-| Piece | What it does |
+`NetSession` remains static. `GameState`, players and gameplay histories also
+hold process-wide state, so running multiple authoritative rooms as threads
+inside one process would mix worlds. Hosted rooms now use separate dedicated
+server processes; this is not an instance-based session refactor.
+
+One physical server can run many rooms. Its directory or parent server
+allocates a port and starts one child process per room. Each child has its
+own session, world, history and memory, and runs one authoritative match.
+
+| Piece | Responsibility |
 |---|---|
-| `Mods.Headless.Active` | one switch, in the shape `ThumbnailMode` established. Turns off only work whose output is a picture, a sound or an answer to a person |
-| `SyntheticInput` | a `KeyboardState` and a `MouseState` built by reflection, because `Scene`'s constructor demands a pair and OpenTK only makes them from a window. Nobody ever presses them |
-| `NetRole.Server` | authority, `LocalSlot = -1`, no socket of its own |
-| `NetSession.StartServerAuthority(sink, matchEnded)` | takes the role; the finished snapshot is handed to the relay in this same process rather than sent as a datagram |
-| `ServerSim.Advance(now)` | the same fixed-step accumulator the game window runs. A server's loop is woken by packets, at no fixed rate, which is exactly what an accumulator is for |
-| `DedicatedServer.Simulate` | `-simulate`. Off by default |
+| `Mods/Network/Server/Core/DedicatedServerProcess` | shared process launcher, unique rotation file, exact argument transport, socket readiness, stop/detach |
+| `Mods/Network/Server/Core/HostPool` | port allocation, room-process ownership, status probes and empty-room cleanup |
+| `Mods/Network/Discovery/NetMaster` | directory requests use the same HostPool instead of another threaded room implementation |
+| `Mods/Network/Integration/Launch/NetHostSession` | local create-and-join starts a child server and joins it as a normal client |
+| `Mods/Network/Server/Core/LocalServer` | the launcher's Dedicated path shares the process-launch implementation |
+| `Mods/Network/Server/Core/ServerLaunchOptions` | applies lobby policy, format, ready/join settings and owner token in the child |
 
-**The wire does not move.** `NetConfig.ProtocolVersion` is unchanged. A client
-is told it is the authority by receiving `PacketType.Authority` and in no other
-way, so a simulating server simply never sends it -- and a client built before
-any of this joins one and behaves correctly without knowing anything changed.
-`HandleIntent` feeds `NetSession.AcceptSlotIntent` one hop earlier than a
-client authority got the same bytes, through the same call, so the ordering
-rule that guards a rejoining player's restarted frame counter is the one that
-has already been debugged.
+The lobby owner's token grants lobby control only. It survives the process
+argument boundary with the same sixteen wire bytes. The creator may edit and
+start the lobby, while the child server runs the match after the load barrier.
+Child startup has a 30-second limit; GUI/CLI room requests allow 35 seconds
+so a slow room load is not abandoned by the client first.
 
-**The simulation follows the server the way a client does.** The roster and the
-match state are applied to it through `NetSession.ApplyRoster` /
-`ApplyMatchState` -- the very packets it is about to broadcast. A rotation is
-therefore an ordinary `NetRoomChange` transition, carrying the intro-camera and
-settling fixes that path already has, rather than a second implementation free
-to disagree with every client at once.
+A locally created room detaches from its creator when the creator leaves;
+the server keeps running. Online rooms stay owned by their directory, which
+reaps them after the configured empty-room grace period or when the child
+exits. A directory shutting down stops the rooms it owns. Every room needs
+game files, and each process consumes its own simulation memory.
 
-## Traps
+## Headless simulation and wire contract
 
-- **`NetSlotManager.Sync` and `NetPlayerSetup.ApplyOnce` both returned early on
-  `LocalSlot < 0`.** That guard is a client's "not admitted yet". A server is
-  never admitted, because none of the slots is its own, so it held for the
-  whole match: no slot was ever activated, the room was simulated empty, and
-  the snapshot went out with a header and no players in it. This is the first
-  thing to check if a simulating server publishes 13-byte snapshots.
-- **`NetHooks.LocalSlot` must be -1, not 0.** It fell through to 0 for anything
-  that was not demo playback, which would make slot 0 -- a real player, on
-  somebody else's machine -- the one slot on the server exempt from every "this
-  belongs to somebody else" test in the engine: its intent dropped, its
-  keyboard read from a keyboard nobody is holding, its shots fired from the
-  origin.
-- **The camera mode is forced to `Roam`, and that is load-bearing.**
-  `IsMainPlayer` is `this == Main && camera mode is Player`, and
-  `PlayerEntity.Main` on a server is slot 0 because something has to be. In
-  `Player` mode that would make one slot in eight "the main player" and send it
-  down 35 branches in `PlayerProcess` alone that no other slot takes --
-  including one that skips `UpdateNodeRefVolume` entirely. `Roam` makes
-  `IsMainPlayer` false everywhere, so all eight slots are treated identically,
-  which is what a machine playing none of them should do.
-- **The multiplayer intro camera sequence must not run.** It is a camera flying
-  round the room for the person about to play in it. On a server it flew for
-  nobody and applied `BlockFormSwitch` and blocked input to slot 0 alone --
-  and asserted (`current.PartIndex != -1`) inside `RoomEntity.UpdateNodeRef`,
-  which in a Debug build kills the server outright on the first join. Every
-  client still runs its own.
-- **`SendMatchEnd` had nobody to send to.** A match won on points is decided by
-  the simulation, and on a server that is this process; without the
-  `NetRole.Server` branch the sim reached the point goal, told no one, and the
-  match ran until the clock did -- which on a rotation entry with no time limit
-  is for ever.
-- **A simulating server may not sleep 20 ms when idle.** It owes a step every
-  16.7 ms whether or not anybody is connected.
-- **The two simulation timers that live in the draw pass never ran, and one of
-  them is what changes room.** `UpdateFade` and the effect advance are called
-  from `GetDrawItems`/`UpdateUniforms` -- correctly, because a fade and a
-  particle are drawn -- and both were already careful to consume *steps owed*
-  rather than pictures drawn (`_pendingFadeSteps`, `_pendingEffectSteps`).
-  Nobody had to think about a caller that draws no pictures at all. The counts
-  simply climbed.
+`Mods/Network/Server/Match/ServerSim` runs the real scene simulation at 60 Hz.
+`Mods/Headless` suppresses work whose output is rendering/audio; synthetic
+keyboard/mouse states satisfy the scene's input interface without a window.
+The server has `LocalSlot = -1`, so no human slot gets a local-player exemption.
+The roster and match state are applied to the simulation through the same
+session paths used by clients; rotation remains a normal room transition.
 
-  A rotation is `SetFade(..., AfterFade.LoadRoom)`, and the load happens in
-  `EndFade`, which only `UpdateFade` reaches -- so **the server went on
-  simulating the first map of the session for ever** while every client
-  rotated correctly. It did not look broken from any client: a live player's
-  position is their own report, not the server's, so the players still saw
-  each other, the scoreboards still agreed, and `compare-reports.py` said
-  0 mismatches. What was wrong was invisible and total -- every shot resolved
-  against the collision of a room nobody was standing in. `ModStepDrawPassTimers`
-  runs both from the end of the step when headless.
+Important headless invariants:
 
-  **The check that catches this is the server's own log**, not a client's:
-  `sim: <room>` must name the room the *scene* is in (read off `Scene.RoomId`
-  every time, never remembered) and it must change when the rotation line
-  above it does.
-- **`UnloadModel` deletes GL objects, and a room transition calls it.** Guarded
-  like the rest -- but only its GL half: `Read.RemoveModel` underneath is what
-  makes a rotating server's memory reach a plateau instead of holding every map
-  it has ever played. Unguarded, the first rotation threw inside `EndFade`,
-  left the fade half-ended, and every subsequent step threw in the same place
-  -- 1800 failures a minute, which is what `StepFailures` in the periodic log
-  is for.
+- Slot admission/setup must allow server `LocalSlot = -1`.
+- The server uses a roaming camera; it must not treat slot 0 as the main player
+  or run that player's multiplayer intro camera/input blocks.
+- Simulation-owned poses and collision must advance without a draw pass.
+- Headless fade/effect timers must advance so room transitions finish.
+- Idle authoritative rooms still owe a 60 Hz simulation step. A server log's
+  scene room must follow map rotation, rather than only its advertised room.
+
+`RunsTheMatch` defaults to true. Production hosting no longer disables it.
+The remaining false setting is confined to protocol/diagnostic fixtures and
+cannot grant a client authority. `-simulate` and `-authority` are accepted as
+compatibility flags and do nothing. Game servers need assets; they do not
+fall back to client-authority relaying when assets are missing.
+
+The current Native wire version is **33**. Homing shots carry firing-time
+variant/role data, and snapshots carry the Prime holder. Role snapshot frames
+are separate from interpolated target acknowledgements. Both ends must use
+the same version; legacy authority grants are not a compatibility fallback.
+See [NETWORK-HOMING.md](NETWORK-HOMING.md) and [SERVER.md](../../SERVER.md).
+
+## Validation
+
+Windows MSVC Release and CTest cover the Native implementation.
+`FruityPrime -hostauthoritycheck [ROOM]` verifies local create-and-join,
+normal client prediction/claim eligibility, exact owner-token transport,
+online lobby options, two simultaneous isolated rooms, and continued server
+snapshots after creator departure. CTest calls this `HostedAuthority`.
+
+`tools/testing/run-homing-net-matrix-all.ps1` runs real loopback UDP cells
+with 2/8 clients, bots, RTT, jitter, loss, reorder, Prime and morphing. Hosted
+cells request a room from a real directory/parent server, then verify a
+separate authoritative child and `authority=False` on all clients. Logs are
+isolated per process so normal log retention cannot remove another cell's
+evidence. This is not a new Pi, remote-network or physical-GPU measurement.
+
+The current gate results and their limits are recorded in
+[the validation report](../../docs/todo/Fruity-Prime-Homing-Audit-Validation-2026-10-14.md).
+
+## Historical C# measurements
+
+The following measurements and relay comparisons describe earlier C# builds.
+They are retained as historical evidence, not as current Native C++ memory,
+performance or platform acceptance, and not as supported hosting modes.
 
 ## Cost, measured
 
@@ -249,58 +224,3 @@ puppet finish morphing while an older state is still in flight, then corrects
 a lasting mismatch. This 78-frame result predates that change; a restart-free
 latency run is still needed to measure it in play. See
 `NETWORK-DIAGNOSTICS.md` and `.claude/KNOWN-GAPS.md`.
-
-## The relay is gone from a dedicated server, and not from the other two
-
-`RunsTheMatch` defaults to true and the standalone `-server` path never changes
-it, so a dedicated server simulates or does not start. `-simulate` and
-`-authority` are accepted and do nothing, which is what keeps every systemd
-unit and launch script already deployed starting after the update.
-
-**The client-authority path is still there, and it has to be**, because
-`DedicatedServer` is instantiated in two other places that cannot simulate:
-
-| Caller | What it is | Why not |
-|---|---|---|
-| `NetHostSession` | "Host: this computer" -- a server on a thread inside the host's own game | the player who started it already owns the process's session |
-| `NetMaster` | "Host: online" -- one server per hosted match, several at a time, in the directory's process | one process, several matches |
-
-The reason is the same for both and it is that **`NetSession` is static**:
-`ServerSim.Start` calls `NetSession.StartServerAuthority`, and a process has
-exactly one session, so it can run exactly one match. For those two, a client
-running the match is not a fallback -- it is how hosting works, and deleting
-`PacketType.Authority` would delete hosting rather than the relay.
-
-Removing it everywhere means an instance-based `NetSession`. That is a real
-piece of work -- the network state is static end to end, and every hook, the
-unlagged history, the damage pipeline and the prediction all read it as a
-global -- and it should not be started as a side effect of anything else.
-
-## What is still owed
-
-- **The game files, and they are now required.** A simulating server needs
-  them, and "a dedicated server needs no game files" was true of every build up
-  to and including v0.8.0. It is not true any more: `RunsTheMatch` defaults to
-  true, `ServerSim.Available` is checked at startup, and a server without them
-  **exits 1 with the reason** rather than relaying. Shipping them is not an
-  option (`tools/check-no-game-assets.sh`), so this is a server whose operator
-  has a dump on the box. `SERVER.md` says so on the first screen.
-
-  **What a simulating server actually needs is 52 MB**, not the 103 MB of a
-  full extraction, found by pruning until it stopped loading and then checking
-  four maps: `_archives`, `levels`, `models`, `stage`, `effects`,
-  `cameraEditor`, `stringTables`, `aiPersonalityData`, and from `data/` only
-  `sound/*.DAT` -- the music *metadata*, which `Music.Init` reads from the
-  `Scene` constructor before anything can decide the process is headless. What
-  is not needed: `archives/` (the packed copies of `_archives`), every sound
-  sample, every movie, and the whole front end. Cutting `Music.Init` too would
-  drop `data/` entirely and save another 4.5 MB, but `Music`'s statics are
-  then null for gameplay code that calls into them, so it was left alone.
-
-  The interesting alternative is for the *client* to hand the server the files
-  it reads, in RAM, at match start -- `Read.cs` is nearly a single choke point,
-  and a room's collision file is about 50 KB.
-- **Client-side hit prediction.** See above: this refactor equalises the wait
-  for damage feedback, it does not shorten it.
-- **Movement authority.** Position is still the client's claim.
-- **The Windows server.** `-simulate` is a Linux-tested flag.

@@ -10,6 +10,8 @@
 
 namespace MphRead::Mods::Network
 {
+    class NetUnlaggedFixture;
+
     class NetUnlagged final
     {
     public:
@@ -50,6 +52,7 @@ namespace MphRead::Mods::Network
         static void ResetSlot(std::int32_t slot);
         static void Reset();
         static void Record(std::uint32_t frame);
+        [[nodiscard]] static std::optional<std::int32_t> PrimeHunterAt(std::uint32_t frame) noexcept;
         [[nodiscard]] static bool PositionAt(std::int32_t slot, std::uint32_t frame,
             std::uint16_t expectedGeneration, std::uint16_t expectedLife, OpenTK::Mathematics::Vector3& position);
         // Whether this copy of the player, in that life, stood within `radius`
@@ -65,6 +68,8 @@ namespace MphRead::Mods::Network
         [[nodiscard]] static std::string DescribeDepths();
 
     private:
+        friend class NetUnlaggedFixture;
+
         inline static std::array<std::int64_t, Entities::PlayerEntity::SlotCapacity> ClampedByShooter{};
         inline static std::int64_t _rewindsSkipped = 0;
         inline static std::array<std::int64_t, HistoryFrames + 1> DepthHistogram{};
@@ -102,6 +107,8 @@ namespace MphRead::Mods::Network
         inline static std::array<std::array<bool, HistoryFrames>, Slots> _altForm{};
         inline static std::array<std::array<bool, HistoryFrames>, Slots> _inPlay{};
         inline static std::array<std::uint32_t, HistoryFrames> _stamp{};
+        inline static std::array<std::uint32_t, HistoryFrames> _primeHunterStamp{};
+        inline static std::array<std::int32_t, HistoryFrames> _primeHunter{};
         inline static std::uint32_t _newest = 0;
 
         inline static std::array<OpenTK::Mathematics::Vector3, Slots> _restore{};

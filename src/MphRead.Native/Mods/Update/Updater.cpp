@@ -1,5 +1,7 @@
 #include "Updater.hpp"
 #include "BuildVersion.hpp"
+#include "UpdateCheck.hpp"
+#include "../DebugLog.hpp"
 #include "../Platform/WebLink.hpp"
 #include "../../NativeRuntime/System/Console.hpp"
 #include "../../NativeRuntime/System/Encoding.hpp"
@@ -374,6 +376,17 @@ namespace MphRead::Mods::Update
         }
 
         std::optional<UpdateInfo> update = UpdateCheck::Latest(cancel);
+        // A check that finds nothing says why, in the debug log: a failure
+        // here is otherwise silent, and "no update offered" looks the same
+        // whether this is the latest build or GitHub could not be reached.
+        if (update.has_value())
+        {
+            DebugLog::Line("update", "found " + update->Tag.Get().value_or(""));
+        }
+        else if (const std::optional<std::string> reason = UpdateCheck::LastReason(); reason.has_value())
+        {
+            DebugLog::Line("update", "no update: " + *reason);
+        }
         State& state = GetState();
         {
             std::lock_guard lock(state.AvailableGate);

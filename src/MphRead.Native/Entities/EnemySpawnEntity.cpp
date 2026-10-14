@@ -2,6 +2,7 @@
 
 #include "../GameState.hpp"
 #include "../Scene.hpp"
+#include "../Mods/Network/Gameplay/Weapons/EnemyTargetIdentity.hpp"
 #include "EnemyInstanceEntity.hpp"
 #include "Enemies/00_WarWasp.hpp"
 #include "Enemies/01_Zoomer.hpp"
@@ -84,8 +85,8 @@ namespace MphRead::Entities
             Formats::Culling::NodeRef nodeRef,
             Scene* scene)
         {
-            return std::make_shared<T>(
-                EnemyInstanceEntityData(type, spawner), nodeRef, scene);
+            return std::make_shared<T>(EnemyInstanceEntityData(type, spawner,
+                Mods::Network::EnemyTargetIdentity::ForSpawn(spawner, type)), nodeRef, scene);
         }
     }
 

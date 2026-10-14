@@ -1,5 +1,6 @@
 #include "FrameTimingCheck.hpp"
 #include "LockjawTrailNoise.hpp"
+#include "Mods/Combat/HomingSteeringRules.hpp"
 #include "../../Utility/Rng.hpp"
 #include "../../NativeRuntime/System/Random.hpp"
 
@@ -43,7 +44,7 @@ namespace MphRead::Mods::Render
     std::int32_t FrameTimingCheck::Run()
     {
         ::MphRead::NativeRuntime::Random rng(20260905);
-        std::array<std::unique_ptr<Case>, 8> cases{};
+        std::array<std::unique_ptr<Case>, 9> cases{};
 
         cases[0] = std::make_unique<Case>();
         cases[0]->Name = "60 Hz display";
@@ -100,6 +101,12 @@ namespace MphRead::Mods::Render
         cases[7]->FrameTime = [](std::int32_t) { return 1.0 / 1500.0; };
         cases[7]->MaxStepsInOneFrame = 1;
 
+        cases[8] = std::make_unique<Case>();
+        cases[8]->Name = "540 Hz display";
+        cases[8]->Seconds = 120.0;
+        cases[8]->FrameTime = [](std::int32_t) { return 1.0 / 540.0; };
+        cases[8]->MaxStepsInOneFrame = 1;
+
         std::int32_t failures = 0;
         const auto savedCap = FrameTiming::FrameRateCap();
         FrameTiming::SetFrameRateCap(FrameTiming::Unlimited);
@@ -142,8 +149,12 @@ namespace MphRead::Mods::Render
     {
         FrameTiming::Reset();
         FrameTiming::ResetDiagnostics();
+        static_cast<void>(Combat::HomingSteeringRules::ConfigureFrequencyHz(
+            Combat::HomingSteeringRules::DefaultFrequencyHz));
         double elapsed = 0.0;
         std::int64_t steps = 0;
+        std::int32_t homingPhase = 0;
+        std::int64_t homingSteps = 0;
         std::int32_t worstFrame = 0;
         std::int32_t frame = 0;
         while (elapsed < test.Seconds)
@@ -152,6 +163,10 @@ namespace MphRead::Mods::Render
             elapsed += dt;
             const std::int32_t taken = FrameTiming::Advance(dt);
             steps += taken;
+            for (std::int32_t i = 0; i < taken; ++i)
+            {
+                homingSteps += Combat::HomingSteeringRules::Advance(homingPhase) ? 1 : 0;
+            }
             if (taken > worstFrame)
             {
                 worstFrame = taken;
@@ -160,9 +175,13 @@ namespace MphRead::Mods::Render
         const double rate = steps / elapsed;
         const double drift = std::abs(rate - test.ExpectedStepsPerSecond)
             / test.ExpectedStepsPerSecond * 100.0;
+        const std::int64_t expectedHomingSteps = steps
+            * Combat::HomingSteeringRules::DefaultFrequencyHz
+            / Combat::HomingSteeringRules::SimulationHz;
         const bool ok = drift <= test.TolerancePercent
             && worstFrame <= test.MaxStepsInOneFrame
-            && FrameTiming::DroppedSteps() == 0;
+            && FrameTiming::DroppedSteps() == 0
+            && homingSteps == expectedHomingSteps;
         const double gameSeconds = steps * FrameTiming::StepSeconds;
 
         std::ostringstream line;
@@ -174,7 +193,8 @@ namespace MphRead::Mods::Render
             << " | game ran " << ::MphRead::NativeRuntime::ToString(gameSeconds / elapsed, "0.0000")
             << "x real time"
             << " | worst frame " << worstFrame << " step(s)"
-            << " | dropped " << FrameTiming::DroppedSteps();
+            << " | dropped " << FrameTiming::DroppedSteps()
+            << " | homing " << homingSteps << '/' << expectedHomingSteps << " steering steps";
         std::cout << line.str() << '\n';
         return ok;
     }

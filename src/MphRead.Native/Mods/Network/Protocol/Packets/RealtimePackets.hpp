@@ -5,6 +5,7 @@
 #include "Mods/Network/Domain/PowerUps.hpp"
 #include "Mods/Network/Protocol/Packets/ImpactOffset.hpp"
 #include "Mods/Network/Protocol/Packets/ShotRayValidation.hpp"
+#include "Mods/Combat/WeaponVariant.hpp"
 #include "Formats/Types.hpp"
 #include <array>
 #include <cstdint>
@@ -132,19 +133,66 @@ namespace MphRead::Mods::Network
         //   sections u8     SectionRay | SectionShots | SectionBombs
         //   ray             origin xyz, direction xyz                  24
         //   shots           count u8, then count x (sequence u32, frame u32,
-        //                   ack u32, weapon u8, charge u8, 2 reserved,
-        //                   origin xyz, direction xyz)                 1 + n x 40
+        //                   ack u32, weapon u8, charge u8, variant u8,
+        //                   flags u8, origin xyz, direction xyz, target) 1 + n x 60
         //   bombs           count u8, gone mask u8, then
         //                   count x (sequence u32, xyz)                2 + n x 16
+        //   continuous fire: lock target reference (Kind None for none),
+        //   its spare byte the shooter's Prime Hunter role             20
         // each present only when its bit is set. A section cut short is read
         // as absent, never half read.
         static constexpr std::int32_t ShotSize = 24;
-        static constexpr std::int32_t ShotEventSize = 40;
+        static constexpr std::int32_t TargetReferenceSize = 20;
+        static constexpr std::int32_t ShotEventSize = 64;
         static constexpr std::int32_t ShotHistoryCount = 4;
         static constexpr std::uint8_t SectionRay = 1U << 0;
         static constexpr std::uint8_t SectionShots = 1U << 1;
         static constexpr std::uint8_t SectionBombs = 1U << 2;
+        static constexpr std::uint8_t SectionContinuousTarget = 1U << 3;
         static constexpr std::uint8_t NoWeapon = 0xFF;
+        static constexpr std::uint8_t NoVariant = 0xFF;
+        static constexpr std::uint8_t ShotFlagPrimeHunter = 1U << 0;
+        static constexpr std::uint8_t ShotFlagTargetResolved = 1U << 1;
+        enum class ShotTargetKind : std::uint8_t
+        {
+            None,
+            Player,
+            Halfturret,
+            SceneEntity,
+            EnemyInstance
+        };
+        struct ShotTargetReference final
+        {
+            ShotTargetKind Kind = ShotTargetKind::None;
+            std::uint8_t EntityType = 0xFF;
+            std::uint8_t Slot = 0xFF;
+            std::uint16_t Generation = 0;
+            std::uint16_t LifeId = 0;
+            std::int32_t EntityId = -1;
+            std::uint64_t StableId = 0;
+            [[nodiscard]] bool operator==(const ShotTargetReference&) const noexcept = default;
+            [[nodiscard]] bool IsValid() const noexcept
+            {
+                switch (Kind)
+                {
+                case ShotTargetKind::None:
+                    return EntityType == 0xFF && Slot == 0xFF && Generation == 0 && LifeId == 0
+                        && EntityId == -1 && StableId == 0;
+                case ShotTargetKind::Player:
+                case ShotTargetKind::Halfturret:
+                    return EntityType == 0xFF && Slot < 8 && EntityId == -1 && StableId == 0;
+                case ShotTargetKind::SceneEntity:
+                    return Slot == 0xFF && Generation == 0 && LifeId == 0 && EntityId >= 0 && StableId == 0
+                        && (EntityType == static_cast<std::uint8_t>(::MphRead::EntityType::Door)
+                            || EntityType == static_cast<std::uint8_t>(::MphRead::EntityType::Platform));
+                case ShotTargetKind::EnemyInstance:
+                    return EntityType == 0xFF && Slot == 0xFF && Generation == 0 && LifeId == 0
+                        && EntityId == -1 && StableId != 0;
+                default:
+                    return false;
+                }
+            }
+        };
         struct ShotEvent
         {
             std::uint32_t Sequence = 0;
@@ -158,9 +206,54 @@ namespace MphRead::Mods::Network
             std::uint32_t AckFrame = 0;
             ::OpenTK::Mathematics::Vector3 Origin{};
             ::OpenTK::Mathematics::Vector3 Direction{};
+            std::uint8_t WeaponVariantIndex = NoVariant;
+            std::uint8_t ShotFlags = 0;
+            ShotTargetReference Target{};
+            // The authoritative role snapshot, independent of the playout clock.
+            std::uint32_t RoleFrame = 0;
+            [[nodiscard]] bool PrimeHunterAtFire() const noexcept
+            {
+                return (ShotFlags & ShotFlagPrimeHunter) != 0;
+            }
+            [[nodiscard]] bool HasHomingDecision() const noexcept
+            {
+                return (ShotFlags & ShotFlagTargetResolved) != 0;
+            }
             [[nodiscard]] bool HasRay() const noexcept
             {
                 return ShotRayValidation::IsValidDirection(Direction);
+            }
+            [[nodiscard]] bool IsValid() const noexcept
+            {
+                return Sequence != 0 && WeaponId < Mods::Combat::BaseWeaponVariantCount
+                    && WeaponVariantIndex < Mods::Combat::WeaponVariantCount
+                    && WeaponVariantIndex % Mods::Combat::BaseWeaponVariantCount == WeaponId
+                    && (!PrimeHunterAtFire() || WeaponVariantIndex >= Mods::Combat::BaseWeaponVariantCount)
+                    && Target.IsValid()
+                    && (HasHomingDecision() || Target.Kind == ShotTargetKind::None);
+            }
+            [[nodiscard]] bool TryMergeHomingDecision(
+                const ShotEvent& update, ShotEvent& merged) const noexcept
+            {
+                if (Sequence == 0 || Sequence != update.Sequence
+                    || Frame != update.Frame || WeaponId != update.WeaponId || Charge != update.Charge
+                    || AckFrame != update.AckFrame || RoleFrame != update.RoleFrame
+                    || WeaponVariantIndex != update.WeaponVariantIndex
+                    || PrimeHunterAtFire() != update.PrimeHunterAtFire()
+                    || !::OpenTK::Mathematics::Equal(Origin, update.Origin)
+                    || !::OpenTK::Mathematics::Equal(Direction, update.Direction)
+                    || !Target.IsValid() || !update.Target.IsValid()
+                    || (HasHomingDecision() && update.HasHomingDecision() && Target != update.Target))
+                {
+                    return false;
+                }
+                merged = *this;
+                if (!HasHomingDecision() && update.HasHomingDecision())
+                {
+                    merged.ShotFlags = update.ShotFlags;
+                    merged.Target = update.Target;
+                }
+                return true;
             }
         };
         bool HasShot = false;
@@ -177,7 +270,7 @@ namespace MphRead::Mods::Network
         static constexpr std::int32_t BombCount = 6;
         static constexpr std::int32_t BombSize = 16;
         static constexpr std::int32_t MaxWireSize = FullSize + 1 + ShotSize
-            + 1 + ShotEventSize * ShotHistoryCount + 2 + BombSize * BombCount;
+            + 1 + ShotEventSize * ShotHistoryCount + 2 + BombSize * BombCount + TargetReferenceSize + 4;
         struct Bomb
         {
             std::uint32_t Sequence = 0;
@@ -189,6 +282,15 @@ namespace MphRead::Mods::Network
         std::uint8_t BombsLength = 0;
         // Whether the sender reported its bombs at all.
         bool HasBombs = false;
+        // A continuous weapon fired by its owner this frame: the lock that
+        // tick took, if any, and whether the shooter held the Prime Hunter
+        // role as it saw it (the authority checks that against its history).
+        static constexpr std::uint8_t ContinuousFlagPrimeHunter = 1U << 0;
+        bool HasContinuousFire = false;
+        bool ContinuousPrimeHunter = false;
+        std::uint32_t ContinuousRoleFrame = 0;
+        bool HasContinuousTarget = false;
+        ShotTargetReference ContinuousTarget{};
 
         // The bytes Write fills: FullSize and the sections there are.
         [[nodiscard]] std::size_t WireSize() const noexcept;
@@ -444,6 +546,7 @@ namespace MphRead::Mods::Network
         std::uint32_t Rng1 = 0;
         std::uint32_t Rng2 = 0;
         std::uint8_t PlayerCount = 0;
+        std::uint8_t PrimeHunterSlot = 0xFF;
 
         void Write(std::span<std::uint8_t> dest) const;
         [[nodiscard]] static SnapshotHeader Read(std::span<const std::uint8_t> src);

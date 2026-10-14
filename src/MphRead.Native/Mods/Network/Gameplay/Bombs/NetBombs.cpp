@@ -188,7 +188,7 @@ namespace MphRead::Mods::Network
     bool NetBombs::IsRemoteReplica(const Entities::BombEntity& bomb) noexcept
     {
         const Entities::PlayerEntity* owner = bomb.Owner();
-        return owner != nullptr && !NetSession::IsAuthority() && !NetSession::IsHost()
+        return owner != nullptr && !NetSession::IsAuthority()
             && Drives(*owner);
     }
 

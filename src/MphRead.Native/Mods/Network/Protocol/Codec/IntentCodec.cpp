@@ -5,6 +5,36 @@ namespace MphRead::Mods::Network
 {
     using namespace Protocol::Wire;
 
+    namespace
+    {
+        void WriteTargetReference(std::span<std::uint8_t> dest, std::size_t at,
+            const IntentPacket::ShotTargetReference& target)
+        {
+            At(dest, at) = static_cast<std::uint8_t>(target.Kind);
+            At(dest, at + 1) = target.EntityType;
+            At(dest, at + 2) = target.Slot;
+            At(dest, at + 3) = 0;
+            W16(Slice(dest, at + 4), target.Generation);
+            W16(Slice(dest, at + 6), target.LifeId);
+            W32(Slice(dest, at + 8), static_cast<std::uint32_t>(target.EntityId));
+            W64(Slice(dest, at + 12), target.StableId);
+        }
+
+        [[nodiscard]] IntentPacket::ShotTargetReference ReadTargetReference(
+            std::span<const std::uint8_t> src, std::size_t at)
+        {
+            IntentPacket::ShotTargetReference target{};
+            target.Kind = static_cast<IntentPacket::ShotTargetKind>(At(src, at));
+            target.EntityType = At(src, at + 1);
+            target.Slot = At(src, at + 2);
+            target.Generation = R16(Slice(src, at + 4));
+            target.LifeId = R16(Slice(src, at + 6));
+            target.EntityId = static_cast<std::int32_t>(R32(Slice(src, at + 8)));
+            target.StableId = R64(Slice(src, at + 12));
+            return target;
+        }
+    }
+
     void IntentPacket::Write(std::span<std::uint8_t> dest) const
     {
         W16(Slice(dest, 74), MatchId);
@@ -95,10 +125,20 @@ namespace MphRead::Mods::Network
                 event.AckFrame = R32(Slice(src, at + 8));
                 event.WeaponId = At(src, at + 12);
                 event.Charge = At(src, at + 13);
+                event.WeaponVariantIndex = At(src, at + 14);
+                event.ShotFlags = At(src, at + 15);
                 event.Origin = ::OpenTK::Mathematics::Vector3(
                     RF(Slice(src, at + 16)), RF(Slice(src, at + 20)), RF(Slice(src, at + 24)));
                 event.Direction = ::OpenTK::Mathematics::Vector3(
                     RF(Slice(src, at + 28)), RF(Slice(src, at + 32)), RF(Slice(src, at + 36)));
+                event.Target = ReadTargetReference(src, at + 40);
+                event.RoleFrame = R32(Slice(src, at + 60));
+                event.ShotFlags = static_cast<std::uint8_t>(event.ShotFlags
+                    & (ShotFlagPrimeHunter | ShotFlagTargetResolved));
+                if (!event.IsValid())
+                {
+                    event = {};
+                }
                 if (!ShotRayValidation::IsFinite(event.Origin)
                     || !ShotRayValidation::IsValidDirection(event.Direction))
                 {
@@ -132,6 +172,23 @@ namespace MphRead::Mods::Network
             BombsLength = count;
             HasBombs = true;
         }
+        if ((sections & SectionContinuousTarget) != 0)
+        {
+            if (!fits(static_cast<std::size_t>(TargetReferenceSize + 4)))
+            {
+                return;
+            }
+            ContinuousTarget = ReadTargetReference(src, at);
+            HasContinuousFire = true;
+            ContinuousPrimeHunter = (At(src, at + 3) & ContinuousFlagPrimeHunter) != 0;
+            ContinuousRoleFrame = R32(Slice(src, at + TargetReferenceSize));
+            HasContinuousTarget = ContinuousTarget.IsValid()
+                && ContinuousTarget.Kind != ShotTargetKind::None;
+            if (!HasContinuousTarget)
+            {
+                ContinuousTarget = {};
+            }
+        }
     }
 
     std::size_t IntentPacket::WireSize() const noexcept
@@ -149,6 +206,10 @@ namespace MphRead::Mods::Network
         {
             size += 2 + static_cast<std::size_t>(BombSize) * std::min<std::uint8_t>(BombsLength, BombCount);
         }
+        if (HasContinuousFire || HasContinuousTarget)
+        {
+            size += static_cast<std::size_t>(TargetReferenceSize + 4);
+        }
         return size;
     }
     void IntentPacket::WriteSections(std::span<std::uint8_t> dest) const
@@ -157,7 +218,8 @@ namespace MphRead::Mods::Network
         const std::uint8_t bombs = HasBombs ? std::min<std::uint8_t>(BombsLength, BombCount) : 0;
         std::size_t at = static_cast<std::size_t>(FullSize);
         At(dest, at++) = static_cast<std::uint8_t>((HasShot ? SectionRay : 0) | (shots > 0 ? SectionShots : 0)
-            | (HasBombs ? SectionBombs : 0));
+            | (HasBombs ? SectionBombs : 0)
+            | (HasContinuousFire || HasContinuousTarget ? SectionContinuousTarget : 0));
         if (HasShot)
         {
             WF(Slice(dest, at), ShotOrigin.X);
@@ -179,14 +241,17 @@ namespace MphRead::Mods::Network
                 W32(Slice(dest, at + 8), event.AckFrame);
                 At(dest, at + 12) = event.WeaponId;
                 At(dest, at + 13) = event.Charge;
-                At(dest, at + 14) = 0;
-                At(dest, at + 15) = 0;
+                At(dest, at + 14) = event.WeaponVariantIndex;
+                At(dest, at + 15) = static_cast<std::uint8_t>(event.ShotFlags
+                    & (ShotFlagPrimeHunter | ShotFlagTargetResolved));
                 WF(Slice(dest, at + 16), event.Origin.X);
                 WF(Slice(dest, at + 20), event.Origin.Y);
                 WF(Slice(dest, at + 24), event.Origin.Z);
                 WF(Slice(dest, at + 28), event.Direction.X);
                 WF(Slice(dest, at + 32), event.Direction.Y);
                 WF(Slice(dest, at + 36), event.Direction.Z);
+                WriteTargetReference(dest, at + 40, event.Target);
+                W32(Slice(dest, at + 60), event.RoleFrame);
                 at += static_cast<std::size_t>(ShotEventSize);
             }
         }
@@ -208,6 +273,12 @@ namespace MphRead::Mods::Network
                 WF(Slice(dest, at + 12), Bombs[i].Position.Z);
                 at += static_cast<std::size_t>(BombSize);
             }
+        }
+        if (HasContinuousFire || HasContinuousTarget)
+        {
+            WriteTargetReference(dest, at, HasContinuousTarget ? ContinuousTarget : ShotTargetReference{});
+            At(dest, at + 3) = ContinuousPrimeHunter ? ContinuousFlagPrimeHunter : 0;
+            W32(Slice(dest, at + TargetReferenceSize), ContinuousRoleFrame);
         }
     }
     void IntentPacket::SetTouchReport(const ::MphRead::Mods::Input::NativeTouchState::Reported& touch) noexcept

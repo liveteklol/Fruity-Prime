@@ -120,25 +120,31 @@ namespace MphRead::Mods::Network
         _writer->WriteRecord(RecordFrame(data, _frameClock.FrameAt(packet.ArrivedAt)), data);
     }
 
-    void DemoRecorder::RecordOwnIntent(
-        std::int32_t slot, std::span<const std::uint8_t> intentBytes)
+    void DemoRecorder::RecordOwnIntent(std::int32_t slot, const IntentPacket& intent)
     {
         if (_writer == nullptr && !DemoClip::Active())
         {
             return;
         }
 
-        std::vector<std::uint8_t> buffer(2 + intentBytes.size());
-        buffer[0] = static_cast<std::uint8_t>(PacketType::SlotIntent);
-        buffer[1] = static_cast<std::uint8_t>(slot);
-        std::copy(intentBytes.begin(), intentBytes.end(), buffer.begin() + 2);
-
+        const std::vector<std::uint8_t> buffer = OwnIntentRecord(slot, intent);
         const std::span<const std::uint8_t> data(buffer);
         DemoClip::Add(data);
         if (_writer != nullptr)
         {
             _writer->WriteRecord(Frame(), data);
         }
+    }
+
+    std::vector<std::uint8_t> DemoRecorder::OwnIntentRecord(std::int32_t slot, const IntentPacket& intent)
+    {
+        // The whole wire form, not FullSize: past it are the shot events and
+        // the bombs, and a copy fires nothing its intent does not carry.
+        std::vector<std::uint8_t> buffer(2 + intent.WireSize());
+        buffer[0] = static_cast<std::uint8_t>(PacketType::SlotIntent);
+        buffer[1] = static_cast<std::uint8_t>(slot);
+        intent.Write(std::span<std::uint8_t>(buffer).subspan(2));
+        return buffer;
     }
 
     void DemoRecorder::RecordOwnSnapshot(std::span<const std::uint8_t> payload)

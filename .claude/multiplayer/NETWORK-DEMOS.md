@@ -37,6 +37,22 @@ only thing during playback that ever calls `ModNetSpawn`. So the host's demo
 did not look thin, it opened on **an empty room**: nobody was ever placed,
 nothing was ever hit, no score ever moved.
 
+### The own intent is recorded whole (native)
+
+In the C++ build a remote copy fires **only the shot events its intent
+carries** (`NetShotEvents`), and those -- with the fired ray and the bombs --
+live in the sections *past* `IntentPacket::FullSize`. The recorder used to
+write the own intent cut at `FullSize`, so the recording player's copy had a
+trigger and no events: on replay their missiles, and every other non-continuous
+shot and bomb, never left (a Missile intent: 142 bytes sent, 100 recorded, 0
+shots read back). Only continuous fire (the Shock Coil), which goes by the
+trigger, showed.
+`DemoRecorder::RecordOwnIntent` now takes the `IntentPacket` and writes its
+whole `WireSize()` itself (`OwnIntentRecord`), so no caller can pick the size
+again. Test: `FruityPrime.DemoOwnIntent`. Demos recorded before the fix stay
+without those shots -- the bytes are not in the file. The C# tree sends and
+records `FullSize` alike and has no events, so it never had this.
+
 ## Frames, not milliseconds
 
 Format version 1 stamped each record with `Environment.TickCount64` and the

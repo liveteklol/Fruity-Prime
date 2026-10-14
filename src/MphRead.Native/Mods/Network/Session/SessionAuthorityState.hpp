@@ -4,7 +4,7 @@
 
 namespace MphRead::Mods::Network
 {
-    // Owns the client/server simulation-authority lease and its measurements.
+    // Owns the server simulation authority and its measurements.
     // Session transport, reconnect policy, and match identity remain outside.
     class SessionAuthorityState final
     {

@@ -4,19 +4,9 @@
 
 namespace MphRead::Mods::Network
 {
-    namespace
-    {
-        [[nodiscard]] bool SameShot(const IntentPacket::ShotEvent& a, const IntentPacket::ShotEvent& b) noexcept
-        {
-            return a.Frame == b.Frame && a.WeaponId == b.WeaponId && a.Charge == b.Charge
-                && a.AckFrame == b.AckFrame && OpenTK::Mathematics::Equal(a.Origin, b.Origin)
-                && OpenTK::Mathematics::Equal(a.Direction, b.Direction);
-        }
-    }
-
     void ShotEventLedger::Note(const IntentPacket::ShotEvent& event) noexcept
     {
-        if (event.Sequence == 0)
+        if (!event.IsValid())
         {
             return;
         }
@@ -25,9 +15,14 @@ namespace MphRead::Mods::Network
         {
             // Every intent repeats the event; one that says something else
             // under the same sequence is not the shot that was kept.
-            if (!SameShot(kept, event))
+            IntentPacket::ShotEvent merged{};
+            if (!kept.TryMergeHomingDecision(event, merged))
             {
                 ++_conflicts;
+            }
+            else
+            {
+                kept = merged;
             }
             return;
         }

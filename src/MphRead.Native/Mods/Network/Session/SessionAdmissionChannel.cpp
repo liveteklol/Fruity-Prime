@@ -79,20 +79,8 @@ namespace MphRead::Mods::Network
         SessionRuntimeState& runtime, SessionAuthorityState& authority,
         StreamMatcher matchesStream)
     {
-        if (payload.size() != 13 || payload[0] != runtime.LocalSlot()
-            || matchesStream == nullptr || !matchesStream(
-                Runtime::ReadUInt16LittleEndian(payload.subspan(1)),
-                Runtime::ReadUInt64LittleEndian(payload.subspan(3)))
-            || Runtime::ReadUInt16LittleEndian(payload.subspan(11))
-                != NetPlayerLifecycle::Generation(runtime.LocalSlot()))
-        {
-            return;
-        }
-        if (authority.BecomeClientAuthority())
-        {
-            ConsoleWriteLine("[net] this client is now the simulation authority");
-            NetLog::Event("became the simulation authority");
-        }
+        // Older servers could grant a client authority. This protocol keeps
+        // all lobby owners and participants as clients.
     }
 
     void SessionAdmissionChannel::HandleRefused(std::span<const std::uint8_t> payload,

@@ -7,10 +7,12 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <vector>
 
 namespace MphRead::Mods::Network
 {
     class DemoWriter;
+    struct IntentPacket;
     struct ReceivedPacket;
 
     class DemoRecorder final
@@ -29,7 +31,12 @@ namespace MphRead::Mods::Network
         static void Stop();
 
         static void Record(ReceivedPacket packet);
-        static void RecordOwnIntent(std::int32_t slot, std::span<const std::uint8_t> intentBytes);
+        // This machine's own intent, as the server would have relayed it to
+        // everyone else: sections included, since a copy fires only the shot
+        // events (and lays only the bombs) the intent carries.
+        static void RecordOwnIntent(std::int32_t slot, const IntentPacket& intent);
+        [[nodiscard]] static std::vector<std::uint8_t> OwnIntentRecord(
+            std::int32_t slot, const IntentPacket& intent);
         static void RecordOwnSnapshot(std::span<const std::uint8_t> payload);
 
     private:

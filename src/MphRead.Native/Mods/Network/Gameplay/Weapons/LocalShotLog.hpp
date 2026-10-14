@@ -23,6 +23,8 @@ namespace MphRead::Mods::Network
         }
         // Gives the shot its sequence and keeps it.
         std::uint32_t Record(IntentPacket::ShotEvent shot) noexcept;
+        void SetHomingTarget(std::uint32_t sequence,
+            const IntentPacket::ShotTargetReference& target) noexcept;
         // How long a shot is repeated: as long as a receiver may still fire it
         // (RemoteShotQueue::FreshFrames, checked where both are known).
         static constexpr std::uint32_t RepeatFrames = 30;

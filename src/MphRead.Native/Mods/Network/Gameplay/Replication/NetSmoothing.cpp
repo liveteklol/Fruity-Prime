@@ -101,7 +101,7 @@ namespace MphRead::Mods::Network
     bool NetSmoothing::PresentationOwnsRemoteReplicas() noexcept
     {
         return _enabled && NetSession::Active()
-            && !NetSession::IsAuthority() && !NetSession::IsHost();
+            && !NetSession::IsAuthority();
     }
 
     void NetSmoothing::Record(std::uint32_t frame, std::span<const PlayerState> states)

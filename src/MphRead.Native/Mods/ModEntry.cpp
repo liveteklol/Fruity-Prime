@@ -56,6 +56,7 @@
 #include "MapGen/Q3Convert.hpp"
 #include "NativeRuntime/System/ExceptionText.hpp"
 #include "Mods/Network/Server/Core/DedicatedServer.hpp"
+#include "Mods/Network/Server/Core/ServerLaunchOptions.hpp"
 #include "Mods/Network/Server/Lobby/ServerMapUpload.hpp"
 #include "Mods/Render/InstagibRails.hpp"
 #include "Mods/Network/Replay/DemoInfo.hpp"
@@ -70,6 +71,7 @@
 #include "Mods/Network/Testing/Harness/NetCheckClient.hpp"
 #include "Mods/Network/Integration/Launch/NetConnectCommand.hpp"
 #include "Mods/Network/Diagnostics/NetDiagnostics.hpp"
+#include "Mods/Network/Diagnostics/HomingShotTrace.hpp"
 #include "Mods/Network/Integration/Hooks/NetHooks.hpp"
 #include "Mods/Network/Gameplay/Claims/Hit/NetHitClaims.hpp"
 #include "Mods/Network/Gameplay/Combat/NetHitPrediction.hpp"
@@ -88,6 +90,12 @@
 #include "Mods/Network/Testing/Combat/NetCombatCheck.hpp"
 #include "Mods/Network/Testing/Lobby/NetLobbyTest.hpp"
 #include "Diagnostics/LockjawEnemyCheck.hpp"
+#include "Diagnostics/HomingContinuousCheck.hpp"
+#include "Launcher/Portable/GameFiles.hpp"
+#include "Diagnostics/HomingDisplayCheck.hpp"
+#include "Diagnostics/HomingParityCheck.hpp"
+#include "Diagnostics/HostedAuthorityCheck.hpp"
+#include "Diagnostics/HomingSpawnCheck.hpp"
 #include "Mods/Network/Testing/Simulation/ServerSimCheck.hpp"
 #include "Mods/Network/Testing/Combat/WeaponDps.hpp"
 #include "Render/Crosshair.hpp"
@@ -1284,6 +1292,11 @@ namespace MphRead::Mods
             const std::optional<std::string> description = Network::NetLag::Describe();
             WriteLine("[net] simulating a bad line: " + description.value_or(""));
         }
+        if (::HasFlag(args, "homingtrace"))
+        {
+            Network::HomingShotTrace::Enable(true);
+            WriteLine("[net] homing trace on: every projectile, claim and verdict goes to the debug log");
+        }
         if (::HasFlag(args, "nounlagged"))
         {
             Network::NetUnlagged::SetEnabled(false);
@@ -1313,8 +1326,13 @@ namespace MphRead::Mods
             }
             else
             {
-                WriteLine("[net] -hitrig " + *rig + " refused: jump, sniper, duel, dialanche, all, wells, lanes, strafe or a weapon name");
+                WriteLine("[net] -hitrig " + *rig + " refused: jump, sniper, duel, dialanche, all, wells, lanes, strafe, homing or a weapon name");
             }
+        }
+        if (::HasFlag(args, "rigmorph"))
+        {
+            Network::HitRig::ConfigureMorph(true);
+            WriteLine("[net] hit rig runners roll into their alt form and out again");
         }
         if (const std::optional<std::string> speed = ValueAfter(args, "rigspeed"); speed.has_value())
         {
@@ -1751,6 +1769,7 @@ namespace MphRead::Mods
         }
         std::shared_ptr<Network::MapRotation> rotation = Network::MapRotation::LoadOrCreate(rotationPath);
         Network::DedicatedServer server(port, maxPlayers, rotation);
+        Network::ServerLaunchOptions::Apply(server, args);
         std::string serverName;
         if (const std::optional<std::string> value = ValueAfter(args, "servername"); value.has_value())
         {
@@ -2208,6 +2227,50 @@ namespace MphRead::Mods
             SetExitCode(Diagnostics::WeavelAltFormCheck::Run(*weavelAltCheck));
             return true;
         }
+        // The homing checks fly real projectiles in a real room: without the
+        // player's game files there is nothing to load, which CTest reads as
+        // a skip (77) rather than a failure.
+        const auto homingCheck = [&args](std::string_view name, const std::function<std::int32_t()>& run)
+        {
+            if (!::HasFlag(args, std::string(name)))
+            {
+                return false;
+            }
+            if (!Launcher::GameFiles::Ready())
+            {
+                WriteLine("[check] -" + std::string(name) + " needs the game files; skipped");
+                SetExitCode(77);
+                return true;
+            }
+            SetExitCode(run());
+            return true;
+        };
+        const auto roomFor = [&args](const char* name)
+        {
+            return ValueAfter(args, name).value_or("MP3 PROVING GROUND");
+        };
+        if (homingCheck("homingcontinuouscheck",
+                [&] { return Diagnostics::HomingContinuousCheck::Run(roomFor("homingcontinuouscheck")); })
+            || homingCheck("homingdisplaycheck",
+                [&] { return Diagnostics::HomingDisplayCheck::Run(roomFor("homingdisplaycheck")); })
+            || homingCheck("homingparitycheck",
+                [&] { return Diagnostics::HomingParityCheck::Run(roomFor("homingparitycheck")); })
+            || homingCheck("netcombatcheck",
+                [&] { return Network::NetCombatCheck::Run(roomFor("netcombatcheck")); })
+            || homingCheck("hostauthoritycheck",
+                [&] { return Diagnostics::HostedAuthorityCheck::Run(roomFor("hostauthoritycheck")); })
+            || homingCheck("homingspawncheck", [&]
+                {
+                    std::int32_t seconds = 20;
+                    if (const auto value = ValueAfter(args, "homingspawncheck"); value.has_value())
+                    {
+                        static_cast<void>(Int32TryParseCurrentCulture(*value, seconds));
+                    }
+                    return Diagnostics::HomingSpawnCheck::Run(std::clamp(seconds, 1, 600));
+                }))
+        {
+            return true;
+        }
         if (lockjawEnemyCheck.has_value())
         {
             SetExitCode(Diagnostics::LockjawEnemyCheck::Run(*lockjawEnemyCheck));
@@ -2477,7 +2540,8 @@ namespace MphRead::Mods
                     : ""));
             const auto game = Network::NetMasterClient::RequestGame(masterHost,
                 masterPort, *hostGame, hostMode, 420, 7,
-                Entities::PlayerEntity::SlotCapacity, hostName + "'s game", 6000, hostRotation);
+                Entities::PlayerEntity::SlotCapacity, hostName + "'s game",
+                Network::NetMasterConfig::HostedRequestTimeoutMs, hostRotation);
             if (!game.Started)
             {
                 WriteLine("[net] it would not: " + game.Reason);

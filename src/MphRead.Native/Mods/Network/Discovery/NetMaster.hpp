@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Mods/Network/Domain/MatchDefinition.hpp"
+#include "Mods/Network/Server/Core/HostPool.hpp"
 #include "NativeRuntime/System/Guid.hpp"
 
 #include <functional>
@@ -39,6 +40,8 @@ namespace MphRead::Mods::Network
         static constexpr std::uint16_t DefaultPort = 27889;
         static constexpr double HeartbeatSeconds = 15.0;
         static constexpr double ExpirySeconds = 50.0;
+        static constexpr std::int32_t HostedStartupTimeoutMs = 30000;
+        static constexpr std::int32_t HostedRequestTimeoutMs = HostedStartupTimeoutMs + 5000;
 
         [[nodiscard]] static constexpr std::int32_t EntriesPerPacket() noexcept
         {
@@ -84,7 +87,6 @@ namespace MphRead::Mods::Network
     {
     private:
         class Entry;
-        class Hosted;
 
     public:
         explicit MasterServer(std::int32_t port = NetMasterConfig::DefaultPort);
@@ -101,9 +103,6 @@ namespace MphRead::Mods::Network
         void Run(std::stop_token cancel = {});
 
     private:
-        static constexpr double PortCooldownSeconds = 5.0;
-        static constexpr double HostedStartupSeconds = 180.0;
-        static constexpr double HostedEmptySeconds = 45.0;
 
         [[nodiscard]] static std::uint32_t ToUInt32(
             const std::array<std::uint8_t, 4>& address) noexcept;
@@ -115,9 +114,7 @@ namespace MphRead::Mods::Network
         void HandleHostRequest(const ReceivedPacket& packet, double now);
         [[nodiscard]] HostReplyPacket StartHosted(const HostRequestPacket& request,
             const std::shared_ptr<System::Net::IPEndPoint>& asker, double now);
-        [[nodiscard]] std::int32_t FreeHostPort(double now);
         void ReapHosted(double now);
-        void StopHosted(const std::shared_ptr<Hosted>& entry, const std::string& why);
         void Unlist(std::int32_t port);
         void HandleHeartbeat(const ReceivedPacket& packet, double now);
         void Expire(double now);
@@ -126,7 +123,7 @@ namespace MphRead::Mods::Network
 
         const std::int32_t _port;
         std::vector<std::shared_ptr<Entry>> _entries{};
-        std::vector<std::shared_ptr<Hosted>> _hosted{};
+        HostPool _hosts{};
         std::array<std::uint8_t, NetConfig::MaxPacketSize> _scratch{};
         std::unique_ptr<NetTransport> _transport{};
         std::atomic<bool> _running{false};
@@ -135,7 +132,6 @@ namespace MphRead::Mods::Network
         std::string _publicName{};
         std::int32_t _hostPortFirst = 0;
         std::int32_t _hostPortLast = -1;
-        std::unordered_map<std::int32_t, double> _cooling{};
     };
 
     struct MasterListing
@@ -204,7 +200,7 @@ namespace MphRead::Mods::Network
         [[nodiscard]] static HostedGame RequestGame(const std::string& masterHost,
             std::int32_t masterPort, const std::string& roomKey, GameMode mode,
             float timeLimit, std::int32_t pointGoal, std::int32_t maxPlayers,
-            const std::string& serverName, std::int32_t timeoutMs = 6000,
+            const std::string& serverName, std::int32_t timeoutMs = NetMasterConfig::HostedRequestTimeoutMs,
             const std::optional<std::vector<std::pair<std::string, GameMode>>>& rotation = std::nullopt,
             ServerSessionPolicy policy = ServerSessionPolicy::Continuous);
 

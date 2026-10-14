@@ -20,6 +20,7 @@
 #include "../../Metadata/SoundMeta.hpp"
 #include "../../Metadata/Weapons.hpp"
 #include "../../Mods/InputSettings.hpp"
+#include "../../Mods/Network/Gameplay/Weapons/FiringVariant.hpp"
 #include "../../Mods/DebugLog.hpp"
 #include "../../Mods/Input/GamepadHaptics.hpp"
 #include "../../Mods/Input/GamepadInput.hpp"
@@ -1300,7 +1301,7 @@ namespace MphRead::Entities
         {
             shotVec = Mods::Network::NetHooks::RemoteShotDirection(*this, shotVec);
         }
-        shotVec = Mods::Network::NetHooks::DrawnRemoteShot(*this, shotOrigin, shotVec);
+        const Vector3 modDrawnShot = Mods::Network::NetHooks::DrawnRemoteShot(*this, shotOrigin, shotVec);
         if (_disruptedTimer > 0)
         {
             shotVec.X += Fixed::ToFloat(static_cast<std::int32_t>(Rng::GetRandomInt2(24576)) - 12288);
@@ -1313,14 +1314,12 @@ namespace MphRead::Entities
         {
             Mods::Network::NetPlayerBridge::NoteLocalShot(shotOrigin, shotVec);
         }
+        const Mods::Network::FiringVariant modFiring = Mods::Network::FiringVariant::For(*this);
         Mods::Network::NetShotEvents::Fired(*this, {_currentWeapon,
-            TestFlag(RequireReference(_equipInfo->Weapon).Flags, WeaponFlags::Continuous), shotOrigin, shotVec});
+            TestFlag(RequireReference(_equipInfo->Weapon).Flags, WeaponFlags::Continuous), shotOrigin, shotVec,
+            modFiring.Index, modFiring.PrimeHunter});
         const std::shared_ptr<WeaponInfo> curWeapon = _equipInfo->Weapon;
-        if (IsPrimeHunter())
-        {
-            _equipInfo->Weapon = ManagedAt(RequireReference(Weapons::Current),
-                static_cast<std::int32_t>(_currentWeapon) + 9);
-        }
+        _equipInfo->Weapon = ManagedAt(RequireReference(Weapons::Current), static_cast<std::int32_t>(modFiring.Index));
         if (_isBot && GameState::SinglePlayer())
         {
             UpdateAdventureModeBotWeapon();
@@ -1330,7 +1329,7 @@ namespace MphRead::Entities
         {
             flags |= BeamSpawnFlags::DoubleDamage;
         }
-        else if (IsPrimeHunter())
+        else if (modFiring.PrimeHunter)
         {
             flags |= BeamSpawnFlags::PrimeHunter;
         }
@@ -1339,8 +1338,10 @@ namespace MphRead::Entities
             _hunter, _gunDrawPos, _aimVec, _muzzlePos, shotOrigin) : std::nullopt;
         Mods::Network::NetUnlagged::BeginShot(*this);
         const BeamResultFlags result = BeamProjectileEntity::Spawn(
-            SharedFrom<EntityBase>(this), _equipInfo, shotOrigin, shotVec, flags, NodeRef, _scene, nullptr, syluxGuardStart);
+            SharedFrom<EntityBase>(this), _equipInfo, shotOrigin, shotVec, flags, NodeRef, _scene, nullptr, syluxGuardStart,
+            modDrawnShot);
         Mods::Network::NetUnlagged::EndShot(*this);
+        Mods::Network::NetShotEvents::FinishShot(*this);
         if (result == BeamResultFlags::NoSpawn)
         {
             _equipInfo->Weapon = curWeapon;

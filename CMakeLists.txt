@@ -340,6 +340,10 @@ if(BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)
     add_executable(fruity_native_aim_rules_tests "${FRUITY_MPHREAD_ROOT}/Testing/TestNativeAimRules.cpp")
     target_compile_features(fruity_native_aim_rules_tests PRIVATE cxx_std_20)
     add_test(NAME FruityPrime.NativeAimRules COMMAND fruity_native_aim_rules_tests)
+    add_executable(fruity_weapon_combat_rules_tests "${FRUITY_MPHREAD_ROOT}/Testing/TestWeaponCombatRules.cpp")
+    target_link_libraries(fruity_weapon_combat_rules_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_weapon_combat_rules_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.WeaponCombatRules COMMAND fruity_weapon_combat_rules_tests)
     add_executable(fruity_hud_text_layout_tests "${FRUITY_MPHREAD_ROOT}/Testing/TestHudTextLayout.cpp")
     target_include_directories(fruity_hud_text_layout_tests PRIVATE "${FRUITY_MPHREAD_ROOT}")
     target_compile_features(fruity_hud_text_layout_tests PRIVATE cxx_std_20)
@@ -377,11 +381,17 @@ if(BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)
     add_executable(fruity_network_protocol_golden_tests "${CMAKE_CURRENT_SOURCE_DIR}/tools/testing/TestNetworkProtocolGolden.cpp")
     target_link_libraries(fruity_network_protocol_golden_tests PRIVATE fruity_mphread_native)
     target_compile_features(fruity_network_protocol_golden_tests PRIVATE cxx_std_20)
-    add_test(NAME FruityPrime.NetworkProtocol31Golden COMMAND fruity_network_protocol_golden_tests
-        "${CMAKE_CURRENT_SOURCE_DIR}/tools/testing/golden/network-protocol-v31.hex")
+    add_test(NAME FruityPrime.NetworkProtocol33Golden COMMAND fruity_network_protocol_golden_tests
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/testing/golden/network-protocol-v33.hex")
     add_test(NAME FruityPrime.NetworkProtocol30GoldenPreserved COMMAND Python3::Interpreter
-        "${CMAKE_CURRENT_SOURCE_DIR}/tools/testing/check-network-protocol-v30-golden.py"
-        "${CMAKE_CURRENT_SOURCE_DIR}/tools/testing/golden/network-protocol-v30.hex")
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/testing/check-network-protocol-golden.py"
+        30 "${CMAKE_CURRENT_SOURCE_DIR}/tools/testing/golden/network-protocol-v30.hex")
+    add_test(NAME FruityPrime.NetworkProtocol31GoldenPreserved COMMAND Python3::Interpreter
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/testing/check-network-protocol-golden.py"
+        31 "${CMAKE_CURRENT_SOURCE_DIR}/tools/testing/golden/network-protocol-v31.hex")
+    add_test(NAME FruityPrime.NetworkProtocol32GoldenPreserved COMMAND Python3::Interpreter
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/testing/check-network-protocol-golden.py"
+        32 "${CMAKE_CURRENT_SOURCE_DIR}/tools/testing/golden/network-protocol-v32.hex")
     add_executable(fruity_timed_effect_sync_tests
         "${FRUITY_MPHREAD_ROOT}/Testing/TestTimedEffectSync.cpp")
     target_include_directories(fruity_timed_effect_sync_tests PRIVATE "${FRUITY_MPHREAD_ROOT}")
@@ -507,6 +517,10 @@ if(BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)
     target_include_directories(fruity_map_upload_tests PRIVATE "${FRUITY_MPHREAD_ROOT}")
     target_link_libraries(fruity_map_upload_tests PRIVATE Threads::Threads ZLIB::ZLIB)
     target_compile_features(fruity_map_upload_tests PRIVATE cxx_std_20)
+    if(WIN32)
+        target_compile_definitions(fruity_map_upload_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+        target_link_libraries(fruity_map_upload_tests PRIVATE ws2_32 bcrypt iphlpapi)
+    endif()
     if(FRUITY_STOP_TOKEN_OPTIONS)
         target_compile_options(fruity_map_upload_tests PRIVATE ${FRUITY_STOP_TOKEN_OPTIONS})
         target_link_options(fruity_map_upload_tests PRIVATE ${FRUITY_STOP_TOKEN_OPTIONS})
@@ -558,6 +572,10 @@ if(BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)
     target_link_libraries(fruity_demo_frame_clock_tests PRIVATE fruity_mphread_native)
     target_compile_features(fruity_demo_frame_clock_tests PRIVATE cxx_std_20)
     add_test(NAME FruityPrime.DemoFrameClock COMMAND fruity_demo_frame_clock_tests)
+    add_executable(fruity_demo_own_intent_tests "${FRUITY_MPHREAD_ROOT}/Testing/TestDemoOwnIntent.cpp")
+    target_link_libraries(fruity_demo_own_intent_tests PRIVATE fruity_mphread_native)
+    target_compile_features(fruity_demo_own_intent_tests PRIVATE cxx_std_20)
+    add_test(NAME FruityPrime.DemoOwnIntent COMMAND fruity_demo_own_intent_tests)
     add_executable(fruity_session_runtime_state_tests "${FRUITY_MPHREAD_ROOT}/Testing/TestSessionRuntimeState.cpp")
     target_link_libraries(fruity_session_runtime_state_tests PRIVATE fruity_mphread_native)
     target_compile_features(fruity_session_runtime_state_tests PRIVATE cxx_std_20)
@@ -1274,6 +1292,30 @@ else()
     find_package(CURL REQUIRED)
     find_package(LibArchive REQUIRED)
     target_link_libraries(fruity_mphread_native PUBLIC CURL::libcurl LibArchive::LibArchive)
+endif()
+
+# The homing checks fly the game's own projectiles in a loaded room through the
+# game binary: they need the player's game files beside it (paths.txt) and
+# report SKIPPED (77) without them, as on CI. -L gamefiles selects them.
+if(BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING AND TARGET fruity_prime)
+    foreach(_check IN ITEMS Parity Display Continuous)
+        string(TOLOWER "${_check}" _flag)
+        add_test(NAME FruityPrime.Homing${_check}
+            COMMAND fruity_prime -homing${_flag}check "MP3 PROVING GROUND" -noupdate)
+        set_tests_properties(FruityPrime.Homing${_check} PROPERTIES
+            SKIP_RETURN_CODE 77 LABELS gamefiles TIMEOUT 600)
+    endforeach()
+    add_test(NAME FruityPrime.HomingSpawn COMMAND fruity_prime -homingspawncheck 15 -noupdate)
+    set_tests_properties(FruityPrime.HomingSpawn PROPERTIES
+        SKIP_RETURN_CODE 77 LABELS "gamefiles;slow" TIMEOUT 3600)
+    add_test(NAME FruityPrime.HomingTraceCompare COMMAND Python3::Interpreter
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/testing/test-compare-homing-trace.py")
+    add_test(NAME FruityPrime.NetworkCombat COMMAND fruity_prime -netcombatcheck "MP3 PROVING GROUND" -noupdate)
+    set_tests_properties(FruityPrime.NetworkCombat PROPERTIES
+        SKIP_RETURN_CODE 77 LABELS gamefiles TIMEOUT 600)
+    add_test(NAME FruityPrime.HostedAuthority COMMAND fruity_prime -hostauthoritycheck "MP3 PROVING GROUND" -noupdate)
+    set_tests_properties(FruityPrime.HostedAuthority PROPERTIES
+        SKIP_RETURN_CODE 77 LABELS gamefiles TIMEOUT 180)
 endif()
 
 # Test executables link the native owner, which includes Qt Core/Gui/Qml/Quick

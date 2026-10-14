@@ -6,10 +6,13 @@
 #include "Mods/Network/Gameplay/Combat/NetUnlagged.hpp"
 #include "Mods/Network/Gameplay/Player/NetPlayerLifecycle.hpp"
 #include "Entities/Players/PlayerEntity.hpp"
+#include "Metadata/Weapons.hpp"
+#include "Mods/Network/Gameplay/Weapons/FiringVariant.hpp"
 #include "NativeRuntime/System/Managed.hpp"
 
 #include <algorithm>
 #include <optional>
+#include <utility>
 
 namespace MphRead::Mods::Network
 {
@@ -29,6 +32,7 @@ namespace MphRead::Mods::Network
             const auto& weapon = NativeRuntime::RequireReference(shooter.EquipInfo()).Weapon;
             return weapon != nullptr && ::MphRead::TestFlag(weapon->Flags, ::MphRead::WeaponFlags::Continuous);
         }
+
     }
 
     bool NetShotEvents::Drives(const Entities::PlayerEntity& shooter) noexcept
@@ -61,8 +65,23 @@ namespace MphRead::Mods::Network
 
     void NetShotEvents::Fired(Entities::PlayerEntity& shooter, const FiredShot& shot)
     {
-        if (shot.Continuous || !NetSession::Active())
+        if (!NetSession::Active())
         {
+            return;
+        }
+        if (shot.Continuous)
+        {
+            // A tick names only the lock it took itself: one that spawns
+            // without looking (something at the muzzle) leaves none.
+            const std::int32_t slot = shooter.SlotIndex();
+            if (Records(shooter) && slot >= 0 && slot < Slots)
+            {
+                RecordContinuousTarget(slot, {});
+                _continuousFire[static_cast<std::size_t>(slot)] = ContinuousFire{true,
+                    shot.WeaponVariantIndex != IntentPacket::NoVariant
+                        ? shot.PrimeHunter : FiringVariant::For(shooter).PrimeHunter,
+                    FiringVariant::RoleFrame()};
+            }
             return;
         }
         if (Records(shooter))
@@ -74,18 +93,121 @@ namespace MphRead::Mods::Network
                 NativeRuntime::RequireReference(shooter.EquipInfo()).ChargeLevel, 0xFF));
             // The same world the projectile was stamped with as it spawned.
             event.AckFrame = NetUnlagged::LaunchFrameFor(shooter);
+            event.RoleFrame = FiringVariant::RoleFrame();
             event.Origin = shot.Origin;
             event.Direction = shot.Direction;
-            static_cast<void>(LogFor(shooter)->Record(event));
+            const FiringVariant firing = shot.WeaponVariantIndex != IntentPacket::NoVariant
+                ? FiringVariant{shot.WeaponVariantIndex, shot.PrimeHunter} : FiringVariant::For(shooter);
+            event.WeaponVariantIndex = firing.Index;
+            if (firing.PrimeHunter)
+            {
+                event.ShotFlags |= IntentPacket::ShotFlagPrimeHunter;
+            }
+            LocalShotLog* log = LogFor(shooter);
+            static_cast<void>(log->Record(event));
+            if (shooter.SlotIndex() >= 0 && shooter.SlotIndex() < Slots)
+            {
+                _activeShots[static_cast<std::size_t>(shooter.SlotIndex())] = *log->Latest();
+            }
         }
         else if (Drives(shooter))
         {
-            _remote[static_cast<std::size_t>(shooter.SlotIndex())].Consume();
+            const std::size_t slot = static_cast<std::size_t>(shooter.SlotIndex());
+            const std::optional<IntentPacket::ShotEvent> event = FiringEvent(shooter);
+            if (event.has_value())
+            {
+                _activeShots[slot] = *event;
+                _remote[slot].Consume();
+            }
+        }
+    }
+
+    void NetShotEvents::FinishShot(const Entities::PlayerEntity& shooter) noexcept
+    {
+        const std::int32_t slot = shooter.SlotIndex();
+        if (slot >= 0 && slot < Slots)
+        {
+            _activeShots[static_cast<std::size_t>(slot)].reset();
+        }
+    }
+
+    std::optional<IntentPacket::ShotEvent> NetShotEvents::CurrentShotEvent(
+        const Entities::PlayerEntity& shooter) noexcept
+    {
+        const std::int32_t slot = shooter.SlotIndex();
+        if (slot < 0 || slot >= Slots)
+        {
+            return std::nullopt;
+        }
+        return _activeShots[static_cast<std::size_t>(slot)];
+    }
+
+    void NetShotEvents::RecordHomingTarget(const Entities::PlayerEntity& shooter,
+        const IntentPacket::ShotTargetReference& target) noexcept
+    {
+        LocalShotLog* log = LogFor(shooter);
+        const std::optional<IntentPacket::ShotEvent> active = CurrentShotEvent(shooter);
+        if (log == nullptr || !active.has_value())
+        {
+            return;
+        }
+        log->SetHomingTarget(active->Sequence, target);
+        IntentPacket::ShotEvent updated = *active;
+        updated.Target = target;
+        updated.ShotFlags |= IntentPacket::ShotFlagTargetResolved;
+        _activeShots[static_cast<std::size_t>(shooter.SlotIndex())] = updated;
+    }
+
+    void NetShotEvents::RecordContinuousTarget(std::int32_t slot,
+        const IntentPacket::ShotTargetReference& target) noexcept
+    {
+        if (slot >= 0 && slot < Slots)
+        {
+            _continuousTargets[static_cast<std::size_t>(slot)] = target.IsValid()
+                ? target : IntentPacket::ShotTargetReference{};
+        }
+    }
+
+    void NetShotEvents::AttachContinuousTarget(const Entities::PlayerEntity& player,
+        IntentPacket& intent) noexcept
+    {
+        intent.HasContinuousFire = false;
+        intent.ContinuousPrimeHunter = false;
+        intent.ContinuousRoleFrame = 0;
+        intent.HasContinuousTarget = false;
+        intent.ContinuousTarget = {};
+        const std::int32_t slot = player.SlotIndex();
+        if (slot < 0 || slot >= Slots)
+        {
+            return;
+        }
+        const std::size_t s = static_cast<std::size_t>(slot);
+        const ContinuousFire fire = std::exchange(_continuousFire[s], ContinuousFire{});
+        if (!Continuous(player))
+        {
+            _continuousTargets[s] = {};
+            return;
+        }
+        // Only what the owner fired this frame: a held trigger that did
+        // not fire names no lock and no role.
+        intent.HasContinuousFire = fire.Fired;
+        intent.ContinuousPrimeHunter = fire.PrimeHunter;
+        intent.ContinuousRoleFrame = fire.RoleFrame;
+        const IntentPacket::ShotTargetReference& target = _continuousTargets[s];
+        intent.HasContinuousTarget = fire.Fired && target.IsValid()
+            && target.Kind != IntentPacket::ShotTargetKind::None;
+        if (intent.HasContinuousTarget)
+        {
+            intent.ContinuousTarget = target;
         }
     }
 
     std::uint32_t NetShotEvents::SequenceOfShotFired(const Entities::PlayerEntity& shooter) noexcept
     {
+        if (const auto active = CurrentShotEvent(shooter); active.has_value())
+        {
+            return active->Sequence;
+        }
         const LocalShotLog* log = LogFor(shooter);
         const IntentPacket::ShotEvent* latest = log != nullptr ? log->Latest() : nullptr;
         return latest != nullptr && latest->Frame == std::max(1U, NetSession::NetFrame()) ? latest->Sequence : 0U;
@@ -102,6 +224,12 @@ namespace MphRead::Mods::Network
         if (weapon != shooter.CurrentWeapon())
         {
             shooter.ModSetWeapon(weapon);
+        }
+        const auto currentWeapons = ::MphRead::Weapons::Current;
+        if (event->WeaponVariantIndex < currentWeapons->size())
+        {
+            NativeRuntime::RequireReference(shooter.EquipInfo()).Weapon
+                = NativeRuntime::ManagedAt(currentWeapons, static_cast<std::int32_t>(event->WeaponVariantIndex));
         }
         // After the switch, which resets it: the charge is the shot's.
         NativeRuntime::RequireReference(shooter.EquipInfo()).ChargeLevel = event->Charge;
@@ -186,9 +314,15 @@ namespace MphRead::Mods::Network
         return fired;
     }
 
-    void NetShotEvents::Attach(IntentPacket& intent) noexcept
+    void NetShotEvents::Attach(IntentPacket& intent, std::int32_t slot) noexcept
     {
         _local.Fill(intent, std::max(1U, NetSession::NetFrame()));
+        if (slot >= 0 && slot < Slots && static_cast<std::size_t>(slot) < Entities::PlayerEntity::Players().size())
+        {
+            const Entities::PlayerEntity& player
+                = NativeRuntime::RequireReference(NativeRuntime::ManagedAt(Entities::PlayerEntity::Players(), slot));
+            AttachContinuousTarget(player, intent);
+        }
     }
 
     void NetShotEvents::AttachFor(std::int32_t slot, IntentPacket& intent) noexcept
@@ -196,6 +330,12 @@ namespace MphRead::Mods::Network
         if (slot >= 0 && slot < Slots)
         {
             _bots[static_cast<std::size_t>(slot)].Fill(intent, std::max(1U, NetSession::NetFrame()));
+            if (static_cast<std::size_t>(slot) < Entities::PlayerEntity::Players().size())
+            {
+                const Entities::PlayerEntity& player
+                    = NativeRuntime::RequireReference(NativeRuntime::ManagedAt(Entities::PlayerEntity::Players(), slot));
+                AttachContinuousTarget(player, intent);
+            }
         }
     }
 
@@ -214,7 +354,7 @@ namespace MphRead::Mods::Network
         for (std::size_t i = 0; i < intent.ShotHistoryLength && i < intent.ShotHistory.size(); ++i)
         {
             const IntentPacket::ShotEvent& event = intent.ShotHistory[i];
-            if (IsValidShotEventFrame(event.Frame, intent.Frame))
+            if (event.IsValid() && IsValidShotEventFrame(event.Frame, intent.Frame))
             {
                 _ledger[s].Note(event);
             }
@@ -308,6 +448,7 @@ namespace MphRead::Mods::Network
         // still has to reach everyone, and Fill already stops repeating it
         // once it is too old to be fired. Only a new occupant (Forget) clears it.
         _remote[static_cast<std::size_t>(slot)].BeginLife();
+        _continuousTargets[static_cast<std::size_t>(slot)] = {};
     }
 
     void NetShotEvents::Forget(std::int32_t slot) noexcept
@@ -329,5 +470,8 @@ namespace MphRead::Mods::Network
         {
             _local.Reset();
         }
+        _activeShots[static_cast<std::size_t>(slot)].reset();
+        _continuousTargets[static_cast<std::size_t>(slot)] = {};
+        _continuousFire[static_cast<std::size_t>(slot)] = {};
     }
 }
