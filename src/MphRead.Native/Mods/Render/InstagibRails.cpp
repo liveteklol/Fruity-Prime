@@ -194,6 +194,7 @@ namespace
         // The straight part -- core and glow -- is a few points so it can taper.
         std::vector<Vector3> spine;
         std::vector<float> coreWidth;
+        std::vector<float> bandWidth;
         std::vector<float> glowWidth;
         for (const float s : {0.0F, 0.5F, 1.5F, 4.0F, 9.0F, 20.0F, length})
         {
@@ -202,12 +203,18 @@ namespace
                 continue;
             }
             spine.push_back(Times(axis, s));
-            coreWidth.push_back(Taper(s, 0.03F, 3.0F));
-            glowWidth.push_back(Taper(s, 0.15F, 9.0F));
+            coreWidth.push_back(Taper(s, 0.06F, 3.0F));
+            bandWidth.push_back(Taper(s, 0.11F, 5.0F));
+            glowWidth.push_back(Taper(s, 0.24F, 9.0F));
         }
+        // Three layers under the helix, widest and faintest first: a soft glow,
+        // a band of the shooter's colour at full strength, and a hot core. The
+        // band is what makes the colour read from across a room; the core
+        // alone was a hairline that the glow barely lifted.
         const Vector3 white = Make(1.0F, 1.0F, 1.0F);
-        const Vector3 core = Mix(rail.Color, white, 0.7F);
+        const Vector3 core = Mix(rail.Color, white, 0.55F);
         Ribbon(scene, rail.Start, axis, spine, glowWidth, rail.Color, look.Glow);
+        Ribbon(scene, rail.Start, axis, spine, bandWidth, rail.Color, 0.85F * look.Core);
         Ribbon(scene, rail.Start, axis, spine, coreWidth, core, look.Core);
 
         // The double helix, wound out of the muzzle. It opens up from a point
@@ -265,8 +272,8 @@ namespace MphRead::Mods::Render
     {
         const float left = std::clamp(1.0F - age, 0.0F, 1.0F);
         Look look;
-        look.Core = std::pow(left, 1.3F);
-        look.Glow = 0.5F * left * left;
+        look.Core = std::pow(left, 0.8F);
+        look.Glow = 0.75F * std::pow(left, 1.5F);
         look.Spiral = 0.95F * std::pow(left, 0.9F);
         look.SpiralRadius = 0.11F * (1.0F + 1.8F * age);
         return look;
