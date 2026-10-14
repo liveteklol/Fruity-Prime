@@ -135,10 +135,13 @@ namespace MphRead::Mods::Network
         inline static std::array<IntentPacket::ShotTargetReference, Slots> _continuousTargets{};
         struct ContinuousFire final
         {
-            bool Fired = false;
-            bool PrimeHunter = false;
-            std::uint32_t RoleFrame = 0;
+            bool Fired;
+            bool PrimeHunter;
+            std::uint32_t RoleFrame;
         };
+        // Value-initialization zeroes every field. Keep ContinuousFire without
+        // default member initializers: GCC and Clang cannot instantiate this
+        // inline static array before NetShotEvents is complete otherwise.
         // Consumed by the intent that carries it, one frame at a time.
         inline static std::array<ContinuousFire, Slots> _continuousFire{};
         // Occupants gone: still part of what this machine received.
