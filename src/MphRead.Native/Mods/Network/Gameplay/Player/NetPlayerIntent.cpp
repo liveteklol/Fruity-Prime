@@ -1,7 +1,9 @@
 #include "Mods/Network/Gameplay/Player/NetPlayerIntent.hpp"
 
 #include "Entities/Players/PlayerEntity.hpp"
+#include "Mods/Network/Gameplay/Player/PlayerCombatPolicy.hpp"
 #include "NativeRuntime/System/Managed.hpp"
+#include "Formats/Enums.hpp"
 
 #include <algorithm>
 #include <memory>
@@ -11,34 +13,44 @@ namespace MphRead::Mods::Network
 {
     using ::MphRead::NativeRuntime::HasFlag;
 
-    IntentPacket NetPlayerIntent::CaptureState(Entities::PlayerEntity& player)
+    IntentPacket NetPlayerIntent::CaptureState(Entities::PlayerEntity& player,
+        std::optional<bool> localSpectatorRequest)
     {
         Entities::PlayerControls& controls = player.Controls();
+        const bool spectating = localSpectatorRequest.value_or(player.ModIsSpectating());
+        const bool inPlay = localSpectatorRequest.has_value()
+            ? PlayerCombatPolicy::IsAliveAndSpawned(
+                HasFlag(player.LoadFlags(), Entities::LoadFlags::Active),
+                HasFlag(player.LoadFlags(), Entities::LoadFlags::Spawned), player.Health()) && !spectating
+            : player.ModIsInPlay();
         IntentButtons buttons = IntentButtons::None;
-        if (controls.MoveLeft().IsDown()) buttons |= IntentButtons::MoveLeft;
-        if (controls.MoveRight().IsDown()) buttons |= IntentButtons::MoveRight;
-        if (controls.MoveUp().IsDown()) buttons |= IntentButtons::MoveUp;
-        if (controls.MoveDown().IsDown()) buttons |= IntentButtons::MoveDown;
-        if (controls.Shoot().IsDown()) buttons |= IntentButtons::Shoot;
-        if (controls.Zoom().IsDown()) buttons |= IntentButtons::Zoom;
-        if (controls.Jump().IsDown()) buttons |= IntentButtons::Jump;
-        if (controls.Morph().IsDown()) buttons |= IntentButtons::Morph;
-        if (controls.Boost().IsDown()) buttons |= IntentButtons::Boost;
-        if (controls.AltAttack().IsDown()) buttons |= IntentButtons::AltAttack;
-        if (controls.ScanVisor().IsDown()) buttons |= IntentButtons::ScanVisor;
-        if (controls.NextWeapon().IsDown()) buttons |= IntentButtons::NextWeapon;
-        if (controls.PrevWeapon().IsDown()) buttons |= IntentButtons::PrevWeapon;
-        if (controls.RolltLeft().IsDown()) buttons |= IntentButtons::RollLeft;
-        if (controls.RollRight().IsDown()) buttons |= IntentButtons::RollRight;
-        if (controls.RollUp().IsDown()) buttons |= IntentButtons::RollUp;
-        if (controls.RollDown().IsDown()) buttons |= IntentButtons::RollDown;
-        if (player.EquipInfo()->Zoomed) buttons |= IntentButtons::ZoomedState;
-        if (player.IsAltForm()) buttons |= IntentButtons::AltFormState;
-        if (HasFlag(player.LoadFlags(), Entities::LoadFlags::Spawned) && player.Health() > 0)
+        if (!spectating)
+        {
+            if (controls.MoveLeft().IsDown()) buttons |= IntentButtons::MoveLeft;
+            if (controls.MoveRight().IsDown()) buttons |= IntentButtons::MoveRight;
+            if (controls.MoveUp().IsDown()) buttons |= IntentButtons::MoveUp;
+            if (controls.MoveDown().IsDown()) buttons |= IntentButtons::MoveDown;
+            if (controls.Shoot().IsDown()) buttons |= IntentButtons::Shoot;
+            if (controls.Zoom().IsDown()) buttons |= IntentButtons::Zoom;
+            if (controls.Jump().IsDown()) buttons |= IntentButtons::Jump;
+            if (controls.Morph().IsDown()) buttons |= IntentButtons::Morph;
+            if (controls.Boost().IsDown()) buttons |= IntentButtons::Boost;
+            if (controls.AltAttack().IsDown()) buttons |= IntentButtons::AltAttack;
+            if (controls.ScanVisor().IsDown()) buttons |= IntentButtons::ScanVisor;
+            if (controls.NextWeapon().IsDown()) buttons |= IntentButtons::NextWeapon;
+            if (controls.PrevWeapon().IsDown()) buttons |= IntentButtons::PrevWeapon;
+            if (controls.RolltLeft().IsDown()) buttons |= IntentButtons::RollLeft;
+            if (controls.RollRight().IsDown()) buttons |= IntentButtons::RollRight;
+            if (controls.RollUp().IsDown()) buttons |= IntentButtons::RollUp;
+            if (controls.RollDown().IsDown()) buttons |= IntentButtons::RollDown;
+            if (player.EquipInfo()->Zoomed) buttons |= IntentButtons::ZoomedState;
+            if (player.IsAltForm()) buttons |= IntentButtons::AltFormState;
+        }
+        if (inPlay)
         {
             buttons |= IntentButtons::InPlayState;
         }
-        if (HasFlag(player.Flags2(), Entities::PlayerFlags2::Spectating))
+        if (spectating)
         {
             buttons |= IntentButtons::SpectatingState;
         }

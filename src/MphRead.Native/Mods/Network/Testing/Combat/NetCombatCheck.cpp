@@ -3,15 +3,21 @@
 #include "Mods/Network/Gameplay/Weapons/ContinuousWeaponPhase.hpp"
 #include "Mods/Network/Gameplay/Combat/NetDamage.hpp"
 #include "Mods/Network/Gameplay/Claims/Hit/NetHitClaims.hpp"
+#include "Mods/Network/Gameplay/Player/NetPlayerBridge.hpp"
 #include "Mods/Network/Gameplay/Player/NetPlayerLifecycle.hpp"
+#include "Mods/Network/Gameplay/Replication/PlayerStateSnapshotCapture.hpp"
+#include "Mods/Network/Gameplay/Weapons/NetShotEvents.hpp"
 #include "Mods/Network/Session/NetSession.hpp"
+#include "Mods/Network/Testing/NetSessionFixture.hpp"
 #include "Mods/Network/Diagnostics/NetShotDiagnostics.hpp"
 #include "Mods/Network/Gameplay/Combat/NetUnlagged.hpp"
 #include "Mods/Network/Server/Match/ServerSim.hpp"
 #include "Mods/Network/Testing/ServerSimFixture.hpp"
 #include "Mods/Network/Testing/NetHitClaimsFixture.hpp"
+#include "Mods/SpectatorMode.hpp"
 #include "Entities/BeamProjectileEntity.hpp"
 #include "Entities/Players/PlayerEntity.hpp"
+#include "Formats/Enums.hpp"
 #include "GameState.hpp"
 #include "Metadata/Metadata.hpp"
 #include "NativeRuntime/System/Console.hpp"
@@ -25,6 +31,7 @@
 #include <array>
 #include <exception>
 #include <memory>
+#include <optional>
 #include <vector>
 
 namespace MphRead::Mods::Network
@@ -40,6 +47,82 @@ namespace MphRead::Mods::Network
         {
             return PlayerEntity::Players().at(static_cast<std::size_t>(slot));
         }
+
+        class SpectatorCheckRestore final
+        {
+        public:
+            explicit SpectatorCheckRestore(Scene* scene = nullptr)
+                : _session(NetSessionFixture::Capture()), _scene(scene),
+                  _mainSlot(PlayerEntity::MainPlayerIndex())
+            {
+                const auto& players = PlayerEntity::Players();
+                _playerCount = std::min(players.size(), _health.size());
+                for (std::size_t slot = 0; slot < _playerCount; ++slot)
+                {
+                    const std::shared_ptr<PlayerEntity>& player = Runtime::ManagedAt(players, slot);
+                    if (player == nullptr)
+                    {
+                        continue;
+                    }
+                    _hasPlayer[slot] = true;
+                    _health[slot] = player->Health();
+                    _spectating[slot] = player->ModIsSpectating();
+                }
+                const std::size_t scoreCount = std::min(GameState::Points().size(), _points.size());
+                for (std::size_t slot = 0; slot < scoreCount; ++slot)
+                {
+                    _points[slot] = Runtime::ManagedAt(GameState::Points(), slot);
+                    _kills[slot] = Runtime::ManagedAt(GameState::Kills(), slot);
+                    _deaths[slot] = Runtime::ManagedAt(GameState::Deaths(), slot);
+                }
+            }
+
+            ~SpectatorCheckRestore()
+            {
+                SpectatorMode::Reset();
+                const auto& players = PlayerEntity::Players();
+                for (std::size_t slot = 0; slot < _playerCount; ++slot)
+                {
+                    if (!_hasPlayer[slot] || slot >= players.size())
+                    {
+                        continue;
+                    }
+                    const std::shared_ptr<PlayerEntity>& player = Runtime::ManagedAt(players, slot);
+                    if (player == nullptr)
+                    {
+                        continue;
+                    }
+                    player->SetHealth(_health[slot]);
+                    player->ModApplyReplicatedSpectating(_spectating[slot]);
+                    player->Controls().ClearAll();
+                }
+                PlayerEntity::SetMainPlayerIndex(_mainSlot);
+                const std::size_t scoreCount = std::min(GameState::Points().size(), _points.size());
+                for (std::size_t slot = 0; slot < scoreCount; ++slot)
+                {
+                    Runtime::ManagedAt(GameState::Points(), slot) = _points[slot];
+                    Runtime::ManagedAt(GameState::Kills(), slot) = _kills[slot];
+                    Runtime::ManagedAt(GameState::Deaths(), slot) = _deaths[slot];
+                }
+                if (_scene != nullptr)
+                {
+                    _scene->SetFreeCamera(false);
+                }
+                NetSessionFixture::Restore(_session);
+            }
+
+        private:
+            NetSessionFixture::State _session{};
+            Scene* _scene = nullptr;
+            std::int32_t _mainSlot = -1;
+            std::size_t _playerCount = 0;
+            std::array<bool, PlayerEntity::SlotCapacity> _hasPlayer{};
+            std::array<bool, PlayerEntity::SlotCapacity> _spectating{};
+            std::array<std::int32_t, PlayerEntity::SlotCapacity> _health{};
+            std::array<std::int32_t, PlayerEntity::SlotCapacity> _points{};
+            std::array<std::int32_t, PlayerEntity::SlotCapacity> _kills{};
+            std::array<std::int32_t, PlayerEntity::SlotCapacity> _deaths{};
+        };
 
         const Vector3 UnitX(1.0F, 0.0F, 0.0F);
         const Vector3 UnitY(0.0F, 1.0F, 0.0F);
@@ -101,6 +184,7 @@ namespace MphRead::Mods::Network
             Check(shooter.ModIsInPlay() && victim.ModIsInPlay() && sim.StepFailures() == 0, "spawn both players");
             Scene* scene = &ServerSimFixture::RequireScene(sim);
             InvalidHitClaimIsRefused();
+            SpectatorInputAndDamageAreRefused();
             InvulnerableClaimIsRefused();
             MutualKillOrdering();
             ClaimArbitrationHasDeadline();
@@ -227,6 +311,11 @@ namespace MphRead::Mods::Network
                     "ricochet child keeps original fire event/" + ::MphRead::ToString(weapon));
             }
             Check(sim.StepFailures() == 0, "no simulation failures");
+            SpectatorShotHistoryIsGated();
+            LocalSpectatorRequestSurvivesSnapshots();
+            SpectatorCameraRequiresTarget(*scene);
+            SpectatorSnapshotSurvivesSpawn();
+            Check(sim.StepFailures() == 0, "spectator integration checks do not fail simulation steps");
             Runtime::ConsoleWriteLine("COMBAT PASS " + std::to_string(_checks) + " assertions");
             result = 0;
         }
@@ -318,6 +407,386 @@ namespace MphRead::Mods::Network
                     : verdict != HitVerdictPacket::ResultApplied,
                 "InvalidHitClaimIsRefused/offset=" + Runtime::ToString(offset) + " result=" + HitVerdictPacket::Describe(verdict));
         }
+    }
+
+    void NetCombatCheck::SpectatorInputAndDamageAreRefused()
+    {
+        PrepareClaims();
+        PlayerEntity& shooter = *PlayerAt(0);
+        PlayerEntity& victim = *PlayerAt(1);
+        victim.ModSetSpectating(true);
+
+        // A spectator's local controls are cleared on transition. Even if a
+        // stale held state is presented again, CaptureState must not serialize
+        // combat buttons or mark the player as in combat.
+        victim.Controls().Shoot().SetIsDown(true);
+        victim.Controls().Morph().SetIsDown(true);
+        const IntentPacket captured = NetPlayerBridge::StateIntent(victim);
+        Check(Runtime::HasFlag(captured.Buttons, IntentButtons::SpectatingState)
+            && !Runtime::HasFlag(captured.Buttons, IntentButtons::InPlayState)
+            && !Runtime::HasFlag(captured.Buttons, IntentButtons::Shoot)
+            && !Runtime::HasFlag(captured.Buttons, IntentButtons::Morph),
+            "SpectatorIntentDoesNotReportCombatOrHeldActions");
+
+        // The authority normalizes contradictory state bits and advances the
+        // press cursor without replaying the old shooting/morph edges.
+        IntentPacket contradictory = Intent(victim, NetSession::NetFrame() + 1, true, true);
+        contradictory.Buttons |= IntentButtons::SpectatingState | IntentButtons::Morph;
+        (*contradictory.Presses)[0] = static_cast<std::uint32_t>(IntentButtons::Shoot);
+        NetPlayerBridge::ApplyIntent(victim, contradictory);
+        Check(victim.ModIsSpectating() && !victim.ModIsInPlay()
+            && !victim.Controls().Shoot().IsDown() && !victim.Controls().Shoot().IsPressed()
+            && !victim.Controls().Morph().IsDown() && !victim.Controls().Morph().IsPressed(),
+            "ContradictorySpectatorIntentCannotDriveGameplay");
+
+        IntentPacket rejoin = Intent(victim, NetSession::NetFrame() + 2, true, false);
+        (*rejoin.Presses)[0] = static_cast<std::uint32_t>(IntentButtons::Shoot);
+        NetPlayerBridge::ApplyIntent(victim, rejoin);
+        Check(!victim.ModIsSpectating() && victim.ModIsInPlay()
+            && !victim.Controls().Shoot().IsPressed(),
+            "RejoinDropsPressHistoryAccumulatedWhileSpectating");
+
+        victim.SetHealth(99);
+        const std::int32_t deathsBefore = Runtime::ManagedAt(GameState::Deaths(), 1);
+        const Entities::DamageFlags lethal = Entities::DamageFlags::Death
+            | Entities::DamageFlags::IgnoreInvuln | Entities::DamageFlags::NoDmgInvuln;
+        victim.ModSetSpectating(true);
+        Check(NetDamage::Suppress(victim, &shooter, lethal),
+            "SpectatorNetDamagePolicyRefusesDamageBeforeReplayOrOfflineShortcuts");
+        victim.TakeDamage(99U, lethal, std::nullopt, &shooter);
+        const HitClaimPacket claim = Claim(0, NetSession::NetFrame() - 1);
+        Check(NetHitClaimsFixture::Judge(0, claim) == HitVerdictPacket::ResultDeadVictim,
+            "SpectatorClaimIsRefusedByAuthorityEligibilityCheck");
+        Receive(0, claim);
+        Check(victim.Health() == 99
+            && Runtime::ManagedAt(GameState::Deaths(), 1) == deathsBefore
+            && NetHitClaims::AppliedHere() == 0,
+            "SpectatorDamageAndAuthorityClaimCannotChangeHealthOrDeaths");
+
+        victim.ModSetSpectating(false);
+        victim.TakeDamage(1U, Entities::DamageFlags::IgnoreInvuln
+            | Entities::DamageFlags::NoDmgInvuln, std::nullopt, nullptr);
+        Check(victim.ModIsInPlay() && victim.Health() < 99,
+            "RejoinedPlayerCanReceiveDamageAgain");
+
+        PrepareClaims();
+        PlayerEntity& claimVictim = *PlayerAt(1);
+        const HitClaimPacket pending = Claim(0, NetSession::NetFrame() - 1);
+        Receive(0, pending);
+        claimVictim.ModSetSpectating(true);
+        for (std::int32_t i = 0; i < NetHitClaims::MaxGraceFrames + 2; i++)
+        {
+            NetSession::Update(NetSession::NetFrame() / 60.0);
+            NetHitClaims::Tick();
+        }
+        Check(claimVictim.ModIsSpectating() && claimVictim.Health() == 1
+            && NetHitClaims::AppliedHere() == 0,
+            "ClaimAcceptedBeforeSpectatorTransitionIsRecheckedBeforeDamage");
+        PrepareClaims();
+    }
+
+    void NetCombatCheck::SpectatorSnapshotSurvivesSpawn()
+    {
+        constexpr std::int32_t slot = 2;
+        PlayerEntity& player = *PlayerAt(slot);
+        const std::uint16_t generation = NetPlayerLifecycle::Generation(slot);
+        const std::uint16_t lifeId = NetPlayerLifecycle::Get(slot);
+        Check(generation != 0 && lifeId != 0, "spectator snapshot test has an assigned identity");
+
+        PlayerState spectator = PlayerStateSnapshotCapture::Capture(player, slot, generation, lifeId);
+        spectator.Flags = static_cast<std::uint8_t>(spectator.Flags
+            | PlayerState::FlagActive | PlayerState::FlagSpawned | PlayerState::FlagSpectating);
+        spectator.Health = static_cast<std::uint16_t>(std::max(player.Health(), 1));
+        spectator.Deaths = static_cast<std::uint16_t>(Runtime::ManagedAt(GameState::Deaths(), slot));
+        const std::int32_t health = spectator.Health;
+        const std::int32_t deaths = spectator.Deaths;
+
+        NetPlayerBridge::ForgetSlot(slot);
+        NetPlayerBridge::ApplyState(player, spectator, false);
+        Check(player.ModIsSpectating() && !player.ModIsInPlay()
+            && player.Health() == health && Runtime::ManagedAt(GameState::Deaths(), slot) == deaths,
+            "first spectator snapshot remains authoritative after Spawn");
+        Check(::MphRead::TestFlag(player.Flags2(), Entities::PlayerFlags2::NoShotsFired),
+            "spectator snapshot preserves Spawn's NoShotsFired initialization");
+
+        PlayerState playing = spectator;
+        playing.Flags = static_cast<std::uint8_t>(playing.Flags & ~PlayerState::FlagSpectating);
+        NetPlayerBridge::ApplyState(player, playing, false);
+        Check(!player.ModIsSpectating() && player.ModIsInPlay(),
+            "same-life normal snapshot exits spectator state");
+        NetPlayerBridge::ApplyState(player, spectator, false);
+        Check(player.ModIsSpectating() && !player.ModIsInPlay(),
+            "same-life spectator snapshot enters spectator state");
+        NetPlayerBridge::ApplyState(player, playing, false);
+        Check(!player.ModIsSpectating() && player.ModIsInPlay(),
+            "same-life normal snapshot restores combat eligibility");
+
+        player.SetHealth(0);
+        NetPlayerBridge::ForgetSlot(slot);
+        NetPlayerBridge::ApplyState(player, spectator, false);
+        Check(player.ModIsSpectating() && !player.ModIsInPlay()
+            && player.Health() == health && Runtime::ManagedAt(GameState::Deaths(), slot) == deaths,
+            "same-life health resynchronization that re-enters Spawn reapplies spectator state");
+
+        const std::uint16_t nextGeneration = NetLifecycleTracker::Next(generation);
+        Check(!player.IsBot(), "occupant shot-isolation test uses a remote human slot");
+        NetShotEvents::Forget(slot);
+        const std::uint32_t oldShotFrame = std::max(1U, NetSession::NetFrame() + 1U);
+        NetShotEvents::RecordAcceptedIntent(slot, generation, lifeId, oldShotFrame, true);
+        IntentPacket oldOccupantIntent = Intent(player, oldShotFrame, true, false);
+        oldOccupantIntent.SlotGeneration = generation;
+        oldOccupantIntent.LifeId = lifeId;
+        IntentPacket::ShotEvent oldOccupantShot{};
+        oldOccupantShot.Sequence = 1;
+        oldOccupantShot.Frame = oldShotFrame;
+        oldOccupantShot.WeaponId = static_cast<std::uint8_t>(BeamType::PowerBeam);
+        oldOccupantIntent.ShotHistory[0] = oldOccupantShot;
+        oldOccupantIntent.ShotHistoryLength = 1;
+        NetShotEvents::Receive(slot, oldOccupantIntent);
+        Check(NetShotEvents::FiringEvent(player).has_value(),
+            "the current occupant has an eligible queued shot before a roster change");
+        NetPlayerLifecycle::SetOccupant(slot, nextGeneration);
+        Check(!NetShotEvents::FiringEvent(player).has_value()
+            && NetShotEvents::Stats(slot).Waiting == 0
+            && NetShotEvents::Stats(slot).Abandoned == 1,
+            "a roster generation change retires the prior occupant's queued shot");
+        const bool oldIntentAccepted = NetPlayerLifecycle::AcceptIntent(slot, oldOccupantIntent);
+        if (oldIntentAccepted)
+        {
+            NetShotEvents::Receive(slot, oldOccupantIntent);
+        }
+        Check(!oldIntentAccepted && NetShotEvents::Stats(slot).Waiting == 0,
+            "a late old-generation intent is rejected before its shot history reaches the queue");
+        PlayerState replacement = spectator;
+        replacement.SlotGeneration = nextGeneration;
+        replacement.LifeId = 1;
+        Check(NetPlayerLifecycle::AcceptState(replacement, NetSession::NetFrame() + 1),
+            "replacement occupant's first spectator snapshot is accepted");
+        NetPlayerBridge::ApplyState(player, replacement, false);
+        Check(player.ModIsSpectating() && !player.ModIsInPlay()
+            && player.Health() == health && Runtime::ManagedAt(GameState::Deaths(), slot) == deaths,
+            "new slot generation keeps its first spectator snapshot after Spawn");
+
+        const std::int32_t replacementHealth = player.Health();
+        NetPlayerBridge::ApplyState(player, spectator, false);
+        Check(player.Health() == replacementHealth && player.ModIsSpectating(),
+            "a prior occupant's snapshot cannot overwrite the replacement generation");
+    }
+
+    void NetCombatCheck::SpectatorShotHistoryIsGated()
+    {
+        constexpr std::int32_t slot = 3;
+        PlayerEntity& shooter = *PlayerAt(slot);
+        Check(!shooter.IsBot(), "shot spectator test uses a remote human slot");
+        shooter.SetHealth(std::max(shooter.Health(), 1));
+        shooter.ModSetSpectating(false);
+        NetShotEvents::Forget(slot);
+
+        const std::uint16_t generation = NetPlayerLifecycle::Generation(slot);
+        const std::uint16_t lifeId = NetPlayerLifecycle::Get(slot);
+        Check(generation != 0 && lifeId != 0, "shot spectator test has an assigned identity");
+        const std::uint32_t firstFrame = std::max(1U, NetSession::NetFrame() + 1U);
+        auto shotIntent = [&](std::uint32_t frame, std::uint32_t sequence,
+            bool spectating, bool contradictoryInPlay)
+        {
+            IntentPacket intent = Intent(shooter, frame, !spectating || contradictoryInPlay, false);
+            intent.SlotGeneration = generation;
+            intent.LifeId = lifeId;
+            if (spectating)
+            {
+                intent.Buttons |= IntentButtons::SpectatingState;
+            }
+            IntentPacket::ShotEvent event{};
+            event.Sequence = sequence;
+            event.Frame = frame;
+            event.AckFrame = frame;
+            event.WeaponId = static_cast<std::uint8_t>(BeamType::PowerBeam);
+            event.Origin = shooter.Position;
+            event.Direction = UnitZ;
+            intent.ShotHistory[0] = event;
+            intent.ShotHistoryLength = 1;
+            return intent;
+        };
+
+        const IntentPacket beforeSpectating = shotIntent(firstFrame, 1, false, false);
+        NetShotEvents::Receive(slot, beforeSpectating);
+        Check(!NetShotEvents::FiringEvent(shooter).has_value()
+            && NetShotEvents::Stats(slot).Waiting == 1,
+            "a shot waits until its carrying intent passes the authority acceptance boundary");
+        NetPlayerBridge::ApplyIntent(shooter, beforeSpectating);
+        const std::optional<IntentPacket::ShotEvent> firstAcceptedShot = NetShotEvents::FiringEvent(shooter);
+        Check(firstAcceptedShot.has_value() && firstAcceptedShot->Sequence == 1,
+            "a normally accepted shot becomes eligible for the remote copy");
+        NetShotEvents::Fired(shooter, NetShotEvents::FiredShot{BeamType::PowerBeam, false, {}, {}});
+
+        const IntentPacket entersSpectating = shotIntent(firstFrame + 10, 3, true, true);
+        NetShotEvents::Receive(slot, entersSpectating);
+        Check(!NetShotEvents::FiringEvent(shooter).has_value()
+            && NetShotEvents::Stats(slot).Waiting == 1
+            && NetShotEvents::Stats(slot).Ineligible == 0,
+            "a new shot cannot fire ahead of its unaccepted spectator transition");
+        NetPlayerBridge::ApplyIntent(shooter, entersSpectating);
+        Check(shooter.ModIsSpectating() && !shooter.ModIsInPlay(),
+            "authority normalizes contradictory spectator and in-play intent bits");
+
+        Check(!NetShotEvents::FiringEvent(shooter).has_value()
+            && NetShotEvents::Stats(slot).Ineligible == 1,
+            "a shot reported at the spectator boundary is rejected exactly once");
+
+        // Sequence 2 was fired before the boundary but its intent arrived
+        // behind sequence 3. The skipped-sequence recovery must retain it.
+        const IntentPacket delayedBeforeSpectating = shotIntent(firstFrame + 5, 2, false, false);
+        NetShotEvents::Receive(slot, delayedBeforeSpectating);
+        const std::optional<IntentPacket::ShotEvent> delayed = NetShotEvents::FiringEvent(shooter);
+        Check(delayed.has_value() && delayed->Sequence == 2
+            && NetShotEvents::Stats(slot).Recovered == 1,
+            "an out-of-order shot fired before the accepted spectator boundary remains eligible");
+        NetShotEvents::Fired(shooter, NetShotEvents::FiredShot{BeamType::PowerBeam, false, {}, {}});
+
+        NetShotEvents::Receive(slot, entersSpectating);
+        Check(!NetShotEvents::FiringEvent(shooter).has_value()
+            && NetShotEvents::Stats(slot).Ineligible == 1,
+            "duplicate spectator shot history cannot enqueue or reject the same event twice");
+
+        const IntentPacket stalePlaying = shotIntent(firstFrame, 1, false, false);
+        NetShotEvents::Receive(slot, stalePlaying);
+        Check(shooter.ModIsSpectating() && !NetShotEvents::FiringEvent(shooter).has_value(),
+            "an older playing intent can repeat a shot but cannot roll back accepted spectator state");
+
+        shooter.ModArmWeapon(BeamType::ShockCoil);
+        Check(!NetShotEvents::MayFire(shooter),
+            "continuous weapons cannot fire while the accepted remote player state is spectating");
+
+        const IntentPacket rejoin = shotIntent(firstFrame + 20, 4, false, false);
+        NetShotEvents::Receive(slot, rejoin);
+        Check(!NetShotEvents::FiringEvent(shooter).has_value()
+            && NetShotEvents::Stats(slot).Waiting == 1,
+            "a rejoin shot waits for authority acceptance of the in-play transition");
+        NetPlayerBridge::ApplyIntent(shooter, rejoin);
+        const std::optional<IntentPacket::ShotEvent> rejoinedShot = NetShotEvents::FiringEvent(shooter);
+        Check(!shooter.ModIsSpectating() && shooter.ModIsInPlay()
+            && rejoinedShot.has_value() && rejoinedShot->Sequence == 4
+            && NetShotEvents::MayFire(shooter),
+            "accepted rejoin restores the normal event and continuous-fire paths");
+        NetShotEvents::Fired(shooter, NetShotEvents::FiredShot{BeamType::PowerBeam, false, {}, {}});
+
+        IntentPacket notInPlay = shotIntent(firstFrame + 30, 5, false, false);
+        notInPlay.Buttons = static_cast<IntentButtons>(
+            static_cast<std::uint32_t>(notInPlay.Buttons)
+            & ~static_cast<std::uint32_t>(IntentButtons::InPlayState));
+        NetShotEvents::Receive(slot, notInPlay);
+        Check(!NetShotEvents::FiringEvent(shooter).has_value()
+            && NetShotEvents::Stats(slot).Waiting == 1,
+            "a shot waits while the authority has not accepted its out-of-play state");
+        NetPlayerBridge::ApplyIntent(shooter, notInPlay);
+        Check(shooter.ModIsInPlay() && !NetShotEvents::MayFire(shooter)
+            && !NetShotEvents::FiringEvent(shooter).has_value(),
+            "continuous and event shots honor the accepted in-play bit as well as entity state");
+        NetShotEvents::Forget(slot);
+    }
+
+    void NetCombatCheck::LocalSpectatorRequestSurvivesSnapshots()
+    {
+        constexpr std::int32_t slot = 0;
+        SpectatorCheckRestore restore{};
+        PlayerEntity& player = *PlayerAt(slot);
+        SpectatorMode::Reset();
+        NetSessionFixture::SetRole(NetRole::Client);
+        NetSessionFixture::SetLocalSlot(slot);
+        NetSessionFixture::RevokeAuthority();
+
+        player.ModApplyReplicatedSpectating(false);
+        player.Controls().Shoot().SetIsDown(true);
+        NetPlayerBridge::ForgetSlot(slot);
+        const std::uint16_t generation = NetPlayerLifecycle::Generation(slot);
+        const std::uint16_t lifeId = NetPlayerLifecycle::Get(slot);
+        PlayerState normal = PlayerStateSnapshotCapture::Capture(player, slot, generation, lifeId);
+        normal.Flags = static_cast<std::uint8_t>(normal.Flags | PlayerState::FlagActive | PlayerState::FlagSpawned);
+        normal.Flags = static_cast<std::uint8_t>(normal.Flags & ~PlayerState::FlagSpectating);
+        normal.Health = static_cast<std::uint16_t>(std::max(player.Health(), 1));
+        NetPlayerBridge::ApplyState(player, normal, true);
+
+        SpectatorMode::Start(false);
+        Check(SpectatorMode::IsSpectating() && !player.ModIsSpectating(),
+            "local spectator request is immediate without changing authority-owned entity state");
+        player.Controls().Shoot().SetIsDown(true);
+        NetPlayerBridge::ApplyState(player, normal, true);
+        IntentPacket spectatorIntent = NetPlayerBridge::StateIntent(player);
+        Check(SpectatorMode::IsSpectating()
+            && player.Controls().Shoot().IsDown()
+            && Runtime::HasFlag(spectatorIntent.Buttons, IntentButtons::SpectatingState)
+            && !Runtime::HasFlag(spectatorIntent.Buttons, IntentButtons::InPlayState)
+            && !Runtime::HasFlag(spectatorIntent.Buttons, IntentButtons::Shoot),
+            "a delayed normal snapshot cannot cancel local spectator view or its masked intent");
+
+        PlayerState authoritativeSpectator = normal;
+        authoritativeSpectator.Flags |= PlayerState::FlagSpectating;
+        NetPlayerBridge::ApplyState(player, authoritativeSpectator, true);
+        SpectatorMode::Rejoin();
+        Check(!SpectatorMode::IsSpectating() && player.ModIsSpectating(),
+            "local rejoin request stays distinct from the last accepted spectator snapshot");
+        player.Controls().Shoot().SetIsDown(true);
+        NetPlayerBridge::ApplyState(player, authoritativeSpectator, true);
+        const IntentPacket rejoinIntent = NetPlayerBridge::StateIntent(player);
+        Check(!SpectatorMode::IsSpectating()
+            && player.Controls().Shoot().IsDown()
+            && !Runtime::HasFlag(rejoinIntent.Buttons, IntentButtons::SpectatingState)
+            && Runtime::HasFlag(rejoinIntent.Buttons, IntentButtons::Shoot)
+            && Runtime::HasFlag(rejoinIntent.Buttons, IntentButtons::InPlayState),
+            "a delayed spectator snapshot cannot cancel local rejoin intent");
+
+        NetPlayerBridge::ApplyState(player, normal, true);
+        Check(!SpectatorMode::IsSpectating() && !player.ModIsSpectating(),
+            "authority-confirmed rejoin updates the local entity and view");
+    }
+
+    void NetCombatCheck::SpectatorCameraRequiresTarget(Scene& scene)
+    {
+        constexpr std::int32_t localSlot = 0;
+        SpectatorCheckRestore restore{&scene};
+        SpectatorMode::Reset();
+        NetSessionFixture::SetRole(NetRole::Client);
+        NetSessionFixture::SetLocalSlot(localSlot);
+        NetSessionFixture::RevokeAuthority();
+        Check(PlayerEntity::Players().size() > 2 && PlayerAt(1) != nullptr && PlayerAt(2) != nullptr,
+            "camera integration test has two remote players");
+        for (std::int32_t slot = 2; slot < static_cast<std::int32_t>(PlayerEntity::Players().size()); ++slot)
+        {
+            const std::shared_ptr<PlayerEntity> player = PlayerAt(slot);
+            if (player != nullptr)
+            {
+                player->ModSetSpectating(true);
+            }
+        }
+        PlayerAt(1)->SetHealth(std::max(PlayerAt(1)->Health(), 1));
+        PlayerAt(1)->ModSetSpectating(false);
+
+        SpectatorMode::Start(true);
+        scene.ApplySpectatorCameraRequest();
+        Check(SpectatorMode::IsSpectating() && PlayerEntity::MainPlayerIndex() == 1
+            && scene.CameraMode() == CameraMode::Player,
+            "spectator camera follows a selected live player");
+        scene.SetFreeCamera(true);
+        Check(scene.IsFreeCam(), "free camera can start from the current spectator target pose");
+
+        PlayerAt(1)->SetHealth(0);
+        SpectatorMode::Update();
+        scene.ApplySpectatorCameraRequest();
+        Check(!SpectatorMode::CanUsePlayerCamera()
+            && scene.CameraMode() == CameraMode::Roam && scene.IsFreeCam(),
+            "target loss moves to a usable free camera");
+        scene.ToggleFreeCamera();
+        Check(scene.CameraMode() == CameraMode::Roam && scene.IsFreeCam()
+            && scene.AllowCameraMovement(),
+            "direct free-camera toggle cannot return to Player mode without a valid target");
+
+        PlayerAt(2)->SetHealth(std::max(PlayerAt(2)->Health(), 1));
+        PlayerAt(2)->ModSetSpectating(false);
+        SpectatorMode::CycleNext();
+        scene.ApplySpectatorCameraRequest();
+        Check(PlayerEntity::MainPlayerIndex() == 2 && SpectatorMode::CanUsePlayerCamera()
+            && scene.CameraMode() == CameraMode::Player,
+            "a new live entrant can become the spectator camera target");
     }
 
     void NetCombatCheck::MutualKillOrdering()

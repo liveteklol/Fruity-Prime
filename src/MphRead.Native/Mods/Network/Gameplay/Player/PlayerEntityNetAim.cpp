@@ -12,6 +12,8 @@
 #include "Mods/Input/GamepadInput.hpp"
 #include "Mods/SpectatorMode.hpp"
 #include "Mods/Network/Gameplay/Combat/NetDamage.hpp"
+#include "Mods/Network/Gameplay/Player/NetInputHistory.hpp"
+#include "Mods/Network/Gameplay/Player/PlayerCombatPolicy.hpp"
 #include "Mods/Network/Integration/Hooks/NetHooks.hpp"
 #include "Mods/Network/Diagnostics/NetLog.hpp"
 #include "Mods/Network/Gameplay/Player/NetPlayerBridge.hpp"
@@ -326,6 +328,26 @@ namespace MphRead::Entities
 
     void PlayerEntity::ModSetSpectating(bool value)
     {
+        if (ModIsSpectating() == value)
+        {
+            return;
+        }
+        ModApplyReplicatedSpectating(value);
+        ModClearSpectatorInput();
+    }
+
+    void PlayerEntity::ModClearSpectatorInput()
+    {
+        (*this).Controls().ClearAll();
+        ::MphRead::Mods::Network::NetInputHistory::ForgetSlot(SlotIndex());
+    }
+
+    void PlayerEntity::ModApplyReplicatedSpectating(bool value)
+    {
+        if (ModIsSpectating() == value)
+        {
+            return;
+        }
         std::uint32_t flags = static_cast<std::uint32_t>((*this).Flags2());
         if (value)
         {
@@ -338,16 +360,22 @@ namespace MphRead::Entities
         (*this).SetFlags2(static_cast<PlayerFlags2>(flags));
     }
 
+    bool PlayerEntity::ModIsSpectating() const
+    {
+        return ::HasFlag(static_cast<std::uint32_t>((*this).Flags2()), PlayerFlagSpectating);
+    }
+
     bool PlayerEntity::ModInPlay() const
     {
-        return (*this).Health() > 0
-            && !::HasFlag(static_cast<std::uint32_t>((*this).Flags2()), PlayerFlagSpectating);
+        return ModIsInPlay();
     }
 
     bool PlayerEntity::ModIsInPlay() const
     {
-        return (static_cast<std::uint8_t>((*this).LoadFlags()) & LoadFlagSpawned) == LoadFlagSpawned
-            && (*this).Health() > 0;
+        return ::MphRead::Mods::Network::PlayerCombatPolicy::IsInPlay(
+            ::MphRead::TestFlag((*this).LoadFlags(), LoadFlags::Active),
+            ::MphRead::TestFlag((*this).LoadFlags(), LoadFlags::Spawned),
+            (*this).Health(), ModIsSpectating());
     }
 
     std::pair<float, float> PlayerEntity::ModAimDeltaTowards(

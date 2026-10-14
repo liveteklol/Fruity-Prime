@@ -4,6 +4,7 @@
 #include "Mods/Network/Protocol/NetProtocol.hpp"
 #include "Mods/Network/Protocol/Packets/ShotRayValidation.hpp"
 #include "Mods/Network/Gameplay/Weapons/RemoteShotQueue.hpp"
+#include "Mods/Network/Gameplay/Weapons/ShotEventEligibility.hpp"
 #include "Mods/Network/Gameplay/Weapons/ShotEventLedger.hpp"
 #include "Formats/Enums.hpp"
 
@@ -78,9 +79,14 @@ namespace MphRead::Mods::Network
         // Before the frame-order check that refuses an older intent: its
         // movement is stale, its shots are not.
         static void Receive(std::int32_t slot, const IntentPacket& intent) noexcept;
+        // Records only state that has passed the authority's intent checks.
+        static void RecordAcceptedIntent(std::int32_t slot, std::uint16_t generation,
+            std::uint16_t lifeId, std::uint32_t frame, bool inPlay) noexcept;
         // A shot a remote player reported, by sequence: what a hit claim
         // naming it is checked against.
         [[nodiscard]] static std::optional<IntentPacket::ShotEvent> Find(std::int32_t slot, std::uint32_t sequence) noexcept;
+        [[nodiscard]] static ShotEventEligibility EligibilityFor(std::int32_t slot,
+            std::uint32_t sequence, std::uint16_t generation, std::uint16_t lifeId) noexcept;
         // The player in the slot begins a life: what their last one left
         // unfired is abandoned. Their sequence and the ledger carry on, since
         // a sequence is never reused and a claim may still name an old shot.
@@ -112,6 +118,7 @@ namespace MphRead::Mods::Network
         inline static LocalShotLog _local{};
         inline static std::array<LocalShotLog, Slots> _bots{};
         inline static std::array<RemoteShotQueue, Slots> _remote{};
+        inline static std::array<ShotEventEligibilityTimeline, Slots> _eligibility{};
         inline static std::array<ShotEventLedger, Slots> _ledger{};
         // Occupants gone: still part of what this machine received.
         inline static ShotQueueStats _departed{};

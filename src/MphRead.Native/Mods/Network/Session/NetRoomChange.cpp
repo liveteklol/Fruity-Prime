@@ -23,6 +23,8 @@
 #include "Entities/Players/PlayerEntity.hpp"
 #include "Metadata/Metadata.hpp"
 #include "Mods/MapGen/MapCatalog.hpp"
+#include "Mods/MapGen/CustomRooms.hpp"
+#include "Mods/Chat/ChatBox.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -164,6 +166,27 @@ namespace MphRead::Mods::Network
                 _requestedFrame = NetSession::NetFrame();
                 return;
             }
+        }
+        // A custom map's room is made from its level the first time it is
+        // wanted (the launcher does it before a match, Scene::AddRoom would do
+        // it too, but too late to say so). Build it now, and if it cannot be
+        // built say why rather than loading a room whose files are not there:
+        // that dies with "Could not find a part of the path ...Collision.bin"
+        // and leaves the player in a black room.
+        Mods::MapGen::CustomRooms::EnsureReady(wanted);
+        if (const std::optional<std::string> why = Mods::MapGen::CustomRooms::WhyUnplayable(wanted))
+        {
+            static std::string reported;
+            if (reported != wanted)
+            {
+                reported = wanted;
+                Mods::Chat::ChatBox::System("Cannot load " + wanted + ": " + *why);
+            }
+            NativeRuntime::ConsoleWriteLine("[net] server switched to \"" + wanted + "\", which cannot be played here: " + *why);
+            NetLog::Event("cannot play server map \"" + wanted + "\": " + *why);
+            _requested = wanted;
+            _requestedFrame = NetSession::NetFrame();
+            return;
         }
         _requested = wanted;
         _requestedFrame = NetSession::NetFrame();

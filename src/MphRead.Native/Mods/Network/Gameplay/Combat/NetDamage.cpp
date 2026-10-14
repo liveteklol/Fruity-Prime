@@ -1,4 +1,5 @@
 #include "Mods/Network/Gameplay/Combat/NetDamage.hpp"
+#include "Mods/Network/Gameplay/Player/PlayerCombatPolicy.hpp"
 #include "Mods/Network/Gameplay/Combat/HitLocation.hpp"
 #include "Mods/Network/Domain/NetworkVectorRules.hpp"
 
@@ -191,6 +192,10 @@ namespace MphRead::Mods::Network
     bool NetDamage::Refuses(Entities::PlayerEntity& victim,
         Entities::EntityBase* source, Entities::DamageFlags flags, bool noting)
     {
+        if (!PlayerCombatPolicy::CanReceiveDamage(victim.ModIsSpectating()))
+        {
+            return true;
+        }
         if (!NetSession::Active() || _replaying)
         {
             return false;

@@ -37,11 +37,6 @@ namespace MphRead::Mods::Network
         return value > previous;
     }
 
-    bool NetLifecycleTracker::Newer(std::uint32_t value, std::uint32_t previous) noexcept
-    {
-        return std::bit_cast<std::int32_t>(value - previous) > 0;
-    }
-
     void NetLifecycleTracker::SetOccupant(std::uint16_t generation)
     {
         _generation = generation;

@@ -2,6 +2,8 @@
 
 #include "Mods/Network/Protocol/Packets/RealtimePackets.hpp"
 
+#include <optional>
+
 namespace MphRead::Entities
 {
     class PlayerEntity;
@@ -16,6 +18,7 @@ namespace MphRead::Mods::Network
     public:
         NetPlayerIntent() = delete;
 
-        [[nodiscard]] static IntentPacket CaptureState(Entities::PlayerEntity& player);
+        [[nodiscard]] static IntentPacket CaptureState(Entities::PlayerEntity& player,
+            std::optional<bool> localSpectatorRequest = std::nullopt);
     };
 }

@@ -411,6 +411,18 @@ namespace
         joined.Receive(WithShots(1000, {{40, 900, Id(BeamType::Missile)}, {41, 995, Id(BeamType::PowerBeam)}}));
         Expect(joined.Stats().Received == 1 && NextWeapon(joined) == Id(BeamType::PowerBeam) && joined.Stats().Gaps == 0,
             "a joiner takes only the shot still fresh");
+
+        RemoteShotQueue future;
+        future.Receive(WithShots(1100, {{1, 1101, Id(BeamType::Missile)}}));
+        Expect(future.Stats().Received == 0 && !future.Next().has_value(),
+            "an event later than its carrying sender frame is rejected");
+
+        RemoteShotQueue ineligible;
+        ineligible.Receive(WithShots(1200, {{1, 1200, Id(BeamType::Missile)}}));
+        ineligible.RejectIneligible();
+        Expect(ineligible.Stats().Ineligible == 1 && ineligible.Stats().Waiting == 0
+            && Balanced(ineligible),
+            "an authority-rejected shot is counted once and preserves queue accounting");
     }
 
     IntentPacket WithBombs(std::uint32_t frame, std::initializer_list<IntentPacket::Bomb> bombs)

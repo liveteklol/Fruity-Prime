@@ -332,6 +332,40 @@ namespace
         return ::MphRead::Entities::ToString(value);
     }
 
+    [[nodiscard]] std::shared_ptr<MphRead::Entities::PlayerEntity> SpectatorCameraPlayer()
+    {
+        if (MphRead::Mods::SpectatorMode::IsSpectating()
+            && !MphRead::Mods::SpectatorMode::CanUsePlayerCamera())
+        {
+            return nullptr;
+        }
+        const std::int32_t slot = MphRead::Entities::PlayerEntity::MainPlayerIndex();
+        const auto& players = MphRead::Entities::PlayerEntity::Players();
+        return slot >= 0 && static_cast<std::size_t>(slot) < players.size()
+            ? ManagedAt(players, slot) : nullptr;
+    }
+
+    [[nodiscard]] std::shared_ptr<MphRead::Entities::PlayerEntity> SpectatorCameraPosePlayer()
+    {
+        if (const auto target = SpectatorCameraPlayer(); target != nullptr)
+        {
+            return target;
+        }
+        if (!MphRead::Mods::SpectatorMode::CanBorrowLocalCameraPose())
+        {
+            return nullptr;
+        }
+        const std::int32_t slot = MphRead::Entities::PlayerEntity::MainPlayerIndex();
+        const auto& players = MphRead::Entities::PlayerEntity::Players();
+        return slot >= 0 && static_cast<std::size_t>(slot) < players.size()
+            ? ManagedAt(players, slot) : nullptr;
+    }
+
+    [[nodiscard]] bool IsFiniteVector(Vector3 value) noexcept
+    {
+        return std::isfinite(value.X) && std::isfinite(value.Y) && std::isfinite(value.Z);
+    }
+
 #undef MPH_ENUM_CASE
 
 }
@@ -1777,6 +1811,8 @@ namespace MphRead
                 Mods::Network::NetSession::MarkMatchLoaded();
             }
             Mods::Network::NetSession::Pump();
+            Mods::SpectatorMode::Update();
+            ApplySpectatorCameraRequest();
             return;
         }
         ++_effectFrame;
@@ -1804,6 +1840,8 @@ namespace MphRead
             }
             Mods::Network::DemoPlayback::PumpFrame();
             Mods::Network::NetSession::Update(_globalElapsedTime);
+            Mods::SpectatorMode::Update();
+            ApplySpectatorCameraRequest();
             if (Mods::Network::NetSession::FreezeGameplay())
             {
                 return;
@@ -1812,10 +1850,7 @@ namespace MphRead
             {
                 Mods::SpectatorMode::Start(true);
             }
-            if (auto freeCamera = Mods::SpectatorMode::TakeCameraRequest(); freeCamera.has_value())
-            {
-                SetFreeCamera(freeCamera.value());
-            }
+            ApplySpectatorCameraRequest();
             Mods::Input::GamepadDesktop::Poll();
             Mods::Input::GamepadContexts::Current(Mods::Input::GamepadContexts::Resolve(
                 Mods::Chat::ChatBox::Composing(), Mods::EndScreen::Available()));
@@ -2536,13 +2571,28 @@ namespace MphRead
         {
             if (_cameraMode == MphRead::CameraMode::Player)
             {
-                const auto main = Entities::PlayerEntity::Main();
-                _viewMatrix = RequireReference(main->CameraInfo()).ViewMatrix;
-                float fov = RequireReference(main->CameraInfo()).Fov > 0.0F
-                    ? RequireReference(main->CameraInfo()).Fov
-                    : static_cast<float>(Mods::RenderOptions::DefaultFov);
-                fov = std::clamp(fov * Mods::RenderOptions::FovScale(), 1.0F, 175.0F);
-                _cameraFov = DegreesToRadians(fov);
+                const auto main = SpectatorCameraPlayer();
+                const auto cameraInfo = main != nullptr ? main->CameraInfo() : nullptr;
+                if (cameraInfo != nullptr)
+                {
+                    _viewMatrix = cameraInfo->ViewMatrix;
+                    float fov = cameraInfo->Fov > 0.0F
+                        ? cameraInfo->Fov
+                        : static_cast<float>(Mods::RenderOptions::DefaultFov);
+                    fov = std::clamp(fov * Mods::RenderOptions::FovScale(), 1.0F, 175.0F);
+                    _cameraFov = DegreesToRadians(fov);
+                    if (Mods::SpectatorMode::IsSpectating())
+                    {
+                        CacheSpectatorCameraPose(cameraInfo->Position, cameraInfo->Facing,
+                            cameraInfo->TrueUp, _cameraFov);
+                    }
+                }
+                else if (Mods::SpectatorMode::IsSpectating() && _hasLastSpectatorCameraPose)
+                {
+                    RestoreSpectatorCameraPose();
+                    _viewMatrix = Matrix4::LookAt(
+                        _cameraPosition, _cameraPosition + _cameraFacing, _cameraUp);
+                }
             }
             else
             {
@@ -2587,7 +2637,16 @@ namespace MphRead
         }
         else if (_cameraMode == MphRead::CameraMode::Player)
         {
-            _cameraPosition = RequireReference(Entities::PlayerEntity::Main()->CameraInfo()).Position;
+            const auto main = SpectatorCameraPlayer();
+            const auto cameraInfo = main != nullptr ? main->CameraInfo() : nullptr;
+            if (cameraInfo != nullptr)
+            {
+                _cameraPosition = cameraInfo->Position;
+            }
+            else if (Mods::SpectatorMode::IsSpectating() && _hasLastSpectatorCameraPose)
+            {
+                RestoreSpectatorCameraPose();
+            }
         }
     }
 
@@ -2626,12 +2685,33 @@ namespace MphRead
     // the last right is kept.
     void Scene::UpdateCameraBasis()
     {
-        const Vector3 right = Vector3::Cross(_cameraFacing, Vector3(0.0F, 1.0F, 0.0F));
+        UpdateCameraBasis(Vector3(0.0F, 1.0F, 0.0F));
+    }
+
+    void Scene::UpdateCameraBasis(Vector3 upHint)
+    {
+        if (!IsFiniteVector(upHint) || upHint.LengthSquared() < 1.0e-8F)
+        {
+            upHint = Vector3(0.0F, 1.0F, 0.0F);
+        }
+        else
+        {
+            upHint = upHint.Normalized();
+        }
+        const Vector3 right = Vector3::Cross(_cameraFacing, upHint);
         if (right.LengthSquared() > 1.0e-8F)
         {
             _cameraRight = right.Normalized();
         }
-        _cameraUp = Vector3::Cross(_cameraRight, _cameraFacing).Normalized();
+        const Vector3 up = Vector3::Cross(_cameraRight, _cameraFacing);
+        if (up.LengthSquared() > 1.0e-8F)
+        {
+            _cameraUp = up.Normalized();
+        }
+        else
+        {
+            _cameraUp = upHint;
+        }
     }
 
     // What holds the free camera still, written to the debug log as it
@@ -4953,34 +5033,115 @@ namespace MphRead
 
     bool Scene::ScoreboardOverFreeCamera() const
     {
-        const auto main = Entities::PlayerEntity::Main();
+        const auto main = SpectatorCameraPlayer();
         return Mods::SpectatorMode::FreeCamera() && Mods::SpectatorMode::ShowScoreboard()
-            && ((main->LoadFlags() & LoadFlags::Active) == LoadFlags::Active);
+            && main != nullptr && ((main->LoadFlags() & LoadFlags::Active) == LoadFlags::Active);
     }
 
-    void Scene::SetFreeCamera(bool on)
+    void Scene::CacheSpectatorCameraPose(Vector3 position, Vector3 facing, Vector3 up, float fov) noexcept
     {
-        if (on == _freeCam)
+        if (!IsFiniteVector(position) || !IsFiniteVector(facing) || !std::isfinite(fov)
+            || fov <= 0.0F || facing.LengthSquared() < 1.0e-8F)
+        {
+            return;
+        }
+
+        if (!IsFiniteVector(up) || up.LengthSquared() < 1.0e-8F)
+        {
+            up = Vector3(0.0F, 1.0F, 0.0F);
+        }
+        _lastSpectatorCameraPosition = position;
+        _lastSpectatorCameraFacing = facing.Normalized();
+        _lastSpectatorCameraUp = up.Normalized();
+        _lastSpectatorCameraFov = fov;
+        _hasLastSpectatorCameraPose = true;
+    }
+
+    void Scene::RestoreSpectatorCameraPose() noexcept
+    {
+        if (!_hasLastSpectatorCameraPose)
+        {
+            return;
+        }
+        _cameraPosition = _lastSpectatorCameraPosition;
+        _cameraFacing = _lastSpectatorCameraFacing;
+        _cameraUp = _lastSpectatorCameraUp;
+        _cameraFov = _lastSpectatorCameraFov;
+        UpdateCameraBasis(_lastSpectatorCameraUp);
+    }
+
+    void Scene::ApplySpectatorCameraRequest()
+    {
+        if (const auto request = Mods::SpectatorMode::TakeCameraRequest(); request.has_value())
+        {
+            SetFreeCamera(request->FreeCamera, request->PreserveLastPose);
+        }
+    }
+
+    void Scene::SetFreeCamera(bool on, bool preserveLastPose)
+    {
+        if (on && _freeCam)
         {
             return;
         }
         if (!on)
         {
+            if (Mods::SpectatorMode::IsSpectating()
+                && !Mods::SpectatorMode::CanUsePlayerCamera())
+            {
+                RestoreSpectatorCameraPose();
+                _cameraMode = MphRead::CameraMode::Roam;
+                _inputMode = InputMode::CameraOnly;
+                _freeCam = true;
+                Mods::SpectatorMode::NoteFreeCamera(true);
+                return;
+            }
             _cameraMode = MphRead::CameraMode::Player;
             _inputMode = InputMode::All;
             _freeCam = false;
             Mods::SpectatorMode::NoteFreeCamera(false);
             return;
         }
-        const auto main = Entities::PlayerEntity::Main();
-        _cameraPosition = RequireReference(main->CameraInfo()).Position;
-        _cameraFacing = RequireReference(main->CameraInfo()).Facing;
-        if (LengthSquared(_cameraFacing) < 0.0001F)
+
+        if (preserveLastPose && _hasLastSpectatorCameraPose)
         {
-            _cameraFacing = Vector3(0.0F, 0.0F, -1.0F);
+            RestoreSpectatorCameraPose();
         }
-        _cameraFacing = _cameraFacing.Normalized();
-        UpdateCameraBasis();
+        else
+        {
+            const auto main = SpectatorCameraPosePlayer();
+            const auto cameraInfo = main != nullptr ? main->CameraInfo() : nullptr;
+            if (cameraInfo != nullptr)
+            {
+                _cameraPosition = cameraInfo->Position;
+                _cameraFacing = cameraInfo->Facing;
+                if (!IsFiniteVector(_cameraFacing) || LengthSquared(_cameraFacing) < 0.0001F)
+                {
+                    _cameraFacing = Vector3(0.0F, 0.0F, -1.0F);
+                }
+                _cameraFacing = _cameraFacing.Normalized();
+                _cameraUp = cameraInfo->TrueUp;
+                if (!IsFiniteVector(_cameraUp) || LengthSquared(_cameraUp) < 1.0e-8F)
+                {
+                    _cameraUp = cameraInfo->UpVector;
+                }
+                float fov = cameraInfo->Fov > 0.0F
+                    ? cameraInfo->Fov
+                    : static_cast<float>(Mods::RenderOptions::DefaultFov);
+                fov = std::clamp(fov * Mods::RenderOptions::FovScale(), 1.0F, 175.0F);
+                _cameraFov = DegreesToRadians(fov);
+                UpdateCameraBasis(_cameraUp);
+                if (Mods::SpectatorMode::IsSpectating())
+                {
+                    CacheSpectatorCameraPose(
+                        _cameraPosition, _cameraFacing, _cameraUp, _cameraFov);
+                }
+            }
+            else if (_hasLastSpectatorCameraPose)
+            {
+                RestoreSpectatorCameraPose();
+            }
+        }
         _cameraMode = MphRead::CameraMode::Roam;
         _inputMode = InputMode::CameraOnly;
         _freeCam = true;

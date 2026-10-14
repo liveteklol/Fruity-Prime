@@ -72,6 +72,27 @@ namespace MphRead::Mods::Network
         return result;
     }
 
+    void NetInputPressReplay::Discard(std::int32_t slot, const IntentPacket& intent) noexcept
+    {
+        if (slot < 0 || slot >= static_cast<std::int32_t>(_cursors.size()))
+        {
+            return;
+        }
+
+        Cursor& cursor = _cursors[static_cast<std::size_t>(slot)];
+        if (!cursor.Initialized
+            || cursor.SlotGeneration != intent.SlotGeneration
+            || cursor.LifeId != intent.LifeId)
+        {
+            cursor = Cursor{intent.Frame, intent.SlotGeneration, intent.LifeId, true};
+            return;
+        }
+        if (NetLifecycleTracker::Newer(intent.Frame, cursor.LastFrame))
+        {
+            cursor.LastFrame = intent.Frame;
+        }
+    }
+
     void NetInputPressReplay::ForgetSlot(std::int32_t slot) noexcept
     {
         if (slot < 0 || slot >= static_cast<std::int32_t>(_cursors.size()))

@@ -346,17 +346,20 @@ namespace MphRead::Mods::Network
         if (player != nullptr
             && TestFlag(player->LoadFlags(), Entities::LoadFlags::Active))
         {
-            if (Mods::SpectatorMode::IsSpectating())
+            const bool spectatorView = Mods::SpectatorMode::IsSpectating();
+            if (spectatorView)
             {
-                player->ModSetSpectating(true);
+                // Keep local controls out of simulation while the view request
+                // is pending; the replicated PlayerEntity flag stays authority-owned.
+                player->Controls().ClearAll();
             }
-            if (!Mods::SpectatorMode::IsSpectating())
+            else
             {
                 HitRig::SetScene(&scene);
                 NetPlayerBridge::SetScene(&scene);
                 NetTestScript::Apply(player);
+                NetPlayerBridge::RecordPresses(*player);
             }
-            NetPlayerBridge::RecordPresses(*player);
             if (NetSession::NetFrame() % NetConfig::IntentSendInterval == 0)
             {
                 // Captured now, before the simulation, so the position and

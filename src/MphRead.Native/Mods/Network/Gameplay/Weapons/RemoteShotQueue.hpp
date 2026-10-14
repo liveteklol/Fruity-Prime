@@ -13,15 +13,16 @@ namespace MphRead::Mods::Network
     // across lives, not across occupants: it describes one connection.
     //
     // Every event received ends in exactly one of Fired, Stale, Overflow,
-    // Abandoned, or is still Waiting:
-    //   Received == Fired + Stale + Overflow + Abandoned + Waiting
+    // Abandoned, Ineligible, or is still Waiting:
+    //   Received == Fired + Stale + Overflow + Abandoned + Ineligible + Waiting
     // and every sequence skipped by a newer one in exactly one of Recovered
     // (then counted in Received), Lost, or still Pending:
     //   Gaps == Recovered + Lost + Pending
     struct ShotQueueStats final
     {
-        // Distinct events that arrived, each counted once however many
-        // intents repeated it.
+        // Distinct valid events admitted to the queue, each counted once
+        // however many intents repeated it. Malformed reports are discarded
+        // before accounting.
         std::uint64_t Received = 0;
         // Fired by the player's copy here.
         std::uint64_t Fired = 0;
@@ -32,6 +33,9 @@ namespace MphRead::Mods::Network
         std::uint64_t Overflow = 0;
         // Still queued when the life they were fired in ended.
         std::uint64_t Abandoned = 0;
+        // Rejected because the authority had accepted spectator state for the
+        // sender frame on which the event claims it was fired.
+        std::uint64_t Ineligible = 0;
         // Sequences an event arrived ahead of: possibly lost, possibly late.
         std::uint64_t Gaps = 0;
         // Of those, the ones a later (reordered) intent still delivered.
@@ -50,7 +54,10 @@ namespace MphRead::Mods::Network
         std::uint64_t Overdue = 0;
 
         // Events that arrived and were never fired.
-        [[nodiscard]] std::uint64_t Unfired() const noexcept { return Stale + Overflow + Abandoned; }
+        [[nodiscard]] std::uint64_t Unfired() const noexcept
+        {
+            return Stale + Overflow + Abandoned + Ineligible;
+        }
 
         ShotQueueStats& operator+=(const ShotQueueStats& other) noexcept;
     };
@@ -81,6 +88,8 @@ namespace MphRead::Mods::Network
         [[nodiscard]] std::optional<IntentPacket::ShotEvent> Next() noexcept;
         // The copy fired the oldest event.
         void Consume() noexcept;
+        // The oldest event was rejected by the authority-state policy.
+        void RejectIneligible() noexcept;
         // Whether this player sends shot events at all: a slot that never
         // sent an intent (a bot) keeps firing from its own controls.
         [[nodiscard]] bool Active() const noexcept { return _active; }

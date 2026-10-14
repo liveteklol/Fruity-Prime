@@ -136,7 +136,7 @@ namespace MphRead::Mods::Network
                 continue;
             }
             Entities::PlayerEntity& player = PlayerAt(i);
-            const bool active = TestFlag(player.LoadFlags(), Entities::LoadFlags::Active) && player.ModIsInPlay();
+            const bool active = player.ModIsInPlay();
             _life[s][index] = NetPlayerLifecycle::Get(i);
             _generation[s][index] = NetPlayerLifecycle::Generation(i);
             _inPlay[s][index] = active;
@@ -416,7 +416,7 @@ namespace MphRead::Mods::Network
                 continue;
             }
             Entities::PlayerEntity& player = PlayerAt(i);
-            if (!TestFlag(player.LoadFlags(), Entities::LoadFlags::Active) || !player.ModIsInPlay())
+            if (!player.ModIsInPlay())
             {
                 continue;
             }

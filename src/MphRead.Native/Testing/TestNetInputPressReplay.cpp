@@ -99,6 +99,16 @@ int main()
     passed &= Check(NetInputPressReplay::Consume(2, nextOccupant).Pressed == IntentButtons::Shoot,
         "a new slot generation starts an independent press history");
 
+    NetInputPressReplay::Reset();
+    const IntentPacket spectator = MakeIntent(500, {
+        static_cast<std::uint32_t>(IntentButtons::Shoot)});
+    NetInputPressReplay::Discard(2, spectator);
+    const IntentPacket rejoined = MakeIntent(501, {
+        static_cast<std::uint32_t>(IntentButtons::Jump),
+        static_cast<std::uint32_t>(IntentButtons::Shoot)});
+    passed &= Check(NetInputPressReplay::Consume(2, rejoined).Pressed == IntentButtons::Jump,
+        "presses accumulated while spectating are discarded before rejoin");
+
     NetInputPressReplay::ForgetSlot(2);
     const IntentPacket multipleShots = MakeIntent(300, {
         static_cast<std::uint32_t>(IntentButtons::Shoot), 0, 0,

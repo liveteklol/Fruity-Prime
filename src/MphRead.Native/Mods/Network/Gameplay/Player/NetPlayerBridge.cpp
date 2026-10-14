@@ -5,6 +5,7 @@
 #include "Mods/Network/Gameplay/Player/NetInputHistory.hpp"
 #include "Mods/Network/Gameplay/Player/NetInputPressReplay.hpp"
 #include "Mods/Network/Gameplay/Player/NetPlayerIntent.hpp"
+#include "Mods/Network/Gameplay/Player/PlayerCombatPolicy.hpp"
 #include "Mods/Network/Gameplay/Pickups/NetPowerUps.hpp"
 #include "Mods/Network/Gameplay/StatusEffects/StatusEffectSynchronization.hpp"
 
@@ -23,6 +24,7 @@
 #include "Mods/Network/Gameplay/Replication/NetSmoothing.hpp"
 #include "Mods/Network/Gameplay/Combat/NetUnlagged.hpp"
 #include "Mods/Network/Gameplay/Combat/HitLocation.hpp"
+#include "Mods/SpectatorMode.hpp"
 #include "NativeRuntime/System/Managed.hpp"
 #include "NativeRuntime/System/Globalization.hpp"
 #include "Formats/Types.hpp"
@@ -129,6 +131,10 @@ namespace MphRead::Mods::Network
 
     IntentPacket NetPlayerBridge::StateIntent(Entities::PlayerEntity& player)
     {
+        if (player.SlotIndex() == NetHooks::LocalSlot())
+        {
+            return NetPlayerIntent::CaptureState(player, SpectatorMode::IsSpectating());
+        }
         return NetPlayerIntent::CaptureState(player);
     }
 
@@ -188,6 +194,15 @@ namespace MphRead::Mods::Network
             return;
         }
         Entities::PlayerControls& c = player.Controls();
+        const bool wasSpectating = player.ModIsSpectating();
+        const bool spectating = HasFlag(intent.Buttons, IntentButtons::SpectatingState);
+        const bool requestedInPlay = HasFlag(intent.Buttons, IntentButtons::InPlayState);
+        const bool inPlay = PlayerCombatPolicy::IntentIsInPlay(requestedInPlay, spectating);
+        // This is the authority's acceptance boundary. A claim already in
+        // flight is checked against this state again before damage is applied.
+        player.ModSetSpectating(spectating);
+        NetShotEvents::RecordAcceptedIntent(player.SlotIndex(), intent.SlotGeneration,
+            intent.LifeId, intent.Frame, inPlay && player.ModIsInPlay());
         const std::int32_t aimSlot = player.SlotIndex();
         if (aimSlot >= 0 && aimSlot < static_cast<std::int32_t>(_aimHeld.size()) && _aimHeld[Index(aimSlot)]
             && (intent.AckFrame >= SpawnFrame[Index(aimSlot)]
@@ -195,8 +210,15 @@ namespace MphRead::Mods::Network
         {
             _aimHeld[Index(aimSlot)] = false;
         }
-        const NetInputPressReplayResult pressReplay
-            = NetInputPressReplay::Consume(player.SlotIndex(), intent);
+        NetInputPressReplayResult pressReplay{};
+        if (spectating || !inPlay || wasSpectating)
+        {
+            NetInputPressReplay::Discard(player.SlotIndex(), intent);
+        }
+        else
+        {
+            pressReplay = NetInputPressReplay::Consume(player.SlotIndex(), intent);
+        }
         const IntentButtons missed = pressReplay.Pressed;
         if (player.SlotIndex() >= 0 && player.SlotIndex() < static_cast<std::int32_t>(ShootPressAge.size()))
         {
@@ -208,13 +230,12 @@ namespace MphRead::Mods::Network
                 + " frame=" + std::to_string(intent.Frame)
                 + " form=" + player.ModFormState());
         }
-        NativeRuntime::ManagedAt(_respawnRequested, player.SlotIndex()) = !HasFlag(intent.Buttons, IntentButtons::InPlayState)
-            && HasFlag(intent.Buttons, IntentButtons::Shoot);
-        if (!HasFlag(intent.Buttons, IntentButtons::InPlayState))
+        NativeRuntime::ManagedAt(_respawnRequested, player.SlotIndex())
+            = !spectating && !requestedInPlay && HasFlag(intent.Buttons, IntentButtons::Shoot);
+        if (!inPlay)
         {
             c.ClearAll();
             NativeRuntime::ManagedAt(ShootPressAge, player.SlotIndex()) = 0;
-            player.ModSetSpectating(HasFlag(intent.Buttons, IntentButtons::SpectatingState));
             return;
         }
         Set(c.MoveLeft(), HasFlag(intent.Buttons, IntentButtons::MoveLeft), HasFlag(missed, IntentButtons::MoveLeft));
@@ -282,7 +303,6 @@ namespace MphRead::Mods::Network
             player.ModNoteInput();
         }
         player.ModSetZoom(HasFlag(intent.Buttons, IntentButtons::ZoomedState));
-        player.ModSetSpectating(HasFlag(intent.Buttons, IntentButtons::SpectatingState));
         if (NetSession::IsAuthority())
         {
             PlayerFormReplication::Apply(player, HasFlag(intent.Buttons, IntentButtons::AltFormState),
@@ -320,7 +340,9 @@ namespace MphRead::Mods::Network
         return intent.MatchId != 0 && intent.AuthorityEpoch != 0
             && intent.MatchId == NetSession::CurrentMatchId() && intent.AuthorityEpoch == NetSession::AuthorityEpoch()
             && intent.LifeId != 0 && NetPlayerLifecycle::Matches(slot, intent.SlotGeneration, intent.LifeId)
-            && HasFlag(intent.Buttons, IntentButtons::InPlayState)
+            && PlayerCombatPolicy::IntentIsInPlay(
+                HasFlag(intent.Buttons, IntentButtons::InPlayState),
+                HasFlag(intent.Buttons, IntentButtons::SpectatingState))
             && Domain::IsSanePlayerVector(intent.Aim);
     }
 
@@ -372,12 +394,15 @@ namespace MphRead::Mods::Network
                 !ReplicaPlayerPolicy::IsLocalSlot(
                     player.SlotIndex(), NetSession::LocalSlot()));
             player.ModSetSpawnFacing(state.Facing);
-            if (state.Health == 0)
+            if (state.Health == 0 && (state.Flags & PlayerState::FlagSpectating) == 0)
             {
                 player.ModNetDie();
             }
         }
         player.SetHealth(state.Health);
+        // Spawn resets Flags2. Restore the authority's spectator state after
+        // that reset for both first-state and same-life resynchronization.
+        player.ModSetSpectating((state.Flags & PlayerState::FlagSpectating) != 0);
     }
 
     void NetPlayerBridge::ApplyState(Entities::PlayerEntity& player, const PlayerState& state, bool isLocal)
@@ -408,9 +433,20 @@ namespace MphRead::Mods::Network
         }
         const auto s = Index(slot);
         const bool fresh = !_lifeApplied[s] || _appliedLifeId[s] != state.LifeId;
+        const bool spectating = (state.Flags & PlayerState::FlagSpectating) != 0;
         if (fresh)
         {
             BeginRemoteLife(player, state);
+        }
+        else if (isLocal)
+        {
+            // A local snapshot updates authority state, not the player's
+            // immediate spectator request or its pending input history.
+            player.ModApplyReplicatedSpectating(spectating);
+        }
+        else
+        {
+            player.ModSetSpectating(spectating);
         }
         const bool spawned = (state.Flags & PlayerState::FlagSpawned) != 0 && state.Health > 0;
         PlayerFormReplication::RecordAuthorityForm(slot, (state.Flags & PlayerState::FlagAltForm) != 0);
@@ -428,7 +464,7 @@ namespace MphRead::Mods::Network
         NetDamage::Replay(player, state);
         if (!spawned)
         {
-            if (state.Health == 0 && player.Health() > 0)
+            if (!spectating && state.Health == 0 && player.Health() > 0)
             {
                 player.ModNetDie();
             }
@@ -437,7 +473,6 @@ namespace MphRead::Mods::Network
             {
                 NetHitPrediction::NoteDeath(slot);
             }
-            player.ModSetSpectating((state.Flags & PlayerState::FlagSpectating) != 0);
             return;
         }
         if (!fresh && player.Health() <= 0)
@@ -489,7 +524,6 @@ namespace MphRead::Mods::Network
             player.ModSetFacing(state.Facing);
             player.ModSetWeapon(static_cast<BeamType>(state.CurrentWeapon));
             player.ModSetZoom((state.Flags & PlayerState::FlagZoomed) != 0);
-            player.ModSetSpectating((state.Flags & PlayerState::FlagSpectating) != 0);
         }
         else
         {

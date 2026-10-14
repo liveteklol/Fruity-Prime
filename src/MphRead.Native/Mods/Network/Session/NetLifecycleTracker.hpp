@@ -1,5 +1,6 @@
 #pragma once
 
+#include <bit>
 #include <cstdint>
 #include <string>
 
@@ -31,7 +32,10 @@ namespace MphRead::Mods::Network
         [[nodiscard]] static std::uint16_t Next(std::uint16_t value) noexcept;
         [[nodiscard]] static bool Newer(std::uint16_t value, std::uint16_t previous) noexcept;
         [[nodiscard]] static bool Newer(std::uint64_t value, std::uint64_t previous) noexcept;
-        [[nodiscard]] static bool Newer(std::uint32_t value, std::uint32_t previous) noexcept;
+        [[nodiscard]] static bool Newer(std::uint32_t value, std::uint32_t previous) noexcept
+        {
+            return std::bit_cast<std::int32_t>(value - previous) > 0;
+        }
 
         void SetOccupant(std::uint16_t generation);
         void ResetLife();

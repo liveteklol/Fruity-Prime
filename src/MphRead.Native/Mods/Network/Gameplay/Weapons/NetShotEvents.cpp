@@ -4,6 +4,7 @@
 #include "Mods/Network/Bots/ServerBots.hpp"
 #include "Mods/Network/Session/NetSession.hpp"
 #include "Mods/Network/Gameplay/Combat/NetUnlagged.hpp"
+#include "Mods/Network/Gameplay/Player/NetPlayerLifecycle.hpp"
 #include "Entities/Players/PlayerEntity.hpp"
 #include "NativeRuntime/System/Managed.hpp"
 
@@ -15,6 +16,11 @@ namespace MphRead::Mods::Network
     static_assert(NetShotEvents::Slots == Entities::PlayerEntity::SlotCapacity);
     static_assert(LocalShotLog::RepeatFrames == RemoteShotQueue::FreshFrames,
         "a shot is repeated exactly as long as a receiver may still fire it");
+    static_assert(ShotEventEligibilityTimeline::Capacity
+        >= static_cast<std::size_t>(NetUnlagged::HistoryFrames),
+        "shot eligibility history must cover the hit-claim rewind window");
+    static_assert(ShotEventEligibilityTimeline::Capacity > RemoteShotQueue::FreshFrames,
+        "shot eligibility history must cover the remote firing queue");
 
     namespace
     {
@@ -107,7 +113,29 @@ namespace MphRead::Mods::Network
         {
             return std::nullopt;
         }
-        return _remote[static_cast<std::size_t>(shooter.SlotIndex())].Next();
+        const std::size_t slot = static_cast<std::size_t>(shooter.SlotIndex());
+        RemoteShotQueue& queue = _remote[slot];
+        const std::uint16_t generation = NetPlayerLifecycle::Generation(shooter.SlotIndex());
+        for (std::size_t i = 0; i < RemoteShotQueue::Capacity; ++i)
+        {
+            const std::optional<IntentPacket::ShotEvent> event = queue.Next();
+            if (!event.has_value())
+            {
+                return std::nullopt;
+            }
+            const ShotEventEligibility eligibility = _eligibility[slot].EvaluateFrame(
+                generation, event->Frame);
+            if (eligibility == ShotEventEligibility::Allowed)
+            {
+                return event;
+            }
+            if (eligibility == ShotEventEligibility::Pending)
+            {
+                return std::nullopt;
+            }
+            queue.RejectIneligible();
+        }
+        return std::nullopt;
     }
 
     std::optional<IntentPacket::ShotEvent> NetShotEvents::FiringRay(const Entities::PlayerEntity& shooter) noexcept
@@ -124,7 +152,18 @@ namespace MphRead::Mods::Network
 
     bool NetShotEvents::MayFire(const Entities::PlayerEntity& shooter) noexcept
     {
-        return !Drives(shooter) || Continuous(shooter) || FiringEvent(shooter).has_value();
+        if (!Drives(shooter))
+        {
+            return true;
+        }
+        const std::int32_t slot = shooter.SlotIndex();
+        const std::size_t index = static_cast<std::size_t>(slot);
+        if (Continuous(shooter))
+        {
+            return shooter.ModIsInPlay() && _eligibility[index].LatestAllowsContinuousFire(
+                NetPlayerLifecycle::Generation(slot), NetPlayerLifecycle::Get(slot));
+        }
+        return FiringEvent(shooter).has_value();
     }
 
     std::int32_t NetShotEvents::FireReady(Entities::PlayerEntity& shooter)
@@ -174,8 +213,23 @@ namespace MphRead::Mods::Network
         _remote[s].Receive(intent);
         for (std::size_t i = 0; i < intent.ShotHistoryLength && i < intent.ShotHistory.size(); ++i)
         {
-            _ledger[s].Note(intent.ShotHistory[i]);
+            const IntentPacket::ShotEvent& event = intent.ShotHistory[i];
+            if (IsValidShotEventFrame(event.Frame, intent.Frame))
+            {
+                _ledger[s].Note(event);
+            }
         }
+    }
+
+    void NetShotEvents::RecordAcceptedIntent(std::int32_t slot, std::uint16_t generation,
+        std::uint16_t lifeId, std::uint32_t frame, bool inPlay) noexcept
+    {
+        if (slot < 0 || slot >= Slots)
+        {
+            return;
+        }
+        _eligibility[static_cast<std::size_t>(slot)].Record(
+            generation, lifeId, frame, inPlay);
     }
 
     std::optional<IntentPacket::ShotEvent> NetShotEvents::Find(std::int32_t slot, std::uint32_t sequence) noexcept
@@ -185,6 +239,22 @@ namespace MphRead::Mods::Network
             return std::nullopt;
         }
         return _ledger[static_cast<std::size_t>(slot)].Find(sequence);
+    }
+
+    ShotEventEligibility NetShotEvents::EligibilityFor(std::int32_t slot,
+        std::uint32_t sequence, std::uint16_t generation, std::uint16_t lifeId) noexcept
+    {
+        if (slot < 0 || slot >= Slots)
+        {
+            return ShotEventEligibility::Pending;
+        }
+        const std::size_t index = static_cast<std::size_t>(slot);
+        const std::optional<IntentPacket::ShotEvent> event = _ledger[index].Find(sequence);
+        if (!event.has_value())
+        {
+            return ShotEventEligibility::Pending;
+        }
+        return _eligibility[index].Evaluate(generation, lifeId, event->Frame);
     }
 
     ShotQueueStats NetShotEvents::Stats(std::int32_t slot) noexcept
@@ -218,6 +288,7 @@ namespace MphRead::Mods::Network
             + std::to_string(total.Stale) + " stale, "
             + std::to_string(total.Overflow) + " pushed out, "
             + std::to_string(total.Abandoned) + " abandoned with a life, "
+            + std::to_string(total.Ineligible) + " ineligible, "
             + std::to_string(total.Waiting) + " waiting (" + std::to_string(total.Overdue) + " overdue); "
             + std::to_string(total.Gaps) + " skipped by a newer one -- "
             + std::to_string(total.Recovered) + " recovered late, "
@@ -252,6 +323,7 @@ namespace MphRead::Mods::Network
             _lastDeparted[static_cast<std::size_t>(slot)] = departed;
         }
         _ledger[static_cast<std::size_t>(slot)].Reset();
+        _eligibility[static_cast<std::size_t>(slot)].Reset();
         _bots[static_cast<std::size_t>(slot)].Reset();
         if (slot == NetHooks::LocalSlot())
         {

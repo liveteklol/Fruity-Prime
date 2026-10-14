@@ -26,6 +26,9 @@ namespace MphRead::Mods::Network
         // The caller validates slot generation/life before consuming. A new
         // generation or life starts a fresh replay cursor automatically.
         static NetInputPressReplayResult Consume(std::int32_t slot, const IntentPacket& intent) noexcept;
+        // Advances the replay cursor without returning edges for an intent
+        // that is not allowed to drive combat or movement.
+        static void Discard(std::int32_t slot, const IntentPacket& intent) noexcept;
         static void ForgetSlot(std::int32_t slot) noexcept;
         static void Reset() noexcept;
 

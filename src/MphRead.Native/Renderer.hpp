@@ -968,7 +968,8 @@ public: \
     void DrawHudDamageModel(const std::shared_ptr<MphRead::ModelInstance>& inst); \
     void LookAt(OpenTK::Mathematics::Vector3 target); \
     [[nodiscard]] bool IsFreeCam() const noexcept; \
-    void SetFreeCamera(bool on); \
+    void SetFreeCamera(bool on, bool preserveLastPose = false); \
+    void ApplySpectatorCameraRequest(); \
     void ToggleFreeCamera(); \
     void OnMouseClick(bool down); \
     void OnMouseMove(float deltaX, float deltaY); \
@@ -1088,6 +1089,10 @@ private: \
     void ResetCamera(); \
     void UpdateCameraRotation(float stepH, float stepV, float limitV = _almostHalfPi); \
     void UpdateCameraBasis(); \
+    void UpdateCameraBasis(OpenTK::Mathematics::Vector3 upHint); \
+    void CacheSpectatorCameraPose(OpenTK::Mathematics::Vector3 position, \
+        OpenTK::Mathematics::Vector3 facing, OpenTK::Mathematics::Vector3 up, float fov) noexcept; \
+    void RestoreSpectatorCameraPose() noexcept; \
     void NoteRoamCameraHeld(const char* reason); \
     void AllocateEffects(); \
     std::shared_ptr<MphRead::Effects::EffectEntry> InitEffectEntry(); \
@@ -1178,6 +1183,11 @@ private: \
     OpenTK::Mathematics::Vector3 _cameraUp{0.0F, 1.0F, 0.0F}; \
     OpenTK::Mathematics::Vector3 _cameraRight{1.0F, 0.0F, 0.0F}; \
     float _cameraFov = 1.361356816555577F; \
+    OpenTK::Mathematics::Vector3 _lastSpectatorCameraPosition{}; \
+    OpenTK::Mathematics::Vector3 _lastSpectatorCameraFacing{0.0F, 0.0F, -1.0F}; \
+    OpenTK::Mathematics::Vector3 _lastSpectatorCameraUp{0.0F, 1.0F, 0.0F}; \
+    float _lastSpectatorCameraFov = 1.361356816555577F; \
+    bool _hasLastSpectatorCameraPose = false; \
     bool _leftMouse = false; \
     std::int32_t _activeCutscene = -1; \
     OpenTK::Mathematics::Vector3 _priorCameraPos{}; \

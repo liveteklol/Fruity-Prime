@@ -5,6 +5,7 @@
 #include "../../Features.hpp"
 #include "../../Formats/CollisionDetection.hpp"
 #include "../../GameState.hpp"
+#include "Mods/SpectatorMode.hpp"
 #include "../../Metadata/Metadata.hpp"
 #include "../../Renderer.hpp"
 #include "../../Scene.hpp"
@@ -185,7 +186,8 @@ namespace MphRead::Entities
 
     void PlayerEntity::Draw()
     {
-        if (TestFlag(Flags2(), PlayerFlags2::Spectating))
+        if (TestFlag(Flags2(), PlayerFlags2::Spectating)
+            || MphRead::Mods::SpectatorMode::ShouldHideLocalPlayerModel(SlotIndex()))
         {
             return;
         }

@@ -29,6 +29,7 @@
 #include "../../Metadata/Player.hpp"
 #include "../../Metadata/Weapons.hpp"
 #include "Mods/Network/Gameplay/Combat/NetDamage.hpp"
+#include "Mods/Network/Gameplay/Player/PlayerCombatPolicy.hpp"
 #include "Mods/Network/Gameplay/Combat/NetHitPrediction.hpp"
 #include "Mods/Network/Diagnostics/NetLog.hpp"
 #include "Mods/Network/Gameplay/Player/NetPlayerBridge.hpp"
@@ -1787,6 +1788,10 @@ namespace MphRead::Entities
     void PlayerEntity::TakeDamage(std::uint32_t damage, DamageFlags flags,
         std::optional<Vector3> direction, EntityBase* source)
     {
+        if (!Mods::Network::PlayerCombatPolicy::CanReceiveDamage(ModIsSpectating()))
+        {
+            return;
+        }
         const Mods::Network::NetDamage::PredictionScoreScope predictedScores(
             Mods::Network::NetHitPrediction::Predicting());
         if (Mods::Network::NetDamage::Suppress(*this, source, flags))

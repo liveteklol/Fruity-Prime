@@ -1,5 +1,6 @@
 #include "Mods/Network/Gameplay/Weapons/RemoteShotQueue.hpp"
 
+#include "Mods/Network/Gameplay/Weapons/ShotEventEligibility.hpp"
 #include "Mods/Network/Session/NetLifecycleTracker.hpp"
 #include "Formats/Enums.hpp"
 
@@ -23,6 +24,7 @@ namespace MphRead::Mods::Network
         Stale += other.Stale;
         Overflow += other.Overflow;
         Abandoned += other.Abandoned;
+        Ineligible += other.Ineligible;
         Gaps += other.Gaps;
         Recovered += other.Recovered;
         Lost += other.Lost;
@@ -49,6 +51,12 @@ namespace MphRead::Mods::Network
             const IntentPacket::ShotEvent& event = intent.ShotHistory[i];
             if (event.Sequence == 0
                 || event.WeaponId > static_cast<std::uint8_t>(::MphRead::BeamType::OmegaCannon))
+            {
+                continue;
+            }
+            // Both frames use this packet's sender clock. An event cannot
+            // have occurred after the intent carrying it was captured.
+            if (!IsValidShotEventFrame(event.Frame, intent.Frame))
             {
                 continue;
             }
@@ -106,6 +114,16 @@ namespace MphRead::Mods::Network
             _lastFired = sequence;
         }
         ++_stats.Fired;
+        PopFront();
+    }
+
+    void RemoteShotQueue::RejectIneligible() noexcept
+    {
+        if (_count == 0)
+        {
+            return;
+        }
+        ++_stats.Ineligible;
         PopFront();
     }
 
