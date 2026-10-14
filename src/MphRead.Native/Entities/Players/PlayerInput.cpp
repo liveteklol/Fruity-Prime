@@ -1,5 +1,6 @@
 #include "../../Mods/Combat/SyluxMuzzleGuard.hpp"
 #include "../../Mods/MapGen/CustomRooms.hpp"
+#include "../../Mods/Render/InstagibRails.hpp"
 #include "PlayerInput.hpp"
 
 #include "PlayerEntity.hpp"
@@ -1383,6 +1384,13 @@ namespace MphRead::Entities
             }
             const std::int32_t effectId = Metadata::MuzzleEffectIds[BeamIndex(_currentWeapon)];
             _muzzleEffect = RequireReference(_scene).SpawnEffectGetEntry(effectId, _gunVec2, _gunVec1, _muzzlePos);
+            // Instagib: the flash at the gun is drawn in the same colour as
+            // the rail it fires (Mods/Render/InstagibRails).
+            if (_muzzleEffect != nullptr && GameState::Instagib() && GameState::Multiplayer()
+                && _currentWeapon == BeamType::Imperialist)
+            {
+                _muzzleEffect->Tint = Mods::Render::InstagibRails::ColorForSlot(SlotIndex());
+            }
             if (_muzzleEffect != nullptr && !IsMainPlayer())
             {
                 _muzzleEffect->SetDrawEnabled(false);

@@ -2883,6 +2883,7 @@ namespace MphRead
             PoolTrace().FreeEntries.erase(entry.get());
         }
         entry->EffectId = 0;
+        entry->Tint.reset();
         MPHREAD_DEBUG_ASSERT(entry->Elements->empty());
         return entry;
     }

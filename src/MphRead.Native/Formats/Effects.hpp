@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -331,6 +332,10 @@ namespace MphRead::Effects
         std::int32_t EffectId = 0;
         const std::shared_ptr<std::vector<std::shared_ptr<EffectElementEntry>>> Elements
             = std::make_shared<std::vector<std::shared_ptr<EffectElementEntry>>>();
+        // A colour every particle of this effect is drawn in instead of its
+        // own, at its own brightness: the Instagib muzzle flash in the
+        // shooter's rail colour. Not set, the effect is drawn as authored.
+        std::optional<OpenTK::Mathematics::Vector3> Tint{};
 
         EffectEntry() = default;
         EffectEntry(const EffectEntry&) = delete;
@@ -497,6 +502,8 @@ namespace MphRead::Effects
         [[nodiscard]] OpenTK::Mathematics::Vector3 EffectVec3() const noexcept;
         [[nodiscard]] bool ShouldDraw() const noexcept;
         [[nodiscard]] OpenTK::Mathematics::Vector3 Color() const noexcept;
+        // This particle's colour after its effect's Tint, if it has one.
+        [[nodiscard]] OpenTK::Mathematics::Vector3 TintedColor(OpenTK::Mathematics::Vector3 color) const noexcept;
         [[nodiscard]] OpenTK::Mathematics::Vector2 Texcoord0() const noexcept;
         [[nodiscard]] OpenTK::Mathematics::Vector3 Vertex0() const noexcept;
         [[nodiscard]] OpenTK::Mathematics::Vector2 Texcoord1() const noexcept;
