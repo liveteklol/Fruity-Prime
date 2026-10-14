@@ -110,7 +110,7 @@ namespace MphRead::Qt
         if (rooms.isEmpty()) { Say("There is no arena to play: the game files are not ready."); return; }
         const QString room = rooms[std::clamp(match.Arena, 0, static_cast<int>(rooms.size()) - 1)].toMap().value(QStringLiteral("key")).toString();
         Play()->start(room, ModeIndex(match.Mode, match.Teams > 0), FromDs(match.Hunter), match.Suit,
-            std::clamp(match.Bots, 0, MaxBots()), std::clamp(match.Skill, 0, 3));
+            std::clamp(match.Bots, 0, MaxBots()), std::clamp(match.Skill, 0, 3), false);
     }
 
     void ClassicHost::StartAdventure(int slot, bool newGame)
