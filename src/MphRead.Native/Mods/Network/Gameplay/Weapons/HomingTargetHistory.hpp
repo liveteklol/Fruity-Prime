@@ -46,9 +46,12 @@ namespace MphRead::Mods::Network
     private:
         struct Frame final
         {
-            std::uint32_t Stamp = 0;
-            std::vector<HomingTargetSnapshot> Targets{};
+            std::uint32_t Stamp;
+            std::vector<HomingTargetSnapshot> Targets;
         };
+        // Value-initialization zeroes Stamp and empties Targets. Keep Frame
+        // without default member initializers: GCC cannot instantiate this
+        // inline static array before HomingTargetHistory is complete otherwise.
 
         [[nodiscard]] static std::size_t At(std::uint32_t frame) noexcept;
         inline static std::array<Frame, HistoryFrames> _frames{};
