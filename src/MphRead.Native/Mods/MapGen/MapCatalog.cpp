@@ -39,6 +39,13 @@ namespace MphRead::Mods::MapGen
 
         using Entry = MapCatalog::Pack;
 
+        // A name longer than its extension, which it ends with.
+        [[nodiscard]] bool HasExtension(const std::string& name, const std::string& extension)
+        {
+            return name.size() > extension.size()
+                && name.compare(name.size() - extension.size(), extension.size(), extension) == 0;
+        }
+
         std::size_t ToMemory(char* data, std::size_t size, std::size_t count, void* user)
         {
             auto* out = static_cast<std::string*>(user);
@@ -123,7 +130,7 @@ namespace MphRead::Mods::MapGen
                 // A name, never a path out of the folder.
                 const std::string name = file->Text();
                 if (name.empty() || name.find_first_of("/\\") != std::string::npos || name.rfind("..", 0) == 0
-                    || name.size() < 5 || name.compare(name.size() - 4, 4, ".pk3") != 0)
+                    || (!HasExtension(name, ".pk3") && !HasExtension(name, ".fpmap")))
                 {
                     continue;
                 }
