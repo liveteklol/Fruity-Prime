@@ -5,6 +5,10 @@ it and each level's picture -- and index.html, the same as a page with a
 form to add a map (upload.php). Run on any change to the folder
 (fp-maps-index.path).
 
+A .fpmap (a zip too, its level in maps/*.bsp) is listed the same way; it
+carries no levelshot, so its picture is a <pack>__<level>.preview.jpg or .png
+put beside it by hand.
+
 A level's picture is the levelshot its pack carries (levelshots/<level>.jpg
 or .tga), written beside the packs as <pack>__<level>.preview.jpg (a JPEG
 as it is) or .png (a TGA, decoded here: no imaging library needed)."""
@@ -70,7 +74,7 @@ entries = []
 previews_kept = set()
 for name in sorted(os.listdir(folder), key=str.lower):
     path = os.path.join(folder, name)
-    if not name.lower().endswith(".pk3") or not os.path.isfile(path):
+    if not name.lower().endswith((".pk3", ".fpmap")) or not os.path.isfile(path):
         continue
     digest = hashlib.sha256()
     with open(path, "rb") as f:
@@ -95,13 +99,20 @@ for name in sorted(os.listdir(folder), key=str.lower):
                         extension = ".jpg"
                     if not data:
                         continue
-                    picture = safe(name[:-4]) + "__" + safe(level) + ".preview" + extension
+                    picture = safe(name.rsplit(".", 1)[0]) + "__" + safe(level) + ".preview" + extension
                     target = os.path.join(folder, picture)
                     if not os.path.exists(target) or os.path.getmtime(target) < os.path.getmtime(path):
                         write_bytes(picture, data)
                     previews[level] = picture
                     previews_kept.add(picture)
                     break
+                else:
+                    stem = safe(name.rsplit(".", 1)[0]) + "__" + safe(level) + ".preview"
+                    for extension in (".jpg", ".png"):
+                        if os.path.isfile(os.path.join(folder, stem + extension)):
+                            previews[level] = stem + extension
+                            previews_kept.add(stem + extension)
+                            break
     except (zipfile.BadZipFile, OSError, struct.error):
         continue
     if not levels:

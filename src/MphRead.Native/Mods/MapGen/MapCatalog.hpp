@@ -9,7 +9,7 @@
 
 namespace MphRead::Mods::MapGen
 {
-    // The maps FruityPrime's server offers: the .pk3 packs it holds (index.json
+    // The maps FruityPrime's server offers: the .pk3 packs and .fpmap files it holds (index.json
     // beside them lists each with its size, SHA-256 and levels,
     // tools/fp-maps-index.py), downloaded into the map folder's "downloaded"
     // folder. Never on their own at start: when the player asks (the Download
